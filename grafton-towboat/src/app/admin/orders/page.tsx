@@ -311,7 +311,6 @@ function OrdersContent() {
             onRefresh={fetchOrders}
           />
         )}
-      </div>
     </div>
   );
 }
