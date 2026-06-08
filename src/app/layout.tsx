@@ -1,40 +1,38 @@
 // src/app/layout.tsx
 import type { Metadata, Viewport } from 'next';
-import { Playfair_Display, Source_Sans_3 } from 'next/font/google';
+import { Oswald, Inter } from 'next/font/google';
 import './globals.css';
 import { Toaster } from '@/components/ui/toaster';
 
-const playfair = Playfair_Display({
+// Oswald = heavy condensed uppercase — matches GTS site heading style
+const oswald = Oswald({
   subsets: ['latin'],
   variable: '--font-display',
   display: 'swap',
+  weight: ['600', '700'],
 });
 
-const sourceSans = Source_Sans_3({
+const inter = Inter({
   subsets: ['latin'],
   variable: '--font-body',
   display: 'swap',
-  weight: ['300', '400', '600', '700'],
+  weight: ['400', '500', '600', '700'],
 });
 
 export const metadata: Metadata = {
   title: 'Grafton Towboat Services — Order Groceries & Supplies',
   description:
-    'Order groceries, provisions, and supplies for your vessel through Grafton Towboat Services. Partnered with Sinclair\'s Foods. Mississippi Mile Marker 218.',
+    "Order groceries, provisions, and supplies for your vessel through Grafton Towboat Services. Partnered with Sinclair's Foods. Mississippi Mile Marker 218.",
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',
     title: 'GTS Orders',
   },
-  icons: {
-    icon: '/icon-192.png',
-    apple: '/icon-192.png',
-  },
 };
 
 export const viewport: Viewport = {
-  themeColor: '#1B3A5C',
+  themeColor: '#1E3D1E',
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
@@ -42,11 +40,9 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${playfair.variable} ${sourceSans.variable}`}>
-      <head>
-        <link rel="apple-touch-icon" href="/icon-192.png" />
-      </head>
-      <body className="font-body bg-brand-cream text-brand-navy antialiased">
+    <html lang="en" className={`${oswald.variable} ${inter.variable}`}>
+      <head />
+      <body className="font-body antialiased">
         {children}
         <Toaster />
       </body>

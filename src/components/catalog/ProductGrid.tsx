@@ -182,7 +182,7 @@ function ProductCard({ product }: { product: Product }) {
             className={`w-full flex items-center justify-center gap-1.5 py-1.5 rounded text-xs font-bold transition-all duration-200 ${
               justAdded
                 ? 'bg-green-500 text-white'
-                : 'bg-brand-steel text-white hover:bg-brand-navy active:scale-95'
+                : 'bg-brand-green text-white hover:bg-brand-gmed active:scale-95'
             }`}
           >
             {justAdded ? (
@@ -199,17 +199,17 @@ function ProductCard({ product }: { product: Product }) {
 
 function getCategoryColor(category: string): string {
   const map: Record<string, string> = {
-    'Meat & Seafood': 'bg-red-400',
+    'Meat & Seafood': 'bg-brand-orange',
     'Dairy & Eggs': 'bg-yellow-300',
-    'Produce': 'bg-green-400',
+    'Produce': 'bg-brand-glight',
     'Frozen Foods': 'bg-cyan-400',
     'Bakery & Deli': 'bg-amber-400',
-    'Beverages': 'bg-blue-400',
+    'Beverages': 'bg-brand-green',
     'Snacks & Sweets': 'bg-pink-400',
     'Pantry & Grocery': 'bg-orange-400',
     'Household & Cleaning': 'bg-teal-400',
     'Health & Personal Care': 'bg-purple-400',
-    'Boat Supplies': 'bg-brand-steel',
+    'Boat Supplies': 'bg-brand-gmed',
   };
   return map[category] ?? 'bg-gray-300';
 }

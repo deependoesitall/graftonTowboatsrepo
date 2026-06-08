@@ -2,7 +2,7 @@
 // src/components/layout/SiteHeader.tsx
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
-import { Anchor, ShoppingCart, Menu, X, Phone } from 'lucide-react';
+import { ShoppingCart, Menu, X, Phone } from 'lucide-react';
 import { getCart, getCartCount, getCartTotal } from '@/lib/cart';
 import { formatCurrency } from '@/lib/utils';
 
@@ -23,24 +23,23 @@ export function SiteHeader() {
   }, []);
 
   return (
-    <header className="sticky top-0 z-40 bg-brand-navy shadow-lg">
+    <header className="sticky top-0 z-40 bg-white/70 backdrop-blur-md border-b border-brand-green/15 shadow-sm">
       <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between gap-4">
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2 shrink-0">
-          <div className="w-7 h-7 bg-brand-gold/20 rounded-full flex items-center justify-center">
-            <Anchor className="w-3.5 h-3.5 text-brand-gold" />
-          </div>
-          <span className="font-display text-white font-bold text-sm md:text-base leading-tight">
-            Grafton Towboat
-          </span>
+          <img
+            src="https://images.squarespace-cdn.com/content/v1/6819038bc556772f05a46e4d/00f04765-aff3-41b3-8b27-6d14b9688c52/image0+%282%29.png?format=300w"
+            alt="Grafton Towboat Services"
+            className="h-10 w-auto"
+          />
         </Link>
 
         {/* Desktop nav */}
         <nav className="hidden md:flex items-center gap-6">
-          <Link href="/catalog" className="text-brand-sky hover:text-white text-sm font-medium transition-colors">
+          <Link href="/catalog" className="text-brand-green font-body font-semibold text-sm hover:text-brand-orange transition-colors tracking-wide">
             Browse Items
           </Link>
-          <a href="tel:6185560290" className="flex items-center gap-1.5 text-brand-sky hover:text-white text-sm transition-colors">
+          <a href="tel:6185560290" className="flex items-center gap-1.5 text-brand-green/70 hover:text-brand-green text-sm font-body transition-colors">
             <Phone className="w-3.5 h-3.5" />
             (618) 556-0290
           </a>
@@ -50,24 +49,24 @@ export function SiteHeader() {
         <div className="flex items-center gap-3">
           <Link
             href="/order"
-            className="flex items-center gap-2 bg-brand-gold/10 hover:bg-brand-gold/20 border border-brand-gold/30 rounded-lg px-3 py-1.5 transition-colors group"
+            className="flex items-center gap-2 bg-brand-green text-white rounded-full px-3.5 py-1.5 transition-colors hover:bg-brand-gmed group"
           >
             <div className="relative">
-              <ShoppingCart className="w-4 h-4 text-brand-gold" />
+              <ShoppingCart className="w-4 h-4" />
               {cartCount > 0 && (
-                <span className="absolute -top-2 -right-2 w-4 h-4 bg-brand-gold text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+                <span className="absolute -top-2 -right-2 w-4 h-4 bg-brand-orange text-white text-[10px] font-bold rounded-full flex items-center justify-center">
                   {cartCount > 9 ? '9+' : cartCount}
                 </span>
               )}
             </div>
             {cartCount > 0 && (
-              <span className="text-white text-xs font-semibold hidden sm:block">
+              <span className="text-white text-xs font-bold hidden sm:block">
                 {formatCurrency(cartTotal)}
               </span>
             )}
           </Link>
           <button
-            className="md:hidden text-white p-1"
+            className="md:hidden text-brand-green p-1"
             onClick={() => setMenuOpen(o => !o)}
             aria-label="Toggle menu"
           >
@@ -78,21 +77,17 @@ export function SiteHeader() {
 
       {/* Mobile menu */}
       {menuOpen && (
-        <div className="md:hidden bg-brand-steel border-t border-brand-river/40 px-4 py-4 flex flex-col gap-1">
+        <div className="md:hidden bg-brand-green border-t border-brand-gmed px-4 py-4 flex flex-col gap-1">
           {[
             { href: '/catalog', label: 'Browse Groceries & Supplies' },
             { href: '/order', label: cartCount > 0 ? `My Order (${cartCount} items · ${formatCurrency(cartTotal)})` : 'My Order' },
           ].map(({ href, label }) => (
-            <Link
-              key={href}
-              href={href}
-              onClick={() => setMenuOpen(false)}
-              className="text-white font-medium text-sm py-3 px-3 rounded-lg hover:bg-brand-river/40 transition-colors border-b border-brand-river/20 last:border-0"
-            >
+            <Link key={href} href={href} onClick={() => setMenuOpen(false)}
+              className="text-white font-bold text-sm py-3 px-3 rounded-lg hover:bg-brand-gmed transition-colors border-b border-brand-gmed/50 last:border-0 uppercase tracking-wide">
               {label}
             </Link>
           ))}
-          <a href="tel:6185560290" className="text-brand-sky text-sm py-3 px-3 flex items-center gap-2">
+          <a href="tel:6185560290" className="text-brand-yellow/80 text-sm py-3 px-3 flex items-center gap-2 font-body">
             <Phone className="w-4 h-4" /> (618) 556-0290
           </a>
         </div>

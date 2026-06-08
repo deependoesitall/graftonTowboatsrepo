@@ -42,47 +42,42 @@ export function CategoryFilter({ categories, counts, activeCategory }: CategoryF
   const isAll = !activeCategory || activeCategory === 'All';
 
   return (
-    <div className="card-base overflow-hidden">
-      <div className="bg-brand-navy px-4 py-3">
-        <h2 className="font-display text-sm font-bold text-white tracking-wide uppercase">Categories</h2>
+    <div className="bg-white/70 backdrop-blur-sm rounded-2xl border border-brand-green/10 shadow-sm overflow-hidden">
+      <div className="bg-brand-green px-4 py-3">
+        <h2 className="font-display font-bold text-brand-yellow text-xs uppercase tracking-widest">Categories</h2>
       </div>
       <nav className="p-2">
-        <Link
-          href={buildHref('All')}
+        <Link href={buildHref('All')}
           className={cn(
-            'flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-all mb-1',
-            isAll ? 'bg-brand-steel text-white shadow-sm' : 'text-gray-600 hover:bg-gray-50'
-          )}
-        >
+            'flex items-center justify-between px-3 py-2 rounded-xl text-sm font-bold uppercase tracking-wide transition-all mb-1',
+            isAll ? 'bg-brand-green text-white' : 'text-brand-green hover:bg-brand-green/10'
+          )}>
           <span className="flex items-center gap-2">
             <span className="text-base">🛒</span>
             <span>All Items</span>
           </span>
-          <span className={cn('text-xs rounded-full px-2 py-0.5', isAll ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500')}>
+          <span className={cn('text-xs rounded-full px-2 py-0.5', isAll ? 'bg-white/20 text-white' : 'bg-brand-green/10 text-brand-green')}>
             {totalCount}
           </span>
         </Link>
 
-        <div className="border-t border-gray-100 my-2" />
+        <div className="border-t border-brand-green/10 my-2" />
 
         {categories.map(cat => {
           const count = getCount(cat);
           if (count === 0) return null;
           const isActive = activeCategory === cat;
           return (
-            <Link
-              key={cat}
-              href={buildHref(cat)}
+            <Link key={cat} href={buildHref(cat)}
               className={cn(
-                'flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-all mb-0.5',
-                isActive ? 'bg-brand-steel text-white shadow-sm' : 'text-gray-600 hover:bg-gray-50'
-              )}
-            >
+                'flex items-center justify-between px-3 py-2 rounded-xl text-sm font-semibold transition-all mb-0.5',
+                isActive ? 'bg-brand-green text-white' : 'text-brand-green hover:bg-brand-green/10'
+              )}>
               <span className="flex items-center gap-2 min-w-0">
                 <span className="text-base shrink-0">{CATEGORY_ICONS[cat] || '📦'}</span>
-                <span className="truncate">{cat}</span>
+                <span className="truncate text-xs uppercase tracking-wide">{cat}</span>
               </span>
-              <span className={cn('text-xs rounded-full px-2 py-0.5 shrink-0 ml-1', isActive ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500')}>
+              <span className={cn('text-xs rounded-full px-2 py-0.5 shrink-0 ml-1', isActive ? 'bg-white/20 text-white' : 'bg-brand-green/10 text-brand-green')}>
                 {count}
               </span>
             </Link>

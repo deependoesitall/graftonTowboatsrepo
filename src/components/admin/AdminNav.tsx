@@ -2,85 +2,68 @@
 // src/components/admin/AdminNav.tsx
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Anchor, LayoutDashboard, ShoppingBag, Settings, LogOut, Package } from 'lucide-react';
+import { LayoutDashboard, ShoppingBag, Settings, LogOut, Package } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-const ADMIN_TOKEN_KEY = 'grafton_admin_token';
+const NAV = [
+  { href: '/admin',          label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/admin/orders',   label: 'Orders',    icon: ShoppingBag },
+  { href: '/admin/products', label: 'Products',  icon: Package },
+  { href: '/admin/settings', label: 'Settings',  icon: Settings },
+];
 
 export function AdminNav() {
-  const pathname = usePathname();
+  const path = usePathname();
 
   function handleLogout() {
-    sessionStorage.removeItem(ADMIN_TOKEN_KEY);
-    window.location.reload();
+    sessionStorage.removeItem('grafton_admin_token');
+    window.location.href = '/admin';
   }
 
-  const links = [
-    { href: '/admin', label: 'Dashboard', icon: LayoutDashboard },
-    { href: '/admin/orders', label: 'Orders', icon: ShoppingBag },
-    { href: '/admin/products', label: 'Products', icon: Package },
-    { href: '/admin/settings', label: 'Settings', icon: Settings },
-  ];
-
   return (
-    <header className="bg-brand-navy border-b border-brand-steel/40 shadow-md">
+    <header className="bg-brand-green text-white shadow-md">
       <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2 shrink-0">
-            <Anchor className="w-5 h-5 text-brand-gold" />
-            <span className="font-display text-white font-bold text-sm">
-              GTS Admin
-            </span>
-          </div>
-          <nav className="hidden md:flex items-center gap-1">
-            {links.map(({ href, label, icon: Icon }) => (
-              <Link
-                key={href}
-                href={href}
+        {/* Logo / title */}
+        <Link href="/admin" className="flex items-center gap-2.5 shrink-0">
+          <img
+            src="https://images.squarespace-cdn.com/content/v1/6819038bc556772f05a46e4d/00f04765-aff3-41b3-8b27-6d14b9688c52/image0+%282%29.png?format=300w"
+            alt="GTS"
+            className="h-9 w-auto"
+          />
+          <span className="font-display font-bold text-brand-yellow text-sm uppercase tracking-widest hidden sm:block">
+            GTS Admin
+          </span>
+        </Link>
+
+        {/* Nav links */}
+        <nav className="flex items-center gap-1">
+          {NAV.map(({ href, label, icon: Icon }) => {
+            const active = path === href || (href !== '/admin' && path.startsWith(href));
+            return (
+              <Link key={href} href={href}
                 className={cn(
-                  'flex items-center gap-1.5 px-3 py-2 rounded text-sm font-medium transition-colors',
-                  (pathname === href || (href !== '/admin' && pathname.startsWith(href)))
-                    ? 'bg-brand-steel/50 text-white'
-                    : 'text-brand-sky hover:text-white hover:bg-brand-steel/30'
-                )}
-              >
-                <Icon className="w-4 h-4" />
-                {label}
+                  'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wide transition-colors',
+                  active
+                    ? 'bg-brand-yellow text-brand-green'
+                    : 'text-white/70 hover:text-white hover:bg-white/10'
+                )}>
+                <Icon className="w-3.5 h-3.5" />
+                <span className="hidden sm:block">{label}</span>
               </Link>
-            ))}
-          </nav>
-        </div>
-        <div className="flex items-center gap-4">
-          <Link href="/catalog" target="_blank" className="text-brand-sky text-xs hover:text-white">
+            );
+          })}
+        </nav>
+
+        {/* Right side */}
+        <div className="flex items-center gap-2">
+          <Link href="/catalog" target="_blank"
+            className="text-white/60 hover:text-white text-xs font-body transition-colors hidden md:block">
             View Store →
           </Link>
-          <button
-            onClick={handleLogout}
-            className="text-brand-sky hover:text-white transition-colors flex items-center gap-1.5 text-sm"
-          >
+          <button onClick={handleLogout}
+            className="flex items-center gap-1 text-white/60 hover:text-white text-xs font-body transition-colors p-1.5 rounded hover:bg-white/10">
             <LogOut className="w-4 h-4" />
-            <span className="hidden md:inline">Logout</span>
           </button>
-        </div>
-      </div>
-      {/* Mobile nav */}
-      <div className="md:hidden overflow-x-auto scrollbar-hide">
-        <div className="flex items-center gap-1 px-4 pb-2">
-          {links.map(({ href, label, icon: Icon }) => (
-            <Link
-              key={href}
-              href={href}
-              className={cn(
-                'flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium whitespace-nowrap transition-colors',
-                (pathname === href || (href !== '/admin' && pathname.startsWith(href)))
-                  ? 'bg-brand-steel/50 text-white'
-                  : 'text-brand-sky'
-              )}
-            >
-              <Icon className="w-3.5 h-3.5" />
-              {label}
-            </Link>
-          ))}
         </div>
       </div>
     </header>
