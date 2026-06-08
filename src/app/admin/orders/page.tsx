@@ -105,13 +105,8 @@ function OrdersContent() {
     fetchOrders();
   }
 
-  async function downloadOrderPdf(orderId: string, orderNumber: string) {
-    const res = await fetch(`/api/orders/${orderId}/pdf`);
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `${orderNumber}.pdf`; a.click();
-    URL.revokeObjectURL(url);
+  function downloadOrderPdf(orderId: string, orderNumber: string) {
+    window.open(`/api/orders/${orderId}/pdf`, '_blank');
   }
 
   async function downloadOrderCsv(order: Order) {

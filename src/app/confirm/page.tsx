@@ -3,7 +3,6 @@
 import { useEffect, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { CheckCircle2, Download, ShoppingCart, Phone, Anchor, Loader2 } from 'lucide-react';
 import { clearCart } from '@/lib/cart';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { Order } from '@/types';
@@ -15,7 +14,6 @@ function ConfirmContent() {
   const orderNumber = searchParams.get('num');
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
-  const [downloadingPdf, setDownloadingPdf] = useState(false);
 
   useEffect(() => {
     clearCart();
@@ -29,21 +27,9 @@ function ConfirmContent() {
     }
   }, [orderId]);
 
-  async function downloadPdf() {
+  function openPdf() {
     if (!orderId) return;
-    setDownloadingPdf(true);
-    try {
-      const res = await fetch(`/api/orders/${orderId}/pdf`);
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${orderNumber || 'order'}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } finally {
-      setDownloadingPdf(false);
-    }
+    window.open(`/api/orders/${orderId}/pdf`, '_blank');
   }
 
   return (
@@ -79,15 +65,11 @@ function ConfirmContent() {
           {/* Actions */}
           <div className="flex flex-col gap-3 mb-6">
             <button
-              onClick={downloadPdf}
-              disabled={downloadingPdf || !orderId}
+              onClick={openPdf}
+              disabled={!orderId}
               className="btn-primary w-full py-3 flex items-center justify-center gap-2"
             >
-              {downloadingPdf ? (
-                <><Loader2 className="w-4 h-4 animate-spin" /> Generating PDF…</>
-              ) : (
-                <><Download className="w-4 h-4" /> Download Order PDF</>
-              )}
+              <Download className="w-4 h-4" /> Download Order PDF
             </button>
             <Link
               href="/catalog"
@@ -101,7 +83,6 @@ function ConfirmContent() {
           {/* Order summary */}
           {loading && (
             <div className="card-base p-6 text-center">
-              <Loader2 className="w-6 h-6 animate-spin text-brand-river mx-auto" />
             </div>
           )}
           {!loading && order && (
