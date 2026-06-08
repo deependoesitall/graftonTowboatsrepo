@@ -1,12 +1,10 @@
 // src/app/api/orders/[id]/pdf/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
-import { renderToBuffer } from '@react-pdf/renderer';
-import { createElement } from 'react';
-import { OrderPDFDocument } from '@/lib/pdf';
 
 export const runtime = 'nodejs';
-export const maxDuration = 30;
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 export async function GET(
   req: NextRequest,
@@ -26,7 +24,12 @@ export async function GET(
   }
 
   try {
-    const element = createElement(OrderPDFDocument, { order });
+    // Dynamic import avoids React bundling conflicts with @react-pdf/renderer
+    const { renderToBuffer } = await import('@react-pdf/renderer');
+    const { OrderPDFDocument } = await import('@/lib/pdf');
+    const React = await import('react');
+
+    const element = React.createElement(OrderPDFDocument, { order });
     const buffer = await renderToBuffer(element as any);
     const uint8Array = new Uint8Array(buffer);
 
@@ -39,6 +42,9 @@ export async function GET(
     });
   } catch (err) {
     console.error('PDF generation error:', err);
-    return NextResponse.json({ error: 'PDF generation failed' }, { status: 500 });
+    return NextResponse.json(
+      { error: 'PDF generation failed', detail: String(err) },
+      { status: 500 }
+    );
   }
 }

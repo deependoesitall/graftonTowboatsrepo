@@ -298,7 +298,7 @@ export function OrderPDFDocument({ order }: OrderPDFProps) {
         </View>
 
         {/* Order Items */}
-        <Text style={styles.sectionTitle}>Order Items ({itemCount} items)</Text>
+        <Text style={styles.sectionTitle}>Order Items ({String(itemCount)} items)</Text>
 
         {/* Table Header */}
         <View style={styles.tableHeader}>
@@ -322,7 +322,7 @@ export function OrderPDFDocument({ order }: OrderPDFProps) {
                 <Text style={[styles.tableCell, styles.colCategory]}>{item.category}</Text>
                 <Text style={[styles.tableCell, styles.colDescription]}>{item.description}</Text>
                 <Text style={[styles.tableCell, styles.colPkg]}>{item.pkg_size || '—'}</Text>
-                <Text style={[styles.tableCell, styles.colQty]}>{item.quantity}</Text>
+                <Text style={[styles.tableCell, styles.colQty]}>{String(item.quantity)}</Text>
                 <Text style={[styles.tableCell, styles.colPrice]}>{formatCurrency(item.unit_price)}</Text>
                 <Text style={[styles.tableCell, styles.colTotal]}>{formatCurrency(item.line_total)}</Text>
               </View>
@@ -333,7 +333,7 @@ export function OrderPDFDocument({ order }: OrderPDFProps) {
         {/* Totals */}
         <View style={styles.totalsBox}>
           <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Subtotal ({itemCount} items)</Text>
+            <Text style={styles.totalLabel}>Subtotal ({String(itemCount)} items)</Text>
             <Text style={styles.totalValue}>{formatCurrency(subtotal)}</Text>
           </View>
           <View style={styles.grandTotalRow}>
