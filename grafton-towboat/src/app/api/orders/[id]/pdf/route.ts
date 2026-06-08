@@ -28,12 +28,13 @@ export async function GET(
   try {
     const element = createElement(OrderPDFDocument, { order });
     const buffer = await renderToBuffer(element as any);
+    const uint8Array = new Uint8Array(buffer);
 
-    return new NextResponse(buffer, {
+    return new NextResponse(uint8Array, {
       headers: {
         'Content-Type': 'application/pdf',
         'Content-Disposition': `attachment; filename="${order.order_number}.pdf"`,
-        'Content-Length': buffer.byteLength.toString(),
+        'Content-Length': uint8Array.byteLength.toString(),
       },
     });
   } catch (err) {
