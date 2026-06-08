@@ -7,7 +7,7 @@ import { clearCart } from '@/lib/cart';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { Order } from '@/types';
 import { SiteHeader } from '@/components/layout/SiteHeader';
-import { CheckCircle2, Download, ShoppingCart, Loader2 } from 'lucide-react';
+import { CheckCircle2, Download, ShoppingCart, Phone, Anchor } from 'lucide-react';
 
 function ConfirmContent() {
   const searchParams = useSearchParams();

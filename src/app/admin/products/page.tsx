@@ -3,7 +3,8 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Upload, Package, AlertCircle, CheckCircle2, Loader2,
          Search, Pencil, Check, X, ToggleLeft, ToggleRight,
-         ChevronLeft, ChevronRight, RefreshCw, Plus } from 'lucide-react';import { normalizeCategory, formatCurrency } from '@/lib/utils';
+         ChevronLeft, ChevronRight, RefreshCw, Plus } from 'lucide-react';
+import { normalizeCategory, formatCurrency } from '@/lib/utils';
 import { Product } from '@/types';
 import { useRouter } from 'next/navigation';
 

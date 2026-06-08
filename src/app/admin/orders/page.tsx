@@ -2,7 +2,7 @@
 // src/app/admin/orders/page.tsx
 import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, Download, Eye, Filter, Loader2, RefreshCw, Package, ArrowRight } from 'lucide-react';
+import { Search, Download, Eye, Loader2, RefreshCw, Package, ArrowRight } from 'lucide-react';
 import { formatCurrency, formatDate, ORDER_STATUSES } from '@/lib/utils';
 import { Order, OrderStatus } from '@/types';
 import { OrderDetailModal } from '@/components/admin/OrderDetailModal';

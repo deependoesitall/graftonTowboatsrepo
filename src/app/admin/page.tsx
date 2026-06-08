@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  Package, Clock, CheckCircle2, XCircle, TrendingUp,
+  Package, Clock, CheckCircle2, TrendingUp,
   ShoppingBag, Lock, Eye, EyeOff, Loader2
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
