@@ -3,8 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Upload, Package, AlertCircle, CheckCircle2, Loader2,
          Search, Pencil, Check, X, ToggleLeft, ToggleRight,
-         ChevronLeft, ChevronRight, RefreshCw, Plus } from 'lucide-react';
-import { normalizeCategory, formatCurrency } from '@/lib/utils';
+         ChevronLeft, ChevronRight, RefreshCw, Plus } from 'lucide-react';import { normalizeCategory, formatCurrency } from '@/lib/utils';
 import { Product } from '@/types';
 import { useRouter } from 'next/navigation';
 
@@ -41,6 +40,12 @@ function parseRow(headers: string[], values: string[]): ParsedProduct | null {
   };
 }
 
+const CATEGORIES = [
+  'Meat & Seafood', 'Dairy & Eggs', 'Produce', 'Frozen Foods',
+  'Bakery & Deli', 'Beverages', 'Snacks & Sweets', 'Pantry & Grocery',
+  'Household & Cleaning', 'Health & Personal Care', 'Boat Supplies', 'General',
+];
+
 interface EditState {
   description: string;
   category: string;
@@ -48,6 +53,112 @@ interface EditState {
   pkg_size: string;
   uom: string;
   price: string;
+}
+
+function AddProductRow({ adminToken, onAdded }: {
+  adminToken: string;
+  onAdded: (p: Product) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    description: '', category: 'Pantry & Grocery', sub_category: '',
+    pkg_size: '', uom: '', price: '',
+  });
+  const descRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { if (open) descRef.current?.focus(); }, [open]);
+
+  function reset() { setForm({ description: '', category: 'Pantry & Grocery', sub_category: '', pkg_size: '', uom: '', price: '' }); setOpen(false); }
+
+  async function save() {
+    if (!form.description || !form.price) return;
+    setSaving(true);
+    const res = await fetch('/api/products', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-admin-token': adminToken },
+      body: JSON.stringify({ products: [{
+        description: form.description.toUpperCase(),
+        category: form.category,
+        sub_category: form.sub_category || form.category,
+        pkg_size: form.pkg_size || null,
+        uom: form.uom || null,
+        price: parseFloat(form.price) || 0,
+        is_active: true,
+        upc: null,
+      }]}),
+    });
+    if (res.ok) {
+      reset();
+      // Fetch the newly added product to get its ID
+      const listRes = await fetch(`/api/products?search=${encodeURIComponent(form.description)}&per_page=1`, {
+        headers: { 'x-admin-token': adminToken },
+      });
+      if (listRes.ok) {
+        const data = await listRes.json();
+        if (data.products?.[0]) onAdded(data.products[0]);
+      }
+    }
+    setSaving(false);
+  }
+
+  if (!open) {
+    return (
+      <tr>
+        <td colSpan={7} className="px-3 py-2 border-b border-dashed border-gray-200">
+          <button onClick={() => setOpen(true)}
+            className="flex items-center gap-2 text-sm text-brand-river hover:text-brand-navy font-medium transition-colors w-full py-1">
+            <Plus className="w-4 h-4" /> Add new product
+          </button>
+        </td>
+      </tr>
+    );
+  }
+
+  return (
+    <tr className="bg-green-50 border-b border-green-200">
+      <td className="px-2 py-2">
+        <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value, sub_category: '' }))}
+          className="input-base text-xs py-1.5 w-full">
+          {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </td>
+      <td className="px-2 py-2">
+        <input className="input-base text-xs py-1.5 w-full" placeholder="Sub-category"
+          value={form.sub_category} onChange={e => setForm(f => ({ ...f, sub_category: e.target.value }))} />
+      </td>
+      <td className="px-2 py-2">
+        <input ref={descRef} className="input-base text-xs py-1.5 w-full font-medium"
+          placeholder="Product name (required)" value={form.description}
+          onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+          onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') reset(); }} />
+      </td>
+      <td className="px-2 py-2">
+        <input className="input-base text-xs py-1.5 w-24" placeholder="e.g. 48 OZ"
+          value={form.pkg_size} onChange={e => setForm(f => ({ ...f, pkg_size: e.target.value }))} />
+      </td>
+      <td className="px-2 py-2">
+        <input className="input-base text-xs py-1.5 w-16" placeholder="e.g. CS"
+          value={form.uom} onChange={e => setForm(f => ({ ...f, uom: e.target.value }))} />
+      </td>
+      <td className="px-2 py-2">
+        <input className="input-base text-xs py-1.5 w-20" placeholder="0.00" type="number" min="0" step="0.01"
+          value={form.price} onChange={e => setForm(f => ({ ...f, price: e.target.value }))}
+          onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') reset(); }} />
+      </td>
+      <td className="px-2 py-2">
+        <div className="flex items-center gap-1.5">
+          <button onClick={save} disabled={saving || !form.description || !form.price}
+            className="p-1.5 bg-green-500 text-white rounded hover:bg-green-600 disabled:opacity-40 transition-colors">
+            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+          </button>
+          <button onClick={reset} className="p-1.5 bg-gray-200 text-gray-600 rounded hover:bg-gray-300 transition-colors">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
 }
 
 function EditableRow({ product, adminToken, onSaved, onToggle }: {
@@ -227,6 +338,11 @@ export default function AdminProductsPage() {
     setProducts(ps => ps.map(p => p.id === updated.id ? updated : p));
   }
 
+  function handleAdded(newProduct: Product) {
+    setProducts(ps => [newProduct, ...ps]);
+    setTotal(t => t + 1);
+  }
+
   // CSV parsing
   function handleFile(file: File) {
     setParsing(true); setResult(null);
@@ -344,6 +460,7 @@ export default function AdminProductsPage() {
                   </tr>
                 </thead>
                 <tbody>
+                  <AddProductRow adminToken={adminToken} onAdded={handleAdded} />
                   {products.map(product => (
                     <EditableRow
                       key={product.id}
