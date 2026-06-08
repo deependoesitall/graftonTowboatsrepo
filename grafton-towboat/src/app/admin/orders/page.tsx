@@ -6,7 +6,7 @@ import { Search, Download, Eye, Filter, Loader2, RefreshCw, Package, ArrowRight 
 import { formatCurrency, formatDate, ORDER_STATUSES } from '@/lib/utils';
 import { Order, OrderStatus } from '@/types';
 import { OrderDetailModal } from '@/components/admin/OrderDetailModal';
-import AdminNav from '@/components/admin/AdminNav';
+import { AdminNav } from '@/components/admin/AdminNav';
 
 const ADMIN_TOKEN_KEY = 'grafton_admin_token';
 

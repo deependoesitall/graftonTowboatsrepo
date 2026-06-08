@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import AdminNav from "@/components/admin/AdminNav"
+import { AdminNav } from "@/components/admin/AdminNav"
 import { Save, Plus, Trash2, Eye, EyeOff, RefreshCw } from "lucide-react"
 
 interface CustomField {
