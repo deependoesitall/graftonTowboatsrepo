@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { AdminNav } from "@/components/admin/AdminNav"
+
 import { Save, Plus, Trash2, Eye, EyeOff, RefreshCw } from "lucide-react"
 
 interface CustomField {
@@ -109,7 +109,6 @@ export default function AdminSettingsPage() {
 
   return (
     <div className="min-h-screen bg-cream">
-      <AdminNav />
       <div className="max-w-3xl mx-auto px-4 py-8">
         <div className="flex items-center justify-between mb-6">
           <div>

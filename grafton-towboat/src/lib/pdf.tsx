@@ -231,7 +231,7 @@ interface OrderPDFProps {
   order: Order;
 }
 
-export function OrderPDF({ order }: OrderPDFProps) {
+export function OrderPDFDocument({ order }: OrderPDFProps) {
   // Group items by category
   const grouped = order.items.reduce((acc, item) => {
     const cat = item.category || 'General';

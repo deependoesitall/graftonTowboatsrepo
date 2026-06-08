@@ -2,8 +2,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { renderToBuffer } from '@react-pdf/renderer';
-import { OrderPDF } from '@/lib/pdf';
-import React from 'react';
+import { createElement } from 'react';
+import { OrderPDFDocument } from '@/lib/pdf';
+
+export const runtime = 'nodejs';
+export const maxDuration = 30;
 
 export async function GET(
   req: NextRequest,
@@ -23,7 +26,8 @@ export async function GET(
   }
 
   try {
-    const buffer = await renderToBuffer(React.createElement(OrderPDF, { order }));
+    const element = createElement(OrderPDFDocument, { order });
+    const buffer = await renderToBuffer(element as any);
 
     return new NextResponse(buffer, {
       headers: {

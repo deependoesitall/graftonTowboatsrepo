@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { generateOrderNumber } from '@/lib/utils';
 import { sendOrderEmail } from '@/lib/email';
-import { CartItem, VesselInfo, Order } from '@/types';
+import { Order } from '@/types';
 import { z } from 'zod';
 
 const submitSchema = z.object({
