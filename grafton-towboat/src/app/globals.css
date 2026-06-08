@@ -1,0 +1,112 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    @apply bg-brand-cream text-brand-navy antialiased;
+  }
+  h1, h2, h3, h4 {
+    @apply font-display;
+  }
+  button, a {
+    touch-action: manipulation;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-brand-steel text-white px-6 py-3 rounded-lg font-body font-semibold text-sm
+           hover:bg-brand-navy transition-colors duration-200
+           focus:outline-none focus:ring-2 focus:ring-brand-sky focus:ring-offset-2
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-gold {
+    @apply bg-brand-gold text-white px-6 py-3 rounded-lg font-body font-semibold text-sm
+           hover:bg-brand-amber transition-colors duration-200
+           focus:outline-none focus:ring-2 focus:ring-brand-amber focus:ring-offset-2
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-outline {
+    @apply border border-brand-steel text-brand-steel px-6 py-3 rounded-lg font-body font-semibold text-sm
+           hover:bg-brand-steel hover:text-white transition-colors duration-200
+           focus:outline-none focus:ring-2 focus:ring-brand-sky focus:ring-offset-2
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .card-base {
+    @apply bg-white rounded-xl border border-gray-200 shadow-sm;
+  }
+
+  .input-base {
+    @apply w-full px-3 py-2.5 border border-gray-200 rounded-lg font-body text-sm
+           focus:outline-none focus:ring-2 focus:ring-brand-river focus:border-brand-river
+           placeholder:text-gray-300 bg-white transition-shadow;
+  }
+
+  .label-base {
+    @apply block text-xs font-bold text-brand-steel uppercase tracking-wider mb-1.5;
+  }
+
+  .status-badge {
+    @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border;
+  }
+}
+
+/* PWA safe area */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Product card hover */
+.product-card {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.product-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(13, 27, 42, 0.10);
+}
+
+/* Admin row hover */
+tr.admin-row:hover td {
+  @apply bg-brand-sand/30;
+}
+
+/* Cart bar slide up */
+.cart-bar-enter {
+  animation: slide-up 0.25s ease-out;
+}
+@keyframes slide-up {
+  from { transform: translateY(100%); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+/* Animate in for modals/toasts */
+.animate-in {
+  animation: fade-in-up 0.2s ease-out;
+}
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+
+/* Slide from bottom for toasts */
+.slide-in-from-bottom-2 {
+  animation: slide-from-bottom 0.25s ease-out;
+}
+@keyframes slide-from-bottom {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Print styles */
+@media print {
+  .no-print { display: none !important; }
+  body { background: white; }
+}

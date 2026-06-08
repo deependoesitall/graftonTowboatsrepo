@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="80" fill="#0D1B2A"/>
+  <text x="256" y="340" font-size="280" text-anchor="middle" fill="#C9922A" font-family="serif" font-weight="bold">G</text>
+  <path d="M60 390 Q130 360 200 390 Q270 420 340 390 Q410 360 450 380 L450 420 Q410 440 340 420 Q270 400 200 420 Q130 440 60 420 Z" fill="#1E5F8C" opacity="0.7"/>
+  <path d="M60 410 Q130 385 200 410 Q270 435 340 410 Q410 385 450 400 L450 450 Q410 455 340 435 Q270 455 200 445 Q130 455 60 440 Z" fill="#1E5F8C"/>
+</svg>

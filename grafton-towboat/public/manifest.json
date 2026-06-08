@@ -1,0 +1,27 @@
+{
+  "name": "Grafton Towboat Order",
+  "short_name": "GTS Order",
+  "description": "Grocery & supply ordering for Grafton Towboat Services",
+  "start_url": "/catalog",
+  "display": "standalone",
+  "background_color": "#0D1B2A",
+  "theme_color": "#0D1B2A",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["food", "shopping", "utilities"],
+  "screenshots": [],
+  "prefer_related_applications": false
+}
