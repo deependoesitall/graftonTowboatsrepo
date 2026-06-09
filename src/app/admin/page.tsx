@@ -13,6 +13,7 @@ const ADMIN_TOKEN_KEY = 'grafton_admin_token';
 export default function AdminDashboard() {
   const [token, setToken] = useState('');
   const [savedToken, setSavedToken] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [loginError, setLoginError] = useState('');
@@ -40,10 +41,10 @@ export default function AdminDashboard() {
       const res = await fetch('/api/admin/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify(username.trim() ? { username: username.trim(), password } : { password }),
       });
       if (!res.ok) {
-        setLoginError('Incorrect password. Please try again.');
+        setLoginError(username.trim() ? 'Invalid username or password.' : 'Incorrect password. Please try again.');
         return;
       }
       const { token: t } = await res.json();
@@ -80,12 +81,25 @@ export default function AdminDashboard() {
           </div>
           <div className="space-y-4">
             <div>
+              <label className="label-base">Username <span className="text-gray-400 font-normal normal-case">(leave blank for default login)</span></label>
+              <input
+                type="text"
+                className="input-base"
+                placeholder="e.g. jennifer"
+                value={username}
+                onChange={e => setUsername(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleLogin()}
+                autoCapitalize="none"
+                autoCorrect="off"
+              />
+            </div>
+            <div>
               <label className="label-base">Password</label>
               <div className="relative">
                 <input
                   type={showPw ? 'text' : 'password'}
                   className="input-base pr-10"
-                  placeholder="Enter admin password"
+                  placeholder="Enter password"
                   value={password}
                   onChange={e => setPassword(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && handleLogin()}
