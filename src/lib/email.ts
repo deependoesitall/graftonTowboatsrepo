@@ -110,7 +110,7 @@ export async function sendOrderEmail(order: Order, businessEmail?: string) {
       from: fromEmail,
       to: [toEmail],
       ...(ccEmail ? { cc: [ccEmail] } : {}),
-      reply_to: toEmail,
+      replyTo: toEmail,
       subject: `🚢 New Order ${order.order_number} — ${order.company_name} (${formatCurrency(order.subtotal)})`,
       html,
     });
