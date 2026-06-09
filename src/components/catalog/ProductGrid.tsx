@@ -132,9 +132,9 @@ function ProductCard({ product }: { product: Product }) {
       <div className={`h-1 w-full ${getCategoryColor(product.category)}`} />
 
       <div className="p-3 flex flex-col gap-2 flex-1">
-        {/* Sub-category label */}
+        {/* Category label — show main category only, not internal Sinclair sub-category */}
         <span className="text-[10px] font-bold text-brand-river uppercase tracking-wide leading-none truncate">
-          {product.sub_category || product.category}
+          {product.category}
         </span>
 
         {/* Product name */}

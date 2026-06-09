@@ -99,7 +99,7 @@ export default function AdminSettingsPage() {
   async function changePassword() {
     setPwError(''); setPwMsg('');
     if (!currentPw) { setPwError('Enter your current password'); return; }
-    if (newPw.length < 8) { setPwError('New password must be at least 8 characters'); return; }
+    if (newPw.length < 4) { setPwError('New password must be at least 4 characters'); return; }
     if (newPw !== confirmPw) { setPwError('New passwords do not match'); return; }
     setSavingPw(true);
     const res = await fetch('/api/admin/settings', {
@@ -242,7 +242,7 @@ export default function AdminSettingsPage() {
             <label className="label-base">New Password</label>
             <input type={showPw ? 'text' : 'password'} className="input-base"
               value={newPw} onChange={e => setNewPw(e.target.value)}
-              placeholder="At least 8 characters" />
+              placeholder="At least 4 characters" />
           </div>
           <div>
             <label className="label-base">Confirm New Password</label>
@@ -289,7 +289,7 @@ export default function AdminSettingsPage() {
                   </div>
                   <div>
                     <label className="label-base">Password</label>
-                    <input type="password" className="input-base" placeholder="At least 8 characters"
+                    <input type="password" className="input-base" placeholder="At least 4 characters"
                       value={newUser.password} onChange={e => setNewUser(u => ({ ...u, password: e.target.value }))} />
                   </div>
                   <div>
