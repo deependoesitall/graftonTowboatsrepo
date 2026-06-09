@@ -87,7 +87,11 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (fullOrder) {
-      sendOrderEmail(fullOrder as Order).catch(err => console.error('Email error:', err));
+      // Read business email from settings (allows Jennifer to change it without redeploying)
+      supabase.from('admin_settings').select('business_email').single().then(({ data: s }) => {
+        const email = s?.business_email || process.env.BUSINESS_EMAIL;
+        sendOrderEmail(fullOrder as Order, email).catch(err => console.error('Email error:', err));
+      });
     }
 
     return NextResponse.json({ order_id: order.id, order_number: orderNumber });

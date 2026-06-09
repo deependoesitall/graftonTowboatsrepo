@@ -101,7 +101,7 @@ export default function HomePage() {
             {[
               { icon: Phone, label: '(618) 556-0290', sub: '24/7 Support', href: 'tel:6185560290' },
               { icon: MapPin, label: 'Mile Marker 218', sub: 'Grafton, IL 62037', href: null },
-              { icon: Clock, label: 'Monitor Channel 68', sub: 'Grafton Harbor', href: null },
+              
             ].map(({ icon: Icon, label, sub, href }) => (
               <div key={label} className="flex flex-col items-center gap-2">
                 <div className="w-10 h-10 bg-brand-yellow/20 rounded-full flex items-center justify-center mb-1">

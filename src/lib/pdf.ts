@@ -1,13 +1,12 @@
 // src/lib/pdf.ts
-// Generates a print-ready HTML string for an order.
-// No external dependencies — works on any server/edge runtime.
-
+// Generates a clean, branded, print-ready HTML order sheet for Sinclair Foods
 import { Order } from '@/types';
 import { formatCurrency, formatDate } from './utils';
 
 export function generateOrderHTML(order: Order): string {
   const itemCount = order.items.reduce((s, i) => s + i.quantity, 0);
 
+  // Group by category
   const grouped = order.items.reduce((acc, item) => {
     const cat = item.category || 'General';
     if (!acc[cat]) acc[cat] = [];
@@ -15,179 +14,173 @@ export function generateOrderHTML(order: Order): string {
     return acc;
   }, {} as Record<string, typeof order.items>);
 
-  const itemRows = Object.entries(grouped).map(([cat, items]) => {
-    const rows = items.map((item, idx) => `
-      <tr style="background:${idx % 2 === 0 ? '#fff' : '#f9fafb'};">
-        <td style="padding:7px 10px;font-size:12px;color:#555;">${cat}</td>
-        <td style="padding:7px 10px;font-size:13px;font-weight:600;color:#0D1B2A;">${item.description}</td>
-        <td style="padding:7px 10px;font-size:12px;color:#666;">${item.pkg_size || '—'}</td>
-        <td style="padding:7px 10px;font-size:12px;text-align:center;font-weight:700;">${item.quantity}</td>
-        <td style="padding:7px 10px;font-size:12px;text-align:right;">${formatCurrency(item.unit_price)}</td>
-        <td style="padding:7px 10px;font-size:13px;text-align:right;font-weight:700;">${formatCurrency(item.line_total)}</td>
+  const categoryRows = Object.entries(grouped).map(([cat, items]) => {
+    const catRows = items.map((item, idx) => `
+      <tr style="background:${idx % 2 === 0 ? '#ffffff' : '#f8f9fa'};">
+        <td style="padding:6px 8px;font-size:11px;color:#555;border-bottom:1px solid #eee;">${item.description}</td>
+        <td style="padding:6px 8px;font-size:11px;color:#666;border-bottom:1px solid #eee;text-align:center;">${item.pkg_size || '—'}</td>
+        <td style="padding:6px 8px;font-size:11px;color:#666;border-bottom:1px solid #eee;text-align:center;">${item.uom || '—'}</td>
+        <td style="padding:6px 8px;font-size:12px;font-weight:700;color:#1E3D1E;border-bottom:1px solid #eee;text-align:center;">${item.quantity}</td>
+        <td style="padding:6px 8px;font-size:11px;color:#333;border-bottom:1px solid #eee;text-align:right;">${formatCurrency(item.unit_price)}</td>
+        <td style="padding:6px 8px;font-size:12px;font-weight:700;color:#1E3D1E;border-bottom:1px solid #eee;text-align:right;">${formatCurrency(item.line_total)}</td>
       </tr>`).join('');
-    return rows;
+
+    return `
+      <tr>
+        <td colspan="6" style="padding:5px 8px;background:#D9E84A;font-size:10px;font-weight:800;
+          text-transform:uppercase;letter-spacing:1px;color:#1E3D1E;">${cat}</td>
+      </tr>
+      ${catRows}`;
   }).join('');
 
   return `<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>${order.order_number} — Grafton Towboat Services</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Order ${order.order_number} — Grafton Towboat Services</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: Georgia, serif; font-size: 13px; color: #1a1a1a; background: #fff; }
-    @page { size: letter; margin: 0.6in 0.6in 0.7in 0.6in; }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; font-size:12px; color:#222; background:#fff; }
+    @page { size:letter; margin:0.5in; }
     @media print {
-      .no-print { display: none !important; }
-      body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+      .no-print { display:none !important; }
+      body { print-color-adjust:exact; -webkit-print-color-adjust:exact; }
     }
-
-    .header { display: flex; justify-content: space-between; align-items: flex-start;
-              border-bottom: 3px solid #1B3A5C; padding-bottom: 16px; margin-bottom: 20px; }
-    .brand-name { font-size: 20px; font-weight: bold; color: #1B3A5C; margin-bottom: 3px; }
-    .brand-tag  { font-size: 10px; color: #1E5F8C; margin-bottom: 5px; }
-    .brand-contact { font-size: 9px; color: #555; line-height: 1.6; }
-    .order-num  { font-size: 18px; font-weight: bold; color: #C9922A; text-align: right; margin-bottom: 4px; }
-    .order-meta { font-size: 9px; color: #666; text-align: right; line-height: 1.7; }
-
-    .section-title { font-size: 9px; font-weight: bold; color: #1B3A5C; text-transform: uppercase;
-                     letter-spacing: 1px; border-bottom: 1px solid #ddd; padding-bottom: 3px;
-                     margin: 16px 0 8px; }
-    .info-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 4px; }
-    .info-label { font-size: 9px; color: #888; margin-bottom: 2px; }
-    .info-value { font-size: 12px; font-weight: bold; color: #1B3A5C; }
-
-    table { width: 100%; border-collapse: collapse; font-size: 12px; }
-    thead tr { background: #1B3A5C; }
-    thead th { padding: 8px 10px; text-align: left; color: #fff; font-size: 10px;
-               font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; }
-    thead th.right { text-align: right; }
-    thead th.center { text-align: center; }
-
-    .totals-box { margin-left: auto; width: 280px; margin-top: 12px; border-top: 2px solid #1B3A5C; }
-    .total-row  { display: flex; justify-content: space-between; padding: 5px 10px;
-                  font-size: 12px; border-bottom: 1px solid #eee; }
-    .grand-row  { display: flex; justify-content: space-between; padding: 8px 10px;
-                  background: #F5E6C8; border-top: 2px solid #C9922A; }
-    .grand-label { font-size: 14px; font-weight: bold; color: #1B3A5C; }
-    .grand-value { font-size: 16px; font-weight: bold; color: #C9922A; }
-
-    .notes-box  { margin-top: 14px; padding: 10px 14px; background: #FFF8EC;
-                  border: 1px solid #E8A93C; border-radius: 4px; }
-    .notes-label{ font-size: 9px; font-weight: bold; color: #C9922A; text-transform: uppercase;
-                  letter-spacing: 1px; margin-bottom: 5px; }
-    .notes-text { font-size: 12px; color: #444; line-height: 1.5; }
-
-    .sinclair-box { margin-top: 16px; padding: 12px 14px; border: 2px solid #1B3A5C;
-                    background: #F0F4F8; border-radius: 4px; }
-    .sinclair-title { font-size: 11px; font-weight: bold; color: #1B3A5C; margin-bottom: 5px; }
-    .sinclair-text  { font-size: 11px; color: #444; line-height: 1.6; }
-
-    .footer { margin-top: 20px; text-align: center; font-size: 9px; color: #999;
-              border-top: 1px solid #eee; padding-top: 10px; line-height: 1.8; }
-
-    .print-btn { position: fixed; top: 20px; right: 20px; background: #1B3A5C; color: #fff;
-                 border: none; padding: 10px 22px; border-radius: 6px; font-size: 14px;
-                 font-weight: bold; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
-    .print-btn:hover { background: #0D1B2A; }
+    .print-btn {
+      position:fixed; top:16px; right:16px;
+      background:#1E3D1E; color:#D9E84A; border:none;
+      padding:10px 22px; border-radius:24px;
+      font-size:13px; font-weight:800; cursor:pointer;
+      text-transform:uppercase; letter-spacing:1px;
+      box-shadow:0 4px 12px rgba(0,0,0,0.2);
+    }
+    .print-btn:hover { background:#2D5A1E; }
   </style>
 </head>
 <body>
-  <button class="print-btn no-print" onclick="window.print()">⬇ Save / Print PDF</button>
 
-  <!-- Header -->
-  <div class="header">
-    <div>
-      <div class="brand-name">Grafton Towboat Services</div>
-      <div class="brand-tag">Groceries, Supplies &amp; Crew Change</div>
-      <div class="brand-contact">
-        25 Dagget Hollow · Grafton, IL 62037<br>
-        Mississippi Mile Marker 218 · IL Mile Marker 0.7<br>
-        (618) 556-0290 · GraftonTowboatServices@gmail.com<br>
-        Monitor Channel 68 via Grafton Harbor
+<button class="print-btn no-print" onclick="window.print()">⬇ Save as PDF</button>
+
+<!-- ===== HEADER ===== -->
+<table width="100%" style="border-bottom:4px solid #1E3D1E;padding-bottom:14px;margin-bottom:16px;">
+  <tr>
+    <td width="60%">
+      <div style="font-size:20px;font-weight:900;color:#1E3D1E;text-transform:uppercase;letter-spacing:-0.5px;">
+        Grafton Towboat Services
       </div>
-    </div>
-    <div>
-      <div class="order-num">${order.order_number}</div>
-      <div class="order-meta">
-        Ordered: ${formatDate(order.created_at)}<br>
-        Status: ${order.status.toUpperCase()}<br>
-        Items: ${itemCount}
+      <div style="font-size:11px;color:#E8640A;font-weight:700;margin:2px 0;">
+        GROCERIES, SUPPLIES &amp; CREW CHANGE
       </div>
-    </div>
-  </div>
+      <div style="font-size:10px;color:#555;line-height:1.6;margin-top:4px;">
+        25 Dagget Hollow · Grafton, IL 62037 · Mile Marker 218<br>
+        (618) 556-0290 · GraftonTowboatServices@gmail.com
+      </div>
+    </td>
+    <td width="40%" style="text-align:right;vertical-align:top;">
+      <div style="font-size:22px;font-weight:900;color:#E8640A;">${order.order_number}</div>
+      <div style="font-size:10px;color:#666;margin-top:3px;line-height:1.7;">
+        Date: ${formatDate(order.created_at)}<br>
+        Status: <strong style="color:#1E3D1E;">${order.status.replace('_',' ').toUpperCase()}</strong><br>
+        Items: <strong>${itemCount}</strong>
+      </div>
+    </td>
+  </tr>
+</table>
 
-  <!-- Vessel Info -->
-  <div class="section-title">Vessel &amp; Contact Information</div>
-  <div class="info-grid">
-    <div>
-      <div class="info-label">Company / Vessel Name</div>
-      <div class="info-value">${order.company_name}</div>
-    </div>
-    <div>
-      <div class="info-label">Contact Person</div>
-      <div class="info-value">${order.contact_name}</div>
-    </div>
-    <div>
-      <div class="info-label">Phone Number</div>
-      <div class="info-value">${order.phone}</div>
-    </div>
-    ${order.po_number ? `<div><div class="info-label">PO Number</div><div class="info-value">${order.po_number}</div></div>` : ''}
-    ${order.eta ? `<div><div class="info-label">Vessel ETA</div><div class="info-value" style="color:#C9922A;">${order.eta}</div></div>` : ''}
+<!-- ===== VESSEL INFO ===== -->
+<div style="background:#f0f7a0;border-left:4px solid #1E3D1E;padding:10px 14px;margin-bottom:16px;border-radius:0 4px 4px 0;">
+  <div style="font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:#1E3D1E;margin-bottom:8px;">
+    Vessel &amp; Contact Information
   </div>
-
-  <!-- Order Items -->
-  <div class="section-title">Order Items (${itemCount} items)</div>
-  <table>
-    <thead>
-      <tr>
-        <th style="width:13%">Category</th>
-        <th style="width:35%">Description</th>
-        <th style="width:16%">Pack Size</th>
-        <th class="center" style="width:8%">Qty</th>
-        <th class="right" style="width:14%">Unit Price</th>
-        <th class="right" style="width:14%">Line Total</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${itemRows}
-    </tbody>
+  <table width="100%">
+    <tr>
+      <td width="33%" style="padding-bottom:6px;">
+        <div style="font-size:9px;color:#666;">COMPANY / VESSEL</div>
+        <div style="font-size:13px;font-weight:700;color:#1E3D1E;">${order.company_name}</div>
+      </td>
+      <td width="33%" style="padding-bottom:6px;">
+        <div style="font-size:9px;color:#666;">CONTACT</div>
+        <div style="font-size:13px;font-weight:700;color:#1E3D1E;">${order.contact_name}</div>
+      </td>
+      <td width="33%" style="padding-bottom:6px;">
+        <div style="font-size:9px;color:#666;">PHONE</div>
+        <div style="font-size:13px;font-weight:700;color:#1E3D1E;">${order.phone}</div>
+      </td>
+    </tr>
+    ${order.po_number || order.eta ? `
+    <tr>
+      ${order.po_number ? `<td><div style="font-size:9px;color:#666;">PO NUMBER</div><div style="font-size:12px;font-weight:600;">${order.po_number}</div></td>` : '<td></td>'}
+      ${order.eta ? `<td><div style="font-size:9px;color:#666;">VESSEL ETA</div><div style="font-size:12px;font-weight:700;color:#E8640A;">${order.eta}</div></td>` : '<td></td>'}
+      <td></td>
+    </tr>` : ''}
   </table>
+</div>
 
-  <!-- Totals -->
-  <div class="totals-box">
-    <div class="total-row">
-      <span>Subtotal (${itemCount} items)</span>
-      <span>${formatCurrency(order.subtotal)}</span>
-    </div>
-    <div class="grand-row">
-      <span class="grand-label">TOTAL</span>
-      <span class="grand-value">${formatCurrency(order.subtotal)}</span>
-    </div>
+${order.notes ? `
+<div style="background:#fff8ec;border:1px solid #E8640A;padding:8px 12px;border-radius:4px;margin-bottom:16px;">
+  <div style="font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:#E8640A;margin-bottom:4px;">
+    Special Instructions
   </div>
+  <div style="font-size:11px;color:#444;line-height:1.5;">${order.notes}</div>
+</div>` : ''}
 
-  <!-- Notes -->
-  ${order.notes ? `
-  <div class="notes-box">
-    <div class="notes-label">Special Instructions / Notes</div>
-    <div class="notes-text">${order.notes}</div>
-  </div>` : ''}
+<!-- ===== ORDER ITEMS ===== -->
+<div style="font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:#1E3D1E;margin-bottom:6px;">
+  Order Items — ${itemCount} items across ${Object.keys(grouped).length} categories
+</div>
 
-  <!-- Sinclair Foods -->
-  <div class="sinclair-box">
-    <div class="sinclair-title">For Sinclair Foods — Grafton, IL</div>
-    <div class="sinclair-text">
-      This order was placed through Grafton Towboat Services digital ordering system.<br>
-      Please prepare the items above for delivery to the vessel indicated.<br>
-      Contact: (618) 556-0290
-    </div>
+<table width="100%" style="border-collapse:collapse;font-size:11px;margin-bottom:16px;">
+  <thead>
+    <tr style="background:#1E3D1E;">
+      <th style="padding:8px;text-align:left;color:#D9E84A;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;width:40%;">Description</th>
+      <th style="padding:8px;text-align:center;color:#D9E84A;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;width:12%;">Pack</th>
+      <th style="padding:8px;text-align:center;color:#D9E84A;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;width:8%;">UOM</th>
+      <th style="padding:8px;text-align:center;color:#D9E84A;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;width:8%;">Qty</th>
+      <th style="padding:8px;text-align:right;color:#D9E84A;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;width:14%;">Unit Price</th>
+      <th style="padding:8px;text-align:right;color:#D9E84A;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;width:14%;">Total</th>
+    </tr>
+  </thead>
+  <tbody>${categoryRows}</tbody>
+</table>
+
+<!-- ===== TOTALS ===== -->
+<table width="100%" style="margin-bottom:16px;">
+  <tr>
+    <td width="60%"></td>
+    <td width="40%">
+      <table width="100%" style="border-top:3px solid #1E3D1E;">
+        <tr>
+          <td style="padding:6px 8px;font-size:11px;color:#555;">Subtotal (${itemCount} items)</td>
+          <td style="padding:6px 8px;text-align:right;font-weight:700;">${formatCurrency(order.subtotal)}</td>
+        </tr>
+        <tr style="background:#D9E84A;">
+          <td style="padding:8px;font-size:14px;font-weight:900;color:#1E3D1E;text-transform:uppercase;">TOTAL</td>
+          <td style="padding:8px;text-align:right;font-size:16px;font-weight:900;color:#1E3D1E;">${formatCurrency(order.subtotal)}</td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+
+<!-- ===== SINCLAIR BOX ===== -->
+<div style="border:2px solid #1E3D1E;padding:12px 16px;background:#f0f7f0;border-radius:4px;margin-bottom:16px;">
+  <div style="font-size:11px;font-weight:800;color:#1E3D1E;margin-bottom:5px;">
+    FOR SINCLAIR FOODS — Jerseyville, IL · (618) 498-6856 · sinclairfoods@jerseyville-il.net
   </div>
-
-  <!-- Footer -->
-  <div class="footer">
-    Grafton Towboat Services · 25 Dagget Hollow, Grafton, IL 62037<br>
-    ${order.order_number} · Generated ${new Date().toLocaleDateString()}
+  <div style="font-size:11px;color:#444;line-height:1.6;">
+    Please prepare the items above for delivery to the vessel listed.<br>
+    This order was placed through Grafton Towboat Services online ordering system.<br>
+    Questions: (618) 556-0290 · GraftonTowboatServices@gmail.com
   </div>
+</div>
+
+<!-- ===== FOOTER ===== -->
+<div style="text-align:center;font-size:9px;color:#aaa;border-top:1px solid #eee;padding-top:10px;">
+  Grafton Towboat Services · 25 Dagget Hollow, Grafton, IL 62037 · Mile Marker 218<br>
+  ${order.order_number} · Generated ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+</div>
+
 </body>
 </html>`;
 }

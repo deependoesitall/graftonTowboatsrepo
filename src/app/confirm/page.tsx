@@ -127,7 +127,7 @@ function ConfirmContent() {
                 <a href="tel:6185560290" className="text-brand-river font-semibold">
                   (618) 556-0290
                 </a>
-                {' '}or monitor Channel 68 at Grafton Harbor.
+                
               </p>
             </div>
           </div>
