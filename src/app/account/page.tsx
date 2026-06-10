@@ -26,7 +26,7 @@ const STATUS_STYLES: Record<string, string> = {
 };
 
 function AccountContent() {
-  const { user, loading, signOut } = useAuth();
+  const { user, loading, signOut, refreshProfile } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
   const [tab, setTab] = useState<'orders' | 'favorites' | 'profile'>('orders');
@@ -41,7 +41,7 @@ function AccountContent() {
   const [favsLoading, setFavsLoading] = useState(true);
 
   // Profile
-  const [profile, setProfile] = useState({ company_name: '', contact_name: '', phone: '' });
+  const [profile, setProfile] = useState({ first_name: '', last_name: '', company_name: '', contact_name: '', phone: '' });
   const [savingProfile, setSavingProfile] = useState(false);
 
   useEffect(() => {
@@ -73,7 +73,13 @@ function AccountContent() {
   async function loadProfile() {
     const supabase = createClient();
     const { data } = await supabase.from('customer_profiles').select('*').single();
-    if (data) setProfile({ company_name: data.company_name || '', contact_name: data.contact_name || '', phone: data.phone || '' });
+    if (data) setProfile({
+      first_name: data.first_name || '',
+      last_name: data.last_name || '',
+      company_name: data.company_name || '',
+      contact_name: data.contact_name || '',
+      phone: data.phone || '',
+    });
   }
 
   async function saveProfile() {
@@ -83,7 +89,8 @@ function AccountContent() {
     await supabase.from('customer_profiles').upsert({ user_id: user.id, ...profile });
     // Also save to localStorage so order form auto-fills
     const existing = getVesselInfo();
-    saveVesselInfo({ ...existing, ...profile });
+    saveVesselInfo({ ...existing, company_name: profile.company_name, contact_name: profile.contact_name, phone: profile.phone });
+    await refreshProfile();
     setSavingProfile(false);
     toast({ title: 'Profile saved', variant: 'success', duration: 2000 });
   }
@@ -264,26 +271,48 @@ function AccountContent() {
 
         {/* ── PROFILE ── */}
         {tab === 'profile' && (
-          <div className="card-base p-6 space-y-4">
-            <div>
-              <h2 className="font-bold text-brand-green mb-1">Saved Vessel Info</h2>
-              <p className="text-xs text-brand-green/50">This auto-fills your checkout form on future orders.</p>
+          <div className="space-y-4">
+            <div className="card-base p-6 space-y-4">
+              <div>
+                <h2 className="font-bold text-brand-green mb-1">Your Info</h2>
+                <p className="text-xs text-brand-green/50">Shown in the account menu.</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label-base">First Name</label>
+                  <input className="input-base" placeholder="Jennifer" value={profile.first_name}
+                    onChange={e => setProfile(p => ({ ...p, first_name: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="label-base">Last Name <span className="text-gray-400 font-normal normal-case">(optional)</span></label>
+                  <input className="input-base" placeholder="Smith" value={profile.last_name}
+                    onChange={e => setProfile(p => ({ ...p, last_name: e.target.value }))} />
+                </div>
+              </div>
             </div>
-            <div>
-              <label className="label-base">Company / Vessel Name</label>
-              <input className="input-base" placeholder="M/V River Hawk" value={profile.company_name}
-                onChange={e => setProfile(p => ({ ...p, company_name: e.target.value }))} />
+
+            <div className="card-base p-6 space-y-4">
+              <div>
+                <h2 className="font-bold text-brand-green mb-1">Saved Vessel Info</h2>
+                <p className="text-xs text-brand-green/50">This auto-fills your checkout form on future orders.</p>
+              </div>
+              <div>
+                <label className="label-base">Company / Vessel Name</label>
+                <input className="input-base" placeholder="M/V River Hawk" value={profile.company_name}
+                  onChange={e => setProfile(p => ({ ...p, company_name: e.target.value }))} />
+              </div>
+              <div>
+                <label className="label-base">Contact Name</label>
+                <input className="input-base" placeholder="Captain Smith" value={profile.contact_name}
+                  onChange={e => setProfile(p => ({ ...p, contact_name: e.target.value }))} />
+              </div>
+              <div>
+                <label className="label-base">Phone</label>
+                <input className="input-base" type="tel" placeholder="(618) 555-0000" value={profile.phone}
+                  onChange={e => setProfile(p => ({ ...p, phone: e.target.value }))} />
+              </div>
             </div>
-            <div>
-              <label className="label-base">Contact Name</label>
-              <input className="input-base" placeholder="Captain Smith" value={profile.contact_name}
-                onChange={e => setProfile(p => ({ ...p, contact_name: e.target.value }))} />
-            </div>
-            <div>
-              <label className="label-base">Phone</label>
-              <input className="input-base" type="tel" placeholder="(618) 555-0000" value={profile.phone}
-                onChange={e => setProfile(p => ({ ...p, phone: e.target.value }))} />
-            </div>
+
             <button onClick={saveProfile} disabled={savingProfile}
               className="btn-primary flex items-center gap-2">
               {savingProfile ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}

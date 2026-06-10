@@ -17,6 +17,9 @@ export function AuthModal({ open, onClose, defaultMode = 'signin', title }: Auth
   const [mode, setMode] = useState<'signin' | 'signup'>(defaultMode);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [companyName, setCompanyName] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -28,24 +31,41 @@ export function AuthModal({ open, onClose, defaultMode = 'signin', title }: Auth
     if (open) {
       setError('');
       setPassword('');
+      setFirstName('');
+      setLastName('');
+      setCompanyName('');
       setMode(defaultMode);
     }
   }, [open, defaultMode]);
 
   if (!open || !mounted) return null;
 
+  const canSubmit = mode === 'signup'
+    ? email && password.length >= 6 && firstName.trim().length > 0
+    : email && password.length >= 6;
+
   async function submit() {
+    if (!canSubmit) return;
     setError(''); setBusy(true);
-    const fn = mode === 'signup' ? signUp : signIn;
-    const { error: err } = await fn(email.trim(), password);
-    setBusy(false);
-    if (err) { setError(err); return; }
+    if (mode === 'signup') {
+      const { error: err } = await signUp(email.trim(), password, {
+        firstName: firstName.trim(),
+        lastName: lastName.trim() || undefined,
+        companyName: companyName.trim() || undefined,
+      });
+      setBusy(false);
+      if (err) { setError(err); return; }
+    } else {
+      const { error: err } = await signIn(email.trim(), password);
+      setBusy(false);
+      if (err) { setError(err); return; }
+    }
     onClose();
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 px-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm animate-in" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 px-4 overflow-y-auto py-8" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm animate-in my-auto" onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div className="bg-brand-green rounded-t-2xl px-6 py-5 relative">
           <button onClick={onClose} className="absolute top-4 right-4 text-white/60 hover:text-white">
@@ -59,52 +79,76 @@ export function AuthModal({ open, onClose, defaultMode = 'signin', title }: Auth
 
         <div className="p-6">
 
-              {mode === 'signup' && (
-                <div className="grid grid-cols-3 gap-2 mb-5">
-                  {[
-                    { icon: Star, label: 'Save favorites' },
-                    { icon: History, label: 'Past orders' },
-                    { icon: Zap, label: '1-click reorder' },
-                  ].map(({ icon: Icon, label }) => (
-                    <div key={label} className="text-center">
-                      <div className="w-9 h-9 bg-brand-yellow/40 rounded-full flex items-center justify-center mx-auto mb-1">
-                        <Icon className="w-4 h-4 text-brand-green" />
-                      </div>
-                      <p className="text-[10px] text-gray-500 font-semibold leading-tight">{label}</p>
-                    </div>
-                  ))}
+          {mode === 'signup' && (
+            <div className="grid grid-cols-3 gap-2 mb-5">
+              {[
+                { icon: Star, label: 'Save favorites' },
+                { icon: History, label: 'Past orders' },
+                { icon: Zap, label: '1-click reorder' },
+              ].map(({ icon: Icon, label }) => (
+                <div key={label} className="text-center">
+                  <div className="w-9 h-9 bg-brand-yellow/40 rounded-full flex items-center justify-center mx-auto mb-1">
+                    <Icon className="w-4 h-4 text-brand-green" />
+                  </div>
+                  <p className="text-[10px] text-gray-500 font-semibold leading-tight">{label}</p>
                 </div>
-              )}
+              ))}
+            </div>
+          )}
 
-              <div className="space-y-3">
-                <div>
-                  <label className="label-base">Email</label>
-                  <input type="email" className="input-base" placeholder="captain@example.com"
-                    value={email} onChange={e => setEmail(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && submit()} autoComplete="email" />
+          <div className="space-y-3">
+            {mode === 'signup' && (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="label-base">First Name</label>
+                    <input type="text" className="input-base" placeholder="Jennifer"
+                      value={firstName} onChange={e => setFirstName(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && submit()} autoComplete="given-name" />
+                  </div>
+                  <div>
+                    <label className="label-base">Last Name <span className="text-gray-400 font-normal normal-case">(optional)</span></label>
+                    <input type="text" className="input-base" placeholder="Smith"
+                      value={lastName} onChange={e => setLastName(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && submit()} autoComplete="family-name" />
+                  </div>
                 </div>
                 <div>
-                  <label className="label-base">Password</label>
-                  <input type="password" className="input-base" placeholder="At least 6 characters"
-                    value={password} onChange={e => setPassword(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && submit()}
-                    autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} />
+                  <label className="label-base">Company Name <span className="text-gray-400 font-normal normal-case">(optional)</span></label>
+                  <input type="text" className="input-base" placeholder="M/V River Hawk"
+                    value={companyName} onChange={e => setCompanyName(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && submit()} autoComplete="organization" />
                 </div>
-                {error && <p className="text-red-500 text-xs bg-red-50 rounded p-2.5">{error}</p>}
-                <button onClick={submit} disabled={busy || !email || password.length < 6}
-                  className="btn-primary w-full flex items-center justify-center gap-2">
-                  {busy && <Loader2 className="w-4 h-4 animate-spin" />}
-                  {mode === 'signup' ? 'Create Account' : 'Sign In'}
-                </button>
-              </div>
+              </>
+            )}
+            <div>
+              <label className="label-base">Email</label>
+              <input type="email" className="input-base" placeholder="captain@example.com"
+                value={email} onChange={e => setEmail(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && submit()} autoComplete="email" />
+            </div>
+            <div>
+              <label className="label-base">Password</label>
+              <input type="password" className="input-base" placeholder="At least 6 characters"
+                value={password} onChange={e => setPassword(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && submit()}
+                autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} />
+            </div>
+            {error && <p className="text-red-500 text-xs bg-red-50 rounded p-2.5">{error}</p>}
+            <button onClick={submit} disabled={busy || !canSubmit}
+              className="btn-primary w-full flex items-center justify-center gap-2">
+              {busy && <Loader2 className="w-4 h-4 animate-spin" />}
+              {mode === 'signup' ? 'Create Account' : 'Sign In'}
+            </button>
+          </div>
 
-              <p className="text-center text-xs text-gray-400 mt-4">
-                {mode === 'signup' ? 'Already have an account?' : 'New here?'}{' '}
-                <button onClick={() => { setMode(m => m === 'signup' ? 'signin' : 'signup'); setError(''); }}
-                  className="text-brand-orange font-bold hover:underline">
-                  {mode === 'signup' ? 'Sign in' : 'Create free account'}
-                </button>
-              </p>
+          <p className="text-center text-xs text-gray-400 mt-4">
+            {mode === 'signup' ? 'Already have an account?' : 'New here?'}{' '}
+            <button onClick={() => { setMode(m => m === 'signup' ? 'signin' : 'signup'); setError(''); }}
+              className="text-brand-orange font-bold hover:underline">
+              {mode === 'signup' ? 'Sign in' : 'Create free account'}
+            </button>
+          </p>
 
         </div>
       </div>

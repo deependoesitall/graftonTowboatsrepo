@@ -13,7 +13,7 @@ export function SiteHeader() {
   const [cartTotal, setCartTotal] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
 
   useEffect(() => {
     const update = () => {
@@ -53,10 +53,19 @@ export function SiteHeader() {
         <div className="flex items-center gap-3">
           {user ? (
             <Link href="/account"
-              className="hidden sm:flex items-center gap-1.5 text-brand-green/70 hover:text-brand-green text-sm font-semibold transition-colors"
+              className="hidden sm:flex flex-col items-end leading-tight text-right group"
               title={user.email || 'Account'}>
-              <User className="w-4 h-4" />
-              Account
+              <span className="flex items-center gap-1.5 text-brand-green text-sm font-bold group-hover:text-brand-orange transition-colors">
+                <User className="w-4 h-4" />
+                {profile?.first_name
+                  ? `${profile.first_name}${profile.last_name ? ' ' + profile.last_name : ''}`
+                  : 'My Account'}
+              </span>
+              {profile?.company_name && (
+                <span className="text-brand-green/50 text-[11px] font-semibold -mt-0.5">
+                  {profile.company_name}
+                </span>
+              )}
             </Link>
           ) : (
             <button onClick={() => setAuthOpen(true)}
@@ -107,8 +116,20 @@ export function SiteHeader() {
           ))}
           {user ? (
             <Link href="/account" onClick={() => setMenuOpen(false)}
-              className="text-white font-bold text-sm py-3 px-3 rounded-lg hover:bg-brand-gmed transition-colors border-b border-brand-gmed/50 uppercase tracking-wide flex items-center gap-2">
-              <User className="w-4 h-4" /> My Account
+              className="text-white py-3 px-3 rounded-lg hover:bg-brand-gmed transition-colors border-b border-brand-gmed/50 flex items-center gap-2">
+              <User className="w-4 h-4 shrink-0" />
+              <span className="leading-tight">
+                <span className="block font-bold text-sm uppercase tracking-wide">
+                  {profile?.first_name
+                    ? `${profile.first_name}${profile.last_name ? ' ' + profile.last_name : ''}`
+                    : 'My Account'}
+                </span>
+                {profile?.company_name && (
+                  <span className="block text-brand-yellow/60 text-[11px] font-semibold normal-case">
+                    {profile.company_name}
+                  </span>
+                )}
+              </span>
             </Link>
           ) : (
             <button onClick={() => { setMenuOpen(false); setAuthOpen(true); }}
