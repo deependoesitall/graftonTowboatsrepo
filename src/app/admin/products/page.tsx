@@ -3,12 +3,11 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Upload, Package, AlertCircle, CheckCircle2, Loader2,
          Search, Pencil, Check, X, ToggleLeft, ToggleRight,
-         ChevronLeft, ChevronRight, RefreshCw, Plus } from 'lucide-react';
+         ChevronLeft, ChevronRight, RefreshCw, Plus, Lock } from 'lucide-react';
 import { normalizeCategory, formatCurrency } from '@/lib/utils';
 import { Product } from '@/types';
 import { useRouter } from 'next/navigation';
-
-const ADMIN_TOKEN_KEY = 'grafton_admin_token';
+import { ADMIN_TOKEN_KEY, getAdminRole, canAccess } from '@/lib/admin-auth';
 
 interface ParsedProduct {
   category: string; sub_category: string; upc: string | null;
@@ -298,9 +297,12 @@ export default function AdminProductsPage() {
 
   const adminToken = typeof window !== 'undefined'
     ? sessionStorage.getItem(ADMIN_TOKEN_KEY) || '' : '';
+  const [denied, setDenied] = useState(false);
+  const role = typeof window !== 'undefined' ? getAdminRole() : null;
 
   useEffect(() => {
-    if (!sessionStorage.getItem(ADMIN_TOKEN_KEY)) router.push('/admin');
+    if (!sessionStorage.getItem(ADMIN_TOKEN_KEY)) { router.push('/admin'); return; }
+    if (!canAccess(getAdminRole(), 'products')) { setDenied(true); return; }
   }, [router]);
 
   const fetchProducts = useCallback(async (q = search, p = page) => {
@@ -399,6 +401,18 @@ export default function AdminProductsPage() {
   }
 
   const totalPages = Math.ceil(total / perPage);
+
+  if (denied) return (
+    <div className="flex flex-col items-center justify-center py-32 text-center px-4">
+      <div className="w-14 h-14 bg-red-50 rounded-full flex items-center justify-center mb-4">
+        <Lock className="w-6 h-6 text-red-400" />
+      </div>
+      <h2 className="font-bold text-brand-navy text-lg mb-1">Access Restricted</h2>
+      <p className="text-gray-400 text-sm max-w-xs">
+        Staff accounts can view orders only. Contact a manager or owner for product catalog access.
+      </p>
+    </div>
+  );
 
   return (
     <div>

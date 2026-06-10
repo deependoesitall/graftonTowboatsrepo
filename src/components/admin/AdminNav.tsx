@@ -2,23 +2,36 @@
 // src/components/admin/AdminNav.tsx
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import { LayoutDashboard, ShoppingBag, Settings, LogOut, Package } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { getAdminRole, getAdminName, clearAdminSession, canAccess, AdminRole } from '@/lib/admin-auth';
 
-const NAV = [
-  { href: '/admin',          label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/admin/orders',   label: 'Orders',    icon: ShoppingBag },
-  { href: '/admin/products', label: 'Products',  icon: Package },
-  { href: '/admin/settings', label: 'Settings',  icon: Settings },
+const NAV: Array<{ href: string; label: string; icon: any; area: 'orders' | 'products' | 'settings' | null }> = [
+  { href: '/admin',          label: 'Dashboard', icon: LayoutDashboard, area: null },
+  { href: '/admin/orders',   label: 'Orders',    icon: ShoppingBag,     area: 'orders' },
+  { href: '/admin/products', label: 'Products',  icon: Package,         area: 'products' },
+  { href: '/admin/settings', label: 'Settings',  icon: Settings,        area: 'settings' },
 ];
+
+const ROLE_LABELS: Record<AdminRole, string> = { owner: 'Owner', manager: 'Manager', staff: 'Staff' };
 
 export function AdminNav() {
   const path = usePathname();
+  const [role, setRole] = useState<AdminRole | null>(null);
+  const [name, setName] = useState('');
+
+  useEffect(() => {
+    setRole(getAdminRole());
+    setName(getAdminName());
+  }, [path]);
 
   function handleLogout() {
-    sessionStorage.removeItem('grafton_admin_token');
+    clearAdminSession();
     window.location.href = '/admin';
   }
+
+  const visibleNav = NAV.filter(item => item.area === null || canAccess(role, item.area));
 
   return (
     <header className="bg-brand-green text-white shadow-md">
@@ -37,7 +50,7 @@ export function AdminNav() {
 
         {/* Nav links */}
         <nav className="flex items-center gap-1">
-          {NAV.map(({ href, label, icon: Icon }) => {
+          {visibleNav.map(({ href, label, icon: Icon }) => {
             const active = path === href || (href !== '/admin' && path.startsWith(href));
             return (
               <Link key={href} href={href}
@@ -55,7 +68,15 @@ export function AdminNav() {
         </nav>
 
         {/* Right side */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          {role && (
+            <span className="hidden md:flex items-center gap-1.5 text-xs">
+              <span className="text-white/50">{name}</span>
+              <span className="bg-white/10 text-brand-yellow px-2 py-0.5 rounded-full font-bold uppercase tracking-wide text-[10px]">
+                {ROLE_LABELS[role]}
+              </span>
+            </span>
+          )}
           <Link href="/catalog" target="_blank"
             className="text-white/60 hover:text-white text-xs font-body transition-colors hidden md:block">
             View Store →

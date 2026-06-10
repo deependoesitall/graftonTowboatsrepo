@@ -2,9 +2,8 @@
 // src/app/admin/settings/page.tsx
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Save, RefreshCw, Eye, EyeOff, Plus, Trash2, UserPlus, ShieldCheck, User } from 'lucide-react';
-
-const ADMIN_TOKEN_KEY = 'grafton_admin_token';
+import { Save, RefreshCw, Eye, EyeOff, Plus, Trash2, UserPlus, ShieldCheck, User, Lock } from 'lucide-react';
+import { ADMIN_TOKEN_KEY, getAdminRole, canAccess } from '@/lib/admin-auth';
 
 interface AdminUser {
   id: string;
@@ -62,9 +61,12 @@ export default function AdminSettingsPage() {
   const [showAddUser, setShowAddUser] = useState(false);
 
   const adminToken = typeof window !== 'undefined' ? sessionStorage.getItem(ADMIN_TOKEN_KEY) || '' : '';
+  const [denied, setDenied] = useState(false);
 
   useEffect(() => {
     if (!sessionStorage.getItem(ADMIN_TOKEN_KEY)) { router.push('/admin'); return; }
+    const role = getAdminRole();
+    if (!canAccess(role, 'settings')) { setDenied(true); return; }
     loadSettings();
     loadUsers();
   }, [router]);
@@ -160,6 +162,18 @@ export default function AdminSettingsPage() {
     { key: 'email', label: 'Email' },
     { key: 'features', label: 'Features' },
   ] as const;
+
+  if (denied) return (
+    <div className="flex flex-col items-center justify-center py-32 text-center px-4">
+      <div className="w-14 h-14 bg-red-50 rounded-full flex items-center justify-center mb-4">
+        <Lock className="w-6 h-6 text-red-400" />
+      </div>
+      <h2 className="font-bold text-brand-navy text-lg mb-1">Access Restricted</h2>
+      <p className="text-gray-400 text-sm max-w-xs">
+        Only Owners can access Settings. Contact an owner if you need changes made here.
+      </p>
+    </div>
+  );
 
   if (loading) return (
     <div className="flex items-center justify-center py-32">

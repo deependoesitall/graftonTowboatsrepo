@@ -7,8 +7,7 @@ import {
   ShoppingBag, Lock, Eye, EyeOff, Loader2
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
-
-const ADMIN_TOKEN_KEY = 'grafton_admin_token';
+import { setAdminSession, ADMIN_TOKEN_KEY } from '@/lib/admin-auth';
 
 export default function AdminDashboard() {
   const [token, setToken] = useState('');
@@ -47,8 +46,8 @@ export default function AdminDashboard() {
         setLoginError(username.trim() ? 'Invalid username or password.' : 'Incorrect password. Please try again.');
         return;
       }
-      const { token: t } = await res.json();
-      sessionStorage.setItem(ADMIN_TOKEN_KEY, t);
+      const { token: t, user } = await res.json();
+      setAdminSession(t, user?.role || 'owner', user?.display_name || user?.username || 'Admin');
       setSavedToken(t);
       fetchStats(t);
     } finally {

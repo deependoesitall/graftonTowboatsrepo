@@ -13,6 +13,7 @@ interface OrderDetailModalProps {
   onDownloadCsv: () => void;
   adminToken: string;
   onRefresh: () => void;
+  canEdit?: boolean;
 }
 
 export function OrderDetailModal({
@@ -21,6 +22,7 @@ export function OrderDetailModal({
   onStatusChange,
   onDownloadPdf,
   onDownloadCsv,
+  canEdit = true,
 }: OrderDetailModalProps) {
   const [editingItems, setEditingItems] = useState(false);
   const [quantities, setQuantities] = useState<Record<string, number>>(
@@ -72,15 +74,21 @@ export function OrderDetailModal({
           {/* Status */}
           <div className="flex items-center gap-4">
             <label className="text-xs font-bold text-gray-500 uppercase tracking-wide">Status</label>
-            <select
-              className="border border-gray-200 rounded px-3 py-1.5 text-sm font-semibold bg-white"
-              value={order.status}
-              onChange={e => onStatusChange(e.target.value as OrderStatus)}
-            >
-              {ORDER_STATUSES.map(s => (
-                <option key={s.value} value={s.value}>{s.label}</option>
-              ))}
-            </select>
+            {canEdit ? (
+              <select
+                className="border border-gray-200 rounded px-3 py-1.5 text-sm font-semibold bg-white"
+                value={order.status}
+                onChange={e => onStatusChange(e.target.value as OrderStatus)}
+              >
+                {ORDER_STATUSES.map(s => (
+                  <option key={s.value} value={s.value}>{s.label}</option>
+                ))}
+              </select>
+            ) : (
+              <span className="border border-gray-200 rounded px-3 py-1.5 text-sm font-semibold bg-gray-50 text-gray-600">
+                {ORDER_STATUSES.find(s => s.value === order.status)?.label || order.status}
+              </span>
+            )}
           </div>
 
           {/* Items */}

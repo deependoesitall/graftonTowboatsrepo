@@ -6,9 +6,7 @@ import { Search, Download, Eye, Loader2, RefreshCw, Package, ArrowRight } from '
 import { formatCurrency, formatDate, ORDER_STATUSES } from '@/lib/utils';
 import { Order, OrderStatus } from '@/types';
 import { OrderDetailModal } from '@/components/admin/OrderDetailModal';
-
-
-const ADMIN_TOKEN_KEY = 'grafton_admin_token';
+import { ADMIN_TOKEN_KEY, getAdminRole, canEdit } from '@/lib/admin-auth';
 
 const STATUS_CONFIG = {
   new:         { label: 'New',         bg: 'bg-blue-50',   text: 'text-blue-700',   border: 'border-blue-200',  dot: 'bg-blue-500'   },
@@ -51,6 +49,7 @@ function OrdersContent() {
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
   const adminToken = typeof window !== 'undefined' ? sessionStorage.getItem(ADMIN_TOKEN_KEY) || '' : '';
+  const canEditOrders = canEdit(typeof window !== 'undefined' ? getAdminRole() : null, 'orders');
 
   // Auth guard
   useEffect(() => {
@@ -248,8 +247,8 @@ function OrdersContent() {
                         </td>
                         <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
                           <div className="flex items-center gap-1.5">
-                            {/* Advance pipeline button */}
-                            {nextStatus && (
+                            {/* Advance pipeline button — owner/manager only */}
+                            {nextStatus && canEditOrders && (
                               <button
                                 onClick={() => advanceStatus(order)}
                                 disabled={isUpdating}
@@ -304,6 +303,7 @@ function OrdersContent() {
             onDownloadCsv={() => downloadOrderCsv(selectedOrder)}
             adminToken={adminToken}
             onRefresh={fetchOrders}
+            canEdit={canEditOrders}
           />
         )}
     </div>
