@@ -48,8 +48,8 @@ export default function AdminDashboard() {
       }
       const { token: t, user } = await res.json();
       setAdminSession(t, user?.role || 'owner', user?.display_name || user?.username || 'Admin');
-      setSavedToken(t);
-      fetchStats(t);
+      // Full reload so AdminNav (and everything else) re-initializes with the new session/role
+      window.location.href = '/admin';
     } finally {
       setLogging(false);
     }
