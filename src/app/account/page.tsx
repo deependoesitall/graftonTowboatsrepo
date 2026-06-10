@@ -54,45 +54,65 @@ function AccountContent() {
 
   async function loadOrders() {
     setOrdersLoading(true);
-    const supabase = createClient();
-    const { data } = await supabase
-      .from('orders')
-      .select('*, items:order_items(*)')
-      .order('created_at', { ascending: false })
-      .limit(50);
-    setOrders((data as Order[]) || []);
-    setOrdersLoading(false);
+    try {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from('orders')
+        .select('*, items:order_items(*)')
+        .order('created_at', { ascending: false })
+        .limit(50);
+      setOrders((data as Order[]) || []);
+    } catch {
+      setOrders([]);
+    } finally {
+      setOrdersLoading(false);
+    }
   }
 
   async function loadFavorites() {
     setFavsLoading(true);
-    setFavorites(await getFavoriteProducts());
-    setFavsLoading(false);
+    try {
+      setFavorites(await getFavoriteProducts());
+    } catch {
+      setFavorites([]);
+    } finally {
+      setFavsLoading(false);
+    }
   }
 
   async function loadProfile() {
-    const supabase = createClient();
-    const { data } = await supabase.from('customer_profiles').select('*').single();
-    if (data) setProfile({
-      first_name: data.first_name || '',
-      last_name: data.last_name || '',
-      company_name: data.company_name || '',
-      contact_name: data.contact_name || '',
-      phone: data.phone || '',
-    });
+    try {
+      const supabase = createClient();
+      const { data } = await supabase.from('customer_profiles').select('*').maybeSingle();
+      if (data) setProfile({
+        first_name: data.first_name || '',
+        last_name: data.last_name || '',
+        company_name: data.company_name || '',
+        contact_name: data.contact_name || '',
+        phone: data.phone || '',
+      });
+    } catch {
+      // no profile yet — leave defaults
+    }
   }
 
   async function saveProfile() {
     if (!user) return;
     setSavingProfile(true);
-    const supabase = createClient();
-    await supabase.from('customer_profiles').upsert({ user_id: user.id, ...profile });
-    // Also save to localStorage so order form auto-fills
-    const existing = getVesselInfo();
-    saveVesselInfo({ ...existing, company_name: profile.company_name, contact_name: profile.contact_name, phone: profile.phone });
-    await refreshProfile();
-    setSavingProfile(false);
-    toast({ title: 'Profile saved', variant: 'success', duration: 2000 });
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.from('customer_profiles').upsert({ user_id: user.id, ...profile });
+      if (error) throw error;
+      // Also save to localStorage so order form auto-fills
+      const existing = getVesselInfo();
+      saveVesselInfo({ ...existing, company_name: profile.company_name, contact_name: profile.contact_name, phone: profile.phone });
+      await refreshProfile();
+      toast({ title: 'Profile saved', variant: 'success', duration: 2000 });
+    } catch (err: any) {
+      toast({ title: 'Could not save profile', description: err?.message || 'Please try again', variant: 'destructive', duration: 3000 });
+    } finally {
+      setSavingProfile(false);
+    }
   }
 
   function repeatOrder(order: Order) {

@@ -43,8 +43,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const supabase = createClient();
 
   async function loadProfile() {
-    const { data } = await supabase.from('customer_profiles').select('*').single();
-    setProfile(data ?? null);
+    try {
+      const { data } = await supabase.from('customer_profiles').select('*').maybeSingle();
+      setProfile(data ?? null);
+    } catch {
+      setProfile(null);
+    }
   }
 
   useEffect(() => {

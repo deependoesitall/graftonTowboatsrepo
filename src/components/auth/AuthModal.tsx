@@ -47,20 +47,24 @@ export function AuthModal({ open, onClose, defaultMode = 'signin', title }: Auth
   async function submit() {
     if (!canSubmit) return;
     setError(''); setBusy(true);
-    if (mode === 'signup') {
-      const { error: err } = await signUp(email.trim(), password, {
-        firstName: firstName.trim(),
-        lastName: lastName.trim() || undefined,
-        companyName: companyName.trim() || undefined,
-      });
+    try {
+      if (mode === 'signup') {
+        const { error: err } = await signUp(email.trim(), password, {
+          firstName: firstName.trim(),
+          lastName: lastName.trim() || undefined,
+          companyName: companyName.trim() || undefined,
+        });
+        if (err) { setError(err); return; }
+      } else {
+        const { error: err } = await signIn(email.trim(), password);
+        if (err) { setError(err); return; }
+      }
+      onClose();
+    } catch (e: any) {
+      setError(e?.message || 'Something went wrong. Please try again.');
+    } finally {
       setBusy(false);
-      if (err) { setError(err); return; }
-    } else {
-      const { error: err } = await signIn(email.trim(), password);
-      setBusy(false);
-      if (err) { setError(err); return; }
     }
-    onClose();
   }
 
   return createPortal(
