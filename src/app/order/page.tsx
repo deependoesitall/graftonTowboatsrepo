@@ -12,6 +12,7 @@ import { formatCurrency } from '@/lib/utils';
 import { CartItem, VesselInfo } from '@/types';
 import { SiteHeader } from '@/components/layout/SiteHeader';
 import { useToast } from '@/hooks/use-toast';
+import { createClient } from '@/lib/supabase/client';
 
 export default function OrderPage() {
   const [items, setItems] = useState<CartItem[]>([]);
