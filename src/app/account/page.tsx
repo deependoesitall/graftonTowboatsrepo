@@ -34,11 +34,11 @@ function AccountContent() {
 
   // Past orders
   const [orders, setOrders] = useState<Order[]>([]);
-  const [ordersLoading, setOrdersLoading] = useState(true);
+  const [ordersLoading, setOrdersLoading] = useState(false);
 
   // Favorites
   const [favorites, setFavorites] = useState<Product[]>([]);
-  const [favsLoading, setFavsLoading] = useState(true);
+  const [favsLoading, setFavsLoading] = useState(false);
 
   // Profile
   const [profile, setProfile] = useState({ first_name: '', last_name: '', company_name: '', contact_name: '', phone: '' });
@@ -211,11 +211,15 @@ function AccountContent() {
             <div className="flex justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-brand-green" /></div>
           ) : orders.length === 0 ? (
             <div className="card-base p-10 text-center">
-              <Package className="w-10 h-10 text-brand-green/20 mx-auto mb-3" />
-              <p className="text-brand-green/60 font-semibold mb-1">No orders yet</p>
-              <p className="text-brand-green/40 text-sm mb-4">Orders placed while signed in will appear here.</p>
+              <div className="w-16 h-16 bg-brand-green/5 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Package className="w-8 h-8 text-brand-green/20" />
+              </div>
+              <p className="font-bold text-brand-green text-base mb-2">No past orders yet</p>
+              <p className="text-brand-green/50 text-sm leading-relaxed mb-5 max-w-xs mx-auto">
+                Orders you place while signed in will appear here. You can view order details, check delivery status, and reorder everything in one tap.
+              </p>
               <Link href="/catalog" className="btn-primary inline-flex items-center gap-2">
-                <ShoppingCart className="w-4 h-4" /> Start Shopping
+                <ShoppingCart className="w-4 h-4" /> Browse Items
               </Link>
             </div>
           ) : (
@@ -258,12 +262,16 @@ function AccountContent() {
             <div className="flex justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-brand-green" /></div>
           ) : favorites.length === 0 ? (
             <div className="card-base p-10 text-center">
-              <Star className="w-10 h-10 text-brand-green/20 mx-auto mb-3" />
-              <p className="text-brand-green/60 font-semibold mb-1">No favorites yet</p>
-              <p className="text-brand-green/40 text-sm mb-4">
-                Tap the ★ on any product in the catalog to save it here for quick reordering.
+              <div className="w-16 h-16 bg-brand-orange/5 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Star className="w-8 h-8 text-brand-orange/20" />
+              </div>
+              <p className="font-bold text-brand-green text-base mb-2">No saved favorites yet</p>
+              <p className="text-brand-green/50 text-sm leading-relaxed mb-5 max-w-xs mx-auto">
+                Tap the ★ icon on any item in the catalog to save it here. Your favorites are always one tap away from being added to your next order.
               </p>
-              <Link href="/catalog" className="btn-primary inline-flex items-center gap-2">Browse Catalog</Link>
+              <Link href="/catalog" className="btn-primary inline-flex items-center gap-2">
+                <Star className="w-4 h-4" /> Browse Catalog
+              </Link>
             </div>
           ) : (
             <div className="space-y-2">
