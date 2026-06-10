@@ -19,7 +19,6 @@ export function AuthModal({ open, onClose, defaultMode = 'signin', title }: Auth
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState(false);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => { setMounted(true); }, []);
@@ -27,7 +26,6 @@ export function AuthModal({ open, onClose, defaultMode = 'signin', title }: Auth
   // Reset state every time the modal is opened
   useEffect(() => {
     if (open) {
-      setDone(false);
       setError('');
       setPassword('');
       setMode(defaultMode);
@@ -42,8 +40,7 @@ export function AuthModal({ open, onClose, defaultMode = 'signin', title }: Auth
     const { error: err } = await fn(email.trim(), password);
     setBusy(false);
     if (err) { setError(err); return; }
-    if (mode === 'signup') { setDone(true); }
-    else { onClose(); }
+    onClose();
   }
 
   return createPortal(
@@ -61,19 +58,7 @@ export function AuthModal({ open, onClose, defaultMode = 'signin', title }: Auth
         </div>
 
         <div className="p-6">
-          {done ? (
-            <div className="text-center py-6">
-              <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                <Star className="w-6 h-6 text-green-600" />
-              </div>
-              <h3 className="font-bold text-brand-green mb-1">Account created!</h3>
-              <p className="text-gray-500 text-sm mb-4">
-                Check your email to confirm your account, then sign in. You can keep ordering as a guest in the meantime.
-              </p>
-              <button onClick={onClose} className="btn-primary w-full">Continue</button>
-            </div>
-          ) : (
-            <>
+
               {mode === 'signup' && (
                 <div className="grid grid-cols-3 gap-2 mb-5">
                   {[
@@ -120,8 +105,7 @@ export function AuthModal({ open, onClose, defaultMode = 'signin', title }: Auth
                   {mode === 'signup' ? 'Sign in' : 'Create free account'}
                 </button>
               </p>
-            </>
-          )}
+
         </div>
       </div>
     </div>,
