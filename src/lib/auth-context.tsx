@@ -55,33 +55,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => {
-    // Hard safety net — never show spinner for more than 3 seconds
+    // Safety net — never show a loading state longer than 3 seconds
     const timeout = setTimeout(() => setLoading(false), 3000);
 
-    // getSession reads local cookie — instant, no network round-trip
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
-      if (session?.user) {
-        await loadProfile();
-      }
       clearTimeout(timeout);
       setLoading(false);
+      if (session?.user) {
+        // Defer: NEVER call supabase queries synchronously in auth callbacks
+        setTimeout(() => { loadProfile(); }, 0);
+      }
     }).catch(() => {
       clearTimeout(timeout);
       setLoading(false);
     });
 
-    // onAuthStateChange handles sign-in/out events after initial load
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      (_event, session) => {
+        // CRITICAL: do NOT await supabase calls inside this callback.
+        // The client holds an auth lock during this callback — any query
+        // made here deadlocks the entire client. Defer with setTimeout.
         setUser(session?.user ?? null);
+        setLoading(false);
         if (session?.user) {
-          await loadProfile();
+          setTimeout(() => { loadProfile(); }, 0);
         } else {
           setProfile(null);
         }
-        // Also clear loading if it fired before getSession resolved
-        setLoading(false);
       }
     );
 
@@ -116,7 +117,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) return { error: error.message };
-      await loadProfile();
+      // Profile loads via the deferred onAuthStateChange handler
       return { error: null };
     } catch (e: any) {
       return { error: e?.message || 'Sign in failed' };
