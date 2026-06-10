@@ -37,9 +37,9 @@ export function clearAdminSession() {
 }
 
 // Permission matrix
-export function canAccess(role: AdminRole | null, area: 'orders' | 'products' | 'settings'): boolean {
+export function canAccess(role: AdminRole | null, area: 'orders' | 'products' | 'settings' | 'reports'): boolean {
   if (!role) return false;
-  if (role === 'owner') return true;
+  if (role === 'owner') return true; // owner has access to everything, including reports
   if (role === 'manager') return area === 'orders' || area === 'products';
   if (role === 'staff') return area === 'orders';
   return false;
