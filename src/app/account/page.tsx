@@ -44,9 +44,10 @@ function AccountContent() {
   const [profile, setProfile] = useState({ first_name: '', last_name: '', company_name: '', contact_name: '', phone: '' });
   const [savingProfile, setSavingProfile] = useState(false);
 
+  // Only trigger data loading once we're sure user is logged in
   useEffect(() => {
     if (loading) return;
-    if (!user) { setAuthOpen(true); return; }
+    if (!user) return; // just show the sign-in prompt — don't auto-open modal
     loadOrders();
     loadFavorites();
     loadProfile();
@@ -143,9 +144,10 @@ function AccountContent() {
     toast({ title: 'Added to cart', description: p.description, variant: 'success', duration: 1500 });
   }
 
+  // While auth is resolving, show nothing — avoids flash of wrong content
   if (loading) return (
-    <div className="min-h-screen flex items-center justify-center">
-      <Loader2 className="w-6 h-6 animate-spin text-brand-green" />
+    <div className="min-h-screen">
+      <SiteHeader />
     </div>
   );
 
