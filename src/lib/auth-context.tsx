@@ -44,7 +44,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function loadProfile() {
     try {
-      const { data } = await supabase.from('customer_profiles').select('*').maybeSingle();
+      const { data } = await supabase
+        .from('customer_profiles')
+        .select('*')
+        .maybeSingle();
       setProfile(data ?? null);
     } catch {
       setProfile(null);
@@ -52,47 +55,78 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => {
-    supabase.auth.getUser().then(async ({ data }) => {
-      setUser(data.user);
-      if (data.user) await loadProfile();
+    // Hard safety net — never show spinner for more than 3 seconds
+    const timeout = setTimeout(() => setLoading(false), 3000);
+
+    // getSession reads local cookie — instant, no network round-trip
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      if (session?.user) {
+        await loadProfile();
+      }
+      clearTimeout(timeout);
+      setLoading(false);
+    }).catch(() => {
+      clearTimeout(timeout);
       setLoading(false);
     });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_e, session) => {
-      setUser(session?.user ?? null);
-      if (session?.user) await loadProfile();
-      else setProfile(null);
-    });
-    return () => subscription.unsubscribe();
+
+    // onAuthStateChange handles sign-in/out events after initial load
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        setUser(session?.user ?? null);
+        if (session?.user) {
+          await loadProfile();
+        } else {
+          setProfile(null);
+        }
+        // Also clear loading if it fired before getSession resolved
+        setLoading(false);
+      }
+    );
+
+    return () => {
+      clearTimeout(timeout);
+      subscription.unsubscribe();
+    };
   }, []);
 
   async function signUp(email: string, password: string, details: SignUpDetails) {
-    const { data, error } = await supabase.auth.signUp({ email, password });
-    if (error) return { error: error.message };
-
-    // Save profile info — works whether or not session is immediately active
-    if (data.user) {
-      const contactName = [details.firstName, details.lastName].filter(Boolean).join(' ');
-      await supabase.from('customer_profiles').upsert({
-        user_id: data.user.id,
-        first_name: details.firstName || null,
-        last_name: details.lastName || null,
-        company_name: details.companyName || null,
-        contact_name: contactName || null,
-      });
-      await loadProfile();
+    try {
+      const { data, error } = await supabase.auth.signUp({ email, password });
+      if (error) return { error: error.message };
+      if (data.user) {
+        const contactName = [details.firstName, details.lastName].filter(Boolean).join(' ');
+        await supabase.from('customer_profiles').upsert({
+          user_id: data.user.id,
+          first_name: details.firstName || null,
+          last_name: details.lastName || null,
+          company_name: details.companyName || null,
+          contact_name: contactName || null,
+        });
+        await loadProfile();
+      }
+      return { error: null };
+    } catch (e: any) {
+      return { error: e?.message || 'Sign up failed' };
     }
-    return { error: null };
   }
 
   async function signIn(email: string, password: string) {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (!error) await loadProfile();
-    return { error: error?.message ?? null };
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) return { error: error.message };
+      await loadProfile();
+      return { error: null };
+    } catch (e: any) {
+      return { error: e?.message || 'Sign in failed' };
+    }
   }
 
   async function signOut() {
     await supabase.auth.signOut();
     setProfile(null);
+    setUser(null);
   }
 
   return (
