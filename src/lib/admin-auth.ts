@@ -50,6 +50,6 @@ export function canEdit(role: AdminRole | null, area: 'orders' | 'products' | 's
   if (!role) return false;
   if (role === 'owner') return true;
   if (role === 'manager') return area === 'orders' || area === 'products';
-  if (role === 'staff') return false; // staff = read-only on orders
+  if (role === 'staff') return area === 'orders'; // staff can edit order status
   return false;
 }
