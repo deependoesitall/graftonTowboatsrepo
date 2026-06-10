@@ -1,6 +1,7 @@
 'use client';
 // src/components/auth/AuthModal.tsx
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Loader2, Star, History, Zap } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 
@@ -19,8 +20,11 @@ export function AuthModal({ open, onClose, defaultMode = 'signin', title }: Auth
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
-  if (!open) return null;
+  useEffect(() => { setMounted(true); }, []);
+
+  if (!open || !mounted) return null;
 
   async function submit() {
     setError(''); setBusy(true);
@@ -32,7 +36,7 @@ export function AuthModal({ open, onClose, defaultMode = 'signin', title }: Auth
     else { onClose(); }
   }
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 px-4" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm animate-in" onClick={e => e.stopPropagation()}>
         {/* Header */}
@@ -110,6 +114,7 @@ export function AuthModal({ open, onClose, defaultMode = 'signin', title }: Auth
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
