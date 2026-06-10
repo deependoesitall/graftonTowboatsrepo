@@ -29,6 +29,23 @@ export default function OrderPage() {
     setVessel(getVesselInfo());
     const handler = () => setItems(getCart());
     window.addEventListener('cart-updated', handler);
+
+    // Auto-fill from saved customer profile when logged in (only fills empty fields)
+    (async () => {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data: profile } = await supabase.from('customer_profiles').select('*').single();
+      if (profile) {
+        setVessel(v => ({
+          ...v,
+          company_name: v.company_name || profile.company_name || '',
+          contact_name: v.contact_name || profile.contact_name || '',
+          phone: v.phone || profile.phone || '',
+        }));
+      }
+    })();
+
     return () => window.removeEventListener('cart-updated', handler);
   }, []);
 
@@ -59,9 +76,15 @@ export default function OrderPage() {
 
     setSubmitting(true);
     try {
+      // Attach Supabase session token if logged in (guests submit without it)
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      const authHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (session?.access_token) authHeaders['Authorization'] = `Bearer ${session.access_token}`;
+
       const res = await fetch('/api/orders', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders,
         body: JSON.stringify({ vessel, items }),
       });
 

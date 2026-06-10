@@ -7,9 +7,13 @@ import { clearCart } from '@/lib/cart';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { Order } from '@/types';
 import { SiteHeader } from '@/components/layout/SiteHeader';
-import { CheckCircle2, Download, ShoppingCart, Phone, Anchor } from 'lucide-react';
+import { CheckCircle2, Download, ShoppingCart, Phone, Anchor, Star } from 'lucide-react';
+import { useAuth } from '@/lib/auth-context';
+import { AuthModal } from '@/components/auth/AuthModal';
 
 function ConfirmContent() {
+  const { user } = useAuth();
+  const [authOpen, setAuthOpen] = useState(false);
   const searchParams = useSearchParams();
   const orderId = searchParams.get('order');
   const orderNumber = searchParams.get('num');
@@ -117,6 +121,32 @@ function ConfirmContent() {
             </div>
           )}
 
+          {/* Create account prompt — only for guests */}
+          {!user && (
+            <div className="card-base p-5 mt-6 border-brand-orange/30 bg-gradient-to-br from-white to-brand-yellow/10">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 bg-brand-orange/10 rounded-full flex items-center justify-center shrink-0">
+                  <Star className="w-5 h-5 text-brand-orange" />
+                </div>
+                <div className="flex-1">
+                  <p className="font-bold text-brand-green text-sm mb-1">
+                    Order on the river often?
+                  </p>
+                  <p className="text-brand-green/60 text-xs leading-relaxed mb-3">
+                    Create a free account to save favorites with one tap, see your past orders, and reorder everything in one click next time.
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setAuthOpen(true)}
+                      className="bg-brand-orange text-white text-xs font-bold uppercase tracking-wide px-4 py-2 rounded-full hover:bg-brand-ored transition-colors">
+                      Create Free Account
+                    </button>
+                    <span className="text-brand-green/40 text-xs">Takes 10 seconds · totally optional</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Contact */}
           <div className="mt-6 p-4 bg-brand-steel/10 rounded-lg border border-brand-steel/20 flex items-start gap-3">
             <Phone className="w-5 h-5 text-brand-steel shrink-0 mt-0.5" />
@@ -140,6 +170,8 @@ function ConfirmContent() {
           </div>
         </div>
       </main>
+      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} defaultMode="signup"
+        title="Create Free Account" />
     </div>
   );
 }

@@ -1,12 +1,14 @@
 'use client';
 // src/components/catalog/ProductGrid.tsx
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Product } from '@/types';
 import { formatCurrency } from '@/lib/utils';
 import { addToCart } from '@/lib/cart';
-import { Plus, Minus, ShoppingCart, Package, Check } from 'lucide-react';
+import { Plus, Minus, ShoppingCart, Package, Check, Star } from 'lucide-react';
 import Link from 'next/link';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/lib/auth-context';
+import { getFavoriteIds, addFavorite, removeFavorite } from '@/lib/favorites';
 
 interface ProductGridProps {
   products: Product[];
@@ -18,6 +20,17 @@ interface ProductGridProps {
 }
 
 export function ProductGrid({ products, totalCount, page, totalPages, search, category }: ProductGridProps) {
+  const { user } = useAuth();
+  const [favIds, setFavIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!user) { setFavIds(new Set()); return; }
+    getFavoriteIds().then(setFavIds);
+    const refresh = () => getFavoriteIds().then(setFavIds);
+    window.addEventListener('favorites-updated', refresh);
+    return () => window.removeEventListener('favorites-updated', refresh);
+  }, [user]);
+
   if (products.length === 0) {
     return (
       <div className="text-center py-24">
@@ -43,7 +56,9 @@ export function ProductGrid({ products, totalCount, page, totalPages, search, ca
       {/* Grid — 2 cols mobile, 3 tablet, 4 desktop */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
         {products.map(product => (
-          <ProductCard key={product.id} product={product} />
+          <ProductCard key={product.id} product={product}
+            isLoggedIn={!!user}
+            isFavorite={favIds.has(product.id)} />
         ))}
       </div>
 
@@ -98,7 +113,7 @@ function PaginationLink({ href, label }: { href: string; label: string }) {
   );
 }
 
-function ProductCard({ product }: { product: Product }) {
+function ProductCard({ product, isLoggedIn, isFavorite }: { product: Product; isLoggedIn: boolean; isFavorite: boolean }) {
   const [qty, setQty] = useState(1);
   const [justAdded, setJustAdded] = useState(false);
   const { toast } = useToast();
@@ -126,8 +141,28 @@ function ProductCard({ product }: { product: Product }) {
     }, 1800);
   }, [product, qty, toast]);
 
+  async function toggleFavorite(e: React.MouseEvent) {
+    e.preventDefault(); e.stopPropagation();
+    if (!isLoggedIn) {
+      toast({ title: 'Sign in to save favorites', description: 'Create a free account to star items', duration: 2500 });
+      return;
+    }
+    if (isFavorite) { await removeFavorite(product.id); }
+    else { await addFavorite(product.id); }
+  }
+
   return (
-    <div className="product-card card-base flex flex-col overflow-hidden group">
+    <div className="product-card card-base flex flex-col overflow-hidden group relative">
+      {/* Star / favorite button */}
+      <button
+        onClick={toggleFavorite}
+        aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+        className={`absolute top-2.5 right-2 z-10 p-1 rounded-full transition-colors ${
+          isFavorite ? 'text-brand-orange' : 'text-gray-300 hover:text-brand-orange'
+        }`}
+      >
+        <Star className={`w-4 h-4 ${isFavorite ? 'fill-brand-orange' : ''}`} />
+      </button>
       {/* Top color band by category */}
       <div className={`h-1 w-full ${getCategoryColor(product.category)}`} />
 

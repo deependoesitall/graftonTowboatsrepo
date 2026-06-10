@@ -1,6 +1,23 @@
 // src/app/api/orders/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
+import { createClient as createSupabaseJs } from '@supabase/supabase-js';
+
+// Verify a Supabase access token and return the user id (or null for guests)
+async function getUserIdFromToken(req: NextRequest): Promise<string | null> {
+  const authHeader = req.headers.get('authorization');
+  if (!authHeader?.startsWith('Bearer ')) return null;
+  const token = authHeader.slice(7);
+  try {
+    const supabase = createSupabaseJs(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error || !data.user) return null;
+    return data.user.id;
+  } catch { return null; }
+}
 import { generateOrderNumber } from '@/lib/utils';
 import { sendOrderEmail } from '@/lib/email';
 import { Order } from '@/types';
@@ -43,6 +60,7 @@ export async function POST(req: NextRequest) {
     const { vessel, items } = parsed.data;
     const supabase = createServiceClient();
     const orderNumber = generateOrderNumber();
+    const userId = await getUserIdFromToken(req); // null for guests — guest flow unchanged
     const subtotal = items.reduce((s, i) => s + i.price * i.quantity, 0);
 
     const { data: order, error: orderError } = await supabase
@@ -57,6 +75,7 @@ export async function POST(req: NextRequest) {
         eta: vessel.eta || null,
         subtotal,
         status: 'new',
+        user_id: userId,
       })
       .select()
       .single();

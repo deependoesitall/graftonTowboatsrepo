@@ -3,6 +3,7 @@ import type { Metadata, Viewport } from 'next';
 import { Oswald, Inter } from 'next/font/google';
 import './globals.css';
 import { Toaster } from '@/components/ui/toaster';
+import { AuthProvider } from '@/lib/auth-context';
 
 // Oswald = heavy condensed uppercase — matches GTS site heading style
 const oswald = Oswald({
@@ -43,8 +44,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" className={`${oswald.variable} ${inter.variable}`}>
       <head />
       <body className="font-body antialiased">
-        {children}
-        <Toaster />
+        <AuthProvider>
+          {children}
+          <Toaster />
+        </AuthProvider>
       </body>
     </html>
   );

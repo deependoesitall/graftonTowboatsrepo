@@ -2,14 +2,18 @@
 // src/components/layout/SiteHeader.tsx
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
-import { ShoppingCart, Menu, X, Phone } from 'lucide-react';
+import { ShoppingCart, Menu, X, Phone, User } from 'lucide-react';
 import { getCart, getCartCount, getCartTotal } from '@/lib/cart';
 import { formatCurrency } from '@/lib/utils';
+import { useAuth } from '@/lib/auth-context';
+import { AuthModal } from '@/components/auth/AuthModal';
 
 export function SiteHeader() {
   const [cartCount, setCartCount] = useState(0);
   const [cartTotal, setCartTotal] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [authOpen, setAuthOpen] = useState(false);
+  const { user } = useAuth();
 
   useEffect(() => {
     const update = () => {
@@ -47,6 +51,20 @@ export function SiteHeader() {
 
         {/* Cart + hamburger */}
         <div className="flex items-center gap-3">
+          {user ? (
+            <Link href="/account"
+              className="hidden sm:flex items-center gap-1.5 text-brand-green/70 hover:text-brand-green text-sm font-semibold transition-colors"
+              title={user.email || 'Account'}>
+              <User className="w-4 h-4" />
+              Account
+            </Link>
+          ) : (
+            <button onClick={() => setAuthOpen(true)}
+              className="hidden sm:flex items-center gap-1.5 text-brand-green/70 hover:text-brand-green text-sm font-semibold transition-colors">
+              <User className="w-4 h-4" />
+              Sign In
+            </button>
+          )}
           <Link
             href="/order"
             className="flex items-center gap-2 bg-brand-green text-white rounded-full px-3.5 py-1.5 transition-colors hover:bg-brand-gmed group"
@@ -87,11 +105,23 @@ export function SiteHeader() {
               {label}
             </Link>
           ))}
+          {user ? (
+            <Link href="/account" onClick={() => setMenuOpen(false)}
+              className="text-white font-bold text-sm py-3 px-3 rounded-lg hover:bg-brand-gmed transition-colors border-b border-brand-gmed/50 uppercase tracking-wide flex items-center gap-2">
+              <User className="w-4 h-4" /> My Account
+            </Link>
+          ) : (
+            <button onClick={() => { setMenuOpen(false); setAuthOpen(true); }}
+              className="text-white font-bold text-sm py-3 px-3 rounded-lg hover:bg-brand-gmed transition-colors border-b border-brand-gmed/50 uppercase tracking-wide flex items-center gap-2 text-left w-full">
+              <User className="w-4 h-4" /> Sign In / Create Account
+            </button>
+          )}
           <a href="tel:6185560290" className="text-brand-yellow/80 text-sm py-3 px-3 flex items-center gap-2 font-body">
             <Phone className="w-4 h-4" /> (618) 556-0290
           </a>
         </div>
       )}
+      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
     </header>
   );
 }
