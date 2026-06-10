@@ -96,6 +96,10 @@ function OrdersContent() {
   }
 
   async function updateStatus(orderId: string, status: OrderStatus) {
+    // Optimistic update so the modal dropdown reflects the change immediately
+    setSelectedOrder(prev => prev && prev.id === orderId ? { ...prev, status } : prev);
+    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status } : o));
+
     await fetch(`/api/orders/${orderId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', 'x-admin-token': adminToken },
