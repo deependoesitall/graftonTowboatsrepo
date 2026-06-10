@@ -18,8 +18,14 @@ const ROLE_LABELS: Record<AdminRole, string> = { owner: 'Owner', manager: 'Manag
 
 export function AdminNav() {
   const path = usePathname();
-  const [role, setRole] = useState<AdminRole | null>(null);
-  const [name, setName] = useState('');
+  const [role, setRole] = useState<AdminRole | null>(() => {
+    if (typeof window === 'undefined') return null;
+    return getAdminRole();
+  });
+  const [name, setName] = useState<string>(() => {
+    if (typeof window === 'undefined') return '';
+    return getAdminName();
+  });
 
   useEffect(() => {
     setRole(getAdminRole());
