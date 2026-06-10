@@ -24,6 +24,16 @@ export function AuthModal({ open, onClose, defaultMode = 'signin', title }: Auth
 
   useEffect(() => { setMounted(true); }, []);
 
+  // Reset state every time the modal is opened
+  useEffect(() => {
+    if (open) {
+      setDone(false);
+      setError('');
+      setPassword('');
+      setMode(defaultMode);
+    }
+  }, [open, defaultMode]);
+
   if (!open || !mounted) return null;
 
   async function submit() {
