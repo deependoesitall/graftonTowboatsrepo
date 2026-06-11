@@ -61,9 +61,20 @@ export async function PATCH(req: NextRequest) {
     updates.admin_password_hash = hashPassword(body.new_password);
   }
 
+  // Fetch the settings row id first so update targets a specific row
+  const { data: existingRow, error: fetchErr } = await supabase
+    .from('admin_settings')
+    .select('id')
+    .single();
+
+  if (fetchErr || !existingRow) {
+    return NextResponse.json({ error: fetchErr?.message || 'Settings row not found' }, { status: 500 });
+  }
+
   const { data, error } = await supabase
     .from('admin_settings')
     .update(updates)
+    .eq('id', existingRow.id)
     .select()
     .single();
 

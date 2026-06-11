@@ -160,7 +160,15 @@ export default function AdminSettingsPage() {
     });
     setSaving(false);
     if (res.ok) { setSaveMsg('Saved!'); setTimeout(() => setSaveMsg(''), 3000); }
-    else { setSaveMsg('Error saving — try again'); }
+    else {
+      let msg = 'Error saving — try again';
+      try {
+        const err = await res.json();
+        if (err?.error) msg = `Error: ${err.error}`;
+      } catch {}
+      setSaveMsg(msg);
+      console.error('Settings save failed:', res.status, msg);
+    }
   }
 
   async function changePassword() {
