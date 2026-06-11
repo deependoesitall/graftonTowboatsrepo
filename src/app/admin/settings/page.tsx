@@ -2,7 +2,7 @@
 // src/app/admin/settings/page.tsx
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Save, RefreshCw, Eye, EyeOff, Plus, Trash2, UserPlus, ShieldCheck, User, Lock, ScrollText, Search, ArrowRight, ChevronLeft, ChevronRight, MessageSquarePlus, Check, X, Loader2 } from 'lucide-react';
+import { Save, RefreshCw, Eye, EyeOff, Plus, Trash2, UserPlus, ShieldCheck, User, Lock, ScrollText, Search, ArrowRight, ChevronLeft, ChevronRight, MessageSquarePlus, Check, X, Loader2, Send } from 'lucide-react';
 import { ADMIN_TOKEN_KEY, getAdminRole, canAccess, adminHeaders } from '@/lib/admin-auth';
 import { formatDate } from '@/lib/utils';
 
@@ -90,6 +90,10 @@ export default function AdminSettingsPage() {
   const [noteDraft, setNoteDraft] = useState('');
   const [savingNoteId, setSavingNoteId] = useState<string | null>(null);
 
+  // Test email
+  const [testingEmail, setTestingEmail] = useState(false);
+  const [testEmailResult, setTestEmailResult] = useState<{ ok: boolean; error?: string; hint?: string; from?: string; to?: string } | null>(null);
+
   const adminToken = typeof window !== 'undefined' ? sessionStorage.getItem(ADMIN_TOKEN_KEY) || '' : '';
   const [denied, setDenied] = useState(false);
 
@@ -135,6 +139,21 @@ export default function AdminSettingsPage() {
   useEffect(() => {
     if (tab === 'logs' && !denied) loadLogs();
   }, [tab, logsPage, logsSearch]);
+
+  async function sendTestEmail() {
+    setTestingEmail(true);
+    setTestEmailResult(null);
+    try {
+      const res = await fetch('/api/admin/test-email', {
+        method: 'POST',
+        headers: { 'x-admin-token': adminToken },
+      });
+      setTestEmailResult(await res.json());
+    } catch (err: any) {
+      setTestEmailResult({ ok: false, error: err?.message || 'Request failed' });
+    }
+    setTestingEmail(false);
+  }
 
   async function saveLogNote(logId: string) {
     setSavingNoteId(logId);
@@ -648,6 +667,35 @@ export default function AdminSettingsPage() {
               <br />4. Update EMAIL_FROM in Vercel environment variables
               <br />5. Update BUSINESS_EMAIL to GraftonTowboatServices@gmail.com
             </p>
+          </div>
+
+          <div className="border border-gray-200 rounded-lg p-4">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div>
+                <p className="font-semibold text-brand-navy text-sm">Test Email Delivery</p>
+                <p className="text-xs text-gray-400">Sends a test email to the address above and shows the exact result.</p>
+              </div>
+              <button onClick={sendTestEmail} disabled={testingEmail}
+                className="btn-outline text-sm px-4 py-2 flex items-center gap-2">
+                {testingEmail ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                Send Test Email
+              </button>
+            </div>
+            {testEmailResult && (
+              <div className={`mt-3 rounded-lg p-3 text-xs ${testEmailResult.ok ? 'bg-green-50 text-green-800 border border-green-200' : 'bg-red-50 text-red-800 border border-red-200'}`}>
+                {testEmailResult.ok ? (
+                  <p>✅ Sent successfully to <strong>{testEmailResult.to}</strong> from <strong>{testEmailResult.from}</strong>. Check your inbox (and spam folder).</p>
+                ) : (
+                  <>
+                    <p className="font-semibold mb-1">❌ {testEmailResult.error}</p>
+                    {testEmailResult.from && testEmailResult.to && (
+                      <p className="text-red-600">From: {testEmailResult.from} → To: {testEmailResult.to}</p>
+                    )}
+                    {testEmailResult.hint && <p className="mt-1 text-red-600">{testEmailResult.hint}</p>}
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
