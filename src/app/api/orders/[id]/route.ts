@@ -36,6 +36,13 @@ export async function PATCH(
   const body = await req.json();
   const supabase = createServiceClient();
 
+  // Fetch current order first so we can log the status transition
+  const { data: existing } = await supabase
+    .from('orders')
+    .select('status, order_number')
+    .eq('id', id)
+    .single();
+
   const { data, error } = await supabase
     .from('orders')
     .update({
@@ -47,5 +54,25 @@ export async function PATCH(
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // Write an activity log entry for status changes.
+  // Admin identity comes from headers set by the admin client (see admin-auth.ts / fetch helper).
+  if (body.status && existing && body.status !== existing.status) {
+    const adminUsername = req.headers.get('x-admin-username') || null;
+    const adminDisplayName = req.headers.get('x-admin-name') || null;
+    const adminRole = req.headers.get('x-admin-role') || null;
+
+    await supabase.from('activity_logs').insert({
+      order_id: id,
+      order_number: existing.order_number,
+      action: 'status_change',
+      from_value: existing.status,
+      to_value: body.status,
+      admin_username: adminUsername,
+      admin_display_name: adminDisplayName,
+      admin_role: adminRole,
+    });
+  }
+
   return NextResponse.json(data);
 }

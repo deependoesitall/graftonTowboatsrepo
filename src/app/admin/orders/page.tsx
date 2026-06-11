@@ -6,7 +6,7 @@ import { Search, Download, Eye, Loader2, RefreshCw, Package, ArrowRight } from '
 import { formatCurrency, formatDate, ORDER_STATUSES } from '@/lib/utils';
 import { Order, OrderStatus } from '@/types';
 import { OrderDetailModal } from '@/components/admin/OrderDetailModal';
-import { ADMIN_TOKEN_KEY, getAdminRole, canEdit } from '@/lib/admin-auth';
+import { ADMIN_TOKEN_KEY, getAdminRole, canEdit, adminHeaders } from '@/lib/admin-auth';
 
 const STATUS_CONFIG = {
   new:         { label: 'New',         bg: 'bg-blue-50',   text: 'text-blue-700',   border: 'border-blue-200',  dot: 'bg-blue-500'   },
@@ -84,7 +84,7 @@ function OrdersContent() {
     setUpdatingId(order.id);
     await fetch(`/api/orders/${order.id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': adminToken },
+      headers: adminHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ status: next }),
     });
     await fetchOrders();
@@ -102,7 +102,7 @@ function OrdersContent() {
 
     await fetch(`/api/orders/${orderId}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': adminToken },
+      headers: adminHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ status }),
     });
     fetchOrders();

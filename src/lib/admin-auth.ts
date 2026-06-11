@@ -4,6 +4,7 @@
 export const ADMIN_TOKEN_KEY = 'grafton_admin_token';
 export const ADMIN_ROLE_KEY = 'grafton_admin_role';
 export const ADMIN_NAME_KEY = 'grafton_admin_name';
+export const ADMIN_USERNAME_KEY = 'grafton_admin_username';
 
 export type AdminRole = 'owner' | 'manager' | 'staff';
 
@@ -24,22 +25,29 @@ export function getAdminName(): string {
   return sessionStorage.getItem(ADMIN_NAME_KEY) || '';
 }
 
-export function setAdminSession(token: string, role: AdminRole, displayName: string) {
+export function getAdminUsername(): string {
+  if (typeof window === 'undefined') return '';
+  return sessionStorage.getItem(ADMIN_USERNAME_KEY) || '';
+}
+
+export function setAdminSession(token: string, role: AdminRole, displayName: string, username?: string) {
   sessionStorage.setItem(ADMIN_TOKEN_KEY, token);
   sessionStorage.setItem(ADMIN_ROLE_KEY, role);
   sessionStorage.setItem(ADMIN_NAME_KEY, displayName);
+  sessionStorage.setItem(ADMIN_USERNAME_KEY, username || 'admin');
 }
 
 export function clearAdminSession() {
   sessionStorage.removeItem(ADMIN_TOKEN_KEY);
   sessionStorage.removeItem(ADMIN_ROLE_KEY);
   sessionStorage.removeItem(ADMIN_NAME_KEY);
+  sessionStorage.removeItem(ADMIN_USERNAME_KEY);
 }
 
 // Permission matrix
-export function canAccess(role: AdminRole | null, area: 'orders' | 'products' | 'settings' | 'reports'): boolean {
+export function canAccess(role: AdminRole | null, area: 'orders' | 'products' | 'settings' | 'reports' | 'logs'): boolean {
   if (!role) return false;
-  if (role === 'owner') return true; // owner has access to everything, including reports
+  if (role === 'owner') return true; // owner has access to everything, including reports & logs
   if (role === 'manager') return area === 'orders' || area === 'products';
   if (role === 'staff') return area === 'orders';
   return false;
@@ -52,4 +60,16 @@ export function canEdit(role: AdminRole | null, area: 'orders' | 'products' | 's
   if (role === 'manager') return area === 'orders' || area === 'products';
   if (role === 'staff') return area === 'orders'; // staff can edit order status
   return false;
+}
+
+// Returns the standard headers for an authenticated admin API request,
+// including identity headers used for activity logging.
+export function adminHeaders(extra?: Record<string, string>): Record<string, string> {
+  return {
+    'x-admin-token': getAdminToken(),
+    'x-admin-username': getAdminUsername(),
+    'x-admin-name': getAdminName(),
+    'x-admin-role': getAdminRole() || '',
+    ...extra,
+  };
 }

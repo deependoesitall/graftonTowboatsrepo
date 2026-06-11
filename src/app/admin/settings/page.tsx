@@ -2,8 +2,9 @@
 // src/app/admin/settings/page.tsx
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Save, RefreshCw, Eye, EyeOff, Plus, Trash2, UserPlus, ShieldCheck, User, Lock } from 'lucide-react';
-import { ADMIN_TOKEN_KEY, getAdminRole, canAccess } from '@/lib/admin-auth';
+import { Save, RefreshCw, Eye, EyeOff, Plus, Trash2, UserPlus, ShieldCheck, User, Lock, ScrollText, Search, ArrowRight, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ADMIN_TOKEN_KEY, getAdminRole, canAccess, adminHeaders } from '@/lib/admin-auth';
+import { formatDate } from '@/lib/utils';
 
 interface AdminUser {
   id: string;
@@ -24,6 +25,19 @@ interface Settings {
   repeat_orders_enabled: boolean;
 }
 
+interface ActivityLog {
+  id: string;
+  order_id: string | null;
+  order_number: string | null;
+  action: string;
+  from_value: string | null;
+  to_value: string | null;
+  admin_username: string | null;
+  admin_display_name: string | null;
+  admin_role: string | null;
+  created_at: string;
+}
+
 const ROLE_LABELS = { owner: 'Owner', manager: 'Manager', staff: 'Staff' };
 const ROLE_COLORS = {
   owner: 'bg-brand-orange/10 text-brand-orange border-brand-orange/20',
@@ -33,7 +47,7 @@ const ROLE_COLORS = {
 
 export default function AdminSettingsPage() {
   const router = useRouter();
-  const [tab, setTab] = useState<'general' | 'password' | 'users' | 'email' | 'features'>('general');
+  const [tab, setTab] = useState<'logs' | 'general' | 'password' | 'users' | 'email' | 'features'>('general');
   const [settings, setSettings] = useState<Settings>({
     business_email: 'GraftonTowboatServices@gmail.com',
     order_email_cc: '',
@@ -60,6 +74,14 @@ export default function AdminSettingsPage() {
   const [addingUser, setAddingUser] = useState(false);
   const [showAddUser, setShowAddUser] = useState(false);
 
+  // Activity logs
+  const [logs, setLogs] = useState<ActivityLog[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logsTotal, setLogsTotal] = useState(0);
+  const [logsPage, setLogsPage] = useState(1);
+  const [logsSearch, setLogsSearch] = useState('');
+  const LOGS_PER_PAGE = 25;
+
   const adminToken = typeof window !== 'undefined' ? sessionStorage.getItem(ADMIN_TOKEN_KEY) || '' : '';
   const [denied, setDenied] = useState(false);
 
@@ -85,6 +107,26 @@ export default function AdminSettingsPage() {
     const res = await fetch('/api/admin/users', { headers: { 'x-admin-token': adminToken } });
     if (res.ok) setUsers(await res.json());
   }
+
+  async function loadLogs() {
+    setLogsLoading(true);
+    const params = new URLSearchParams({
+      page: String(logsPage),
+      per_page: String(LOGS_PER_PAGE),
+      ...(logsSearch ? { search: logsSearch } : {}),
+    });
+    const res = await fetch(`/api/admin/logs?${params}`, { headers: adminHeaders() });
+    if (res.ok) {
+      const data = await res.json();
+      setLogs(data.logs || []);
+      setLogsTotal(data.total || 0);
+    }
+    setLogsLoading(false);
+  }
+
+  useEffect(() => {
+    if (tab === 'logs' && !denied) loadLogs();
+  }, [tab, logsPage, logsSearch]);
 
   async function saveSettings() {
     setSaving(true); setSaveMsg('');
@@ -156,6 +198,7 @@ export default function AdminSettingsPage() {
   }
 
   const tabs = [
+    { key: 'logs', label: 'Logs' },
     { key: 'general', label: 'General' },
     { key: 'password', label: 'Password' },
     { key: 'users', label: 'Admin Users' },
@@ -182,13 +225,13 @@ export default function AdminSettingsPage() {
   );
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-8">
+    <div className={`mx-auto px-4 py-8 ${tab === 'logs' ? 'max-w-5xl' : 'max-w-3xl'}`}>
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-brand-navy font-display">Settings</h1>
           <p className="text-gray-400 text-sm mt-0.5">Configure your ordering system</p>
         </div>
-        {tab !== 'password' && tab !== 'users' && (
+        {tab !== 'password' && tab !== 'users' && tab !== 'logs' && (
           <button onClick={saveSettings} disabled={saving}
             className="btn-primary flex items-center gap-2 text-sm px-4 py-2">
             {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
@@ -207,6 +250,108 @@ export default function AdminSettingsPage() {
           </button>
         ))}
       </div>
+
+      {/* ── LOGS ── */}
+      {tab === 'logs' && (
+        <div className="space-y-4">
+          <div className="card-base overflow-hidden">
+            <div className="bg-brand-navy px-6 py-4 flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-2">
+                <ScrollText className="w-4 h-4 text-brand-yellow" />
+                <h2 className="text-white font-bold">Activity Log</h2>
+              </div>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/40" />
+                <input
+                  type="search"
+                  placeholder="Search order #, user…"
+                  value={logsSearch}
+                  onChange={e => { setLogsPage(1); setLogsSearch(e.target.value); }}
+                  className="bg-white/10 text-white placeholder:text-white/40 text-xs rounded-full pl-8 pr-3 py-1.5 w-48 focus:outline-none focus:ring-1 focus:ring-brand-yellow"
+                />
+              </div>
+            </div>
+
+            {logsLoading ? (
+              <div className="flex items-center justify-center py-16">
+                <RefreshCw className="w-5 h-5 animate-spin text-brand-river" />
+              </div>
+            ) : logs.length === 0 ? (
+              <div className="p-10 text-center">
+                <ScrollText className="w-8 h-8 mx-auto mb-2 text-gray-300" />
+                <p className="text-sm text-gray-400">No activity yet</p>
+                <p className="text-xs text-gray-300 mt-1">
+                  Order status changes made by admin users will appear here.
+                </p>
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-100">
+                {logs.map(log => (
+                  <div key={log.id} className="px-6 py-3.5 flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-8 h-8 bg-brand-steel/10 rounded-full flex items-center justify-center font-bold text-brand-steel text-xs shrink-0">
+                        {(log.admin_display_name || log.admin_username || '?')[0].toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm text-brand-navy">
+                          <span className="font-semibold">{log.admin_display_name || log.admin_username || 'Unknown'}</span>
+                          {log.admin_role && (
+                            <span className={`ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded-full border uppercase ${ROLE_COLORS[log.admin_role as keyof typeof ROLE_COLORS] || ''}`}>
+                              {ROLE_LABELS[log.admin_role as keyof typeof ROLE_LABELS] || log.admin_role}
+                            </span>
+                          )}
+                        </p>
+                        <p className="text-xs text-gray-400 truncate">
+                          Order <span className="font-mono font-semibold text-gray-500">{log.order_number}</span>
+                          {log.from_value && log.to_value && (
+                            <span className="inline-flex items-center gap-1 ml-1.5">
+                              <span className="capitalize">{log.from_value.replace('_', ' ')}</span>
+                              <ArrowRight className="w-3 h-3" />
+                              <span className="capitalize font-semibold text-brand-navy">{log.to_value.replace('_', ' ')}</span>
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-xs text-gray-400">{formatDate(log.created_at)}</p>
+                      <p className="text-[11px] text-gray-300">
+                        {new Date(log.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Pagination */}
+            {logsTotal > LOGS_PER_PAGE && (
+              <div className="flex items-center justify-between px-6 py-3 border-t border-gray-100 bg-gray-50">
+                <p className="text-xs text-gray-400">
+                  Showing {((logsPage - 1) * LOGS_PER_PAGE) + 1}–{Math.min(logsPage * LOGS_PER_PAGE, logsTotal)} of {logsTotal}
+                </p>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setLogsPage(p => Math.max(1, p - 1))} disabled={logsPage <= 1}
+                    className="p-1.5 rounded border border-gray-200 disabled:opacity-40 hover:bg-white">
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <span className="text-xs text-gray-500">
+                    Page {logsPage} of {Math.ceil(logsTotal / LOGS_PER_PAGE)}
+                  </span>
+                  <button onClick={() => setLogsPage(p => p + 1)} disabled={logsPage * LOGS_PER_PAGE >= logsTotal}
+                    className="p-1.5 rounded border border-gray-200 disabled:opacity-40 hover:bg-white">
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="bg-gray-50 px-6 py-3 text-xs text-gray-400 border-t border-gray-100">
+              Tracks order status changes made by admin users. Visible to Owners only.
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── GENERAL ── */}
       {tab === 'general' && (

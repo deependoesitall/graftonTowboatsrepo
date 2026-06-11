@@ -47,7 +47,7 @@ export default function AdminDashboard() {
         return;
       }
       const { token: t, user } = await res.json();
-      setAdminSession(t, user?.role || 'owner', user?.display_name || user?.username || 'Admin');
+      setAdminSession(t, user?.role || 'owner', user?.display_name || user?.username || 'Admin', user?.username || 'admin');
       // Full reload so AdminNav (and everything else) re-initializes with the new session/role
       window.location.href = '/admin';
     } finally {
