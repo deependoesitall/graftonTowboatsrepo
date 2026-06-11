@@ -4,15 +4,15 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Lock, RefreshCw, Download, FileText, TrendingUp, ShoppingBag,
-  DollarSign, Package, ChevronDown, ChevronRight, RotateCcw,
-  Search, Calendar, Star, Repeat,
+  DollarSign, Package,
+  Calendar, Star, Repeat,
 } from 'lucide-react';
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend,
 } from 'recharts';
 import { fetchAdminSession, getAdminRole, canAccess, adminFetch } from '@/lib/admin-auth';
-import { formatCurrency, formatDate } from '@/lib/utils';
+import { formatCurrency } from '@/lib/utils';
 
 interface Stats {
   totalRevenue: number;
@@ -100,8 +100,6 @@ export default function ReportsPage() {
   const [data, setData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const [vesselSearch, setVesselSearch] = useState('');
-  const [expandedVessel, setExpandedVessel] = useState<string | null>(null);
   const [productCategoryFilter, setProductCategoryFilter] = useState('All');
 
   // Auth guard — verify the session cookie with the server
@@ -127,7 +125,7 @@ export default function ReportsPage() {
 
   useEffect(() => { fetchReport(); }, [fetchReport]);
 
-  function exportCsv(type: 'orders' | 'products' | 'vessels') {
+  function exportCsv(type: 'orders' | 'products') {
     adminFetch(`/api/admin/reports/export?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}&type=${type}`).then(async res => {
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -167,32 +165,6 @@ export default function ReportsPage() {
 
   const productCategories = ['All', ...Array.from(new Set(data?.topProducts.map(p => p.category) || []))];
 
-  const filteredVessels = data?.vessels.filter(v => {
-    const q = vesselSearch.toLowerCase().trim();
-    if (!q) return true;
-    return v.company_name.toLowerCase().includes(q) ||
-           v.contact_name.toLowerCase().includes(q) ||
-           v.phone.toLowerCase().includes(q);
-  }) || [];
-
-  function repeatVesselOrder(order: VesselOrder) {
-    const cart = order.items.map(item => ({
-      product_id: '',
-      description: item.description,
-      category: item.category,
-      pkg_size: null,
-      uom: null,
-      price: item.unit_price,
-      quantity: item.quantity,
-    }));
-    try {
-      const existing = JSON.parse(localStorage.getItem('grafton_cart') || '{"items":[]}');
-      existing.items = [...(existing.items || []), ...cart];
-      localStorage.setItem('grafton_cart', JSON.stringify(existing));
-      window.dispatchEvent(new Event('cart-updated'));
-    } catch {}
-    window.open('/order', '_blank');
-  }
 
   return (
     <div className="space-y-6">
@@ -358,110 +330,6 @@ export default function ReportsPage() {
                     ))}
                   </tbody>
                 </table>
-              </div>
-            )}
-          </div>
-
-          <div className="card-base overflow-hidden">
-            <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between flex-wrap gap-3">
-              <h2 className="font-display font-bold text-brand-navy">Customer / Vessel Lookup</h2>
-              <button onClick={() => exportCsv('vessels')} className="btn-outline text-xs px-3 py-1.5 flex items-center gap-1.5">
-                <Download className="w-3.5 h-3.5" /> CSV
-              </button>
-            </div>
-            <div className="p-4 border-b border-gray-100">
-              <div className="relative max-w-md">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input type="search" placeholder="Search vessel, company, contact, or phone…"
-                  value={vesselSearch} onChange={e => setVesselSearch(e.target.value)}
-                  className="input-base pl-9 text-sm" />
-              </div>
-            </div>
-            {filteredVessels.length === 0 ? (
-              <div className="p-10"><EmptyState text="No vessels match your search" /></div>
-            ) : (
-              <div className="divide-y divide-gray-100">
-                {filteredVessels.slice(0, 100).map(v => {
-                  const key = `${v.company_name}|${v.phone}`;
-                  const expanded = expandedVessel === key;
-                  return (
-                    <div key={key}>
-                      <button onClick={() => setExpandedVessel(expanded ? null : key)}
-                        className="w-full flex items-center justify-between gap-4 px-5 py-3.5 hover:bg-gray-50 transition-colors text-left">
-                        <div className="flex items-center gap-3 min-w-0">
-                          {expanded ? <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" /> : <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />}
-                          <div className="min-w-0">
-                            <p className="font-semibold text-brand-navy text-sm truncate">{v.company_name}</p>
-                            <p className="text-xs text-gray-400 truncate">{v.contact_name} · {v.phone}</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-6 shrink-0 text-right">
-                          <div>
-                            <p className="text-xs text-gray-400">Orders</p>
-                            <p className="font-bold text-brand-navy">{v.orderCount}</p>
-                          </div>
-                          <div>
-                            <p className="text-xs text-gray-400">Total Spent</p>
-                            <p className="font-bold text-brand-navy">{formatCurrency(v.totalSpent)}</p>
-                          </div>
-                        </div>
-                      </button>
-
-                      {expanded && (
-                        <div className="px-5 pb-5 bg-gray-50/50">
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                            <div className="bg-white rounded-xl border border-gray-100 p-4">
-                              <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Most Ordered Items</h3>
-                              {v.mostOrdered.length === 0 ? (
-                                <p className="text-sm text-gray-400">No item data</p>
-                              ) : (
-                                <ul className="space-y-1.5">
-                                  {v.mostOrdered.map(item => (
-                                    <li key={item.description} className="flex justify-between text-sm">
-                                      <span className="text-brand-navy truncate pr-2">{item.description}</span>
-                                      <span className="font-bold text-gray-500 shrink-0">×{item.qty}</span>
-                                    </li>
-                                  ))}
-                                </ul>
-                              )}
-                            </div>
-                            <div className="bg-white rounded-xl border border-gray-100 p-4">
-                              <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Account Summary</h3>
-                              <div className="space-y-1.5 text-sm">
-                                <div className="flex justify-between"><span className="text-gray-500">Avg Order Value</span><span className="font-bold text-brand-navy">{formatCurrency(v.avgOrderValue)}</span></div>
-                                <div className="flex justify-between"><span className="text-gray-500">Total Orders</span><span className="font-bold text-brand-navy">{v.orderCount}</span></div>
-                                <div className="flex justify-between"><span className="text-gray-500">Total Spent</span><span className="font-bold text-brand-navy">{formatCurrency(v.totalSpent)}</span></div>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wide px-4 py-3 border-b border-gray-100">
-                              Past Orders ({v.orders.length})
-                            </h3>
-                            <div className="divide-y divide-gray-100">
-                              {v.orders.slice(0, 20).map(o => (
-                                <div key={o.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
-                                  <div className="min-w-0">
-                                    <p className="font-mono text-xs font-bold text-brand-navy">{o.order_number}</p>
-                                    <p className="text-xs text-gray-400">{formatDate(o.created_at)} · {o.items.length} items</p>
-                                  </div>
-                                  <div className="flex items-center gap-3 shrink-0">
-                                    <span className="font-bold text-sm text-brand-navy">{formatCurrency(o.subtotal)}</span>
-                                    <button onClick={() => repeatVesselOrder(o)}
-                                      className="flex items-center gap-1.5 bg-brand-orange text-white text-xs font-bold uppercase tracking-wide px-3 py-1.5 rounded-full hover:bg-brand-ored transition-colors">
-                                      <RotateCcw className="w-3.5 h-3.5" /> Repeat
-                                    </button>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
               </div>
             )}
           </div>

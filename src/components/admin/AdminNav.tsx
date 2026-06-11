@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { LayoutDashboard, ShoppingBag, Settings, LogOut, Package, BarChart3 } from 'lucide-react';
+import { LayoutDashboard, ShoppingBag, Settings, LogOut, Package, BarChart3, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAdminRole, getAdminName, logoutAdmin, canAccess, AdminRole } from '@/lib/admin-auth';
 
@@ -11,6 +11,7 @@ const NAV: Array<{ href: string; label: string; icon: any; area: 'orders' | 'pro
   { href: '/admin',          label: 'Dashboard', icon: LayoutDashboard, area: null },
   { href: '/admin/orders',   label: 'Orders',    icon: ShoppingBag,     area: 'orders' },
   { href: '/admin/products', label: 'Products',  icon: Package,         area: 'products' },
+  { href: '/admin/customers',label: 'Customers', icon: Users,           area: 'reports' },
   { href: '/admin/reports',  label: 'Reports',   icon: BarChart3,       area: 'reports' },
   { href: '/admin/settings', label: 'Settings',  icon: Settings,        area: 'settings' },
 ];

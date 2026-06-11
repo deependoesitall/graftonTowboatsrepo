@@ -9,7 +9,12 @@ export function getCart(): CartItem[] {
   if (typeof window === 'undefined') return [];
   try {
     const raw = localStorage.getItem(CART_KEY);
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed;
+    // Defensive: handle legacy/malformed { items: [...] } shape
+    if (parsed && Array.isArray(parsed.items)) return parsed.items;
+    return [];
   } catch {
     return [];
   }
