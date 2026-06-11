@@ -53,7 +53,7 @@ const PRESETS = [
 
 type PresetKey = typeof PRESETS[number]['key'];
 
-const PIE_COLORS = ['#1E3D1E', '#E8640A', '#5A9A3C', '#D9E84A', '#3D7A28', '#D44E05', '#2D5A1E', '#F0F7A0'];
+const PIE_COLORS = ['#1E3D1E', '#E8640A', '#7B61FF', '#D9E84A', '#2196F3', '#C0392B', '#2ECC71', '#F4C2C2', '#34495E', '#F39C12'];
 
 function getPresetRange(preset: PresetKey, customFrom?: string, customTo?: string): { from: string; to: string; label: string } {
   const now = new Date();
