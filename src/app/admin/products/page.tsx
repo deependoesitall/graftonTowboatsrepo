@@ -349,7 +349,7 @@ export default function AdminProductsPage() {
   const [dupGroups, setDupGroups] = useState<any[]>([]);
   const [dupLoading, setDupLoading] = useState(false);
   const [dupSelected, setDupSelected] = useState<Set<string>>(new Set());
-  const [dupFilter, setDupFilter] = useState<'all' | 'upc' | 'name_pack'>('all');
+  const [dupFilter, setDupFilter] = useState<'all' | 'upc' | 'name_pack' | 'upc_conflict'>('all');
 
   const [denied, setDenied] = useState(false);
   const role = typeof window !== 'undefined' ? getAdminRole() : null;
@@ -598,16 +598,18 @@ export default function AdminProductsPage() {
   }
 
   const filteredDupGroups = dupGroups.filter(g => dupFilter === 'all' || g.type === dupFilter);
+  const deletableGroups = filteredDupGroups.filter(g => g.type !== 'upc_conflict');
 
   async function deleteAllDuplicates() {
-    // Keep the first (oldest) item in each visible group, delete the rest.
+    // Keep the first (oldest) item in each true-duplicate group, delete the rest.
+    // "upc_conflict" groups (same UPC, different products) are never auto-deleted.
     const idsToDelete: string[] = [];
-    for (const group of filteredDupGroups) {
+    for (const group of deletableGroups) {
       const [, ...rest] = group.items;
       for (const item of rest) idsToDelete.push(item.id);
     }
     if (!idsToDelete.length) return;
-    if (!confirm(`Delete ${idsToDelete.length} duplicate item${idsToDelete.length === 1 ? '' : 's'} across ${filteredDupGroups.length} group${filteredDupGroups.length === 1 ? '' : 's'}? The first item in each group will be kept. This cannot be undone.`)) return;
+    if (!confirm(`Delete ${idsToDelete.length} duplicate item${idsToDelete.length === 1 ? '' : 's'} across ${deletableGroups.length} group${deletableGroups.length === 1 ? '' : 's'}? The first item in each group will be kept. This cannot be undone.`)) return;
     setDupLoading(true);
     const res = await adminFetch('/api/products', {
       method: 'DELETE',
@@ -974,8 +976,9 @@ export default function AdminProductsPage() {
               <span className="text-sm font-medium text-gray-500">Filter:</span>
               {[
                 { key: 'all', label: 'All' },
-                { key: 'upc', label: 'Same UPC' },
-                { key: 'name_pack', label: 'Same Name & Pack Size' },
+                { key: 'upc', label: 'Same UPC + Name (true dupes)' },
+                { key: 'name_pack', label: 'Same Name & Pack & Price' },
+                { key: 'upc_conflict', label: 'Reused UPC, different items' },
               ].map(f => (
                 <button key={f.key} onClick={() => setDupFilter(f.key as any)}
                   className={`text-xs px-3 py-1.5 rounded-full font-medium transition-colors ${
@@ -988,11 +991,11 @@ export default function AdminProductsPage() {
               <button onClick={fetchDuplicates} className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5">
                 <RefreshCw className="w-4 h-4" /> Refresh
               </button>
-              {filteredDupGroups.length > 0 && (
+              {deletableGroups.length > 0 && (
                 <button onClick={deleteAllDuplicates} disabled={dupLoading}
                   className="text-sm px-3 py-2 rounded font-medium bg-red-600 text-white hover:bg-red-700 flex items-center gap-1.5 transition-colors disabled:opacity-50">
                   {dupLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                  Delete All Duplicates
+                  Delete All True Duplicates
                 </button>
               )}
               {dupSelected.size > 0 && (
@@ -1015,11 +1018,20 @@ export default function AdminProductsPage() {
             </div>
           ) : (
             filteredDupGroups.map(group => (
-              <div key={group.key} className="card-base overflow-hidden">
+              <div key={group.key} className={`card-base overflow-hidden ${group.type === 'upc_conflict' ? 'ring-1 ring-amber-300' : ''}`}>
                 <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-                  <p className="text-sm font-semibold text-brand-navy">
-                    {group.type === 'upc' ? `Same UPC: ${group.items[0].upc}` : 'Same Name & Pack Size'}
-                  </p>
+                  <div>
+                    <p className="text-sm font-semibold text-brand-navy">
+                      {group.type === 'upc' && `Same UPC & Name: ${group.items[0].upc}`}
+                      {group.type === 'name_pack' && 'Same Name, Pack Size & Price'}
+                      {group.type === 'upc_conflict' && `Reused UPC ${group.items[0].upc} — different items`}
+                    </p>
+                    {group.type === 'upc_conflict' && (
+                      <p className="text-xs text-amber-600 mt-0.5">
+                        These products share a UPC in the source catalog but are different items. Not deleted automatically — review manually if needed.
+                      </p>
+                    )}
+                  </div>
                   <span className="text-xs text-gray-400">{group.items.length} items</span>
                 </div>
                 <div className="overflow-x-auto">
