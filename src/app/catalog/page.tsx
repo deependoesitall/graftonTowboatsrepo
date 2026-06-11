@@ -28,6 +28,7 @@ export default async function CatalogPage({ searchParams }: PageProps) {
     .from('products')
     .select('*', { count: 'exact' })
     .eq('is_active', true)
+    .eq('is_available', true)
     .order('category', { ascending: true })
     .order('description', { ascending: true })
     .range(offset, offset + perPage - 1);

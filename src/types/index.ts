@@ -10,6 +10,7 @@ export interface Product {
   uom: string | null;
   price: number;
   is_active: boolean;
+  is_available: boolean;
   created_at?: string;
 }
 

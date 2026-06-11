@@ -3,8 +3,9 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Upload, Package, AlertCircle, CheckCircle2, Loader2,
          Search, Pencil, Check, X, ToggleLeft, ToggleRight,
-         ChevronLeft, ChevronRight, RefreshCw, Plus, Lock } from 'lucide-react';
-import { normalizeCategory, formatCurrency } from '@/lib/utils';
+         ChevronLeft, ChevronRight, RefreshCw, Plus, Lock,
+         Download, Trash2, Layers, PackageX, PackageCheck, Filter } from 'lucide-react';
+import { normalizeCategory, formatCurrency, MAIN_CATEGORIES } from '@/lib/utils';
 import { Product } from '@/types';
 import { useRouter } from 'next/navigation';
 import { fetchAdminSession, getAdminRole, canAccess, adminFetch } from '@/lib/admin-auth';
@@ -40,10 +41,14 @@ function parseRow(headers: string[], values: string[]): ParsedProduct | null {
   };
 }
 
-const CATEGORIES = [
-  'Meat & Seafood', 'Dairy & Eggs', 'Produce', 'Frozen Foods',
-  'Bakery & Deli', 'Beverages', 'Snacks & Sweets', 'Pantry & Grocery',
-  'Household & Cleaning', 'Health & Personal Care', 'Boat Supplies', 'General',
+const CATEGORIES = [...MAIN_CATEGORIES];
+
+const STATUS_FILTERS: { key: string; label: string }[] = [
+  { key: '', label: 'All Statuses' },
+  { key: 'active', label: 'Active' },
+  { key: 'inactive', label: 'Inactive (hidden)' },
+  { key: 'available', label: 'In Stock' },
+  { key: 'unavailable', label: 'Out of Stock' },
 ];
 
 interface EditState {
@@ -76,16 +81,20 @@ function AddProductRow({ onAdded }: {
     const res = await adminFetch('/api/products', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ products: [{
-        description: form.description.toUpperCase(),
-        category: form.category,
-        sub_category: form.sub_category || form.category,
-        pkg_size: form.pkg_size || null,
-        uom: form.uom || null,
-        price: parseFloat(form.price) || 0,
-        is_active: true,
-        upc: null,
-      }]}),
+      body: JSON.stringify({
+        mode: 'add_anyway',
+        products: [{
+          description: form.description.toUpperCase(),
+          category: form.category,
+          sub_category: form.sub_category || form.category,
+          pkg_size: form.pkg_size || null,
+          uom: form.uom || null,
+          price: parseFloat(form.price) || 0,
+          is_active: true,
+          is_available: true,
+          upc: null,
+        }],
+      }),
     });
     if (res.ok) {
       reset();
@@ -102,7 +111,7 @@ function AddProductRow({ onAdded }: {
   if (!open) {
     return (
       <tr>
-        <td colSpan={7} className="px-3 py-2 border-b border-dashed border-gray-200">
+        <td colSpan={8} className="px-3 py-2 border-b border-dashed border-gray-200">
           <button onClick={() => setOpen(true)}
             className="flex items-center gap-2 text-sm text-brand-river hover:text-brand-navy font-medium transition-colors w-full py-1">
             <Plus className="w-4 h-4" /> Add new product
@@ -114,6 +123,7 @@ function AddProductRow({ onAdded }: {
 
   return (
     <tr className="bg-green-50 border-b border-green-200">
+      <td className="px-2 py-2"></td>
       <td className="px-2 py-2">
         <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value, sub_category: '' }))}
           className="input-base text-xs py-1.5 w-full">
@@ -158,10 +168,13 @@ function AddProductRow({ onAdded }: {
   );
 }
 
-function EditableRow({ product, onSaved, onToggle }: {
+function EditableRow({ product, selected, onSelect, onSaved, onToggleActive, onToggleAvailable }: {
   product: Product;
+  selected: boolean;
+  onSelect: (id: string, checked: boolean) => void;
   onSaved: (p: Product) => void;
-  onToggle: (p: Product) => void;
+  onToggleActive: (p: Product) => void;
+  onToggleAvailable: (p: Product) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -200,6 +213,7 @@ function EditableRow({ product, onSaved, onToggle }: {
   if (editing) {
     return (
       <tr className="bg-blue-50 border-b border-blue-100">
+        <td className="px-3 py-2"></td>
         <td className="px-3 py-2">
           <input className="input-base text-xs py-1 w-full" value={form.category}
             onChange={e => setForm(f => ({ ...f, category: e.target.value }))} />
@@ -242,10 +256,23 @@ function EditableRow({ product, onSaved, onToggle }: {
 
   return (
     <tr className={`border-b border-gray-100 hover:bg-gray-50 transition-colors ${!product.is_active ? 'opacity-40' : ''}`}>
+      <td className="px-3 py-2.5">
+        <input type="checkbox" checked={selected}
+          onChange={e => onSelect(product.id, e.target.checked)}
+          className="w-4 h-4 rounded border-gray-300 text-brand-river focus:ring-brand-river" />
+      </td>
       <td className="px-3 py-2.5 text-xs text-brand-river font-medium">{product.category}</td>
       <td className="px-3 py-2.5 text-xs text-gray-400">{product.sub_category}</td>
       <td className="px-3 py-2.5 text-sm font-medium text-brand-navy max-w-xs">
         <span className="line-clamp-1">{product.description}</span>
+        <div className="flex items-center gap-1.5 mt-0.5">
+          {!product.is_active && (
+            <span className="inline-block text-[10px] font-bold uppercase tracking-wide text-gray-400 bg-gray-100 rounded px-1.5 py-0.5">Inactive</span>
+          )}
+          {!product.is_available && (
+            <span className="inline-block text-[10px] font-bold uppercase tracking-wide text-red-500 bg-red-50 rounded px-1.5 py-0.5">Out of Stock</span>
+          )}
+        </div>
       </td>
       <td className="px-3 py-2.5 text-xs text-gray-500">{product.pkg_size || '—'}</td>
       <td className="px-3 py-2.5 text-xs text-gray-500">{product.uom || '—'}</td>
@@ -256,7 +283,16 @@ function EditableRow({ product, onSaved, onToggle }: {
             className="p-1.5 text-gray-400 hover:text-brand-river hover:bg-blue-50 rounded transition-colors">
             <Pencil className="w-3.5 h-3.5" />
           </button>
-          <button onClick={() => onToggle(product)} title={product.is_active ? 'Deactivate' : 'Activate'}
+          <button onClick={() => onToggleAvailable(product)}
+            title={product.is_available ? 'Mark Out of Stock' : 'Mark In Stock'}
+            className={`p-1.5 rounded transition-colors ${product.is_available
+              ? 'text-blue-400 hover:text-red-500 hover:bg-red-50'
+              : 'text-red-400 hover:text-blue-500 hover:bg-blue-50'}`}>
+            {product.is_available
+              ? <PackageCheck className="w-4 h-4" />
+              : <PackageX className="w-4 h-4" />}
+          </button>
+          <button onClick={() => onToggleActive(product)} title={product.is_active ? 'Deactivate' : 'Activate'}
             className={`p-1.5 rounded transition-colors ${product.is_active
               ? 'text-green-500 hover:text-red-500 hover:bg-red-50'
               : 'text-gray-300 hover:text-green-500 hover:bg-green-50'}`}>
@@ -270,26 +306,50 @@ function EditableRow({ product, onSaved, onToggle }: {
   );
 }
 
+interface ImportSummary {
+  total: number;
+  new_items: number;
+  strong_duplicates: number;
+  weak_duplicates: number;
+}
+
+type ImportMode = 'skip_duplicates' | 'update_duplicates' | 'add_anyway';
+
 export default function AdminProductsPage() {
   const router = useRouter();
-  const [tab, setTab] = useState<'catalog' | 'import'>('catalog');
+  const [tab, setTab] = useState<'catalog' | 'import' | 'duplicates'>('catalog');
 
   // Catalog state
   const [products, setProducts] = useState<Product[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [category, setCategory] = useState('');
+  const [status, setStatus] = useState('');
   const [page, setPage] = useState(1);
   const searchRef = useRef<ReturnType<typeof setTimeout>>();
   const perPage = 50;
+
+  // Selection state
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkCategory, setBulkCategory] = useState('');
 
   // Import state
   const [isDragging, setIsDragging] = useState(false);
   const [parsing, setParsing] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [preview, setPreview] = useState<ParsedProduct[]>([]);
   const [previewAll, setPreviewAll] = useState<ParsedProduct[]>([]);
+  const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
+  const [importMode, setImportMode] = useState<ImportMode>('skip_duplicates');
+  const [analyzing, setAnalyzing] = useState(false);
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  // Duplicates tab state
+  const [dupGroups, setDupGroups] = useState<any[]>([]);
+  const [dupLoading, setDupLoading] = useState(false);
+  const [dupSelected, setDupSelected] = useState<Set<string>>(new Set());
+  const [dupFilter, setDupFilter] = useState<'all' | 'upc' | 'name_pack'>('all');
 
   const [denied, setDenied] = useState(false);
   const role = typeof window !== 'undefined' ? getAdminRole() : null;
@@ -303,9 +363,11 @@ export default function AdminProductsPage() {
     })();
   }, [router]);
 
-  const fetchProducts = useCallback(async (q = search, p = page) => {
+  const fetchProducts = useCallback(async (q = search, p = page, cat = category, st = status) => {
     setLoading(true);
     const params = new URLSearchParams({ search: q, page: String(p), per_page: '50' });
+    if (cat) params.set('category', cat);
+    if (st) params.set('status', st);
     const res = await adminFetch(`/api/products?${params}`);
     if (res.ok) {
       const data = await res.json();
@@ -313,14 +375,17 @@ export default function AdminProductsPage() {
       setTotal(data.total || 0);
     }
     setLoading(false);
-  }, [search, page]);
+  }, [search, page, category, status]);
 
-  useEffect(() => { fetchProducts(); }, [page]);
+  useEffect(() => { fetchProducts(); }, [page, category, status]);
 
   useEffect(() => {
     clearTimeout(searchRef.current);
-    searchRef.current = setTimeout(() => { setPage(1); fetchProducts(search, 1); }, 350);
+    searchRef.current = setTimeout(() => { setPage(1); fetchProducts(search, 1, category, status); }, 350);
   }, [search]);
+
+  // Clear selection whenever the visible product list changes
+  useEffect(() => { setSelected(new Set()); }, [products]);
 
   async function toggleActive(product: Product) {
     const res = await adminFetch('/api/products', {
@@ -333,6 +398,17 @@ export default function AdminProductsPage() {
     }
   }
 
+  async function toggleAvailable(product: Product) {
+    const res = await adminFetch('/api/products', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: product.id, is_available: !product.is_available }),
+    });
+    if (res.ok) {
+      setProducts(ps => ps.map(p => p.id === product.id ? { ...p, is_available: !p.is_available } : p));
+    }
+  }
+
   function handleSaved(updated: Product) {
     setProducts(ps => ps.map(p => p.id === updated.id ? updated : p));
   }
@@ -342,9 +418,67 @@ export default function AdminProductsPage() {
     setTotal(t => t + 1);
   }
 
-  // CSV parsing
+  function toggleSelect(id: string, checked: boolean) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (checked) next.add(id); else next.delete(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll(checked: boolean) {
+    setSelected(checked ? new Set(products.map(p => p.id)) : new Set());
+  }
+
+  // ── Bulk actions on the catalog tab ──
+  async function bulkDelete() {
+    if (!selected.size) return;
+    if (!confirm(`Delete ${selected.size} selected product${selected.size === 1 ? '' : 's'}? This cannot be undone.`)) return;
+    setBulkBusy(true);
+    const res = await adminFetch('/api/products', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: Array.from(selected) }),
+    });
+    if (res.ok) {
+      setProducts(ps => ps.filter(p => !selected.has(p.id)));
+      setTotal(t => Math.max(0, t - selected.size));
+      setSelected(new Set());
+    }
+    setBulkBusy(false);
+  }
+
+  async function bulkUpdate(updates: Record<string, any>) {
+    if (!selected.size) return;
+    setBulkBusy(true);
+    const res = await adminFetch('/api/products', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: Array.from(selected), updates }),
+    });
+    if (res.ok) {
+      setProducts(ps => ps.map(p => selected.has(p.id) ? { ...p, ...updates } : p));
+    }
+    setBulkBusy(false);
+  }
+
+  async function exportCatalog() {
+    const res = await adminFetch('/api/products/export');
+    if (!res.ok) return;
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `grafton-towboat-catalog-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  // ── CSV parsing ──
   function handleFile(file: File) {
-    setParsing(true); setResult(null);
+    setParsing(true); setResult(null); setImportSummary(null); setPreviewAll([]);
     const reader = new FileReader();
     reader.onload = (e) => {
       const text = e.target?.result as string;
@@ -359,14 +493,38 @@ export default function AdminProductsPage() {
           if (p && p.description) all.push(p);
         }
         setPreviewAll(all);
-        setPreview(all.slice(0, 20));
         setParsing(false);
+        analyzeImport(all);
       } catch (err) {
         setResult({ success: false, message: `Parse error: ${err}` });
         setParsing(false);
       }
     };
     reader.readAsText(file);
+  }
+
+  async function analyzeImport(rows: ParsedProduct[]) {
+    if (!rows.length) return;
+    setAnalyzing(true);
+    try {
+      const res = await adminFetch('/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'preview', products: rows }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setImportSummary(data.summary);
+        // Default mode: if there are duplicates, default to skipping them
+        if (data.summary.strong_duplicates + data.summary.weak_duplicates > 0) {
+          setImportMode('skip_duplicates');
+        } else {
+          setImportMode('add_anyway');
+        }
+      }
+    } finally {
+      setAnalyzing(false);
+    }
   }
 
   const onDrop = useCallback((e: React.DragEvent) => {
@@ -382,13 +540,17 @@ export default function AdminProductsPage() {
       const res = await adminFetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ products: previewAll }),
+        body: JSON.stringify({ products: previewAll, mode: importMode }),
       });
       if (res.ok) {
         const data = await res.json();
-        setResult({ success: true, message: `Successfully imported ${data.count} products.` });
-        setPreview([]); setPreviewAll([]);
-        setTab('catalog'); fetchProducts('', 1);
+        const parts: string[] = [];
+        if (data.inserted) parts.push(`${data.inserted} added`);
+        if (data.updated) parts.push(`${data.updated} updated`);
+        if (data.skipped) parts.push(`${data.skipped} skipped`);
+        setResult({ success: true, message: `Import complete — ${parts.join(', ') || 'no changes'}.` });
+        setPreviewAll([]); setImportSummary(null);
+        setTab('catalog'); fetchProducts('', 1, category, status);
       } else {
         const err = await res.json();
         setResult({ success: false, message: err.error || 'Import failed' });
@@ -396,7 +558,49 @@ export default function AdminProductsPage() {
     } finally { setUploading(false); }
   }
 
+  // ── Duplicates review tab ──
+  const fetchDuplicates = useCallback(async () => {
+    setDupLoading(true);
+    setDupSelected(new Set());
+    const res = await adminFetch('/api/products/duplicates');
+    if (res.ok) {
+      const data = await res.json();
+      setDupGroups(data.groups || []);
+    }
+    setDupLoading(false);
+  }, []);
+
+  useEffect(() => { if (tab === 'duplicates') fetchDuplicates(); }, [tab, fetchDuplicates]);
+
+  function toggleDupSelect(id: string, checked: boolean) {
+    setDupSelected(prev => {
+      const next = new Set(prev);
+      if (checked) next.add(id); else next.delete(id);
+      return next;
+    });
+  }
+
+  async function deleteDupSelected() {
+    if (!dupSelected.size) return;
+    if (!confirm(`Delete ${dupSelected.size} selected duplicate item${dupSelected.size === 1 ? '' : 's'}? This cannot be undone.`)) return;
+    setDupLoading(true);
+    const res = await adminFetch('/api/products', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: Array.from(dupSelected) }),
+    });
+    if (res.ok) {
+      await fetchDuplicates();
+      fetchProducts();
+    } else {
+      setDupLoading(false);
+    }
+  }
+
+  const filteredDupGroups = dupGroups.filter(g => dupFilter === 'all' || g.type === dupFilter);
+
   const totalPages = Math.ceil(total / perPage);
+  const allSelectedOnPage = products.length > 0 && products.every(p => selected.has(p.id));
 
   if (denied) return (
     <div className="flex flex-col items-center justify-center py-32 text-center px-4">
@@ -418,6 +622,9 @@ export default function AdminProductsPage() {
           <p className="text-gray-400 text-sm">{total.toLocaleString()} products total</p>
         </div>
         <div className="flex gap-2">
+          <button onClick={exportCatalog} className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5">
+            <Download className="w-4 h-4" /> Export CSV
+          </button>
           <button onClick={() => fetchProducts()} className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5">
             <RefreshCw className="w-4 h-4" /> Refresh
           </button>
@@ -427,7 +634,8 @@ export default function AdminProductsPage() {
       {/* Tabs */}
       <div className="flex gap-1 bg-white border border-gray-200 rounded-xl p-1 mb-6 w-fit">
         {[{ key: 'catalog', label: 'Browse & Edit', icon: Package },
-          { key: 'import', label: 'Import CSV', icon: Upload }].map(({ key, label, icon: Icon }) => (
+          { key: 'import', label: 'Import CSV', icon: Upload },
+          { key: 'duplicates', label: 'Duplicates', icon: Layers }].map(({ key, label, icon: Icon }) => (
           <button key={key} onClick={() => setTab(key as any)}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               tab === key ? 'bg-brand-navy text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
@@ -439,15 +647,69 @@ export default function AdminProductsPage() {
       {/* ── CATALOG TAB ── */}
       {tab === 'catalog' && (
         <div className="card-base overflow-hidden">
-          {/* Search bar */}
-          <div className="p-4 border-b border-gray-100">
-            <div className="relative max-w-md">
+          {/* Search + filters */}
+          <div className="p-4 border-b border-gray-100 flex flex-wrap items-center gap-3">
+            <div className="relative max-w-md flex-1 min-w-[220px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input type="search" placeholder="Search products…" value={search}
+              <input type="search" placeholder="Search by name or UPC…" value={search}
                 onChange={e => setSearch(e.target.value)}
-                className="input-base pl-9 text-sm" />
+                className="input-base pl-9 text-sm w-full" />
+            </div>
+            <div className="flex items-center gap-2">
+              <Filter className="w-4 h-4 text-gray-400" />
+              <select value={category} onChange={e => { setCategory(e.target.value); setPage(1); }}
+                className="input-base text-sm py-2">
+                <option value="">All Categories</option>
+                {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <select value={status} onChange={e => { setStatus(e.target.value); setPage(1); }}
+                className="input-base text-sm py-2">
+                {STATUS_FILTERS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+              </select>
             </div>
           </div>
+
+          {/* Bulk action bar */}
+          {selected.size > 0 && (
+            <div className="px-4 py-3 bg-brand-sand/40 border-b border-gray-100 flex flex-wrap items-center gap-2">
+              <span className="text-sm font-semibold text-brand-navy mr-2">
+                {selected.size} selected
+              </span>
+              <button onClick={() => bulkUpdate({ is_active: true })} disabled={bulkBusy}
+                className="btn-outline text-xs px-3 py-1.5 flex items-center gap-1.5">
+                <ToggleRight className="w-3.5 h-3.5" /> Activate
+              </button>
+              <button onClick={() => bulkUpdate({ is_active: false })} disabled={bulkBusy}
+                className="btn-outline text-xs px-3 py-1.5 flex items-center gap-1.5">
+                <ToggleLeft className="w-3.5 h-3.5" /> Deactivate
+              </button>
+              <button onClick={() => bulkUpdate({ is_available: true })} disabled={bulkBusy}
+                className="btn-outline text-xs px-3 py-1.5 flex items-center gap-1.5">
+                <PackageCheck className="w-3.5 h-3.5" /> Mark In Stock
+              </button>
+              <button onClick={() => bulkUpdate({ is_available: false })} disabled={bulkBusy}
+                className="btn-outline text-xs px-3 py-1.5 flex items-center gap-1.5">
+                <PackageX className="w-3.5 h-3.5" /> Mark Out of Stock
+              </button>
+              <div className="flex items-center gap-1.5">
+                <select value={bulkCategory} onChange={e => setBulkCategory(e.target.value)}
+                  className="input-base text-xs py-1.5">
+                  <option value="">Set category…</option>
+                  {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <button onClick={() => bulkCategory && bulkUpdate({ category: bulkCategory })}
+                  disabled={bulkBusy || !bulkCategory}
+                  className="btn-outline text-xs px-3 py-1.5 disabled:opacity-40">
+                  Apply
+                </button>
+              </div>
+              <button onClick={bulkDelete} disabled={bulkBusy}
+                className="ml-auto text-xs px-3 py-1.5 rounded font-medium bg-red-50 text-red-600 hover:bg-red-100 flex items-center gap-1.5 transition-colors">
+                {bulkBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                Delete Selected
+              </button>
+            </div>
+          )}
 
           {loading ? (
             <div className="flex items-center justify-center py-20">
@@ -463,6 +725,11 @@ export default function AdminProductsPage() {
               <table className="w-full">
                 <thead>
                   <tr className="bg-brand-navy text-left">
+                    <th className="px-3 py-3">
+                      <input type="checkbox" checked={allSelectedOnPage}
+                        onChange={e => toggleSelectAll(e.target.checked)}
+                        className="w-4 h-4 rounded border-gray-300" />
+                    </th>
                     {['Category', 'Sub-Category', 'Description', 'Pack Size', 'UOM', 'Price', 'Actions'].map(h => (
                       <th key={h} className="px-3 py-3 text-xs font-bold text-brand-sky uppercase tracking-wide whitespace-nowrap">
                         {h}
@@ -476,8 +743,11 @@ export default function AdminProductsPage() {
                     <EditableRow
                       key={product.id}
                       product={product}
+                      selected={selected.has(product.id)}
+                      onSelect={toggleSelect}
                       onSaved={handleSaved}
-                      onToggle={toggleActive}
+                      onToggleActive={toggleActive}
+                      onToggleAvailable={toggleAvailable}
                     />
                   ))}
                 </tbody>
@@ -539,6 +809,12 @@ export default function AdminProductsPage() {
               <p className="text-sm text-brand-river">Parsing file…</p>
             </div>
           )}
+          {analyzing && (
+            <div className="flex items-center gap-3 p-4 bg-blue-50 rounded-lg">
+              <Loader2 className="w-5 h-5 text-brand-river animate-spin" />
+              <p className="text-sm text-brand-river">Checking for duplicates…</p>
+            </div>
+          )}
           {result && (
             <div className={`flex items-center gap-3 p-4 rounded-lg ${
               result.success ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
@@ -551,23 +827,72 @@ export default function AdminProductsPage() {
             </div>
           )}
 
-          {/* Preview */}
-          {preview.length > 0 && (
+          {/* Import summary + duplicate handling */}
+          {importSummary && !analyzing && (
             <div className="card-base overflow-hidden">
-              <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-                <div>
-                  <h2 className="font-display text-lg font-bold text-brand-navy">
-                    Preview — {previewAll.length.toLocaleString()} rows detected
-                  </h2>
-                  <p className="text-gray-400 text-xs mt-0.5">Showing first 20 rows</p>
+              <div className="px-6 py-4 border-b border-gray-100">
+                <h2 className="font-display text-lg font-bold text-brand-navy">
+                  Import Summary — {importSummary.total.toLocaleString()} rows detected
+                </h2>
+              </div>
+              <div className="p-6 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="bg-green-50 rounded-lg p-4">
+                  <p className="text-2xl font-bold text-green-600">{importSummary.new_items.toLocaleString()}</p>
+                  <p className="text-xs text-green-700 mt-1">New items will be added</p>
                 </div>
+                <div className="bg-amber-50 rounded-lg p-4">
+                  <p className="text-2xl font-bold text-amber-600">{importSummary.strong_duplicates.toLocaleString()}</p>
+                  <p className="text-xs text-amber-700 mt-1">Potential duplicates (UPC + Price match)</p>
+                </div>
+                <div className="bg-orange-50 rounded-lg p-4">
+                  <p className="text-2xl font-bold text-orange-600">{importSummary.weak_duplicates.toLocaleString()}</p>
+                  <p className="text-xs text-orange-700 mt-1">Items with matching name/pack/price but different UPC</p>
+                </div>
+              </div>
+
+              {(importSummary.strong_duplicates + importSummary.weak_duplicates > 0) && (
+                <div className="px-6 pb-2">
+                  <p className="text-sm font-semibold text-brand-navy mb-2">How should duplicates be handled?</p>
+                  <div className="space-y-2">
+                    <label className="flex items-start gap-2 cursor-pointer">
+                      <input type="radio" name="importMode" className="mt-1"
+                        checked={importMode === 'skip_duplicates'}
+                        onChange={() => setImportMode('skip_duplicates')} />
+                      <span className="text-sm text-gray-600">
+                        <span className="font-medium text-brand-navy">Skip all duplicates</span> — only add the {importSummary.new_items.toLocaleString()} new items
+                      </span>
+                    </label>
+                    <label className="flex items-start gap-2 cursor-pointer">
+                      <input type="radio" name="importMode" className="mt-1"
+                        checked={importMode === 'update_duplicates'}
+                        onChange={() => setImportMode('update_duplicates')} />
+                      <span className="text-sm text-gray-600">
+                        <span className="font-medium text-brand-navy">Update existing items</span> — refresh matched items with the new file&apos;s data (e.g. price changes), and add the new items
+                      </span>
+                    </label>
+                    <label className="flex items-start gap-2 cursor-pointer">
+                      <input type="radio" name="importMode" className="mt-1"
+                        checked={importMode === 'add_anyway'}
+                        onChange={() => setImportMode('add_anyway')} />
+                      <span className="text-sm text-gray-600">
+                        <span className="font-medium text-brand-navy">Add anyway</span> — import everything as new items, even possible duplicates (you can review and merge later in the Duplicates tab)
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between">
+                <p className="text-gray-400 text-xs">Nothing has been saved yet — review the summary above before importing.</p>
                 <button onClick={uploadProducts} disabled={uploading}
                   className="btn-gold text-sm flex items-center gap-2">
                   {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-                  {uploading ? 'Importing…' : `Import All ${previewAll.length.toLocaleString()} Products`}
+                  {uploading ? 'Importing…' : 'Confirm Import'}
                 </button>
               </div>
-              <div className="overflow-x-auto">
+
+              {/* Preview rows */}
+              <div className="overflow-x-auto border-t border-gray-100">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 text-left">
@@ -577,7 +902,7 @@ export default function AdminProductsPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {preview.map((p, i) => (
+                    {previewAll.slice(0, 20).map((p, i) => (
                       <tr key={i} className={i % 2 === 0 ? '' : 'bg-gray-50'}>
                         <td className="px-3 py-2 text-xs text-brand-river">{p.category}</td>
                         <td className="px-3 py-2 font-medium text-brand-navy max-w-xs truncate">{p.description}</td>
@@ -590,6 +915,7 @@ export default function AdminProductsPage() {
                     ))}
                   </tbody>
                 </table>
+                <p className="text-gray-400 text-xs px-3 py-2">Showing first 20 of {previewAll.length.toLocaleString()} rows</p>
               </div>
             </div>
           )}
@@ -614,6 +940,102 @@ export default function AdminProductsPage() {
               ))}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ── DUPLICATES TAB ── */}
+      {tab === 'duplicates' && (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-gray-500">Filter:</span>
+              {[
+                { key: 'all', label: 'All' },
+                { key: 'upc', label: 'Same UPC' },
+                { key: 'name_pack', label: 'Same Name & Pack Size' },
+              ].map(f => (
+                <button key={f.key} onClick={() => setDupFilter(f.key as any)}
+                  className={`text-xs px-3 py-1.5 rounded-full font-medium transition-colors ${
+                    dupFilter === f.key ? 'bg-brand-navy text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                  {f.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={fetchDuplicates} className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5">
+                <RefreshCw className="w-4 h-4" /> Refresh
+              </button>
+              {dupSelected.size > 0 && (
+                <button onClick={deleteDupSelected} disabled={dupLoading}
+                  className="text-sm px-3 py-2 rounded font-medium bg-red-50 text-red-600 hover:bg-red-100 flex items-center gap-1.5 transition-colors">
+                  <Trash2 className="w-4 h-4" /> Delete {dupSelected.size} Selected
+                </button>
+              )}
+            </div>
+          </div>
+
+          {dupLoading ? (
+            <div className="flex items-center justify-center py-20">
+              <Loader2 className="w-6 h-6 animate-spin text-brand-river" />
+            </div>
+          ) : filteredDupGroups.length === 0 ? (
+            <div className="card-base text-center py-16">
+              <Layers className="w-10 h-10 text-gray-200 mx-auto mb-3" />
+              <p className="text-gray-400">No duplicates found</p>
+            </div>
+          ) : (
+            filteredDupGroups.map(group => (
+              <div key={group.key} className="card-base overflow-hidden">
+                <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                  <p className="text-sm font-semibold text-brand-navy">
+                    {group.type === 'upc' ? `Same UPC: ${group.items[0].upc}` : 'Same Name & Pack Size'}
+                  </p>
+                  <span className="text-xs text-gray-400">{group.items.length} items</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 text-left">
+                        <th className="px-3 py-2"></th>
+                        {['UPC', 'Name', 'Pack Size', 'Category', 'Price', 'Status'].map(h => (
+                          <th key={h} className="px-3 py-2 text-xs font-bold text-gray-500 uppercase tracking-wide">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {group.items.map((item: any) => (
+                        <tr key={item.id} className={dupSelected.has(item.id) ? 'bg-red-50' : ''}>
+                          <td className="px-3 py-2">
+                            <input type="checkbox" checked={dupSelected.has(item.id)}
+                              onChange={e => toggleDupSelect(item.id, e.target.checked)}
+                              className="w-4 h-4 rounded border-gray-300 text-brand-river focus:ring-brand-river" />
+                          </td>
+                          <td className="px-3 py-2 text-xs text-gray-500">{item.upc || '—'}</td>
+                          <td className="px-3 py-2 font-medium text-brand-navy max-w-xs truncate">{item.description}</td>
+                          <td className="px-3 py-2 text-xs text-gray-500">{item.pkg_size || '—'}</td>
+                          <td className="px-3 py-2 text-xs text-brand-river">{item.category}</td>
+                          <td className="px-3 py-2 font-bold text-brand-navy">{formatCurrency(item.price)}</td>
+                          <td className="px-3 py-2">
+                            <div className="flex items-center gap-1">
+                              {!item.is_active && (
+                                <span className="inline-block text-[10px] font-bold uppercase tracking-wide text-gray-400 bg-gray-100 rounded px-1.5 py-0.5">Inactive</span>
+                              )}
+                              {!item.is_available && (
+                                <span className="inline-block text-[10px] font-bold uppercase tracking-wide text-red-500 bg-red-50 rounded px-1.5 py-0.5">Out of Stock</span>
+                              )}
+                              {item.is_active && item.is_available && (
+                                <span className="inline-block text-[10px] font-bold uppercase tracking-wide text-green-600 bg-green-50 rounded px-1.5 py-0.5">Active</span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       )}
     </div>
