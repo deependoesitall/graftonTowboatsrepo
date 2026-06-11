@@ -199,7 +199,21 @@ function ProductCard({ product, isLoggedIn, isFavorite }: { product: Product; is
               >
                 <Minus className="w-2.5 h-2.5" />
               </button>
-              <span className="w-6 text-center text-xs font-bold text-brand-navy select-none">{qty}</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={qty}
+                onChange={(e) => {
+                  const val = e.target.value.replace(/[^0-9]/g, '');
+                  if (val === '') { setQty(0); return; }
+                  setQty(Math.min(999, parseInt(val, 10)));
+                }}
+                onBlur={() => { if (!qty || qty < 1) setQty(1); }}
+                onFocus={(e) => e.target.select()}
+                className="w-8 text-center text-xs font-bold text-brand-navy bg-transparent border-0 focus:outline-none focus:ring-1 focus:ring-brand-steel rounded"
+                aria-label="Quantity"
+              />
               <button
                 onClick={() => setQty(q => Math.min(999, q + 1))}
                 className="w-6 h-6 flex items-center justify-center text-gray-400 hover:bg-gray-100 transition-colors"

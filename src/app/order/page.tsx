@@ -305,6 +305,24 @@ function CartItemRow({
   onUpdate: (qty: number) => void;
   onRemove: () => void;
 }) {
+  const [draft, setDraft] = useState(String(item.quantity));
+
+  useEffect(() => {
+    setDraft(String(item.quantity));
+  }, [item.quantity]);
+
+  function commit() {
+    const n = parseInt(draft, 10);
+    if (!draft || isNaN(n) || n < 1) {
+      setDraft(String(item.quantity));
+      if (item.quantity < 1) onUpdate(1);
+      return;
+    }
+    const clamped = Math.min(999, n);
+    setDraft(String(clamped));
+    if (clamped !== item.quantity) onUpdate(clamped);
+  }
+
   return (
     <div className="p-3 flex items-start gap-3">
       <div className="flex-1 min-w-0">
@@ -338,9 +356,18 @@ function CartItemRow({
           >
             <Minus className="w-3 h-3" />
           </button>
-          <span className="w-8 text-center text-sm font-bold text-brand-navy">
-            {item.quantity}
-          </span>
+          <input
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value.replace(/[^0-9]/g, ''))}
+            onBlur={commit}
+            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+            onFocus={(e) => e.target.select()}
+            className="w-8 text-center text-sm font-bold text-brand-navy bg-transparent border-0 focus:outline-none focus:ring-1 focus:ring-brand-steel rounded"
+            aria-label="Quantity"
+          />
           <button
             onClick={() => onUpdate(item.quantity + 1)}
             className="w-7 h-7 flex items-center justify-center text-gray-500 hover:bg-gray-100"
