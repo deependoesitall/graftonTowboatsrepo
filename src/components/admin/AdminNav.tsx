@@ -50,18 +50,19 @@ export function AdminNav() {
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
           {/* Logo / title */}
           <Link href="/admin" className="flex items-center gap-3 shrink-0">
-            <div className="shrink-0">
-              <img
-                src="https://images.squarespace-cdn.com/content/v1/6819038bc556772f05a46e4d/00f04765-aff3-41b3-8b27-6d14b9688c52/image0+%282%29.png?format=300w"
-                alt="Grafton Towboat Services"
-                className="h-11 w-11 object-contain"
-              />
-            </div>
-            <div className="hidden sm:flex flex-col leading-tight">
-              <span className="font-display font-bold text-brand-yellow text-sm uppercase tracking-widest">
+            <img
+              src="/branding/logo-circle.jpg"
+              alt="Grafton Towboat Services"
+              className="h-14 w-14 rounded-full object-cover shrink-0"
+            />
+            <div className="hidden sm:flex flex-col justify-center leading-tight">
+              <span className="font-display font-bold text-white text-base uppercase tracking-wide">
                 Grafton Towboat
               </span>
-              <span className="text-white/50 text-[10px] uppercase tracking-[0.2em] font-bold">
+              <span className="font-display text-white/70 text-xs uppercase tracking-wider">
+                Services
+              </span>
+              <span className="text-brand-yellow text-[10px] uppercase tracking-[0.2em] font-bold mt-0.5">
                 Admin Console
               </span>
             </div>
