@@ -28,7 +28,9 @@ export async function sendOrderEmail(order: Order, businessEmail?: string, ccEma
     </tr>`).join('');
 
   const itemCount = order.items.reduce((s, i) => s + i.quantity, 0);
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || '';
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL && !process.env.NEXT_PUBLIC_APP_URL.includes('*'))
+    ? process.env.NEXT_PUBLIC_APP_URL
+    : 'https://grafton-towboatsrepo.vercel.app';
 
   const html = `<!DOCTYPE html>
 <html>
@@ -99,11 +101,11 @@ export async function sendOrderEmail(order: Order, businessEmail?: string, ccEma
       </tfoot>
     </table>
 
-    ${appUrl ? `<div style="text-align:center;padding:14px;background:#f8f9fa;border-radius:4px;">
-      <a href="${appUrl}/admin" style="background:#1E3D1E;color:#D9E84A;padding:10px 24px;border-radius:24px;text-decoration:none;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1px;">
-        View in Admin Dashboard →
+    <div style="text-align:center;padding:14px;background:#f8f9fa;border-radius:4px;">
+      <a href="${appUrl}/admin/orders" style="background:#1E3D1E;color:#D9E84A;padding:10px 24px;border-radius:24px;text-decoration:none;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1px;">
+        Order Dashboard →
       </a>
-    </div>` : ''}
+    </div>
   </div>
 
   <div style="background:#1E3D1E;padding:14px 28px;text-align:center;">
