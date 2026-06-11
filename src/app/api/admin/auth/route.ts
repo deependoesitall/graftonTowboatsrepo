@@ -1,9 +1,9 @@
 // src/app/api/admin/auth/route.ts
 //
-// Admin login. On success, sets an httpOnly/Secure/SameSite=Strict
-// session cookie containing a signed JWT. The token itself is NEVER
-// returned in the response body — the client only receives non-secret
-// display info (username, role, display name).
+// Admin login. On success, returns a signed JWT in the response body —
+// the client stores this in sessionStorage (cleared on tab close) and
+// sends it back as `Authorization: Bearer <jwt>` on subsequent requests.
+// A legacy httpOnly cookie is also set for backwards compatibility.
 //
 // Supports two login modes:
 //   - Multi-user: { username, password } -> checks admin_users table
@@ -69,6 +69,7 @@ export async function POST(req: NextRequest) {
     });
 
     const res = NextResponse.json({
+      token,
       user: { username: user.username, role, display_name: user.display_name },
     });
     res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
@@ -121,6 +122,7 @@ export async function POST(req: NextRequest) {
   });
 
   const res = NextResponse.json({
+    token,
     user: { username: 'admin', role: 'owner', display_name: 'Jennifer' },
   });
   res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());

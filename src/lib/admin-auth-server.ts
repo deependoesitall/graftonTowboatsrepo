@@ -2,18 +2,16 @@
 // Server-side admin session verification and role-based access control
 // (RBAC). This is the SINGLE SOURCE OF TRUTH for admin authorization.
 //
-// Sessions are JWTs signed with ADMIN_SECRET_KEY (HS256), stored in an
-// httpOnly, Secure, SameSite=Strict cookie. The token is never exposed
-// to client-side JS — only this server-side helper reads it.
+// Sessions are JWTs signed with ADMIN_SECRET_KEY (HS256). The token is
+// returned to the client on login and stored in sessionStorage (cleared
+// automatically when the tab/window is closed — true "close tab = log
+// out" behavior). The client sends it back as `Authorization: Bearer
+// <jwt>` on every admin API call. A legacy httpOnly cookie is still
+// accepted as a fallback.
 //
-// SESSION LIFETIME: short (20 min) and sliding. Every successful
-// /api/admin/me check (polled by the admin layout while a tab is open)
-// re-issues a fresh cookie, so an actively-used tab never expires.
-// If the tab/browser is closed, no more refreshes happen and the
-// session naturally expires within ~20 minutes — closing and quickly
-// reopening within that window will NOT require re-login by design
-// (true close-tab-instant-logout isn't reliably detectable client-side
-// without logging people out mid-use, which was explicitly unwanted).
+// SESSION LIFETIME: 8 hours server-side as a backstop — in practice the
+// session ends whenever the tab is closed (sessionStorage is cleared),
+// not because of this expiry.
 
 import { NextRequest, NextResponse } from 'next/server';
 import jwt from 'jsonwebtoken';
@@ -22,7 +20,7 @@ export type AdminRole = 'owner' | 'manager' | 'staff';
 export type Area = 'orders' | 'products' | 'settings' | 'reports' | 'logs';
 
 export const SESSION_COOKIE = 'gts_admin_session';
-export const SESSION_TTL_SECONDS = 60 * 20; // 20 minutes, sliding
+export const SESSION_TTL_SECONDS = 60 * 60 * 8; // 8 hour backstop; sessionStorage clearing on tab close is the real boundary
 
 export interface AdminSessionPayload {
   sub: string;          // admin_users.id, or 'admin' for legacy single-password login
@@ -68,11 +66,27 @@ export function verifyAdminSession(token: string): AdminSessionPayload | null {
   }
 }
 
-/** Read and verify the admin session from the request's cookies. */
+/**
+ * Read and verify the admin session.
+ *
+ * Checks, in order:
+ *  1. `Authorization: Bearer <jwt>` header — used by the client, which
+ *     stores the token in sessionStorage (cleared when the tab closes).
+ *  2. The legacy httpOnly session cookie — kept as a fallback for any
+ *     in-flight requests during the transition.
+ */
 export function getAdminSession(req: NextRequest): AdminSessionPayload | null {
-  const token = req.cookies.get(SESSION_COOKIE)?.value;
-  if (!token) return null;
-  return verifyAdminSession(token);
+  const authHeader = req.headers.get('authorization');
+  if (authHeader?.startsWith('Bearer ')) {
+    const token = authHeader.slice('Bearer '.length).trim();
+    const session = verifyAdminSession(token);
+    if (session) return session;
+  }
+
+  const cookieToken = req.cookies.get(SESSION_COOKIE)?.value;
+  if (cookieToken) return verifyAdminSession(cookieToken);
+
+  return null;
 }
 
 /** Cookie options used when setting/refreshing the session cookie. */

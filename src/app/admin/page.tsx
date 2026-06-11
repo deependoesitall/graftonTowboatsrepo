@@ -7,7 +7,7 @@ import {
   ShoppingBag, Lock, Eye, EyeOff, Loader2
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
-import { setAdminUiState, fetchAdminSession, adminFetch } from '@/lib/admin-auth';
+import { setAdminSession, setAdminUiState, fetchAdminSession, adminFetch } from '@/lib/admin-auth';
 
 export default function AdminDashboard() {
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null); // null = checking
@@ -47,8 +47,12 @@ export default function AdminDashboard() {
         setLoginError(username.trim() ? 'Invalid username or password.' : 'Incorrect password. Please try again.');
         return;
       }
-      const { user } = await res.json();
-      setAdminUiState(user?.role || 'owner', user?.display_name || user?.username || 'Admin', user?.username || 'admin');
+      const { token, user } = await res.json();
+      if (token) {
+        setAdminSession(token, user?.role || 'owner', user?.display_name || user?.username || 'Admin', user?.username || 'admin');
+      } else {
+        setAdminUiState(user?.role || 'owner', user?.display_name || user?.username || 'Admin', user?.username || 'admin');
+      }
       // Full reload so AdminNav (and everything else) re-initializes with the new session/role
       window.location.href = '/admin';
     } finally {

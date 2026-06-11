@@ -1,22 +1,33 @@
 // src/lib/admin-auth.ts
 //
-// Client-side helpers for admin role-based UI gating.
+// Client-side admin auth helpers.
 //
-// SECURITY NOTE: Authentication is handled entirely via an httpOnly,
-// Secure, SameSite=Strict session cookie set by /api/admin/auth — it is
-// never readable or storable by client-side JS. The values cached here
-// (role, display name, username) are NON-SECRET UI HINTS ONLY, used to
-// show/hide nav items and labels for a smoother UX. Every admin API
-// route independently re-verifies the session cookie and re-checks role
-// permissions server-side (see src/lib/admin-auth-server.ts), so a user
-// tampering with these client-side values cannot gain access to
-// anything the server wouldn't otherwise allow.
+// SESSION MODEL: on login, the server returns a signed JWT, which is
+// stored in sessionStorage. sessionStorage is automatically cleared
+// when the tab/window is closed, giving simple "logged in until the
+// tab is closed" behavior — refreshing the page keeps you logged in
+// (sessionStorage survives reloads), but closing the tab requires
+// logging in again.
+//
+// The token is sent on every admin API call as
+// `Authorization: Bearer <jwt>`. The server independently verifies the
+// JWT signature and re-checks role permissions on every request (see
+// src/lib/admin-auth-server.ts), so this token grants exactly what the
+// server allows for that role — nothing client-side tampering can
+// expand.
 
 export type AdminRole = 'owner' | 'manager' | 'staff';
 
+const ADMIN_TOKEN_KEY = 'grafton_admin_token';
 const ADMIN_ROLE_KEY = 'grafton_admin_role';
 const ADMIN_NAME_KEY = 'grafton_admin_name';
 const ADMIN_USERNAME_KEY = 'grafton_admin_username';
+
+/** Read the stored admin JWT, or null if not logged in (or tab was closed/reopened). */
+export function getAdminToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return sessionStorage.getItem(ADMIN_TOKEN_KEY);
+}
 
 export function getAdminRole(): AdminRole | null {
   if (typeof window === 'undefined') return null;
@@ -35,7 +46,15 @@ export function getAdminUsername(): string {
   return sessionStorage.getItem(ADMIN_USERNAME_KEY) || '';
 }
 
-/** Cache non-secret UI hints after a successful login. The session cookie itself is set by the server. */
+/** Store the JWT and non-secret UI hints after a successful login. */
+export function setAdminSession(token: string, role: AdminRole, displayName: string, username?: string) {
+  sessionStorage.setItem(ADMIN_TOKEN_KEY, token);
+  sessionStorage.setItem(ADMIN_ROLE_KEY, role);
+  sessionStorage.setItem(ADMIN_NAME_KEY, displayName);
+  sessionStorage.setItem(ADMIN_USERNAME_KEY, username || 'admin');
+}
+
+/** @deprecated kept for backwards compatibility — use setAdminSession */
 export function setAdminUiState(role: AdminRole, displayName: string, username?: string) {
   sessionStorage.setItem(ADMIN_ROLE_KEY, role);
   sessionStorage.setItem(ADMIN_NAME_KEY, displayName);
@@ -43,6 +62,7 @@ export function setAdminUiState(role: AdminRole, displayName: string, username?:
 }
 
 export function clearAdminUiState() {
+  sessionStorage.removeItem(ADMIN_TOKEN_KEY);
   sessionStorage.removeItem(ADMIN_ROLE_KEY);
   sessionStorage.removeItem(ADMIN_NAME_KEY);
   sessionStorage.removeItem(ADMIN_USERNAME_KEY);
@@ -69,17 +89,14 @@ export function canEdit(role: AdminRole | null, area: 'orders' | 'products' | 's
 }
 
 /**
- * Standard headers/options for authenticated admin API requests.
- *
- * Replaces the old token-based `adminHeaders()`. The session cookie is
- * sent automatically by the browser via `credentials: 'include'` — no
- * secret token is attached here. The x-admin-* headers below are
- * NON-SECRET display hints only (used for activity log display names);
- * the server derives the *authoritative* identity from the verified
- * session cookie and ignores these for authorization decisions.
+ * Standard headers for authenticated admin API requests. Includes the
+ * Authorization Bearer token (the actual auth) plus non-secret display
+ * hints used for activity log display names.
  */
 export function adminHeaders(extra?: Record<string, string>): Record<string, string> {
+  const token = getAdminToken();
   return {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
     'x-admin-username': getAdminUsername(),
     'x-admin-name': getAdminName(),
     'x-admin-role': getAdminRole() || '',
@@ -87,7 +104,7 @@ export function adminHeaders(extra?: Record<string, string>): Record<string, str
   };
 }
 
-/** fetch() wrapper that always sends the admin session cookie. */
+/** fetch() wrapper that always sends the admin auth token. */
 export function adminFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   return fetch(input, {
     ...init,
@@ -99,7 +116,7 @@ export function adminFetch(input: RequestInfo | URL, init?: RequestInit): Promis
   });
 }
 
-/** Call the logout endpoint (clears the server-side cookie) and clear local UI state. */
+/** Log out: clear the token from sessionStorage (and best-effort clear any legacy cookie). */
 export async function logoutAdmin(): Promise<void> {
   try {
     await fetch('/api/admin/logout', { method: 'POST', credentials: 'include' });
@@ -109,12 +126,18 @@ export async function logoutAdmin(): Promise<void> {
 }
 
 /**
- * Check whether a valid admin session cookie exists. If so, caches the
- * role/display info for UI use and returns it; otherwise returns null
- * and clears any stale local UI state.
+ * Check whether a valid admin session exists for this tab. If so, caches
+ * the role/display info for UI use and returns it; otherwise returns
+ * null and clears any stale local state.
  */
 export async function fetchAdminSession(): Promise<{ role: AdminRole; display_name: string; username: string } | null> {
-  const res = await fetch('/api/admin/me', { credentials: 'include' });
+  const token = getAdminToken();
+  if (!token) {
+    clearAdminUiState();
+    return null;
+  }
+
+  const res = await adminFetch('/api/admin/me');
   if (!res.ok) {
     clearAdminUiState();
     return null;
