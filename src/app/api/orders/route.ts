@@ -107,10 +107,16 @@ export async function POST(req: NextRequest) {
 
     if (fullOrder) {
       // Read business email from settings (allows Jennifer to change it without redeploying)
-      supabase.from('admin_settings').select('business_email').single().then(({ data: s }) => {
+      // IMPORTANT: must be awaited — Vercel serverless functions terminate
+      // immediately after the response is sent, killing any unawaited promises.
+      try {
+        const { data: s } = await supabase.from('admin_settings').select('business_email').single();
         const email = s?.business_email || process.env.BUSINESS_EMAIL;
-        sendOrderEmail(fullOrder as Order, email).catch(err => console.error('Email error:', err));
-      });
+        await sendOrderEmail(fullOrder as Order, email);
+      } catch (err) {
+        console.error('Email error:', err);
+        // Don't fail order creation if email fails
+      }
     }
 
     return NextResponse.json({ order_id: order.id, order_number: orderNumber });
