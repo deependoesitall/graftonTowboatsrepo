@@ -51,9 +51,9 @@ export function AdminNav() {
           {/* Logo / title */}
           <Link href="/admin" className="flex items-center gap-3 shrink-0">
             <img
-              src="/branding/logo-circle.jpg"
+              src="/branding/logo-circle.png"
               alt="Grafton Towboat Services"
-              className="h-14 w-14 rounded-full object-cover shrink-0"
+              className="h-14 w-14 object-contain shrink-0"
             />
             <div className="hidden sm:flex flex-col justify-center leading-tight">
               <span className="font-display font-bold text-white text-base uppercase tracking-wide">
