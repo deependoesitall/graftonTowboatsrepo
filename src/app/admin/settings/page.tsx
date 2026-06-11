@@ -2,7 +2,7 @@
 // src/app/admin/settings/page.tsx
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Save, RefreshCw, Eye, EyeOff, Plus, Trash2, UserPlus, ShieldCheck, User, Lock, ScrollText, Search, ArrowRight, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Save, RefreshCw, Eye, EyeOff, Plus, Trash2, UserPlus, ShieldCheck, User, Lock, ScrollText, Search, ArrowRight, ChevronLeft, ChevronRight, MessageSquarePlus, Check, X, Loader2 } from 'lucide-react';
 import { ADMIN_TOKEN_KEY, getAdminRole, canAccess, adminHeaders } from '@/lib/admin-auth';
 import { formatDate } from '@/lib/utils';
 
@@ -39,6 +39,7 @@ interface ActivityLog {
   contact_name: string | null;
   phone: string | null;
   po_number: string | null;
+  note: string | null;
   created_at: string;
 }
 
@@ -85,6 +86,9 @@ export default function AdminSettingsPage() {
   const [logsPage, setLogsPage] = useState(1);
   const [logsSearch, setLogsSearch] = useState('');
   const LOGS_PER_PAGE = 25;
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [savingNoteId, setSavingNoteId] = useState<string | null>(null);
 
   const adminToken = typeof window !== 'undefined' ? sessionStorage.getItem(ADMIN_TOKEN_KEY) || '' : '';
   const [denied, setDenied] = useState(false);
@@ -131,6 +135,21 @@ export default function AdminSettingsPage() {
   useEffect(() => {
     if (tab === 'logs' && !denied) loadLogs();
   }, [tab, logsPage, logsSearch]);
+
+  async function saveLogNote(logId: string) {
+    setSavingNoteId(logId);
+    const res = await fetch('/api/admin/logs', {
+      method: 'PATCH',
+      headers: adminHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ id: logId, note: noteDraft }),
+    });
+    if (res.ok) {
+      const updated = await res.json();
+      setLogs(prev => prev.map(l => l.id === logId ? { ...l, note: updated.note } : l));
+      setEditingNoteId(null);
+    }
+    setSavingNoteId(null);
+  }
 
   async function saveSettings() {
     setSaving(true); setSaveMsg('');
@@ -291,7 +310,8 @@ export default function AdminSettingsPage() {
             ) : (
               <div className="divide-y divide-gray-100">
                 {logs.map(log => (
-                  <div key={log.id} className="px-6 py-3.5 flex items-center justify-between gap-4">
+                  <div key={log.id} className="px-6 py-3.5">
+                    <div className="flex items-center justify-between gap-4">
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="w-8 h-8 bg-brand-steel/10 rounded-full flex items-center justify-center font-bold text-brand-steel text-xs shrink-0">
                         {(log.admin_display_name || log.admin_username || '?')[0].toUpperCase()}
@@ -342,6 +362,51 @@ export default function AdminSettingsPage() {
                       <p className="text-[11px] text-gray-300">
                         {new Date(log.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
                       </p>
+                    </div>
+                    </div>
+
+                    {/* Note */}
+                    <div className="mt-2 pl-11">
+                      {editingNoteId === log.id ? (
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            autoFocus
+                            value={noteDraft}
+                            onChange={e => setNoteDraft(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') saveLogNote(log.id);
+                              if (e.key === 'Escape') setEditingNoteId(null);
+                            }}
+                            placeholder="Add a note (e.g. 'deleted test orders')"
+                            className="input-base text-xs py-1.5 flex-1 max-w-md"
+                          />
+                          <button onClick={() => saveLogNote(log.id)} disabled={savingNoteId === log.id}
+                            className="p-1.5 text-green-600 hover:bg-green-50 rounded transition-colors disabled:opacity-50">
+                            {savingNoteId === log.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                          </button>
+                          <button onClick={() => setEditingNoteId(null)}
+                            className="p-1.5 text-gray-400 hover:bg-gray-100 rounded transition-colors">
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ) : log.note ? (
+                        <button
+                          onClick={() => { setEditingNoteId(log.id); setNoteDraft(log.note || ''); }}
+                          className="text-xs text-gray-500 bg-brand-sand/30 hover:bg-brand-sand/50 rounded-lg px-2.5 py-1.5 inline-flex items-start gap-1.5 max-w-full text-left transition-colors"
+                        >
+                          <MessageSquarePlus className="w-3 h-3 mt-0.5 shrink-0 text-brand-river" />
+                          <span className="truncate">{log.note}</span>
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => { setEditingNoteId(log.id); setNoteDraft(''); }}
+                          className="text-[11px] text-gray-300 hover:text-brand-river inline-flex items-center gap-1 transition-colors"
+                        >
+                          <MessageSquarePlus className="w-3 h-3" />
+                          Add note
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}

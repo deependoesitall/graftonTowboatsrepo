@@ -48,3 +48,29 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({ logs: data, total: count });
 }
+
+export async function PATCH(req: NextRequest) {
+  const authHeader = req.headers.get('x-admin-token');
+  if (authHeader !== process.env.ADMIN_SECRET_KEY) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const role = req.headers.get('x-admin-role');
+  if (role !== 'owner') {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+
+  const { id, note } = await req.json();
+  if (!id) return NextResponse.json({ error: 'Missing log id' }, { status: 400 });
+
+  const supabase = createServiceClient();
+  const { data, error } = await supabase
+    .from('activity_logs')
+    .update({ note: note?.trim() || null })
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json(data);
+}
