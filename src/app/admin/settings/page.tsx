@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Save, RefreshCw, Eye, EyeOff, Plus, Trash2, UserPlus, ShieldCheck, User, Lock, ScrollText, Search, ArrowRight, ChevronLeft, ChevronRight, MessageSquarePlus, Check, X, Loader2, Send, Wrench } from 'lucide-react';
-import { ADMIN_TOKEN_KEY, getAdminRole, canAccess, adminHeaders } from '@/lib/admin-auth';
+import { fetchAdminSession, getAdminRole, canAccess, adminFetch } from '@/lib/admin-auth';
 import { formatDate } from '@/lib/utils';
 
 interface AdminUser {
@@ -111,20 +111,22 @@ export default function AdminSettingsPage() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
 
-  const adminToken = typeof window !== 'undefined' ? sessionStorage.getItem(ADMIN_TOKEN_KEY) || '' : '';
   const [denied, setDenied] = useState(false);
 
+  // Auth guard — verify the session cookie with the server
   useEffect(() => {
-    if (!sessionStorage.getItem(ADMIN_TOKEN_KEY)) { router.push('/admin'); return; }
-    const role = getAdminRole();
-    if (!canAccess(role, 'settings')) { setDenied(true); return; }
-    loadSettings();
-    loadUsers();
+    (async () => {
+      const session = await fetchAdminSession();
+      if (!session) { router.push('/admin'); return; }
+      if (!canAccess(session.role, 'settings')) { setDenied(true); return; }
+      loadSettings();
+      loadUsers();
+    })();
   }, [router]);
 
   async function loadSettings() {
     setLoading(true);
-    const res = await fetch('/api/admin/settings', { headers: { 'x-admin-token': adminToken } });
+    const res = await adminFetch('/api/admin/settings');
     if (res.ok) {
       const data = await res.json();
       setSettings(s => ({ ...s, ...data }));
@@ -133,7 +135,7 @@ export default function AdminSettingsPage() {
   }
 
   async function loadUsers() {
-    const res = await fetch('/api/admin/users', { headers: { 'x-admin-token': adminToken } });
+    const res = await adminFetch('/api/admin/users');
     if (res.ok) setUsers(await res.json());
   }
 
@@ -144,7 +146,7 @@ export default function AdminSettingsPage() {
       per_page: String(LOGS_PER_PAGE),
       ...(logsSearch ? { search: logsSearch } : {}),
     });
-    const res = await fetch(`/api/admin/logs?${params}`, { headers: adminHeaders() });
+    const res = await adminFetch(`/api/admin/logs?${params}`);
     if (res.ok) {
       const data = await res.json();
       setLogs(data.logs || []);
@@ -160,9 +162,9 @@ export default function AdminSettingsPage() {
   async function loadEmailPreview() {
     setPreviewLoading(true);
     try {
-      const res = await fetch('/api/admin/email-preview', {
+      const res = await adminFetch('/api/admin/email-preview', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-admin-token': adminToken },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           order_email_subject: settings.order_email_subject,
           email_header_tagline: settings.email_header_tagline,
@@ -182,9 +184,8 @@ export default function AdminSettingsPage() {
     setTestingEmail(true);
     setTestEmailResult(null);
     try {
-      const res = await fetch('/api/admin/test-email', {
+      const res = await adminFetch('/api/admin/test-email', {
         method: 'POST',
-        headers: { 'x-admin-token': adminToken },
       });
       setTestEmailResult(await res.json());
     } catch (err: any) {
@@ -195,9 +196,9 @@ export default function AdminSettingsPage() {
 
   async function saveLogNote(logId: string) {
     setSavingNoteId(logId);
-    const res = await fetch('/api/admin/logs', {
+    const res = await adminFetch('/api/admin/logs', {
       method: 'PATCH',
-      headers: adminHeaders({ 'Content-Type': 'application/json' }),
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: logId, note: noteDraft }),
     });
     if (res.ok) {
@@ -210,9 +211,9 @@ export default function AdminSettingsPage() {
 
   async function saveSettings() {
     setSaving(true); setSaveMsg('');
-    const res = await fetch('/api/admin/settings', {
+    const res = await adminFetch('/api/admin/settings', {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': adminToken },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(settings),
     });
     setSaving(false);
@@ -234,9 +235,9 @@ export default function AdminSettingsPage() {
     if (newPw.length < 4) { setPwError('New password must be at least 4 characters'); return; }
     if (newPw !== confirmPw) { setPwError('New passwords do not match'); return; }
     setSavingPw(true);
-    const res = await fetch('/api/admin/settings', {
+    const res = await adminFetch('/api/admin/settings', {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': adminToken },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ current_password: currentPw, new_password: newPw }),
     });
     setSavingPw(false);
@@ -252,9 +253,9 @@ export default function AdminSettingsPage() {
   async function addUser() {
     if (!newUser.username || !newUser.password) return;
     setAddingUser(true);
-    const res = await fetch('/api/admin/users', {
+    const res = await adminFetch('/api/admin/users', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': adminToken },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...newUser, display_name: newUser.display_name || newUser.username }),
     });
     if (res.ok) {
@@ -267,9 +268,9 @@ export default function AdminSettingsPage() {
   }
 
   async function toggleUser(u: AdminUser) {
-    const res = await fetch('/api/admin/users', {
+    const res = await adminFetch('/api/admin/users', {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': adminToken },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: u.id, is_active: !u.is_active }),
     });
     if (res.ok) setUsers(us => us.map(x => x.id === u.id ? { ...x, is_active: !x.is_active } : x));
@@ -277,9 +278,9 @@ export default function AdminSettingsPage() {
 
   async function deleteUser(id: string) {
     if (!confirm('Delete this admin user?')) return;
-    await fetch('/api/admin/users', {
+    await adminFetch('/api/admin/users', {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': adminToken },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id }),
     });
     setUsers(us => us.filter(u => u.id !== id));
@@ -523,7 +524,7 @@ export default function AdminSettingsPage() {
             <code className="bg-white rounded px-2 py-1 text-xs block mb-2">Order Groceries & Supplies</code>
             <p className="font-semibold mb-1">Button URL:</p>
             <code className="bg-white rounded px-2 py-1 text-xs block break-all">
-              {process.env.NEXT_PUBLIC_APP_URL || 'https://grafton-towboatsrepo.vercel.app'}/catalog
+              {process.env.NEXT_PUBLIC_APP_URL || '(set NEXT_PUBLIC_APP_URL in Vercel)'}/catalog
             </code>
           </div>
         </div>

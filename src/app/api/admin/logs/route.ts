@@ -1,18 +1,11 @@
 // src/app/api/admin/logs/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
+import { requireAdmin } from '@/lib/admin-auth-server';
 
 export async function GET(req: NextRequest) {
-  const authHeader = req.headers.get('x-admin-token');
-  if (authHeader !== process.env.ADMIN_SECRET_KEY) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  // Owner-only — checked client-side via canAccess, but enforce here too
-  const role = req.headers.get('x-admin-role');
-  if (role !== 'owner') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  }
+  const session = requireAdmin(req, { ownerOnly: true });
+  if (session instanceof NextResponse) return session;
 
   const { searchParams } = new URL(req.url);
   const page = parseInt(searchParams.get('page') || '1');
@@ -50,15 +43,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const authHeader = req.headers.get('x-admin-token');
-  if (authHeader !== process.env.ADMIN_SECRET_KEY) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  const role = req.headers.get('x-admin-role');
-  if (role !== 'owner') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  }
+  const session = requireAdmin(req, { ownerOnly: true });
+  if (session instanceof NextResponse) return session;
 
   const { id, note } = await req.json();
   if (!id) return NextResponse.json({ error: 'Missing log id' }, { status: 400 });

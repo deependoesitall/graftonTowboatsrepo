@@ -1,6 +1,7 @@
 // src/app/api/products/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
+import { getAdminSession, requireAdmin } from '@/lib/admin-auth-server';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -9,8 +10,7 @@ export async function GET(req: NextRequest) {
   const page = parseInt(searchParams.get('page') || '1');
   const perPage = parseInt(searchParams.get('per_page') || '50');
   const offset = (page - 1) * perPage;
-  const adminToken = req.headers.get('x-admin-token');
-  const isAdmin = adminToken === process.env.ADMIN_SECRET_KEY;
+  const isAdmin = !!getAdminSession(req);
 
   const supabase = createServiceClient();
 
@@ -35,10 +35,8 @@ export async function GET(req: NextRequest) {
 
 // Admin: bulk import products from CSV
 export async function POST(req: NextRequest) {
-  const authHeader = req.headers.get('x-admin-token');
-  if (authHeader !== process.env.ADMIN_SECRET_KEY) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  const session = requireAdmin(req, { area: 'products', editRequired: true });
+  if (session instanceof NextResponse) return session;
 
   const { products } = await req.json();
   const supabase = createServiceClient();
@@ -64,10 +62,8 @@ export async function POST(req: NextRequest) {
 
 // Admin: update a single product
 export async function PATCH(req: NextRequest) {
-  const authHeader = req.headers.get('x-admin-token');
-  if (authHeader !== process.env.ADMIN_SECRET_KEY) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  const session = requireAdmin(req, { area: 'products', editRequired: true });
+  if (session instanceof NextResponse) return session;
 
   const { id, ...updates } = await req.json();
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
@@ -86,10 +82,8 @@ export async function PATCH(req: NextRequest) {
 
 // Admin: delete a product
 export async function DELETE(req: NextRequest) {
-  const authHeader = req.headers.get('x-admin-token');
-  if (authHeader !== process.env.ADMIN_SECRET_KEY) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  const session = requireAdmin(req, { area: 'products', editRequired: true });
+  if (session instanceof NextResponse) return session;
 
   const { id } = await req.json();
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });

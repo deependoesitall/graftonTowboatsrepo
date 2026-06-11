@@ -1,18 +1,15 @@
 // src/app/api/admin/users/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
-import { createHash } from 'crypto';
+import { hashPassword } from '@/lib/password';
+import { requireAdmin } from '@/lib/admin-auth-server';
 
-function hashPassword(p: string) {
-  return createHash('sha256').update(p + 'gts-salt-2024').digest('hex');
-}
-
-function auth(req: NextRequest) {
-  return req.headers.get('x-admin-token') === process.env.ADMIN_SECRET_KEY;
-}
+// User management is owner-only.
 
 export async function GET(req: NextRequest) {
-  if (!auth(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const session = requireAdmin(req, { ownerOnly: true });
+  if (session instanceof NextResponse) return session;
+
   const supabase = createServiceClient();
   const { data, error } = await supabase
     .from('admin_users')
@@ -23,12 +20,16 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  if (!auth(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const session = requireAdmin(req, { ownerOnly: true });
+  if (session instanceof NextResponse) return session;
+
   const { username, password, role, display_name } = await req.json();
-  if (!username || !password) return NextResponse.json({ error: 'Username and password required' }, { status: 400 });
+  if (!username || !password) {
+    return NextResponse.json({ error: 'Username and password required' }, { status: 400 });
+  }
   const supabase = createServiceClient();
   const { data, error } = await supabase.from('admin_users').insert({
-    username, password_hash: hashPassword(password),
+    username, password_hash: await hashPassword(password),
     role: role || 'staff', display_name: display_name || username,
   }).select('id, username, role, display_name, is_active').single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -36,10 +37,12 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  if (!auth(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const session = requireAdmin(req, { ownerOnly: true });
+  if (session instanceof NextResponse) return session;
+
   const { id, password, ...updates } = await req.json();
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
-  if (password) updates.password_hash = hashPassword(password);
+  if (password) (updates as any).password_hash = await hashPassword(password);
   const supabase = createServiceClient();
   const { data, error } = await supabase.from('admin_users').update(updates).eq('id', id)
     .select('id, username, role, display_name, is_active').single();
@@ -48,7 +51,9 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  if (!auth(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const session = requireAdmin(req, { ownerOnly: true });
+  if (session instanceof NextResponse) return session;
+
   const { id } = await req.json();
   const supabase = createServiceClient();
   await supabase.from('admin_users').delete().eq('id', id);

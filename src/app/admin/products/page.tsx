@@ -7,7 +7,7 @@ import { Upload, Package, AlertCircle, CheckCircle2, Loader2,
 import { normalizeCategory, formatCurrency } from '@/lib/utils';
 import { Product } from '@/types';
 import { useRouter } from 'next/navigation';
-import { ADMIN_TOKEN_KEY, getAdminRole, canAccess } from '@/lib/admin-auth';
+import { fetchAdminSession, getAdminRole, canAccess, adminFetch } from '@/lib/admin-auth';
 
 interface ParsedProduct {
   category: string; sub_category: string; upc: string | null;
@@ -55,8 +55,7 @@ interface EditState {
   price: string;
 }
 
-function AddProductRow({ adminToken, onAdded }: {
-  adminToken: string;
+function AddProductRow({ onAdded }: {
   onAdded: (p: Product) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -74,9 +73,9 @@ function AddProductRow({ adminToken, onAdded }: {
   async function save() {
     if (!form.description || !form.price) return;
     setSaving(true);
-    const res = await fetch('/api/products', {
+    const res = await adminFetch('/api/products', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': adminToken },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ products: [{
         description: form.description.toUpperCase(),
         category: form.category,
@@ -91,9 +90,7 @@ function AddProductRow({ adminToken, onAdded }: {
     if (res.ok) {
       reset();
       // Fetch the newly added product to get its ID
-      const listRes = await fetch(`/api/products?search=${encodeURIComponent(form.description)}&per_page=1`, {
-        headers: { 'x-admin-token': adminToken },
-      });
+      const listRes = await adminFetch(`/api/products?search=${encodeURIComponent(form.description)}&per_page=1`);
       if (listRes.ok) {
         const data = await listRes.json();
         if (data.products?.[0]) onAdded(data.products[0]);
@@ -161,9 +158,8 @@ function AddProductRow({ adminToken, onAdded }: {
   );
 }
 
-function EditableRow({ product, adminToken, onSaved, onToggle }: {
+function EditableRow({ product, onSaved, onToggle }: {
   product: Product;
-  adminToken: string;
   onSaved: (p: Product) => void;
   onToggle: (p: Product) => void;
 }) {
@@ -180,9 +176,9 @@ function EditableRow({ product, adminToken, onSaved, onToggle }: {
 
   async function save() {
     setSaving(true);
-    const res = await fetch('/api/products', {
+    const res = await adminFetch('/api/products', {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': adminToken },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         id: product.id,
         description: form.description,
@@ -295,29 +291,29 @@ export default function AdminProductsPage() {
   const [previewAll, setPreviewAll] = useState<ParsedProduct[]>([]);
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
 
-  const adminToken = typeof window !== 'undefined'
-    ? sessionStorage.getItem(ADMIN_TOKEN_KEY) || '' : '';
   const [denied, setDenied] = useState(false);
   const role = typeof window !== 'undefined' ? getAdminRole() : null;
 
+  // Auth guard — verify the session cookie with the server
   useEffect(() => {
-    if (!sessionStorage.getItem(ADMIN_TOKEN_KEY)) { router.push('/admin'); return; }
-    if (!canAccess(getAdminRole(), 'products')) { setDenied(true); return; }
+    (async () => {
+      const session = await fetchAdminSession();
+      if (!session) { router.push('/admin'); return; }
+      if (!canAccess(session.role, 'products')) { setDenied(true); return; }
+    })();
   }, [router]);
 
   const fetchProducts = useCallback(async (q = search, p = page) => {
     setLoading(true);
     const params = new URLSearchParams({ search: q, page: String(p), per_page: '50' });
-    const res = await fetch(`/api/products?${params}`, {
-      headers: { 'x-admin-token': adminToken },
-    });
+    const res = await adminFetch(`/api/products?${params}`);
     if (res.ok) {
       const data = await res.json();
       setProducts(data.products || []);
       setTotal(data.total || 0);
     }
     setLoading(false);
-  }, [adminToken, search, page]);
+  }, [search, page]);
 
   useEffect(() => { fetchProducts(); }, [page]);
 
@@ -327,9 +323,9 @@ export default function AdminProductsPage() {
   }, [search]);
 
   async function toggleActive(product: Product) {
-    const res = await fetch('/api/products', {
+    const res = await adminFetch('/api/products', {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': adminToken },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: product.id, is_active: !product.is_active }),
     });
     if (res.ok) {
@@ -383,9 +379,9 @@ export default function AdminProductsPage() {
     if (!previewAll.length) return;
     setUploading(true);
     try {
-      const res = await fetch('/api/products', {
+      const res = await adminFetch('/api/products', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-admin-token': adminToken },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ products: previewAll }),
       });
       if (res.ok) {
@@ -475,12 +471,11 @@ export default function AdminProductsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  <AddProductRow adminToken={adminToken} onAdded={handleAdded} />
+                  <AddProductRow onAdded={handleAdded} />
                   {products.map(product => (
                     <EditableRow
                       key={product.id}
                       product={product}
-                      adminToken={adminToken}
                       onSaved={handleSaved}
                       onToggle={toggleActive}
                     />

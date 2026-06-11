@@ -1,6 +1,7 @@
 // src/app/api/orders/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
+import { requireAdmin } from '@/lib/admin-auth-server';
 
 export async function GET(
   req: NextRequest,
@@ -27,10 +28,8 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   // Admin auth check
-  const authHeader = req.headers.get('x-admin-token');
-  if (authHeader !== process.env.ADMIN_SECRET_KEY) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  const session = requireAdmin(req, { area: 'orders', editRequired: true });
+  if (session instanceof NextResponse) return session;
 
   const { id } = await params;
   const body = await req.json();
@@ -58,19 +57,15 @@ export async function PATCH(
   // Write an activity log entry for status changes.
   // Admin identity comes from headers set by the admin client (see admin-auth.ts / fetch helper).
   if (body.status && existing && body.status !== existing.status) {
-    const adminUsername = req.headers.get('x-admin-username') || null;
-    const adminDisplayName = req.headers.get('x-admin-name') || null;
-    const adminRole = req.headers.get('x-admin-role') || null;
-
     await supabase.from('activity_logs').insert({
       order_id: id,
       order_number: existing.order_number,
       action: 'status_change',
       from_value: existing.status,
       to_value: body.status,
-      admin_username: adminUsername,
-      admin_display_name: adminDisplayName,
-      admin_role: adminRole,
+      admin_username: session.username,
+      admin_display_name: session.display_name,
+      admin_role: session.role,
       company_name: existing.company_name,
       contact_name: existing.contact_name,
       phone: existing.phone,
@@ -85,16 +80,10 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const authHeader = req.headers.get('x-admin-token');
-  if (authHeader !== process.env.ADMIN_SECRET_KEY) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
   // Only Owners may permanently delete orders
-  const role = req.headers.get('x-admin-role');
-  if (role !== 'owner') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  }
+  const session = requireAdmin(req, { ownerOnly: true });
+  if (session instanceof NextResponse) return session;
+  const role = session.role;
 
   const { id } = await params;
   const supabase = createServiceClient();
@@ -111,16 +100,14 @@ export async function DELETE(
 
   // Log the deletion for accountability
   if (existing) {
-    const adminUsername = req.headers.get('x-admin-username') || null;
-    const adminDisplayName = req.headers.get('x-admin-name') || null;
     await supabase.from('activity_logs').insert({
       order_id: null,
       order_number: existing.order_number,
       action: 'order_deleted',
       from_value: existing.status,
       to_value: null,
-      admin_username: adminUsername,
-      admin_display_name: adminDisplayName,
+      admin_username: session.username,
+      admin_display_name: session.display_name,
       admin_role: role,
       company_name: existing.company_name,
       contact_name: existing.contact_name,

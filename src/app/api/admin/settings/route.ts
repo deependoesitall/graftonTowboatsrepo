@@ -1,21 +1,13 @@
 // src/app/api/admin/settings/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
-import { createHash } from 'crypto';
-
-function hashPassword(password: string): string {
-  return createHash('sha256').update(password + 'gts-salt-2024').digest('hex');
-}
-
-function verifyPassword(password: string, hash: string): boolean {
-  return hashPassword(password) === hash;
-}
+import { hashPassword, verifyPassword } from '@/lib/password';
+import { requireAdmin } from '@/lib/admin-auth-server';
 
 export async function GET(req: NextRequest) {
-  const authHeader = req.headers.get('x-admin-token');
-  if (authHeader !== process.env.ADMIN_SECRET_KEY) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  const session = requireAdmin(req, { area: 'settings' });
+  if (session instanceof NextResponse) return session;
+
   const supabase = createServiceClient();
   const { data, error } = await supabase
     .from('admin_settings')
@@ -28,10 +20,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const authHeader = req.headers.get('x-admin-token');
-  if (authHeader !== process.env.ADMIN_SECRET_KEY) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  const session = requireAdmin(req, { area: 'settings', editRequired: true });
+  if (session instanceof NextResponse) return session;
+
   const body = await req.json();
   const supabase = createServiceClient();
 
@@ -50,21 +41,32 @@ export async function PATCH(req: NextRequest) {
   if (body.email_button_text !== undefined) updates.email_button_text = body.email_button_text;
   if (body.email_button_url !== undefined) updates.email_button_url = body.email_button_url;
 
-  // Password change — requires current password verification
+  // Password change — requires current password verification.
+  // Only the owner may change the legacy single-password.
   if (body.new_password) {
+    if (session.role !== 'owner') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
     if (!body.current_password) {
       return NextResponse.json({ error: 'Current password required' }, { status: 400 });
     }
-    // Check current password against env var OR stored hash
-    const envPassword = process.env.ADMIN_PASSWORD || '';
     const { data: settings } = await supabase.from('admin_settings').select('admin_password_hash').single();
-    const storedHash = settings?.admin_password_hash;
-    const validCurrent = body.current_password === envPassword ||
-      (storedHash && verifyPassword(body.current_password, storedHash));
+    const storedHash = settings?.admin_password_hash as string | null | undefined;
+
+    let validCurrent = false;
+    if (storedHash) {
+      validCurrent = await verifyPassword(body.current_password, storedHash);
+    } else {
+      // No password has been set in Supabase yet — fall back to ADMIN_PASSWORD env var.
+      // No hardcoded default; if ADMIN_PASSWORD is unset, this fails closed.
+      const envPassword = process.env.ADMIN_PASSWORD;
+      validCurrent = !!envPassword && body.current_password === envPassword;
+    }
+
     if (!validCurrent) {
       return NextResponse.json({ error: 'Current password incorrect' }, { status: 400 });
     }
-    updates.admin_password_hash = hashPassword(body.new_password);
+    updates.admin_password_hash = await hashPassword(body.new_password);
   }
 
   // Fetch the settings row id first so update targets a specific row

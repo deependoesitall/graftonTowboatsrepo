@@ -21,6 +21,7 @@ async function getUserIdFromToken(req: NextRequest): Promise<string | null> {
 import { generateOrderNumber } from '@/lib/utils';
 import { sendOrderEmail } from '@/lib/email';
 import { Order } from '@/types';
+import { requireAdmin } from '@/lib/admin-auth-server';
 import { z } from 'zod';
 
 const submitSchema = z.object({
@@ -144,10 +145,8 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
-  const authHeader = req.headers.get('x-admin-token');
-  if (authHeader !== process.env.ADMIN_SECRET_KEY) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  const session = requireAdmin(req, { area: 'orders' });
+  if (session instanceof NextResponse) return session;
 
   const { searchParams } = new URL(req.url);
   const page = Math.max(1, parseInt(searchParams.get('page') || '1'));

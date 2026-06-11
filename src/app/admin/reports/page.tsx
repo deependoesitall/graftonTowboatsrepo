@@ -11,7 +11,7 @@ import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend,
 } from 'recharts';
-import { ADMIN_TOKEN_KEY, getAdminRole, canAccess } from '@/lib/admin-auth';
+import { fetchAdminSession, getAdminRole, canAccess, adminFetch } from '@/lib/admin-auth';
 import { formatCurrency, formatDate } from '@/lib/utils';
 
 interface Stats {
@@ -91,7 +91,7 @@ function getPresetRange(preset: PresetKey, customFrom?: string, customTo?: strin
 export default function ReportsPage() {
   const router = useRouter();
   const [denied, setDenied] = useState(false);
-  const [adminToken, setAdminToken] = useState('');
+  const [ready, setReady] = useState(false);
 
   const [preset, setPreset] = useState<PresetKey>('this_month');
   const [customFrom, setCustomFrom] = useState('');
@@ -104,32 +104,31 @@ export default function ReportsPage() {
   const [expandedVessel, setExpandedVessel] = useState<string | null>(null);
   const [productCategoryFilter, setProductCategoryFilter] = useState('All');
 
+  // Auth guard — verify the session cookie with the server
   useEffect(() => {
-    const token = sessionStorage.getItem(ADMIN_TOKEN_KEY);
-    if (!token) { router.push('/admin'); return; }
-    if (!canAccess(getAdminRole(), 'reports')) { setDenied(true); return; }
-    setAdminToken(token);
+    (async () => {
+      const session = await fetchAdminSession();
+      if (!session) { router.push('/admin'); return; }
+      if (!canAccess(session.role, 'reports')) { setDenied(true); return; }
+      setReady(true);
+    })();
   }, [router]);
 
   const range = useMemo(() => getPresetRange(preset, customFrom, customTo), [preset, customFrom, customTo]);
 
   const fetchReport = useCallback(async () => {
-    if (!adminToken) return;
+    if (!ready) return;
     setLoading(true);
     const params = new URLSearchParams({ from: range.from, to: range.to });
-    const res = await fetch(`/api/admin/reports?${params}`, {
-      headers: { 'x-admin-token': adminToken },
-    });
+    const res = await adminFetch(`/api/admin/reports?${params}`);
     if (res.ok) setData(await res.json());
     setLoading(false);
-  }, [adminToken, range.from, range.to]);
+  }, [ready, range.from, range.to]);
 
   useEffect(() => { fetchReport(); }, [fetchReport]);
 
   function exportCsv(type: 'orders' | 'products' | 'vessels') {
-    fetch(`/api/admin/reports/export?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}&type=${type}`, {
-      headers: { 'x-admin-token': adminToken },
-    }).then(async res => {
+    adminFetch(`/api/admin/reports/export?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}&type=${type}`).then(async res => {
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -142,9 +141,7 @@ export default function ReportsPage() {
 
   function exportPdf() {
     const params = new URLSearchParams({ from: range.from, to: range.to, label: range.label });
-    fetch(`/api/admin/reports/pdf?${params}`, {
-      headers: { 'x-admin-token': adminToken },
-    }).then(async res => {
+    adminFetch(`/api/admin/reports/pdf?${params}`).then(async res => {
       const html = await res.text();
       const blob = new Blob([html], { type: 'text/html' });
       const url = URL.createObjectURL(blob);

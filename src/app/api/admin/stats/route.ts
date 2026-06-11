@@ -1,12 +1,11 @@
 // src/app/api/admin/stats/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
+import { requireAdmin } from '@/lib/admin-auth-server';
 
 export async function GET(req: NextRequest) {
-  const authHeader = req.headers.get('x-admin-token');
-  if (authHeader !== process.env.ADMIN_SECRET_KEY) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  const session = requireAdmin(req);
+  if (session instanceof NextResponse) return session;
 
   const supabase = createServiceClient();
 

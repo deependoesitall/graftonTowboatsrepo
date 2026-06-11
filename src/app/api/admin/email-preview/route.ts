@@ -3,6 +3,7 @@
 // in-progress (unsaved) template settings, so they can preview before saving.
 import { NextRequest, NextResponse } from 'next/server';
 import { buildOrderEmailHtml } from '@/lib/email';
+import { requireAdmin } from '@/lib/admin-auth-server';
 import { Order } from '@/types';
 
 const SAMPLE_ORDER: Order = {
@@ -26,10 +27,8 @@ const SAMPLE_ORDER: Order = {
 };
 
 export async function POST(req: NextRequest) {
-  const authHeader = req.headers.get('x-admin-token');
-  if (authHeader !== process.env.ADMIN_SECRET_KEY) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  const session = requireAdmin(req, { area: 'settings' });
+  if (session instanceof NextResponse) return session;
 
   const body = await req.json();
 

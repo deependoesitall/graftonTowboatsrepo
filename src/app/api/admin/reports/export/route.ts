@@ -1,10 +1,8 @@
 // src/app/api/admin/reports/export/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
+import { requireAdmin } from '@/lib/admin-auth-server';
 
-function auth(req: NextRequest) {
-  return req.headers.get('x-admin-token') === process.env.ADMIN_SECRET_KEY;
-}
 
 function csvEscape(val: any): string {
   const s = String(val ?? '');
@@ -15,7 +13,8 @@ function csvEscape(val: any): string {
 }
 
 export async function GET(req: NextRequest) {
-  if (!auth(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const session = requireAdmin(req, { area: 'reports' });
+  if (session instanceof NextResponse) return session;
 
   const { searchParams } = new URL(req.url);
   const from = searchParams.get('from');

@@ -40,9 +40,13 @@ function applyTemplateVars(text: string, order: Order, appUrl: string): string {
 }
 
 function getAppUrl(): string {
-  return (process.env.NEXT_PUBLIC_APP_URL && !process.env.NEXT_PUBLIC_APP_URL.includes('*'))
-    ? process.env.NEXT_PUBLIC_APP_URL
-    : 'https://grafton-towboatsrepo.vercel.app';
+  // Requires NEXT_PUBLIC_APP_URL to be set in Vercel env vars.
+  // No hardcoded production URL fallback — falls back to localhost only
+  // for local development convenience.
+  if (process.env.NEXT_PUBLIC_APP_URL && !process.env.NEXT_PUBLIC_APP_URL.includes('*')) {
+    return process.env.NEXT_PUBLIC_APP_URL;
+  }
+  return 'http://localhost:3000';
 }
 
 // Builds the full HTML email body for an order notification.

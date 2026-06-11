@@ -6,7 +6,7 @@ import { Search, Download, Eye, Loader2, RefreshCw, Package, ArrowRight, Trash2 
 import { formatCurrency, formatDate, ORDER_STATUSES } from '@/lib/utils';
 import { Order, OrderStatus } from '@/types';
 import { OrderDetailModal } from '@/components/admin/OrderDetailModal';
-import { ADMIN_TOKEN_KEY, getAdminRole, canEdit, adminHeaders } from '@/lib/admin-auth';
+import { fetchAdminSession, getAdminRole, canEdit, adminFetch } from '@/lib/admin-auth';
 
 const STATUS_CONFIG = {
   new:         { label: 'New',         bg: 'bg-blue-50',   text: 'text-blue-700',   border: 'border-blue-200',  dot: 'bg-blue-500'   },
@@ -48,14 +48,16 @@ function OrdersContent() {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
-  const adminToken = typeof window !== 'undefined' ? sessionStorage.getItem(ADMIN_TOKEN_KEY) || '' : '';
   const canEditOrders = canEdit(typeof window !== 'undefined' ? getAdminRole() : null, 'orders');
   const isOwner = (typeof window !== 'undefined' ? getAdminRole() : null) === 'owner';
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // Auth guard
+  // Auth guard — verify the session cookie with the server
   useEffect(() => {
-    if (!sessionStorage.getItem(ADMIN_TOKEN_KEY)) router.push('/admin');
+    (async () => {
+      const session = await fetchAdminSession();
+      if (!session) router.push('/admin');
+    })();
   }, [router]);
 
   const fetchOrders = useCallback(async () => {
@@ -66,9 +68,7 @@ function OrdersContent() {
     if (search) params.set('search', search);
     if (statusFilter) params.set('status', statusFilter);
 
-    const res = await fetch(`/api/orders?${params.toString()}`, {
-      headers: { 'x-admin-token': adminToken },
-    });
+    const res = await adminFetch(`/api/orders?${params.toString()}`);
     if (res.ok) {
       const data = await res.json();
       setOrders(data.orders || []);
@@ -76,7 +76,7 @@ function OrdersContent() {
       setStatusCounts(data.status_counts || {});
     }
     setLoading(false);
-  }, [page, search, statusFilter, adminToken]);
+  }, [page, search, statusFilter]);
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
 
@@ -84,9 +84,9 @@ function OrdersContent() {
     const next = NEXT_STATUS[order.status];
     if (!next) return;
     setUpdatingId(order.id);
-    await fetch(`/api/orders/${order.id}`, {
+    await adminFetch(`/api/orders/${order.id}`, {
       method: 'PATCH',
-      headers: adminHeaders({ 'Content-Type': 'application/json' }),
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: next }),
     });
     await fetchOrders();
@@ -102,9 +102,9 @@ function OrdersContent() {
     setSelectedOrder(prev => prev && prev.id === orderId ? { ...prev, status } : prev);
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status } : o));
 
-    await fetch(`/api/orders/${orderId}`, {
+    await adminFetch(`/api/orders/${orderId}`, {
       method: 'PATCH',
-      headers: adminHeaders({ 'Content-Type': 'application/json' }),
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status }),
     });
     fetchOrders();
@@ -113,9 +113,8 @@ function OrdersContent() {
   async function deleteOrder(orderId: string, orderNumber: string) {
     if (!confirm(`Permanently delete order ${orderNumber}? This cannot be undone.`)) return;
     setDeletingId(orderId);
-    const res = await fetch(`/api/orders/${orderId}`, {
+    const res = await adminFetch(`/api/orders/${orderId}`, {
       method: 'DELETE',
-      headers: adminHeaders(),
     });
     if (res.ok) {
       setOrders(prev => prev.filter(o => o.id !== orderId));
@@ -333,7 +332,6 @@ function OrdersContent() {
             onStatusChange={(status) => updateStatus(selectedOrder.id, status)}
             onDownloadPdf={() => downloadOrderPdf(selectedOrder.id, selectedOrder.order_number)}
             onDownloadCsv={() => downloadOrderCsv(selectedOrder)}
-            adminToken={adminToken}
             onRefresh={fetchOrders}
             canEdit={canEditOrders}
             isOwner={isOwner}

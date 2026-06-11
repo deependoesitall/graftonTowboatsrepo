@@ -12,7 +12,6 @@ interface OrderDetailModalProps {
   onDownloadPdf: () => void;
   onDownloadCsv: () => void;
   onDelete?: () => void;
-  adminToken: string;
   onRefresh: () => void;
   canEdit?: boolean;
   isOwner?: boolean;

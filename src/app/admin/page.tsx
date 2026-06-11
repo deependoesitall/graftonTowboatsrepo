@@ -7,11 +7,10 @@ import {
   ShoppingBag, Lock, Eye, EyeOff, Loader2
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
-import { setAdminSession, ADMIN_TOKEN_KEY } from '@/lib/admin-auth';
+import { setAdminUiState, fetchAdminSession, adminFetch } from '@/lib/admin-auth';
 
 export default function AdminDashboard() {
-  const [token, setToken] = useState('');
-  const [savedToken, setSavedToken] = useState('');
+  const [loggedIn, setLoggedIn] = useState<boolean | null>(null); // null = checking
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
@@ -28,9 +27,11 @@ export default function AdminDashboard() {
   const router = useRouter();
 
   useEffect(() => {
-    const t = sessionStorage.getItem(ADMIN_TOKEN_KEY) || '';
-    setSavedToken(t);
-    if (t) fetchStats(t);
+    (async () => {
+      const session = await fetchAdminSession();
+      setLoggedIn(!!session);
+      if (session) fetchStats();
+    })();
   }, []);
 
   async function handleLogin() {
@@ -46,8 +47,8 @@ export default function AdminDashboard() {
         setLoginError(username.trim() ? 'Invalid username or password.' : 'Incorrect password. Please try again.');
         return;
       }
-      const { token: t, user } = await res.json();
-      setAdminSession(t, user?.role || 'owner', user?.display_name || user?.username || 'Admin', user?.username || 'admin');
+      const { user } = await res.json();
+      setAdminUiState(user?.role || 'owner', user?.display_name || user?.username || 'Admin', user?.username || 'admin');
       // Full reload so AdminNav (and everything else) re-initializes with the new session/role
       window.location.href = '/admin';
     } finally {
@@ -55,19 +56,20 @@ export default function AdminDashboard() {
     }
   }
 
-  async function fetchStats(t: string) {
-    const res = await fetch('/api/admin/stats', {
-      headers: { 'x-admin-token': t },
-    });
+  async function fetchStats() {
+    const res = await adminFetch('/api/admin/stats');
     if (res.ok) setStats(await res.json());
-    else {
-      sessionStorage.removeItem(ADMIN_TOKEN_KEY);
-      setSavedToken('');
-    }
+    else setLoggedIn(false);
   }
 
   // Not logged in
-  if (!savedToken) {
+  if (loggedIn === null) {
+    return (
+      <div className="min-h-[80vh] flex items-center justify-center text-gray-400 text-sm">Loading…</div>
+    );
+  }
+
+  if (!loggedIn) {
     return (
       <div className="min-h-[80vh] flex items-center justify-center">
         <div className="card-base w-full max-w-sm p-8">
