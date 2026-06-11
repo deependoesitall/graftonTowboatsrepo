@@ -112,10 +112,7 @@ export async function POST(req: NextRequest) {
       // IMPORTANT: must be awaited — Vercel serverless functions terminate
       // immediately after the response is sent, killing any unawaited promises.
       try {
-        const { data: s } = await supabase.from('admin_settings').select(
-          'business_email, order_email_cc, email_debug_enabled, order_email_subject, ' +
-          'email_header_tagline, email_intro_message, email_footer_text, email_button_text, email_button_url'
-        ).single();
+        const { data: s } = await supabase.from('admin_settings').select('business_email, order_email_cc, email_debug_enabled, order_email_subject, email_header_tagline, email_intro_message, email_footer_text, email_button_text, email_button_url').single();
         debugEnabled = !!s?.email_debug_enabled;
         const email = s?.business_email || process.env.BUSINESS_EMAIL;
         const result = await sendOrderEmail(fullOrder as Order, email, s?.order_email_cc, {
