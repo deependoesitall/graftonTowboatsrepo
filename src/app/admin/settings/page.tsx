@@ -35,6 +35,10 @@ interface ActivityLog {
   admin_username: string | null;
   admin_display_name: string | null;
   admin_role: string | null;
+  company_name: string | null;
+  contact_name: string | null;
+  phone: string | null;
+  po_number: string | null;
   created_at: string;
 }
 
@@ -264,7 +268,7 @@ export default function AdminSettingsPage() {
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/40" />
                 <input
                   type="search"
-                  placeholder="Search order #, user…"
+                  placeholder="Search order #, vessel, contact, PO, user…"
                   value={logsSearch}
                   onChange={e => { setLogsPage(1); setLogsSearch(e.target.value); }}
                   className="bg-white/10 text-white placeholder:text-white/40 text-xs rounded-full pl-8 pr-3 py-1.5 w-48 focus:outline-none focus:ring-1 focus:ring-brand-yellow"
@@ -303,14 +307,34 @@ export default function AdminSettingsPage() {
                         </p>
                         <p className="text-xs text-gray-400 truncate">
                           Order <span className="font-mono font-semibold text-gray-500">{log.order_number}</span>
-                          {log.from_value && log.to_value && (
+                          {log.action === 'order_deleted' ? (
+                            <span className="inline-flex items-center gap-1 ml-1.5 text-red-500 font-semibold">
+                              <Trash2 className="w-3 h-3" />
+                              Deleted
+                              {log.from_value && (
+                                <span className="text-gray-400 font-normal capitalize">
+                                  (was {log.from_value.replace('_', ' ')})
+                                </span>
+                              )}
+                            </span>
+                          ) : log.from_value && log.to_value ? (
                             <span className="inline-flex items-center gap-1 ml-1.5">
                               <span className="capitalize">{log.from_value.replace('_', ' ')}</span>
                               <ArrowRight className="w-3 h-3" />
                               <span className="capitalize font-semibold text-brand-navy">{log.to_value.replace('_', ' ')}</span>
                             </span>
+                          ) : (
+                            <span className="ml-1.5 capitalize">{log.action.replace('_', ' ')}</span>
                           )}
                         </p>
+                        {(log.company_name || log.contact_name || log.po_number) && (
+                          <p className="text-[11px] text-gray-300 truncate mt-0.5">
+                            {log.company_name && <span className="font-medium text-gray-400">{log.company_name}</span>}
+                            {log.contact_name && <span> · {log.contact_name}</span>}
+                            {log.phone && <span> · {log.phone}</span>}
+                            {log.po_number && <span> · PO #{log.po_number}</span>}
+                          </p>
+                        )}
                       </div>
                     </div>
                     <div className="text-right shrink-0">
@@ -347,7 +371,7 @@ export default function AdminSettingsPage() {
             )}
 
             <div className="bg-gray-50 px-6 py-3 text-xs text-gray-400 border-t border-gray-100">
-              Tracks order status changes made by admin users. Visible to Owners only.
+              Tracks order status changes and deletions made by admin users. Search by order #, vessel/company, contact name, phone, PO number, or staff name. Visible to Owners only.
             </div>
           </div>
         </div>

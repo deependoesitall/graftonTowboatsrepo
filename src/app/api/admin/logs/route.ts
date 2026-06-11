@@ -29,8 +29,17 @@ export async function GET(req: NextRequest) {
     .range(offset, offset + perPage - 1);
 
   if (search) {
+    const term = search.replace(/[%_]/g, ''); // strip wildcard chars from user input
     query = query.or(
-      `order_number.ilike.%${search}%,admin_username.ilike.%${search}%,admin_display_name.ilike.%${search}%`
+      [
+        `order_number.ilike.%${term}%`,
+        `admin_username.ilike.%${term}%`,
+        `admin_display_name.ilike.%${term}%`,
+        `company_name.ilike.%${term}%`,
+        `contact_name.ilike.%${term}%`,
+        `phone.ilike.%${term}%`,
+        `po_number.ilike.%${term}%`,
+      ].join(',')
     );
   }
 

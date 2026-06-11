@@ -39,7 +39,7 @@ export async function PATCH(
   // Fetch current order first so we can log the status transition
   const { data: existing } = await supabase
     .from('orders')
-    .select('status, order_number')
+    .select('status, order_number, company_name, contact_name, phone, po_number')
     .eq('id', id)
     .single();
 
@@ -71,6 +71,10 @@ export async function PATCH(
       admin_username: adminUsername,
       admin_display_name: adminDisplayName,
       admin_role: adminRole,
+      company_name: existing.company_name,
+      contact_name: existing.contact_name,
+      phone: existing.phone,
+      po_number: existing.po_number,
     });
   }
 
@@ -97,7 +101,7 @@ export async function DELETE(
 
   const { data: existing } = await supabase
     .from('orders')
-    .select('order_number, status')
+    .select('order_number, status, company_name, contact_name, phone, po_number')
     .eq('id', id)
     .single();
 
@@ -118,6 +122,10 @@ export async function DELETE(
       admin_username: adminUsername,
       admin_display_name: adminDisplayName,
       admin_role: role,
+      company_name: existing.company_name,
+      contact_name: existing.contact_name,
+      phone: existing.phone,
+      po_number: existing.po_number,
     });
   }
 
