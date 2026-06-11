@@ -24,6 +24,11 @@ interface Settings {
   draft_orders_enabled: boolean;
   repeat_orders_enabled: boolean;
   email_debug_enabled: boolean;
+  email_header_tagline: string;
+  email_intro_message: string;
+  email_footer_text: string;
+  email_button_text: string;
+  email_button_url: string;
 }
 
 interface ActivityLog {
@@ -61,6 +66,11 @@ export default function AdminSettingsPage() {
     tax_rate: 0, tax_enabled: false,
     draft_orders_enabled: false, repeat_orders_enabled: true,
     email_debug_enabled: false,
+    email_header_tagline: 'New Order Received',
+    email_intro_message: '',
+    email_footer_text: 'Grafton Towboat Services · Grafton, IL 62037 · (618) 556-0290',
+    email_button_text: 'Order Dashboard',
+    email_button_url: '/admin/orders',
   });
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
@@ -95,6 +105,11 @@ export default function AdminSettingsPage() {
   // Test email
   const [testingEmail, setTestingEmail] = useState(false);
   const [testEmailResult, setTestEmailResult] = useState<{ ok: boolean; error?: string; hint?: string; from?: string; to?: string } | null>(null);
+
+  // Email template preview
+  const [previewHtml, setPreviewHtml] = useState('');
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
 
   const adminToken = typeof window !== 'undefined' ? sessionStorage.getItem(ADMIN_TOKEN_KEY) || '' : '';
   const [denied, setDenied] = useState(false);
@@ -141,6 +156,27 @@ export default function AdminSettingsPage() {
   useEffect(() => {
     if (tab === 'logs' && !denied) loadLogs();
   }, [tab, logsPage, logsSearch]);
+
+  async function loadEmailPreview() {
+    setPreviewLoading(true);
+    try {
+      const res = await fetch('/api/admin/email-preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-token': adminToken },
+        body: JSON.stringify({
+          order_email_subject: settings.order_email_subject,
+          email_header_tagline: settings.email_header_tagline,
+          email_intro_message: settings.email_intro_message,
+          email_footer_text: settings.email_footer_text,
+          email_button_text: settings.email_button_text,
+          email_button_url: settings.email_button_url,
+        }),
+      });
+      setPreviewHtml(await res.text());
+      setShowPreview(true);
+    } catch {}
+    setPreviewLoading(false);
+  }
 
   async function sendTestEmail() {
     setTestingEmail(true);
@@ -654,11 +690,71 @@ export default function AdminSettingsPage() {
             <label className="label-base">Email Subject Template</label>
             <input type="text" className="input-base" value={settings.order_email_subject}
               onChange={e => setSettings(s => ({ ...s, order_email_subject: e.target.value }))} />
-            <p className="text-xs text-gray-400 mt-1">
-              Variables: <code className="bg-gray-100 px-1 rounded">{'{order_number}'}</code>{' '}
-              <code className="bg-gray-100 px-1 rounded">{'{company_name}'}</code>
-            </p>
           </div>
+
+          <div className="border-t border-gray-100 pt-5">
+            <h2 className="font-bold text-brand-navy mb-1">Email Template</h2>
+            <p className="text-xs text-gray-400 mb-4">Customize the order notification email sent to staff and owners.</p>
+
+            <div className="space-y-4">
+              <div>
+                <label className="label-base">Header Tagline</label>
+                <input type="text" className="input-base" value={settings.email_header_tagline}
+                  onChange={e => setSettings(s => ({ ...s, email_header_tagline: e.target.value }))}
+                  placeholder="New Order Received" />
+                <p className="text-xs text-gray-400 mt-1">Appears under the company name at the top of the email.</p>
+              </div>
+
+              <div>
+                <label className="label-base">Intro Message <span className="text-gray-400 font-normal normal-case">(optional)</span></label>
+                <textarea className="input-base" rows={3} value={settings.email_intro_message}
+                  onChange={e => setSettings(s => ({ ...s, email_intro_message: e.target.value }))}
+                  placeholder="e.g. Thanks for your order! Our team will start preparing it shortly." />
+                <p className="text-xs text-gray-400 mt-1">A short message shown above the order details. Leave blank to omit.</p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="label-base">Button Text</label>
+                  <input type="text" className="input-base" value={settings.email_button_text}
+                    onChange={e => setSettings(s => ({ ...s, email_button_text: e.target.value }))}
+                    placeholder="Order Dashboard" />
+                </div>
+                <div>
+                  <label className="label-base">Button Link</label>
+                  <input type="text" className="input-base" value={settings.email_button_url}
+                    onChange={e => setSettings(s => ({ ...s, email_button_url: e.target.value }))}
+                    placeholder="/admin/orders" />
+                  <p className="text-xs text-gray-400 mt-1">Use a path like <code className="bg-gray-100 px-1 rounded">/admin/orders</code> or a full URL.</p>
+                </div>
+              </div>
+
+              <div>
+                <label className="label-base">Footer Text</label>
+                <input type="text" className="input-base" value={settings.email_footer_text}
+                  onChange={e => setSettings(s => ({ ...s, email_footer_text: e.target.value }))} />
+              </div>
+
+              <div className="bg-gray-50 rounded-lg p-3">
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Available Variables</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {['{order_number}', '{company_name}', '{contact_name}', '{phone}', '{po_number}', '{eta}', '{order_total}', '{item_count}', '{order_date}'].map(v => (
+                    <code key={v} className="bg-white border border-gray-200 px-1.5 py-0.5 rounded text-[11px] text-brand-navy">{v}</code>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-400 mt-2">
+                  Use these in the subject, header tagline, intro message, footer, button text, or button link — they'll be replaced with the order's actual details.
+                </p>
+              </div>
+
+              <button onClick={loadEmailPreview} disabled={previewLoading}
+                className="btn-outline text-sm px-4 py-2 flex items-center gap-2">
+                {previewLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4" />}
+                Preview Email
+              </button>
+            </div>
+          </div>
+
           <div className="bg-blue-50 rounded-lg p-4 text-sm">
             <p className="font-semibold text-blue-800 mb-2">📧 Email Setup (Resend + Gmail)</p>
             <p className="text-blue-700 text-xs leading-relaxed">
@@ -698,6 +794,23 @@ export default function AdminSettingsPage() {
                 )}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Email preview modal */}
+      {showPreview && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" onClick={() => setShowPreview(false)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 shrink-0">
+              <h3 className="font-bold text-brand-navy text-sm">Email Preview <span className="font-normal text-gray-400">(sample order data)</span></h3>
+              <button onClick={() => setShowPreview(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto bg-gray-100">
+              <iframe srcDoc={previewHtml} className="w-full h-full min-h-[500px] border-0" title="Email preview" />
+            </div>
           </div>
         </div>
       )}
