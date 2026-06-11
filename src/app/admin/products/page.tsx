@@ -599,6 +599,29 @@ export default function AdminProductsPage() {
 
   const filteredDupGroups = dupGroups.filter(g => dupFilter === 'all' || g.type === dupFilter);
 
+  async function deleteAllDuplicates() {
+    // Keep the first (oldest) item in each visible group, delete the rest.
+    const idsToDelete: string[] = [];
+    for (const group of filteredDupGroups) {
+      const [, ...rest] = group.items;
+      for (const item of rest) idsToDelete.push(item.id);
+    }
+    if (!idsToDelete.length) return;
+    if (!confirm(`Delete ${idsToDelete.length} duplicate item${idsToDelete.length === 1 ? '' : 's'} across ${filteredDupGroups.length} group${filteredDupGroups.length === 1 ? '' : 's'}? The first item in each group will be kept. This cannot be undone.`)) return;
+    setDupLoading(true);
+    const res = await adminFetch('/api/products', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: idsToDelete }),
+    });
+    if (res.ok) {
+      await fetchDuplicates();
+      fetchProducts();
+    } else {
+      setDupLoading(false);
+    }
+  }
+
   const totalPages = Math.ceil(total / perPage);
   const allSelectedOnPage = products.length > 0 && products.every(p => selected.has(p.id));
 
@@ -965,6 +988,13 @@ export default function AdminProductsPage() {
               <button onClick={fetchDuplicates} className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5">
                 <RefreshCw className="w-4 h-4" /> Refresh
               </button>
+              {filteredDupGroups.length > 0 && (
+                <button onClick={deleteAllDuplicates} disabled={dupLoading}
+                  className="text-sm px-3 py-2 rounded font-medium bg-red-600 text-white hover:bg-red-700 flex items-center gap-1.5 transition-colors disabled:opacity-50">
+                  {dupLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                  Delete All Duplicates
+                </button>
+              )}
               {dupSelected.size > 0 && (
                 <button onClick={deleteDupSelected} disabled={dupLoading}
                   className="text-sm px-3 py-2 rounded font-medium bg-red-50 text-red-600 hover:bg-red-100 flex items-center gap-1.5 transition-colors">
