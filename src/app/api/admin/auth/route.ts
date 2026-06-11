@@ -17,7 +17,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { hashPassword, verifyPassword, isLegacyHash } from '@/lib/password';
-import { createAdminSession, sessionCookieOptions, SESSION_COOKIE, AdminRole } from '@/lib/admin-auth-server';
+import { signAdminSession, sessionCookieOptions, SESSION_COOKIE, AdminRole } from '@/lib/admin-auth-server';
 
 export async function POST(req: NextRequest) {
   let body: { password?: string; username?: string };
@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
     await supabase.from('admin_users').update({ last_login: new Date().toISOString() }).eq('id', user.id);
 
     const role = user.role as AdminRole;
-    const token = await createAdminSession({
+    const token = signAdminSession({
       sub: user.id,
       username: user.username,
       role,
@@ -113,7 +113,7 @@ export async function POST(req: NextRequest) {
 
   if (!valid) return genericError;
 
-  const token = await createAdminSession({
+  const token = signAdminSession({
     sub: 'admin',
     username: 'admin',
     role: 'owner',

@@ -5,24 +5,30 @@
 // Sessions are JWTs signed with ADMIN_SECRET_KEY (HS256), stored in an
 // httpOnly, Secure, SameSite=Strict cookie. The token is never exposed
 // to client-side JS — only this server-side helper reads it.
+//
+// SESSION LIFETIME: short (20 min) and sliding. Every successful
+// /api/admin/me check (polled by the admin layout while a tab is open)
+// re-issues a fresh cookie, so an actively-used tab never expires.
+// If the tab/browser is closed, no more refreshes happen and the
+// session naturally expires within ~20 minutes — closing and quickly
+// reopening within that window will NOT require re-login by design
+// (true close-tab-instant-logout isn't reliably detectable client-side
+// without logging people out mid-use, which was explicitly unwanted).
 
 import { NextRequest, NextResponse } from 'next/server';
 import jwt from 'jsonwebtoken';
-import { randomUUID } from 'crypto';
-import { createServiceClient } from '@/lib/supabase/server';
 
 export type AdminRole = 'owner' | 'manager' | 'staff';
 export type Area = 'orders' | 'products' | 'settings' | 'reports' | 'logs';
 
 export const SESSION_COOKIE = 'gts_admin_session';
-const SESSION_TTL_SECONDS = 60 * 60 * 10; // JWT backstop expiry; real expiry is the DB session row
+export const SESSION_TTL_SECONDS = 60 * 20; // 20 minutes, sliding
 
 export interface AdminSessionPayload {
   sub: string;          // admin_users.id, or 'admin' for legacy single-password login
   username: string;
   role: AdminRole;
   display_name: string;
-  jti: string;          // unique session id, tracked in admin_sessions
 }
 
 function getSecret(): string {
@@ -36,56 +42,9 @@ function getSecret(): string {
   return secret;
 }
 
-/** Sign a new admin session JWT. The payload must include a `jti`
- * (use createAdminSession() instead of calling this directly for normal logins). */
+/** Sign a new admin session JWT. */
 export function signAdminSession(payload: AdminSessionPayload): string {
   return jwt.sign(payload, getSecret(), { expiresIn: SESSION_TTL_SECONDS });
-}
-
-/**
- * Create a new server-tracked admin session: generates a jti, signs the
- * JWT, and inserts a row into admin_sessions. Returns the signed token.
- * Call this at login instead of signAdminSession directly.
- */
-export async function createAdminSession(
-  payload: Omit<AdminSessionPayload, 'jti'>
-): Promise<string> {
-  const jti = randomUUID();
-  const token = signAdminSession({ ...payload, jti });
-
-  const supabase = createServiceClient();
-  const expiresAt = new Date(Date.now() + SESSION_TTL_SECONDS * 1000).toISOString();
-  await supabase.from('admin_sessions').insert({
-    jti,
-    admin_user_id: payload.sub,
-    expires_at: expiresAt,
-  });
-
-  return token;
-}
-
-/**
- * Check whether a session's jti is still active in admin_sessions
- * (i.e. the user hasn't logged out / closed the browser since).
- * Returns false if the row is missing or expired.
- */
-export async function isSessionActive(jti: string): Promise<boolean> {
-  const supabase = createServiceClient();
-  const { data } = await supabase
-    .from('admin_sessions')
-    .select('expires_at')
-    .eq('jti', jti)
-    .maybeSingle();
-
-  if (!data) return false;
-  if (new Date(data.expires_at).getTime() < Date.now()) return false;
-  return true;
-}
-
-/** Delete a session row (used on logout / pagehide beacon). */
-export async function deleteAdminSession(jti: string): Promise<void> {
-  const supabase = createServiceClient();
-  await supabase.from('admin_sessions').delete().eq('jti', jti);
 }
 
 /** Verify and decode an admin session JWT. Returns null if invalid/expired/malformed. */
@@ -93,16 +52,15 @@ export function verifyAdminSession(token: string): AdminSessionPayload | null {
   try {
     const decoded = jwt.verify(token, getSecret());
     if (typeof decoded === 'string') return null;
-    const { sub, username, role, display_name, jti } = decoded as Record<string, unknown>;
+    const { sub, username, role, display_name } = decoded as Record<string, unknown>;
     if (
       typeof sub === 'string' &&
       typeof username === 'string' &&
       typeof role === 'string' &&
       typeof display_name === 'string' &&
-      typeof jti === 'string' &&
       (role === 'owner' || role === 'manager' || role === 'staff')
     ) {
-      return { sub, username, role, display_name, jti };
+      return { sub, username, role, display_name };
     }
     return null;
   } catch {
@@ -117,11 +75,7 @@ export function getAdminSession(req: NextRequest): AdminSessionPayload | null {
   return verifyAdminSession(token);
 }
 
-/** Cookie options used when setting the session cookie at login.
- * The cookie itself can persist (so the JWT survives), but the actual
- * "are you logged in" check is the admin_sessions DB row, which is
- * deleted on logout / browser-close beacon (see /api/admin/me and
- * the AdminNav unload handler). */
+/** Cookie options used when setting/refreshing the session cookie. */
 export function sessionCookieOptions() {
   return {
     httpOnly: true,

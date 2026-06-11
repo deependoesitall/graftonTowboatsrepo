@@ -34,19 +34,6 @@ export function AdminNav() {
     setName(getAdminName());
   }, [path]);
 
-  // Closing the tab/browser (or navigating away entirely) ends the
-  // server-tracked session, so the next visit to /admin always shows
-  // the login screen — even if the JWT cookie itself is still present.
-  // sendBeacon is used because it reliably fires during unload and
-  // still carries same-origin cookies.
-  useEffect(() => {
-    function endSession() {
-      navigator.sendBeacon?.('/api/admin/logout');
-    }
-    window.addEventListener('pagehide', endSession);
-    return () => window.removeEventListener('pagehide', endSession);
-  }, []);
-
   async function handleLogout() {
     await logoutAdmin();
     window.location.href = '/admin';
