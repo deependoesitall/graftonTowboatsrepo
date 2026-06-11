@@ -66,14 +66,17 @@ export function getAdminSession(req: NextRequest): AdminSessionPayload | null {
   return verifyAdminSession(token);
 }
 
-/** Cookie options used when setting the session cookie at login. */
+/** Cookie options used when setting the session cookie at login.
+ * No maxAge -> this becomes a browser "session cookie": it is cleared
+ * automatically when the browser/tab is fully closed, so each new
+ * visit to /admin requires logging in again. The JWT itself still
+ * carries a 10-hour expiry as a server-side backstop. */
 export function sessionCookieOptions() {
   return {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'strict' as const,
     path: '/',
-    maxAge: SESSION_TTL_SECONDS,
   };
 }
 

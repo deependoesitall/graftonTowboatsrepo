@@ -42,57 +42,69 @@ export function AdminNav() {
   const visibleNav = NAV.filter(item => item.area === null || canAccess(role, item.area));
 
   return (
-    <header className="bg-brand-green text-white shadow-md">
-      <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between gap-4">
-        {/* Logo / title */}
-        <Link href="/admin" className="flex items-center gap-2.5 shrink-0">
-          <img
-            src="https://images.squarespace-cdn.com/content/v1/6819038bc556772f05a46e4d/00f04765-aff3-41b3-8b27-6d14b9688c52/image0+%282%29.png?format=300w"
-            alt="GTS"
-            className="h-9 w-auto"
-          />
-          <span className="font-display font-bold text-brand-yellow text-sm uppercase tracking-widest hidden sm:block">
-            GTS Admin
-          </span>
-        </Link>
+    <header className="sticky top-0 z-30 shadow-md">
+      {/* Brand gradient accent strip */}
+      <div className="h-1 bg-gts-gradient" />
 
-        {/* Nav links */}
-        <nav className="flex items-center gap-1">
-          {visibleNav.map(({ href, label, icon: Icon }) => {
-            const active = path === href || (href !== '/admin' && path.startsWith(href));
-            return (
-              <Link key={href} href={href}
-                className={cn(
-                  'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wide transition-colors',
-                  active
-                    ? 'bg-brand-yellow text-brand-green'
-                    : 'text-white/70 hover:text-white hover:bg-white/10'
-                )}>
-                <Icon className="w-3.5 h-3.5" />
-                <span className="hidden sm:block">{label}</span>
-              </Link>
-            );
-          })}
-        </nav>
-
-        {/* Right side */}
-        <div className="flex items-center gap-3">
-          {role && (
-            <span className="hidden md:flex items-center gap-1.5 text-xs">
-              <span className="text-white/50">{name}</span>
-              <span className="bg-white/10 text-brand-yellow px-2 py-0.5 rounded-full font-bold uppercase tracking-wide text-[10px]">
-                {ROLE_LABELS[role]}
+      <div className="bg-brand-green text-white">
+        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
+          {/* Logo / title */}
+          <Link href="/admin" className="flex items-center gap-3 shrink-0">
+            <div className="bg-white rounded-xl p-1.5 shadow-sm shrink-0">
+              <img
+                src="https://images.squarespace-cdn.com/content/v1/6819038bc556772f05a46e4d/00f04765-aff3-41b3-8b27-6d14b9688c52/image0+%282%29.png?format=300w"
+                alt="Grafton Towboat Services"
+                className="h-9 w-9 object-contain"
+              />
+            </div>
+            <div className="hidden sm:flex flex-col leading-tight">
+              <span className="font-display font-bold text-brand-yellow text-sm uppercase tracking-widest">
+                Grafton Towboat
               </span>
-            </span>
-          )}
-          <Link href="/catalog" target="_blank"
-            className="text-white/60 hover:text-white text-xs font-body transition-colors hidden md:block">
-            View Store →
+              <span className="text-white/50 text-[10px] uppercase tracking-[0.2em] font-bold">
+                Admin Console
+              </span>
+            </div>
           </Link>
-          <button onClick={handleLogout}
-            className="flex items-center gap-1 text-white/60 hover:text-white text-xs font-body transition-colors p-1.5 rounded hover:bg-white/10">
-            <LogOut className="w-4 h-4" />
-          </button>
+
+          {/* Nav links */}
+          <nav className="flex items-center gap-1 overflow-x-auto">
+            {visibleNav.map(({ href, label, icon: Icon }) => {
+              const active = path === href || (href !== '/admin' && path.startsWith(href));
+              return (
+                <Link key={href} href={href}
+                  className={cn(
+                    'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wide transition-colors whitespace-nowrap',
+                    active
+                      ? 'bg-brand-yellow text-brand-green'
+                      : 'text-white/70 hover:text-white hover:bg-white/10'
+                  )}>
+                  <Icon className="w-3.5 h-3.5" />
+                  <span className="hidden sm:block">{label}</span>
+                </Link>
+              );
+            })}
+          </nav>
+
+          {/* Right side */}
+          <div className="flex items-center gap-3 shrink-0">
+            {role && (
+              <span className="hidden md:flex items-center gap-1.5 text-xs">
+                <span className="text-white/50">{name}</span>
+                <span className="bg-white/10 text-brand-yellow px-2 py-0.5 rounded-full font-bold uppercase tracking-wide text-[10px]">
+                  {ROLE_LABELS[role]}
+                </span>
+              </span>
+            )}
+            <Link href="/catalog" target="_blank"
+              className="text-white/60 hover:text-white text-xs font-body transition-colors hidden md:block">
+              View Store →
+            </Link>
+            <button onClick={handleLogout}
+              className="flex items-center gap-1 text-white/60 hover:text-white text-xs font-body transition-colors p-1.5 rounded hover:bg-white/10">
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </div>
     </header>
