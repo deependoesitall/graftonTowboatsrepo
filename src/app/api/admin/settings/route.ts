@@ -42,6 +42,7 @@ export async function PATCH(req: NextRequest) {
   if (body.tax_enabled !== undefined) updates.tax_enabled = body.tax_enabled;
   if (body.draft_orders_enabled !== undefined) updates.draft_orders_enabled = body.draft_orders_enabled;
   if (body.repeat_orders_enabled !== undefined) updates.repeat_orders_enabled = body.repeat_orders_enabled;
+  if (body.email_debug_enabled !== undefined) updates.email_debug_enabled = body.email_debug_enabled;
   if (body.order_email_subject !== undefined) updates.order_email_subject = body.order_email_subject;
 
   // Password change — requires current password verification

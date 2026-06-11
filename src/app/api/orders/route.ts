@@ -106,12 +106,14 @@ export async function POST(req: NextRequest) {
       .single();
 
     let emailDebug: any = null;
+    let debugEnabled = false;
     if (fullOrder) {
       // Read business email from settings (allows Jennifer to change it without redeploying)
       // IMPORTANT: must be awaited — Vercel serverless functions terminate
       // immediately after the response is sent, killing any unawaited promises.
       try {
-        const { data: s } = await supabase.from('admin_settings').select('business_email').single();
+        const { data: s } = await supabase.from('admin_settings').select('business_email, email_debug_enabled').single();
+        debugEnabled = !!s?.email_debug_enabled;
         const email = s?.business_email || process.env.BUSINESS_EMAIL;
         const result = await sendOrderEmail(fullOrder as Order, email);
         emailDebug = { ok: true, to: email, id: (result as any)?.data?.id };
@@ -122,7 +124,12 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ order_id: order.id, order_number: orderNumber, _emailDebug: emailDebug });
+    // Only include diagnostic info in the response if the owner has enabled it in Settings → Features
+    return NextResponse.json({
+      order_id: order.id,
+      order_number: orderNumber,
+      ...(debugEnabled ? { _emailDebug: emailDebug } : {}),
+    });
   } catch (err) {
     console.error('Order creation error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

@@ -2,7 +2,7 @@
 // src/app/admin/settings/page.tsx
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Save, RefreshCw, Eye, EyeOff, Plus, Trash2, UserPlus, ShieldCheck, User, Lock, ScrollText, Search, ArrowRight, ChevronLeft, ChevronRight, MessageSquarePlus, Check, X, Loader2, Send } from 'lucide-react';
+import { Save, RefreshCw, Eye, EyeOff, Plus, Trash2, UserPlus, ShieldCheck, User, Lock, ScrollText, Search, ArrowRight, ChevronLeft, ChevronRight, MessageSquarePlus, Check, X, Loader2, Send, Wrench } from 'lucide-react';
 import { ADMIN_TOKEN_KEY, getAdminRole, canAccess, adminHeaders } from '@/lib/admin-auth';
 import { formatDate } from '@/lib/utils';
 
@@ -23,6 +23,7 @@ interface Settings {
   tax_enabled: boolean;
   draft_orders_enabled: boolean;
   repeat_orders_enabled: boolean;
+  email_debug_enabled: boolean;
 }
 
 interface ActivityLog {
@@ -59,6 +60,7 @@ export default function AdminSettingsPage() {
     order_email_subject: 'New Order #{order_number} — {company_name}',
     tax_rate: 0, tax_enabled: false,
     draft_orders_enabled: false, repeat_orders_enabled: true,
+    email_debug_enabled: false,
   });
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
@@ -730,6 +732,35 @@ export default function AdminSettingsPage() {
                 onChange={e => setSettings(s => ({ ...s, tax_rate: parseFloat(e.target.value) || 0 }))} />
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Diagnostics (Features tab) ── */}
+      {tab === 'features' && (
+        <div className="card-base p-6 mt-6 border-2 border-dashed border-amber-200 bg-amber-50/40">
+          <div className="flex items-center gap-2 mb-1">
+            <Wrench className="w-4 h-4 text-amber-600" />
+            <h2 className="font-bold text-brand-navy">Diagnostics</h2>
+          </div>
+          <p className="text-xs text-gray-400 mb-4">
+            Temporary tools for troubleshooting. Safe to leave off — turn on only when actively debugging an issue.
+          </p>
+          <div className="flex items-center justify-between gap-4 py-3">
+            <div>
+              <p className="font-semibold text-brand-navy text-sm">Email Send Diagnostics</p>
+              <p className="text-xs text-gray-400">
+                Shows a popup on the order page after checkout revealing whether the order notification email
+                was sent successfully (and the error if not). Customers will see this — only enable while
+                actively testing email delivery, then turn off.
+              </p>
+            </div>
+            <button onClick={() => setSettings(s => ({ ...s, email_debug_enabled: !s.email_debug_enabled }))}
+              className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors ${
+                settings.email_debug_enabled ? 'bg-amber-500' : 'bg-gray-200'}`}>
+              <span className={`inline-block h-5 w-5 rounded-full bg-white shadow transform transition-transform ${
+                settings.email_debug_enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+            </button>
+          </div>
         </div>
       )}
     </div>
