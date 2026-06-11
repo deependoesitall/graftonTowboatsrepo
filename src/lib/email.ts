@@ -5,10 +5,18 @@ import { formatCurrency, formatDate } from './utils';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-export async function sendOrderEmail(order: Order, businessEmail?: string) {
+export async function sendOrderEmail(order: Order, businessEmail?: string, ccEmailRaw?: string) {
   const toEmail = businessEmail || process.env.BUSINESS_EMAIL || 'GraftonTowboatServices@gmail.com';
   const fromEmail = process.env.EMAIL_FROM || 'onboarding@resend.dev';
-  const ccEmail = process.env.ORDER_EMAIL_CC;
+
+  // Parse cc list from settings (or env var fallback) — supports comma-separated addresses,
+  // trims whitespace, and silently drops anything that isn't a valid email address.
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const ccSource = ccEmailRaw ?? process.env.ORDER_EMAIL_CC ?? '';
+  const ccList = ccSource
+    .split(',')
+    .map(e => e.trim())
+    .filter(e => EMAIL_RE.test(e));
 
   const itemRows = order.items.map(item => `
     <tr style="border-bottom:1px solid #f0f0f0;">
@@ -109,7 +117,7 @@ export async function sendOrderEmail(order: Order, businessEmail?: string) {
     const result = await resend.emails.send({
       from: fromEmail,
       to: [toEmail],
-      ...(ccEmail ? { cc: [ccEmail] } : {}),
+      ...(ccList.length > 0 ? { cc: ccList } : {}),
       replyTo: toEmail,
       subject: `🚢 New Order ${order.order_number} — ${order.company_name} (${formatCurrency(order.subtotal)})`,
       html,
