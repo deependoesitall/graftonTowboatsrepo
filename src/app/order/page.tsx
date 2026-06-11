@@ -94,7 +94,17 @@ export default function OrderPage() {
         throw new Error(err.error || 'Failed to submit order');
       }
 
-      const { order_id, order_number } = await res.json();
+      const { order_id, order_number, _emailDebug } = await res.json();
+
+      // TEMPORARY DIAGNOSTIC — remove once email is confirmed working
+      if (_emailDebug) {
+        if (_emailDebug.ok) {
+          toast({ title: '✅ Email sent', description: `To: ${_emailDebug.to}`, duration: 6000 });
+        } else {
+          toast({ title: '❌ Email failed', description: _emailDebug.error, variant: 'destructive', duration: 10000 });
+        }
+      }
+
       router.push(`/confirm?order=${order_id}&num=${order_number}`);
     } catch (err) {
       toast({

@@ -114,6 +114,12 @@ export async function sendOrderEmail(order: Order, businessEmail?: string) {
       subject: `🚢 New Order ${order.order_number} — ${order.company_name} (${formatCurrency(order.subtotal)})`,
       html,
     });
+    if (result.error) {
+      // Resend SDK often returns { data: null, error: {...} } WITHOUT throwing —
+      // must check this explicitly or failures are silently swallowed.
+      console.error('Resend returned an error:', result.error);
+      throw new Error(result.error.message || JSON.stringify(result.error));
+    }
     console.log('Email sent successfully:', result);
     return result;
   } catch (err) {
