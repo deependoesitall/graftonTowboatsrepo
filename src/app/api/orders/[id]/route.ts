@@ -76,3 +76,50 @@ export async function PATCH(
 
   return NextResponse.json(data);
 }
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const authHeader = req.headers.get('x-admin-token');
+  if (authHeader !== process.env.ADMIN_SECRET_KEY) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // Only Owners may permanently delete orders
+  const role = req.headers.get('x-admin-role');
+  if (role !== 'owner') {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+
+  const { id } = await params;
+  const supabase = createServiceClient();
+
+  const { data: existing } = await supabase
+    .from('orders')
+    .select('order_number, status')
+    .eq('id', id)
+    .single();
+
+  // order_items has ON DELETE CASCADE from orders, so deleting the order removes its items too
+  const { error } = await supabase.from('orders').delete().eq('id', id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // Log the deletion for accountability
+  if (existing) {
+    const adminUsername = req.headers.get('x-admin-username') || null;
+    const adminDisplayName = req.headers.get('x-admin-name') || null;
+    await supabase.from('activity_logs').insert({
+      order_id: null,
+      order_number: existing.order_number,
+      action: 'order_deleted',
+      from_value: existing.status,
+      to_value: null,
+      admin_username: adminUsername,
+      admin_display_name: adminDisplayName,
+      admin_role: role,
+    });
+  }
+
+  return NextResponse.json({ success: true });
+}

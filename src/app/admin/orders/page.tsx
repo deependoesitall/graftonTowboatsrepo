@@ -2,7 +2,7 @@
 // src/app/admin/orders/page.tsx
 import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, Download, Eye, Loader2, RefreshCw, Package, ArrowRight } from 'lucide-react';
+import { Search, Download, Eye, Loader2, RefreshCw, Package, ArrowRight, Trash2 } from 'lucide-react';
 import { formatCurrency, formatDate, ORDER_STATUSES } from '@/lib/utils';
 import { Order, OrderStatus } from '@/types';
 import { OrderDetailModal } from '@/components/admin/OrderDetailModal';
@@ -50,6 +50,8 @@ function OrdersContent() {
 
   const adminToken = typeof window !== 'undefined' ? sessionStorage.getItem(ADMIN_TOKEN_KEY) || '' : '';
   const canEditOrders = canEdit(typeof window !== 'undefined' ? getAdminRole() : null, 'orders');
+  const isOwner = (typeof window !== 'undefined' ? getAdminRole() : null) === 'owner';
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Auth guard
   useEffect(() => {
@@ -106,6 +108,20 @@ function OrdersContent() {
       body: JSON.stringify({ status }),
     });
     fetchOrders();
+  }
+
+  async function deleteOrder(orderId: string, orderNumber: string) {
+    if (!confirm(`Permanently delete order ${orderNumber}? This cannot be undone.`)) return;
+    setDeletingId(orderId);
+    const res = await fetch(`/api/orders/${orderId}`, {
+      method: 'DELETE',
+      headers: adminHeaders(),
+    });
+    if (res.ok) {
+      setOrders(prev => prev.filter(o => o.id !== orderId));
+      if (selectedOrder?.id === orderId) setSelectedOrder(null);
+    }
+    setDeletingId(null);
   }
 
   function downloadOrderPdf(orderId: string, orderNumber: string) {
@@ -277,6 +293,18 @@ function OrdersContent() {
                             >
                               <Download className="w-4 h-4" />
                             </button>
+                            {isOwner && (
+                              <button
+                                onClick={() => deleteOrder(order.id, order.order_number)}
+                                disabled={deletingId === order.id}
+                                className="p-1.5 text-gray-400 hover:text-red-500 transition-colors disabled:opacity-50"
+                                title="Delete Order"
+                              >
+                                {deletingId === order.id
+                                  ? <Loader2 className="w-4 h-4 animate-spin" />
+                                  : <Trash2 className="w-4 h-4" />}
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -308,6 +336,9 @@ function OrdersContent() {
             adminToken={adminToken}
             onRefresh={fetchOrders}
             canEdit={canEditOrders}
+            isOwner={isOwner}
+            deleting={deletingId === selectedOrder.id}
+            onDelete={() => deleteOrder(selectedOrder.id, selectedOrder.order_number)}
           />
         )}
     </div>

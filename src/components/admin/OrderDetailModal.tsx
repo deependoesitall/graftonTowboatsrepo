@@ -1,7 +1,7 @@
 'use client';
 // src/components/admin/OrderDetailModal.tsx
 import { useState } from 'react';
-import { X, Download, FileText, Printer, CheckCircle2 } from 'lucide-react';
+import { X, Download, FileText, Printer, CheckCircle2, Trash2, Loader2 } from 'lucide-react';
 import { Order, OrderStatus } from '@/types';
 import { formatCurrency, formatDate, ORDER_STATUSES } from '@/lib/utils';
 
@@ -11,9 +11,12 @@ interface OrderDetailModalProps {
   onStatusChange: (status: OrderStatus) => void;
   onDownloadPdf: () => void;
   onDownloadCsv: () => void;
+  onDelete?: () => void;
   adminToken: string;
   onRefresh: () => void;
   canEdit?: boolean;
+  isOwner?: boolean;
+  deleting?: boolean;
 }
 
 export function OrderDetailModal({
@@ -22,7 +25,10 @@ export function OrderDetailModal({
   onStatusChange,
   onDownloadPdf,
   onDownloadCsv,
+  onDelete,
   canEdit = true,
+  isOwner = false,
+  deleting = false,
 }: OrderDetailModalProps) {
   const [editingItems, setEditingItems] = useState(false);
   const [quantities, setQuantities] = useState<Record<string, number>>(
@@ -47,6 +53,12 @@ export function OrderDetailModal({
             <button onClick={onDownloadCsv} className="text-brand-gold hover:text-brand-amber transition-colors" title="Download CSV">
               <FileText className="w-5 h-5" />
             </button>
+            {isOwner && onDelete && (
+              <button onClick={onDelete} disabled={deleting}
+                className="text-brand-sky hover:text-red-400 transition-colors disabled:opacity-50" title="Delete Order">
+                {deleting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Trash2 className="w-5 h-5" />}
+              </button>
+            )}
             <button onClick={onClose} className="text-brand-sky hover:text-white transition-colors ml-2">
               <X className="w-6 h-6" />
             </button>
