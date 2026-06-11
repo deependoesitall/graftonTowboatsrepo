@@ -34,6 +34,19 @@ export function AdminNav() {
     setName(getAdminName());
   }, [path]);
 
+  // Closing the tab/browser (or navigating away entirely) ends the
+  // server-tracked session, so the next visit to /admin always shows
+  // the login screen — even if the JWT cookie itself is still present.
+  // sendBeacon is used because it reliably fires during unload and
+  // still carries same-origin cookies.
+  useEffect(() => {
+    function endSession() {
+      navigator.sendBeacon?.('/api/admin/logout');
+    }
+    window.addEventListener('pagehide', endSession);
+    return () => window.removeEventListener('pagehide', endSession);
+  }, []);
+
   async function handleLogout() {
     await logoutAdmin();
     window.location.href = '/admin';
@@ -50,11 +63,11 @@ export function AdminNav() {
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
           {/* Logo / title */}
           <Link href="/admin" className="flex items-center gap-3 shrink-0">
-            <div className="bg-white rounded-xl p-1.5 shadow-sm shrink-0">
+            <div className="shrink-0">
               <img
                 src="https://images.squarespace-cdn.com/content/v1/6819038bc556772f05a46e4d/00f04765-aff3-41b3-8b27-6d14b9688c52/image0+%282%29.png?format=300w"
                 alt="Grafton Towboat Services"
-                className="h-9 w-9 object-contain"
+                className="h-11 w-11 object-contain"
               />
             </div>
             <div className="hidden sm:flex flex-col leading-tight">
