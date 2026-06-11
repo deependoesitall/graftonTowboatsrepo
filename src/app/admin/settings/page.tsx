@@ -686,11 +686,6 @@ export default function AdminSettingsPage() {
               onChange={e => setSettings(s => ({ ...s, order_email_cc: e.target.value }))}
               placeholder="second@email.com, third@email.com" />
           </div>
-          <div>
-            <label className="label-base">Email Subject Template</label>
-            <input type="text" className="input-base" value={settings.order_email_subject}
-              onChange={e => setSettings(s => ({ ...s, order_email_subject: e.target.value }))} />
-          </div>
 
           <div className="border-t border-gray-100 pt-5">
             <h2 className="font-bold text-brand-navy mb-1">Email Template</h2>
@@ -698,11 +693,18 @@ export default function AdminSettingsPage() {
 
             <div className="space-y-4">
               <div>
-                <label className="label-base">Header Tagline</label>
+                <label className="label-base">Subject Line</label>
+                <input type="text" className="input-base" value={settings.order_email_subject}
+                  onChange={e => setSettings(s => ({ ...s, order_email_subject: e.target.value }))} />
+                <p className="text-xs text-gray-400 mt-1">What appears in the inbox before the email is opened.</p>
+              </div>
+
+              <div>
+                <label className="label-base">Banner Text</label>
                 <input type="text" className="input-base" value={settings.email_header_tagline}
                   onChange={e => setSettings(s => ({ ...s, email_header_tagline: e.target.value }))}
                   placeholder="New Order Received" />
-                <p className="text-xs text-gray-400 mt-1">Appears under the company name at the top of the email.</p>
+                <p className="text-xs text-gray-400 mt-1">Shown inside the email, just below the company name in the green header.</p>
               </div>
 
               <div>
