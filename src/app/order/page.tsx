@@ -389,7 +389,6 @@ export default function OrderPage() {
           A confirmation will be sent to the email address you provided
         </p>
       </main>
-    </div>
 
       <AuthModal
         open={authModalOpen}
