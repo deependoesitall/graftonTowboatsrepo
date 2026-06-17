@@ -9,13 +9,14 @@ interface AuthModalProps {
   open: boolean;
   onClose: () => void;
   defaultMode?: 'signin' | 'signup';
+  defaultEmail?: string;
   title?: string;
 }
 
-export function AuthModal({ open, onClose, defaultMode = 'signin', title }: AuthModalProps) {
+export function AuthModal({ open, onClose, defaultMode = 'signin', defaultEmail = '', title }: AuthModalProps) {
   const { signIn, signUp } = useAuth();
   const [mode, setMode] = useState<'signin' | 'signup'>(defaultMode);
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(defaultEmail);
   const [password, setPassword] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -35,8 +36,9 @@ export function AuthModal({ open, onClose, defaultMode = 'signin', title }: Auth
       setLastName('');
       setCompanyName('');
       setMode(defaultMode);
+      setEmail(defaultEmail || '');
     }
-  }, [open, defaultMode]);
+  }, [open, defaultMode, defaultEmail]);
 
   if (!open || !mounted) return null;
 

@@ -5,12 +5,13 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   ShoppingCart, Trash2, Plus, Minus, ArrowLeft,
-  ChevronRight, Loader2, AlertCircle, Package, HelpCircle, X
+  ChevronRight, Loader2, AlertCircle, Package, HelpCircle, X, LogIn
 } from 'lucide-react';
 import { getCart, updateCartItem, removeFromCart, getCartTotal, getCartCount, getVesselInfo, saveVesselInfo } from '@/lib/cart';
 import { formatCurrency } from '@/lib/utils';
 import { CartItem, VesselInfo } from '@/types';
 import { SiteHeader } from '@/components/layout/SiteHeader';
+import { AuthModal } from '@/components/auth/AuthModal';
 import { useToast } from '@/hooks/use-toast';
 import { createClient } from '@/lib/supabase/client';
 
@@ -26,6 +27,9 @@ export default function OrderPage() {
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [estimatedOpen, setEstimatedOpen] = useState(false);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [emailHasAccount, setEmailHasAccount] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
   const { toast } = useToast();
@@ -41,6 +45,7 @@ export default function OrderPage() {
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
+      setIsLoggedIn(true);
       const { data: profile } = await supabase.from('customer_profiles').select('*').single();
       if (profile) {
         setVessel(v => ({
@@ -86,6 +91,24 @@ export default function OrderPage() {
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(vessel.email.trim())) errs.email = 'Please enter a valid email address';
     if (items.length === 0) errs.items = 'Your cart is empty';
     return errs;
+  }
+
+  async function checkEmailForAccount(email: string) {
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || isLoggedIn) {
+      setEmailHasAccount(false);
+      return;
+    }
+    try {
+      const res = await fetch('/api/auth/check-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      const { exists } = await res.json();
+      setEmailHasAccount(exists);
+    } catch {
+      setEmailHasAccount(false);
+    }
   }
 
   async function handleSubmit() {
@@ -287,9 +310,25 @@ export default function OrderPage() {
                 className={`input-base ${errors.email ? 'border-red-400' : ''}`}
                 placeholder="captain@example.com"
                 value={vessel.email}
-                onChange={e => handleVesselChange('email', e.target.value)}
+                onChange={e => { handleVesselChange('email', e.target.value); setEmailHasAccount(false); }}
+                onBlur={e => checkEmailForAccount(e.target.value)}
                 autoComplete="email"
               />
+              {emailHasAccount && !isLoggedIn && (
+                <div className="mt-2 flex items-center justify-between gap-3 bg-brand-sand border border-brand-gold/40 rounded-lg px-3 py-2">
+                  <p className="text-xs text-brand-navy leading-snug">
+                    <span className="font-semibold">Account found.</span> Sign in to auto-fill your vessel info and track your order.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setAuthModalOpen(true)}
+                    className="shrink-0 flex items-center gap-1.5 bg-brand-navy text-white text-xs font-bold px-3 py-1.5 rounded-full hover:bg-brand-steel transition-colors"
+                  >
+                    <LogIn className="w-3.5 h-3.5" />
+                    Sign In
+                  </button>
+                </div>
+              )}
             </FormField>
 
             <FormField label="PO Number (optional)">
@@ -350,6 +389,25 @@ export default function OrderPage() {
           A confirmation will be sent to the email address you provided
         </p>
       </main>
+    </div>
+
+      <AuthModal
+        open={authModalOpen}
+        onClose={() => {
+          setAuthModalOpen(false);
+          // Re-check login state after modal closes
+          createClient().auth.getUser().then(({ data: { user } }) => {
+            if (user) {
+              setIsLoggedIn(true);
+              setEmailHasAccount(false);
+              setVessel(v => ({ ...v, email: v.email || user.email || '' }));
+            }
+          });
+        }}
+        defaultMode="signin"
+        defaultEmail={vessel.email}
+        title="Sign In to Your Account"
+      />
     </div>
   );
 }
