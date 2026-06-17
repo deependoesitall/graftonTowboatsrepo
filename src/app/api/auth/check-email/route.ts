@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
     const { data, error } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
     if (error) return NextResponse.json({ exists: false });
 
-    const exists = data.users.some(
+    const exists = (data.users as { email?: string }[]).some(
       u => u.email?.toLowerCase() === email.trim().toLowerCase()
     );
     return NextResponse.json({ exists });
