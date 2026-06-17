@@ -88,6 +88,7 @@ function defaultVesselInfo(): VesselInfo {
     company_name: '',
     contact_name: '',
     phone: '',
+    email: '',
     po_number: '',
     notes: '',
     eta: '',

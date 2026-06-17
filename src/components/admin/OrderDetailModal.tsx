@@ -1,7 +1,7 @@
 'use client';
 // src/components/admin/OrderDetailModal.tsx
 import { useState } from 'react';
-import { X, Download, FileText, Printer, CheckCircle2, Trash2, Loader2 } from 'lucide-react';
+import { X, Download, FileText, Printer, Trash2, Loader2 } from 'lucide-react';
 import { Order, OrderStatus } from '@/types';
 import { formatCurrency, formatDate, ORDER_STATUSES } from '@/lib/utils';
 
@@ -70,6 +70,9 @@ export function OrderDetailModal({
             <InfoBlock label="Company / Vessel" value={order.company_name} />
             <InfoBlock label="Contact" value={order.contact_name} />
             <InfoBlock label="Phone" value={order.phone} />
+            {order.customer_email && (
+              <InfoBlock label="Customer Email" value={order.customer_email} />
+            )}
             {order.po_number && <InfoBlock label="PO Number" value={order.po_number} />}
             {order.eta && <InfoBlock label="Vessel ETA" value={order.eta} highlight />}
             <InfoBlock label="Ordered" value={formatDate(order.created_at)} />
@@ -86,15 +89,22 @@ export function OrderDetailModal({
           <div className="flex items-center gap-4">
             <label className="text-xs font-bold text-gray-500 uppercase tracking-wide">Status</label>
             {canEdit ? (
-              <select
-                className="border border-gray-200 rounded px-3 py-1.5 text-sm font-semibold bg-white"
-                value={order.status}
-                onChange={e => onStatusChange(e.target.value as OrderStatus)}
-              >
-                {ORDER_STATUSES.map(s => (
-                  <option key={s.value} value={s.value}>{s.label}</option>
-                ))}
-              </select>
+              <div className="flex items-center gap-2">
+                <select
+                  className="border border-gray-200 rounded px-3 py-1.5 text-sm font-semibold bg-white"
+                  value={order.status}
+                  onChange={e => onStatusChange(e.target.value as OrderStatus)}
+                >
+                  {ORDER_STATUSES.map(s => (
+                    <option key={s.value} value={s.value}>{s.label}</option>
+                  ))}
+                </select>
+                {order.status !== 'fulfilled' && order.customer_email && (
+                  <span className="text-xs text-gray-400">
+                    Setting to <strong>Fulfilled</strong> sends the Order Shopped email to {order.customer_email}
+                  </span>
+                )}
+              </div>
             ) : (
               <span className="border border-gray-200 rounded px-3 py-1.5 text-sm font-semibold bg-gray-50 text-gray-600">
                 {ORDER_STATUSES.find(s => s.value === order.status)?.label || order.status}
@@ -113,6 +123,7 @@ export function OrderDetailModal({
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50">
+                    <th className="px-3 py-2 text-left text-xs font-bold text-gray-500 uppercase">Item #</th>
                     <th className="px-3 py-2 text-left text-xs font-bold text-gray-500 uppercase">Item</th>
                     <th className="px-3 py-2 text-left text-xs font-bold text-gray-500 uppercase">Pack</th>
                     <th className="px-3 py-2 text-center text-xs font-bold text-gray-500 uppercase">Qty</th>
@@ -123,6 +134,7 @@ export function OrderDetailModal({
                 <tbody className="divide-y divide-gray-100">
                   {order.items.map(item => (
                     <tr key={item.id}>
+                      <td className="px-3 py-2 text-xs text-gray-400 font-mono">{item.upc || '—'}</td>
                       <td className="px-3 py-2">
                         <p className="font-medium text-brand-navy text-xs">{item.description}</p>
                         <p className="text-xs text-gray-400">{item.category}</p>
@@ -138,7 +150,7 @@ export function OrderDetailModal({
                 </tbody>
                 <tfoot>
                   <tr className="bg-brand-sand/30 border-t-2 border-brand-gold/30">
-                    <td colSpan={4} className="px-3 py-2 font-bold text-brand-navy text-sm">
+                    <td colSpan={5} className="px-3 py-2 font-bold text-brand-navy text-sm">
                       TOTAL ({order.items.reduce((s, i) => s + i.quantity, 0)} items)
                     </td>
                     <td className="px-3 py-2 text-right font-display text-base font-bold text-brand-navy">
@@ -174,7 +186,7 @@ function InfoBlock({ label, value, highlight }: { label: string; value: string; 
   return (
     <div>
       <p className="text-xs text-gray-400 uppercase tracking-wide mb-0.5">{label}</p>
-      <p className={`text-sm font-bold ${highlight ? 'text-brand-gold' : 'text-brand-navy'}`}>
+      <p className={`text-sm font-bold break-all ${highlight ? 'text-brand-gold' : 'text-brand-navy'}`}>
         {value}
       </p>
     </div>

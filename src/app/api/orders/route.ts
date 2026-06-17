@@ -18,17 +18,21 @@ async function getUserIdFromToken(req: NextRequest): Promise<string | null> {
     return data.user.id;
   } catch { return null; }
 }
+
 import { generateOrderNumber } from '@/lib/utils';
-import { sendOrderEmail } from '@/lib/email';
+import { sendOrderReceivedEmail } from '@/lib/email';
 import { Order } from '@/types';
 import { requireAdmin } from '@/lib/admin-auth-server';
 import { z } from 'zod';
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const submitSchema = z.object({
   vessel: z.object({
     company_name: z.string().min(1),
     contact_name: z.string().min(1),
     phone: z.string().min(1),
+    email: z.string().min(1).refine(v => EMAIL_RE.test(v.trim()), 'Invalid email address'),
     po_number: z.string().optional(),
     notes: z.string().optional(),
     eta: z.string().optional(),
@@ -61,7 +65,7 @@ export async function POST(req: NextRequest) {
     const { vessel, items } = parsed.data;
     const supabase = createServiceClient();
     const orderNumber = generateOrderNumber();
-    const userId = await getUserIdFromToken(req); // null for guests — guest flow unchanged
+    const userId = await getUserIdFromToken(req);
     const subtotal = items.reduce((s, i) => s + i.price * i.quantity, 0);
 
     const { data: order, error: orderError } = await supabase
@@ -71,6 +75,7 @@ export async function POST(req: NextRequest) {
         company_name: vessel.company_name,
         contact_name: vessel.contact_name,
         phone: vessel.phone,
+        customer_email: vessel.email.trim().toLowerCase(),
         po_number: vessel.po_number || null,
         notes: vessel.notes || null,
         eta: vessel.eta || null,
@@ -86,6 +91,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Failed to create order' }, { status: 500 });
     }
 
+    // Fetch UPCs for all product_ids so we can snapshot them in order_items
+    const productIds = items.map(i => i.product_id).filter(Boolean);
+    const { data: products } = await supabase
+      .from('products')
+      .select('id, upc')
+      .in('id', productIds);
+    const upcMap: Record<string, string | null> = {};
+    (products || []).forEach((p: { id: string; upc: string | null }) => {
+      upcMap[p.id] = p.upc;
+    });
+
     const orderItems = items.map(item => ({
       order_id: order.id,
       product_id: item.product_id,
@@ -93,6 +109,7 @@ export async function POST(req: NextRequest) {
       category: item.category,
       pkg_size: item.pkg_size || null,
       uom: item.uom || null,
+      upc: upcMap[item.product_id] ?? null,
       unit_price: item.price,
       quantity: item.quantity,
       line_total: item.price * item.quantity,
@@ -106,33 +123,37 @@ export async function POST(req: NextRequest) {
       .eq('id', order.id)
       .single();
 
-    let emailDebug: any = null;
+    let emailDebug: { ok: boolean; to?: string; id?: string; error?: string } | null = null;
     let debugEnabled = false;
+
     if (fullOrder) {
-      // Read business email from settings (allows Jennifer to change it without redeploying)
-      // IMPORTANT: must be awaited — Vercel serverless functions terminate
-      // immediately after the response is sent, killing any unawaited promises.
       try {
-        const { data: s } = await supabase.from('admin_settings').select('business_email, order_email_cc, email_debug_enabled, order_email_subject, email_header_tagline, email_intro_message, email_footer_text, email_button_text, email_button_url').single();
+        const { data: s } = await supabase
+          .from('admin_settings')
+          .select('business_email, order_email_cc, email_debug_enabled, order_email_subject, email_header_tagline, email_intro_message, email_footer_text, email_button_text, email_button_url')
+          .single();
         debugEnabled = !!s?.email_debug_enabled;
-        const email = s?.business_email || process.env.BUSINESS_EMAIL;
-        const result = await sendOrderEmail(fullOrder as Order, email, s?.order_email_cc, {
-          subject_template: s?.order_email_subject,
-          header_tagline: s?.email_header_tagline,
-          intro_message: s?.email_intro_message,
-          footer_text: s?.email_footer_text,
-          button_text: s?.email_button_text,
-          button_url: s?.email_button_url,
+
+        const result = await sendOrderReceivedEmail(fullOrder as Order, {
+          businessEmail: s?.business_email || process.env.BUSINESS_EMAIL,
+          ccEmailRaw: s?.order_email_cc,
+          template: {
+            subject_template: s?.order_email_subject,
+            header_tagline: s?.email_header_tagline,
+            intro_message: s?.email_intro_message,
+            footer_text: s?.email_footer_text,
+            button_text: s?.email_button_text,
+            button_url: s?.email_button_url,
+          },
         });
-        emailDebug = { ok: true, to: email, id: (result as any)?.data?.id };
-      } catch (err: any) {
+        emailDebug = { ok: true, to: s?.business_email, id: (result as { data?: { id?: string } })?.data?.id };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
         console.error('Email error:', err);
-        emailDebug = { ok: false, error: err?.message || String(err) };
-        // Don't fail order creation if email fails
+        emailDebug = { ok: false, error: message };
       }
     }
 
-    // Only include diagnostic info in the response if the owner has enabled it in Settings → Features
     return NextResponse.json({
       order_id: order.id,
       order_number: orderNumber,
@@ -157,7 +178,6 @@ export async function GET(req: NextRequest) {
 
   const supabase = createServiceClient();
 
-  // Run orders query and status counts in parallel
   let query = supabase
     .from('orders')
     .select('*, items:order_items(*)', { count: 'exact' })
@@ -178,7 +198,6 @@ export async function GET(req: NextRequest) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  // Build status counts from all orders (not filtered)
   const status_counts: Record<string, number> = { new: 0, in_progress: 0, fulfilled: 0, cancelled: 0 };
   (statusRows || []).forEach((r: { status: string }) => {
     if (r.status in status_counts) status_counts[r.status]++;

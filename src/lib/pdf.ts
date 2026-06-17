@@ -17,6 +17,7 @@ export function generateOrderHTML(order: Order): string {
   const categoryRows = Object.entries(grouped).map(([cat, items]) => {
     const catRows = items.map((item, idx) => `
       <tr style="background:${idx % 2 === 0 ? '#ffffff' : '#f8f9fa'};">
+        <td style="padding:6px 8px;font-size:10px;color:#888;border-bottom:1px solid #eee;font-family:monospace;">${item.upc || '—'}</td>
         <td style="padding:6px 8px;font-size:11px;color:#555;border-bottom:1px solid #eee;">${item.description}</td>
         <td style="padding:6px 8px;font-size:11px;color:#666;border-bottom:1px solid #eee;text-align:center;">${item.pkg_size || '—'}</td>
         <td style="padding:6px 8px;font-size:11px;color:#666;border-bottom:1px solid #eee;text-align:center;">${item.uom || '—'}</td>
@@ -27,7 +28,7 @@ export function generateOrderHTML(order: Order): string {
 
     return `
       <tr>
-        <td colspan="6" style="padding:5px 8px;background:#D9E84A;font-size:10px;font-weight:800;
+        <td colspan="7" style="padding:5px 8px;background:#D9E84A;font-size:10px;font-weight:800;
           text-transform:uppercase;letter-spacing:1px;color:#1E3D1E;">${cat}</td>
       </tr>
       ${catRows}`;
@@ -133,12 +134,13 @@ ${order.notes ? `
 <table width="100%" style="border-collapse:collapse;font-size:11px;margin-bottom:16px;">
   <thead>
     <tr style="background:#1E3D1E;">
-      <th style="padding:8px;text-align:left;color:#D9E84A;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;width:40%;">Description</th>
-      <th style="padding:8px;text-align:center;color:#D9E84A;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;width:12%;">Pack</th>
-      <th style="padding:8px;text-align:center;color:#D9E84A;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;width:8%;">UOM</th>
-      <th style="padding:8px;text-align:center;color:#D9E84A;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;width:8%;">Qty</th>
-      <th style="padding:8px;text-align:right;color:#D9E84A;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;width:14%;">Unit Price</th>
-      <th style="padding:8px;text-align:right;color:#D9E84A;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;width:14%;">Total</th>
+      <th style="padding:8px;text-align:left;color:#D9E84A;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;width:11%;">Item #</th>
+      <th style="padding:8px;text-align:left;color:#D9E84A;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;width:32%;">Description</th>
+      <th style="padding:8px;text-align:center;color:#D9E84A;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;width:11%;">Pack</th>
+      <th style="padding:8px;text-align:center;color:#D9E84A;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;width:7%;">UOM</th>
+      <th style="padding:8px;text-align:center;color:#D9E84A;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;width:7%;">Qty</th>
+      <th style="padding:8px;text-align:right;color:#D9E84A;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;width:13%;">Unit Price</th>
+      <th style="padding:8px;text-align:right;color:#D9E84A;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;width:13%;">Total</th>
     </tr>
   </thead>
   <tbody>${categoryRows}</tbody>

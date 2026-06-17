@@ -2,6 +2,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/admin-auth-server';
+import { sendOrderShoppedEmail } from '@/lib/email';
+import { Order } from '@/types';
 
 export async function GET(
   req: NextRequest,
@@ -27,7 +29,6 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  // Admin auth check
   const session = requireAdmin(req, { area: 'orders', editRequired: true });
   if (session instanceof NextResponse) return session;
 
@@ -35,7 +36,7 @@ export async function PATCH(
   const body = await req.json();
   const supabase = createServiceClient();
 
-  // Fetch current order first so we can log the status transition
+  // Fetch current order so we can log the status transition and trigger emails
   const { data: existing } = await supabase
     .from('orders')
     .select('status, order_number, company_name, contact_name, phone, po_number')
@@ -54,8 +55,7 @@ export async function PATCH(
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  // Write an activity log entry for status changes.
-  // Admin identity comes from headers set by the admin client (see admin-auth.ts / fetch helper).
+  // Write activity log for status changes
   if (body.status && existing && body.status !== existing.status) {
     await supabase.from('activity_logs').insert({
       order_id: id,
@@ -71,6 +71,35 @@ export async function PATCH(
       phone: existing.phone,
       po_number: existing.po_number,
     });
+
+    // When order is marked fulfilled, send the Order Shopped email
+    if (body.status === 'fulfilled') {
+      const { data: fullOrder } = await supabase
+        .from('orders')
+        .select('*, items:order_items(*)')
+        .eq('id', id)
+        .single();
+
+      if (fullOrder) {
+        // Fire-and-forget is intentional here: don't block the status update response
+        // if the email fails. Errors are logged server-side.
+        (async () => {
+          try {
+            const { data: s } = await supabase
+              .from('admin_settings')
+              .select('business_email, order_email_cc')
+              .single();
+
+            await sendOrderShoppedEmail(fullOrder as Order, {
+              businessEmail: s?.business_email || process.env.BUSINESS_EMAIL,
+              ccEmailRaw: s?.order_email_cc,
+            });
+          } catch (err) {
+            console.error('Order Shopped email error:', err);
+          }
+        })();
+      }
+    }
   }
 
   return NextResponse.json(data);
@@ -80,7 +109,6 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  // Only Owners may permanently delete orders
   const session = requireAdmin(req, { ownerOnly: true });
   if (session instanceof NextResponse) return session;
   const role = session.role;
@@ -94,11 +122,9 @@ export async function DELETE(
     .eq('id', id)
     .single();
 
-  // order_items has ON DELETE CASCADE from orders, so deleting the order removes its items too
   const { error } = await supabase.from('orders').delete().eq('id', id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  // Log the deletion for accountability
   if (existing) {
     await supabase.from('activity_logs').insert({
       order_id: null,

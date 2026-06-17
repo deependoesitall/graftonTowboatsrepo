@@ -33,6 +33,7 @@ export interface VesselInfo {
   company_name: string;
   contact_name: string;
   phone: string;
+  email: string;
   po_number: string;
   notes: string;
   eta: string;
@@ -44,6 +45,7 @@ export interface Order {
   company_name: string;
   contact_name: string;
   phone: string;
+  customer_email: string | null;
   po_number: string | null;
   notes: string | null;
   eta: string | null;
@@ -62,6 +64,7 @@ export interface OrderItem {
   category: string;
   pkg_size: string | null;
   uom: string | null;
+  upc: string | null;
   unit_price: number;
   quantity: number;
   line_total: number;

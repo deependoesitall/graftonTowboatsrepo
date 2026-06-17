@@ -1,11 +1,11 @@
 'use client';
 // src/app/order/page.tsx
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   ShoppingCart, Trash2, Plus, Minus, ArrowLeft,
-  ChevronRight, Loader2, AlertCircle, Package
+  ChevronRight, Loader2, AlertCircle, Package, HelpCircle, X
 } from 'lucide-react';
 import { getCart, updateCartItem, removeFromCart, getCartTotal, getCartCount, getVesselInfo, saveVesselInfo } from '@/lib/cart';
 import { formatCurrency } from '@/lib/utils';
@@ -14,14 +14,19 @@ import { SiteHeader } from '@/components/layout/SiteHeader';
 import { useToast } from '@/hooks/use-toast';
 import { createClient } from '@/lib/supabase/client';
 
+const ESTIMATED_TOTAL_EXPLANATION =
+  'Some orders may display an estimated total at checkout. This is because certain items are sold by weight, market prices may change, or substitutions may be necessary if an item is unavailable. Your final invoice will reflect the actual items delivered, including any approved substitutions, quantity adjustments, or weighted products. We make every effort to keep pricing accurate and will contact you if there are any significant changes to your order. At Grafton Towboat Services, our goal is to provide the products you need while making the ordering process as simple and convenient as possible. If you have any questions about your order or pricing, please contact us at (618) 556-0290 or GraftonTowboatServices@gmail.com.';
+
 export default function OrderPage() {
   const [items, setItems] = useState<CartItem[]>([]);
   const [vessel, setVessel] = useState<VesselInfo>({
     company_name: '', contact_name: '', phone: '',
-    po_number: '', notes: '', eta: '',
+    email: '', po_number: '', notes: '', eta: '',
   });
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [estimatedOpen, setEstimatedOpen] = useState(false);
+  const tooltipRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
   const { toast } = useToast();
 
@@ -43,12 +48,27 @@ export default function OrderPage() {
           company_name: v.company_name || profile.company_name || '',
           contact_name: v.contact_name || profile.contact_name || '',
           phone: v.phone || profile.phone || '',
+          email: v.email || user.email || '',
         }));
+      } else {
+        // No profile but logged in — pre-fill email from auth
+        setVessel(v => ({ ...v, email: v.email || user.email || '' }));
       }
     })();
 
     return () => window.removeEventListener('cart-updated', handler);
   }, []);
+
+  // Close tooltip when clicking outside
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (tooltipRef.current && !tooltipRef.current.contains(e.target as Node)) {
+        setEstimatedOpen(false);
+      }
+    }
+    if (estimatedOpen) document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [estimatedOpen]);
 
   function handleVesselChange(field: keyof VesselInfo, value: string) {
     const updated = { ...vessel, [field]: value };
@@ -62,6 +82,8 @@ export default function OrderPage() {
     if (!vessel.company_name.trim()) errs.company_name = 'Company / Vessel name is required';
     if (!vessel.contact_name.trim()) errs.contact_name = 'Contact person name is required';
     if (!vessel.phone.trim()) errs.phone = 'Phone number is required';
+    if (!vessel.email.trim()) errs.email = 'Email address is required for order confirmation';
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(vessel.email.trim())) errs.email = 'Please enter a valid email address';
     if (items.length === 0) errs.items = 'Your cart is empty';
     return errs;
   }
@@ -77,7 +99,6 @@ export default function OrderPage() {
 
     setSubmitting(true);
     try {
-      // Attach Supabase session token if logged in (guests submit without it)
       const supabase = createClient();
       const { data: { session } } = await supabase.auth.getSession();
       const authHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -96,7 +117,6 @@ export default function OrderPage() {
 
       const { order_id, order_number, _emailDebug } = await res.json();
 
-      // TEMPORARY DIAGNOSTIC — remove once email is confirmed working
       if (_emailDebug) {
         if (_emailDebug.ok) {
           toast({ title: '✅ Email sent', description: `To: ${_emailDebug.to}`, duration: 6000 });
@@ -176,17 +196,43 @@ export default function OrderPage() {
                 <CartItemRow
                   key={item.product_id}
                   item={item}
-                  onUpdate={(qty) => {
-                    updateCartItem(item.product_id, qty);
-                  }}
-                  onRemove={() => {
-                    removeFromCart(item.product_id);
-                  }}
+                  onUpdate={(qty) => { updateCartItem(item.product_id, qty); }}
+                  onRemove={() => { removeFromCart(item.product_id); }}
                 />
               ))}
               <div className="p-4 bg-brand-sand/40">
                 <div className="flex justify-between items-center">
-                  <span className="font-body font-bold text-brand-navy">Order Total</span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-body font-bold text-brand-navy">Order Total</span>
+                    {/* Estimated total disclaimer */}
+                    <div className="relative" ref={tooltipRef}>
+                      <button
+                        type="button"
+                        onClick={() => setEstimatedOpen(o => !o)}
+                        onMouseEnter={() => setEstimatedOpen(true)}
+                        onMouseLeave={() => !estimatedOpen && setEstimatedOpen(false)}
+                        className="flex items-center gap-1 text-xs text-brand-river hover:text-brand-navy transition-colors focus:outline-none"
+                        aria-label="Why is my total estimated?"
+                      >
+                        <HelpCircle className="w-3.5 h-3.5" />
+                        <span className="underline underline-offset-2">Why is my total estimated?</span>
+                      </button>
+                      {estimatedOpen && (
+                        <div className="absolute bottom-full left-0 mb-2 z-30 w-80 sm:w-96 bg-white border border-gray-200 rounded-lg shadow-xl p-4 text-xs text-gray-600 leading-relaxed">
+                          <div className="flex items-start justify-between gap-2 mb-2">
+                            <p className="font-bold text-gray-800 text-sm">Why is my total estimated?</p>
+                            <button
+                              onClick={() => setEstimatedOpen(false)}
+                              className="text-gray-400 hover:text-gray-600 shrink-0 mt-0.5"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                          <p>{ESTIMATED_TOTAL_EXPLANATION}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                   <span className="font-display text-2xl font-bold text-brand-navy">
                     {formatCurrency(total)}
                   </span>
@@ -205,10 +251,7 @@ export default function OrderPage() {
             <p className="text-gray-400 text-xs mt-1">Your info is saved for next time</p>
           </div>
           <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <FormField
-              label="Company / Vessel Name *"
-              error={errors.company_name}
-            >
+            <FormField label="Company / Vessel Name *" error={errors.company_name}>
               <input
                 type="text"
                 className={`input-base ${errors.company_name ? 'border-red-400' : ''}`}
@@ -238,6 +281,17 @@ export default function OrderPage() {
               />
             </FormField>
 
+            <FormField label="Email Address *" error={errors.email}>
+              <input
+                type="email"
+                className={`input-base ${errors.email ? 'border-red-400' : ''}`}
+                placeholder="captain@example.com"
+                value={vessel.email}
+                onChange={e => handleVesselChange('email', e.target.value)}
+                autoComplete="email"
+              />
+            </FormField>
+
             <FormField label="PO Number (optional)">
               <input
                 type="text"
@@ -258,11 +312,15 @@ export default function OrderPage() {
               />
             </FormField>
 
-            <FormField label="Special Instructions (optional)" className="sm:col-span-2">
+            <FormField
+              label="Special Instructions (optional)"
+              className="sm:col-span-2"
+              hint="For delivery notes or special requests only. Item substitutions are handled separately — do not use this field to request product substitutions."
+            >
               <textarea
                 className="input-base resize-none"
                 rows={3}
-                placeholder="Any special requests, dietary notes, or delivery instructions…"
+                placeholder="Delivery notes, access instructions, special requests…"
                 value={vessel.notes}
                 onChange={e => handleVesselChange('notes', e.target.value)}
               />
@@ -289,7 +347,7 @@ export default function OrderPage() {
           )}
         </button>
         <p className="text-center text-xs text-gray-400 mt-3">
-          Your order will be sent to Grafton Towboat Services immediately
+          A confirmation will be sent to the email address you provided
         </p>
       </main>
     </div>
@@ -383,17 +441,20 @@ function CartItemRow({
 function FormField({
   label,
   error,
+  hint,
   children,
   className = '',
 }: {
   label: string;
   error?: string;
+  hint?: string;
   children: React.ReactNode;
   className?: string;
 }) {
   return (
     <div className={className}>
       <label className="label-base">{label}</label>
+      {hint && <p className="text-xs text-gray-400 mb-1 leading-snug">{hint}</p>}
       {children}
       {error && <p className="text-red-500 text-xs mt-1">{error}</p>}
     </div>
