@@ -4,27 +4,52 @@ import { Order } from '@/types';
 import { formatCurrency, formatDate } from './utils';
 
 export function generateOrderHTML(order: Order): string {
-  const itemCount = order.items.reduce((s, i) => s + i.quantity, 0);
+  // Phase 2a: exclude out-of-stock (substituted) items; label substitutions
+  const outOfStockMap = new Map<string, string>(
+    order.items
+      .filter(i => i.shopping_status === 'out_of_stock')
+      .map(i => [i.id, i.description])
+  );
+  const visibleItems  = order.items.filter(i => i.shopping_status !== 'out_of_stock');
+  const isFulfilled   = order.status === 'fulfilled';
 
-  // Group by category
-  const grouped = order.items.reduce((acc, item) => {
+  const itemCount = visibleItems.reduce((s, i) => s + i.quantity, 0);
+
+  // Group by category (visible items only)
+  const grouped = visibleItems.reduce((acc, item) => {
     const cat = item.category || 'General';
     if (!acc[cat]) acc[cat] = [];
     acc[cat].push(item);
     return acc;
-  }, {} as Record<string, typeof order.items>);
+  }, {} as Record<string, typeof visibleItems>);
 
   const categoryRows = Object.entries(grouped).map(([cat, items]) => {
-    const catRows = items.map((item, idx) => `
-      <tr style="background:${idx % 2 === 0 ? '#ffffff' : '#f8f9fa'};">
+    const catRows = items.map((item, idx) => {
+      const isSub          = item.is_substitution;
+      const effectiveTotal = item.actual_total ?? item.line_total;
+      const origDesc       = isSub && item.substitutes_item_id
+        ? outOfStockMap.get(item.substitutes_item_id) : null;
+      const subLabel = isSub
+        ? `<div style="font-size:9px;color:#E8640A;font-weight:700;margin-top:2px;">
+             SUBSTITUTED FOR: ${origDesc || 'original item'}
+           </div>` : '';
+      const weightLabel = item.actual_weight
+        ? `<div style="font-size:9px;color:#555;margin-top:2px;">Actual weight: ${item.actual_weight} lbs</div>` : '';
+      const rowBg = isSub ? '#fff8ec' : (idx % 2 === 0 ? '#ffffff' : '#f8f9fa');
+      const borderLeft = isSub ? 'border-left:3px solid #E8640A;' : '';
+      return `
+      <tr style="background:${rowBg};${borderLeft}">
         <td style="padding:6px 8px;font-size:10px;color:#888;border-bottom:1px solid #eee;font-family:monospace;">${item.upc || '—'}</td>
-        <td style="padding:6px 8px;font-size:11px;color:#555;border-bottom:1px solid #eee;">${item.description}</td>
+        <td style="padding:6px 8px;font-size:11px;color:${isSub ? '#E8640A' : '#555'};font-weight:${isSub ? '700' : 'normal'};border-bottom:1px solid #eee;">
+          ${item.description}${subLabel}${weightLabel}
+        </td>
         <td style="padding:6px 8px;font-size:11px;color:#666;border-bottom:1px solid #eee;text-align:center;">${item.pkg_size || '—'}</td>
         <td style="padding:6px 8px;font-size:11px;color:#666;border-bottom:1px solid #eee;text-align:center;">${item.uom || '—'}</td>
         <td style="padding:6px 8px;font-size:12px;font-weight:700;color:#1E3D1E;border-bottom:1px solid #eee;text-align:center;">${item.quantity}</td>
         <td style="padding:6px 8px;font-size:11px;color:#333;border-bottom:1px solid #eee;text-align:right;">${formatCurrency(item.unit_price)}</td>
-        <td style="padding:6px 8px;font-size:12px;font-weight:700;color:#1E3D1E;border-bottom:1px solid #eee;text-align:right;">${formatCurrency(item.line_total)}</td>
-      </tr>`).join('');
+        <td style="padding:6px 8px;font-size:12px;font-weight:700;color:#1E3D1E;border-bottom:1px solid #eee;text-align:right;">${formatCurrency(effectiveTotal)}</td>
+      </tr>`;
+    }).join('');
 
     return `
       <tr>
@@ -156,7 +181,6 @@ ${order.notes ? `
           <td style="padding:6px 8px;font-size:11px;color:#555;">Subtotal (${itemCount} items)</td>
           <td style="padding:6px 8px;text-align:right;font-weight:700;">${formatCurrency(order.subtotal)}</td>
         </tr>
-        <tr style="background:#D9E84A;">
           <td style="padding:8px;font-size:14px;font-weight:900;color:#1E3D1E;text-transform:uppercase;">TOTAL</td>
           <td style="padding:8px;text-align:right;font-size:16px;font-weight:900;color:#1E3D1E;">${formatCurrency(order.subtotal)}</td>
         </tr>
@@ -164,6 +188,13 @@ ${order.notes ? `
     </td>
   </tr>
 </table>
+
+${isFulfilled ? `
+<!-- ===== CUSTOMER NOTE ===== -->
+<div style="border-left:3px solid #E8640A;background:#fffbf0;padding:8px 12px;margin-bottom:16px;font-size:10px;color:#555;">
+  <strong style="color:#E8640A;">Note:</strong> This is your final receipt reflecting actual items delivered, including any substitutions and weight adjustments.
+  For full order details, visit your account page or check your order confirmation email.
+</div>` : ''}
 
 <!-- ===== SINCLAIR BOX ===== -->
 <div style="border:2px solid #1E3D1E;padding:12px 16px;background:#f0f7f0;border-radius:4px;margin-bottom:16px;">

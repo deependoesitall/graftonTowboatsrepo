@@ -7,12 +7,12 @@ import { clearCart } from '@/lib/cart';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { Order } from '@/types';
 import { SiteHeader } from '@/components/layout/SiteHeader';
-import { CheckCircle2, Download, ShoppingCart, Phone, Anchor, Star } from 'lucide-react';
+import { CheckCircle2, Download, ShoppingCart, Phone, Anchor, Star, History } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { AuthModal } from '@/components/auth/AuthModal';
 
 function ConfirmContent() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [authOpen, setAuthOpen] = useState(false);
   const searchParams = useSearchParams();
   const orderId = searchParams.get('order');
@@ -53,7 +53,7 @@ function ConfirmContent() {
             <div className="inline-block bg-brand-sand px-4 py-2 rounded-lg mb-4">
               <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Order Number</p>
               <p className="font-mono font-bold text-brand-navy text-xl">
-                {orderNumber || 'Processing…'}
+                {orderNumber || 'Processing...'}
               </p>
             </div>
             <p className="text-gray-500 text-sm leading-relaxed mb-2">
@@ -103,7 +103,7 @@ function ConfirmContent() {
                         {item.description}
                       </p>
                       <p className="text-xs text-gray-400">
-                        {item.quantity}× {formatCurrency(item.unit_price)}
+                        {item.quantity}&times; {formatCurrency(item.unit_price)}
                       </p>
                     </div>
                     <p className="text-sm font-bold text-brand-navy shrink-0">
@@ -121,8 +121,31 @@ function ConfirmContent() {
             </div>
           )}
 
-          {/* Create account prompt — only for guests */}
-          {!user && (
+          {/* Logged-in: link to order history */}
+          {!authLoading && user && (
+            <div className="card-base p-5 mt-6 border-brand-green/20 bg-gradient-to-br from-white to-brand-yellow/10">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 bg-brand-green/10 rounded-full flex items-center justify-center shrink-0">
+                  <History className="w-5 h-5 text-brand-green" />
+                </div>
+                <div className="flex-1">
+                  <p className="font-bold text-brand-green text-sm mb-1">
+                    Order saved to your account
+                  </p>
+                  <p className="text-brand-green/60 text-xs leading-relaxed mb-3">
+                    You can view this order, reorder with one click, and track your full order history from your account page.
+                  </p>
+                  <Link href="/account"
+                    className="inline-flex items-center gap-1.5 bg-brand-green text-white text-xs font-bold uppercase tracking-wide px-4 py-2 rounded-full hover:bg-brand-gmed transition-colors">
+                    <History className="w-3.5 h-3.5" /> View Order History
+                  </Link>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Create account prompt -- only for confirmed guests (not loading) */}
+          {!authLoading && !user && (
             <div className="card-base p-5 mt-6 border-brand-orange/30 bg-gradient-to-br from-white to-brand-yellow/10">
               <div className="flex items-start gap-3">
                 <div className="w-10 h-10 bg-brand-orange/10 rounded-full flex items-center justify-center shrink-0">
@@ -140,7 +163,7 @@ function ConfirmContent() {
                       className="bg-brand-orange text-white text-xs font-bold uppercase tracking-wide px-4 py-2 rounded-full hover:bg-brand-ored transition-colors">
                       Create Free Account
                     </button>
-                    <span className="text-brand-green/40 text-xs">Takes 10 seconds · totally optional</span>
+                    <span className="text-brand-green/40 text-xs">Takes 10 seconds &middot; totally optional</span>
                   </div>
                 </div>
               </div>
@@ -157,7 +180,6 @@ function ConfirmContent() {
                 <a href="tel:6185560290" className="text-brand-river font-semibold">
                   (618) 556-0290
                 </a>
-                
               </p>
             </div>
           </div>
@@ -165,7 +187,7 @@ function ConfirmContent() {
           <div className="text-center mt-6">
             <div className="flex items-center justify-center gap-2 text-brand-navy/40">
               <Anchor className="w-4 h-4" />
-              <span className="text-xs">Grafton Towboat Services · Mile Marker 218</span>
+              <span className="text-xs">Grafton Towboat Services &middot; Mile Marker 218</span>
             </div>
           </div>
         </div>

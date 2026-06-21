@@ -68,6 +68,12 @@ export interface OrderItem {
   unit_price: number;
   quantity: number;
   line_total: number;
+  // Phase 2a: shopping mode fields
+  shopping_status: 'pending' | 'shopped' | 'out_of_stock';
+  actual_weight: number | null;
+  actual_total: number | null;
+  is_substitution: boolean;
+  substitutes_item_id: string | null;
 }
 
 export type OrderStatus = 'new' | 'in_progress' | 'fulfilled' | 'cancelled';

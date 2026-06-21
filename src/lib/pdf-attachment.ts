@@ -37,7 +37,17 @@ export async function generateOrderPdfBuffer(order: Order): Promise<Buffer> {
     doc.on('end',  () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    const itemCount = order.items.reduce((s, i) => s + i.quantity, 0);
+    // Phase 2a: filter out items that were marked out-of-stock (substituted)
+    // and build a map so substitution items can reference what they replaced.
+    const outOfStockMap = new Map<string, string>(
+      order.items
+        .filter(i => i.shopping_status === 'out_of_stock')
+        .map(i => [i.id, i.description])
+    );
+    const visibleItems = order.items.filter(i => i.shopping_status !== 'out_of_stock');
+    const isFulfilled  = order.status === 'fulfilled';
+
+    const itemCount = visibleItems.reduce((s, i) => s + i.quantity, 0);
 
     // ── HEADER ────────────────────────────────────────────────
     doc.rect(MARGIN, MARGIN, CONTENT_W, 56).fill(DARK_GREEN);
@@ -142,13 +152,13 @@ export async function generateOrderPdfBuffer(order: Order): Promise<Buffer> {
     });
     y += 16;
 
-    // Group items by category
-    const grouped = order.items.reduce((acc, item) => {
+    // Group visible items by category
+    const grouped = visibleItems.reduce((acc, item) => {
       const cat = item.category || 'General';
       if (!acc[cat]) acc[cat] = [];
       acc[cat].push(item);
       return acc;
-    }, {} as Record<string, typeof order.items>);
+    }, {} as Record<string, typeof visibleItems>);
 
     let rowBg = false;
     Object.entries(grouped).forEach(([cat, items]) => {
@@ -159,34 +169,58 @@ export async function generateOrderPdfBuffer(order: Order): Promise<Buffer> {
       y += 12;
 
       items.forEach(item => {
+        const isSub = item.is_substitution;
+        const rowH  = isSub ? 24 : 16; // substitution rows are taller (need extra line)
+
         // Check for page break
-        if (y > 700) {
+        if (y > 700 - rowH) {
           doc.addPage();
           y = MARGIN;
         }
 
-        const bg = rowBg ? '#f8f9fa' : '#ffffff';
-        doc.rect(MARGIN, y, CONTENT_W, 16).fill(bg);
+        const bg = isSub ? '#fff8ec' : (rowBg ? '#f8f9fa' : '#ffffff');
+        doc.rect(MARGIN, y, CONTENT_W, rowH).fill(bg);
         rowBg = !rowBg;
 
+        // Left accent bar for substitutions
+        if (isSub) {
+          doc.rect(MARGIN, y, 3, rowH).fill(ORANGE);
+        }
+
+        const textY = isSub ? y + 3 : y + 4;
+        const effectiveTotal = item.actual_total ?? item.line_total;
+
         doc.fillColor(GRAY).fontSize(8).font('Helvetica')
-           .text(item.upc || '—', cols.upc.x + 3, y + 4, { width: cols.upc.w - 6 });
-        doc.fillColor('#222222').fontSize(8).font('Helvetica')
-           .text(item.description, cols.desc.x + 3, y + 4, { width: cols.desc.w - 6 });
+           .text(item.upc || '—', cols.upc.x + 3, textY, { width: cols.upc.w - 6 });
+        doc.fillColor(isSub ? ORANGE : '#222222').fontSize(8).font(isSub ? 'Helvetica-Bold' : 'Helvetica')
+           .text(item.description, cols.desc.x + 3, textY, { width: cols.desc.w - 6 });
         doc.fillColor(GRAY).fontSize(8).font('Helvetica')
-           .text(item.pkg_size || '—', cols.pack.x + 3, y + 4, { width: cols.pack.w - 6 });
+           .text(item.pkg_size || '—', cols.pack.x + 3, textY, { width: cols.pack.w - 6 });
         doc.fillColor(GRAY).fontSize(8).font('Helvetica')
-           .text(item.uom || '—', cols.uom.x + 3, y + 4, { width: cols.uom.w - 6, align: 'center' });
+           .text(item.uom || '—', cols.uom.x + 3, textY, { width: cols.uom.w - 6, align: 'center' });
         doc.fillColor(DARK_GREEN).fontSize(9).font('Helvetica-Bold')
-           .text(String(item.quantity), cols.qty.x + 3, y + 4, { width: cols.qty.w - 6, align: 'right' });
+           .text(String(item.quantity), cols.qty.x + 3, textY, { width: cols.qty.w - 6, align: 'right' });
         doc.fillColor(GRAY).fontSize(8).font('Helvetica')
-           .text(formatCurrency(item.unit_price), cols.unit.x + 3, y + 4, { width: cols.unit.w - 6, align: 'right' });
+           .text(formatCurrency(item.unit_price), cols.unit.x + 3, textY, { width: cols.unit.w - 6, align: 'right' });
         doc.fillColor(DARK_GREEN).fontSize(9).font('Helvetica-Bold')
-           .text(formatCurrency(item.line_total), cols.total.x + 3, y + 4, { width: cols.total.w - 6, align: 'right' });
+           .text(formatCurrency(effectiveTotal), cols.total.x + 3, textY, { width: cols.total.w - 6, align: 'right' });
+
+        // Sub-line for substitutions: "Substituted for: [original]"
+        if (isSub && item.substitutes_item_id) {
+          const origDesc = outOfStockMap.get(item.substitutes_item_id) || 'original item';
+          doc.fillColor(ORANGE).fontSize(7).font('Helvetica')
+             .text(`SUBSTITUTED FOR: ${origDesc}`, cols.desc.x + 3, textY + 10, { width: cols.desc.w + 80 });
+        }
+
+        // Sub-line for weight items: "Actual weight: X.XX lbs"
+        if (item.actual_weight) {
+          doc.fillColor(GRAY).fontSize(7).font('Helvetica')
+             .text(`Actual weight: ${item.actual_weight} lbs`, cols.desc.x + 3, textY + 10, { width: cols.desc.w + 80 });
+        }
 
         // Bottom border
-        doc.moveTo(MARGIN, y + 16).lineTo(MARGIN + CONTENT_W, y + 16).strokeColor('#eeeeee').lineWidth(0.5).stroke();
-        y += 16;
+        doc.moveTo(MARGIN, y + rowH).lineTo(MARGIN + CONTENT_W, y + rowH).strokeColor('#eeeeee').lineWidth(0.5).stroke();
+        y += rowH;
       });
     });
 
@@ -201,6 +235,19 @@ export async function generateOrderPdfBuffer(order: Order): Promise<Buffer> {
        .text(`TOTAL  ${formatCurrency(order.subtotal)}`, totalRowX + 8, y + 7,
          { width: totalRowW - 16, align: 'right' });
     y += 34;
+
+    // ── CUSTOMER NOTE (fulfilled orders only) ────────────────
+    if (isFulfilled) {
+      if (y > 680) { doc.addPage(); y = MARGIN; }
+      doc.rect(MARGIN, y, CONTENT_W, 28).fill('#fffbf0');
+      doc.rect(MARGIN, y, 3, 28).fill(ORANGE);
+      doc.fillColor(ORANGE).fontSize(7).font('Helvetica-Bold')
+         .text('NOTE', MARGIN + 8, y + 5, { characterSpacing: 0.5 });
+      doc.fillColor('#555555').fontSize(8).font('Helvetica')
+         .text('This is your final receipt. For full order details including any adjustments, visit your account page at grafton-ordering.vercel.app/account or check your confirmation email.',
+           MARGIN + 8, y + 14, { width: CONTENT_W - 16 });
+      y += 34;
+    }
 
     // ── SINCLAIR FOODS BOX ────────────────────────────────────
     if (y > 680) { doc.addPage(); y = MARGIN; }

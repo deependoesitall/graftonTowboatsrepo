@@ -17,9 +17,9 @@ const SAMPLE_ORDER: Order = {
   notes: 'Please deliver to the south dock by 2pm if possible. Thanks!',
   eta: '2:00 PM',
   items: [
-    { id: '1', order_id: 'sample', product_id: 'p1', description: 'Bologna Salad', category: 'Bakery & Deli', pkg_size: 'PER LB', uom: null, upc: '023456789012', unit_price: 6.29, quantity: 2, line_total: 12.58 },
-    { id: '2', order_id: 'sample', product_id: 'p2', description: '2% Milk Gallon', category: 'Dairy & Eggs', pkg_size: '1 GAL', uom: null, upc: '070470003498', unit_price: 3.89, quantity: 3, line_total: 11.67 },
-    { id: '3', order_id: 'sample', product_id: 'p3', description: 'Lysol Spray Disinfectant 19oz 2-Pk', category: 'Household', pkg_size: '2 CT', uom: null, upc: null, unit_price: 9.99, quantity: 1, line_total: 9.99 },
+    { id: '1', order_id: 'sample', product_id: 'p1', description: 'Bologna Salad', category: 'Bakery & Deli', pkg_size: 'PER LB', uom: null, upc: '023456789012', unit_price: 6.29, quantity: 2, line_total: 12.58, shopping_status: 'pending', actual_weight: null, actual_total: null, is_substitution: false, substitutes_item_id: null },
+    { id: '2', order_id: 'sample', product_id: 'p2', description: '2% Milk Gallon', category: 'Dairy & Eggs', pkg_size: '1 GAL', uom: null, upc: '070470003498', unit_price: 3.89, quantity: 3, line_total: 11.67, shopping_status: 'pending', actual_weight: null, actual_total: null, is_substitution: false, substitutes_item_id: null },
+    { id: '3', order_id: 'sample', product_id: 'p3', description: 'Lysol Spray Disinfectant 19oz 2-Pk', category: 'Household', pkg_size: '2 CT', uom: null, upc: null, unit_price: 9.99, quantity: 1, line_total: 9.99, shopping_status: 'pending', actual_weight: null, actual_total: null, is_substitution: false, substitutes_item_id: null },
   ],
   subtotal: 34.24,
   status: 'new',

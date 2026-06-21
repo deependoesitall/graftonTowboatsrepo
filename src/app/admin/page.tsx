@@ -7,10 +7,11 @@ import {
   ShoppingBag, Lock, Eye, EyeOff, Loader2
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
-import { setAdminSession, setAdminUiState, fetchAdminSession, adminFetch } from '@/lib/admin-auth';
+import { AdminRole, setAdminSession, setAdminUiState, fetchAdminSession, adminFetch } from '@/lib/admin-auth';
 
 export default function AdminDashboard() {
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null); // null = checking
+  const [adminRole, setAdminRole] = useState<AdminRole | null>(null);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
@@ -30,7 +31,10 @@ export default function AdminDashboard() {
     (async () => {
       const session = await fetchAdminSession();
       setLoggedIn(!!session);
-      if (session) fetchStats();
+      if (session) {
+        setAdminRole(session.role);
+        fetchStats();
+      }
     })();
   }, []);
 
@@ -164,13 +168,15 @@ export default function AdminDashboard() {
               color="bg-yellow-50"
               action={() => router.push('/admin/orders?status=in_progress')}
             />
-            <StatCard
-              label="Revenue"
-              value={formatCurrency(stats.total_revenue)}
-              icon={<TrendingUp className="w-5 h-5 text-green-500" />}
-              color="bg-green-50"
-              isString
-            />
+            {adminRole !== 'staff' && (
+              <StatCard
+                label="Revenue"
+                value={formatCurrency(stats.total_revenue)}
+                icon={<TrendingUp className="w-5 h-5 text-green-500" />}
+                color="bg-green-50"
+                isString
+              />
+            )}
           </div>
 
           {/* Recent orders */}
@@ -190,7 +196,9 @@ export default function AdminDashboard() {
                   <tr className="bg-gray-50 text-left">
                     <th className="px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wide">Order</th>
                     <th className="px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wide">Vessel</th>
-                    <th className="px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wide">Total</th>
+                    {adminRole !== 'staff' && (
+                      <th className="px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wide">Total</th>
+                    )}
                     <th className="px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wide">Status</th>
                     <th className="px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wide">Date</th>
                   </tr>
@@ -206,7 +214,9 @@ export default function AdminDashboard() {
                         {order.order_number}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-700">{order.company_name}</td>
-                      <td className="px-4 py-3 text-sm font-bold">{formatCurrency(order.subtotal)}</td>
+                      {adminRole !== 'staff' && (
+                        <td className="px-4 py-3 text-sm font-bold">{formatCurrency(order.subtotal)}</td>
+                      )}
                       <td className="px-4 py-3">
                         <StatusBadge status={order.status} />
                       </td>

@@ -72,10 +72,30 @@ export async function PATCH(
       po_number: existing.po_number,
     });
 
-    // When order is marked fulfilled, send the Order Shopped email.
+    // When order is marked fulfilled, recalculate the subtotal from
+    // final shopping state (exclude out_of_stock items, use actual_total
+    // for weight items), then send the Order Shopped email.
     // Must be fully awaited before returning — Vercel terminates the function
     // as soon as the response is sent, so fire-and-forget won't work here.
     if (body.status === 'fulfilled') {
+      // Recalculate subtotal from final item state
+      const { data: finalItems } = await supabase
+        .from('order_items')
+        .select('shopping_status, line_total, actual_total')
+        .eq('order_id', id);
+
+      if (finalItems) {
+        const newSubtotal = finalItems
+          .filter((i: { shopping_status: string }) => i.shopping_status !== 'out_of_stock')
+          .reduce((sum: number, i: { line_total: number; actual_total: number | null }) =>
+            sum + (i.actual_total ?? i.line_total), 0);
+
+        await supabase
+          .from('orders')
+          .update({ subtotal: newSubtotal })
+          .eq('id', id);
+      }
+
       const { data: fullOrder } = await supabase
         .from('orders')
         .select('*, items:order_items(*)')
@@ -114,6 +134,7 @@ export async function DELETE(
 
   const { id } = await params;
   const supabase = createServiceClient();
+
 
   const { data: existing } = await supabase
     .from('orders')
