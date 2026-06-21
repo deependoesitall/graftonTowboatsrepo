@@ -4,13 +4,13 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Package, Clock, CheckCircle2, TrendingUp,
-  ShoppingBag, Lock, Eye, EyeOff, Loader2
+  ShoppingBag, Lock, Eye, EyeOff, Loader2, ShoppingCart,
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import { AdminRole, setAdminSession, setAdminUiState, fetchAdminSession, adminFetch } from '@/lib/admin-auth';
 
 export default function AdminDashboard() {
-  const [loggedIn, setLoggedIn] = useState<boolean | null>(null); // null = checking
+  const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
   const [adminRole, setAdminRole] = useState<AdminRole | null>(null);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -57,7 +57,6 @@ export default function AdminDashboard() {
       } else {
         setAdminUiState(user?.role || 'owner', user?.display_name || user?.username || 'Admin', user?.username || 'admin');
       }
-      // Full reload so AdminNav (and everything else) re-initializes with the new session/role
       window.location.href = '/admin';
     } finally {
       setLogging(false);
@@ -70,11 +69,8 @@ export default function AdminDashboard() {
     else setLoggedIn(false);
   }
 
-  // Not logged in
   if (loggedIn === null) {
-    return (
-      <div className="min-h-[80vh] flex items-center justify-center text-gray-400 text-sm">Loading…</div>
-    );
+    return <div className="min-h-[80vh] flex items-center justify-center text-gray-400 text-sm">Loading…</div>;
   }
 
   if (!loggedIn) {
@@ -136,7 +132,8 @@ export default function AdminDashboard() {
     );
   }
 
-  // Dashboard
+  const isStaff = adminRole === 'staff';
+
   return (
     <div>
       <div className="mb-6">
@@ -144,31 +141,58 @@ export default function AdminDashboard() {
         <p className="text-gray-400 text-sm">Grafton Towboat Services · Order Management</p>
       </div>
 
-      {/* Stats cards */}
       {stats && (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-            <StatCard
-              label="Total Orders"
-              value={stats.total}
-              icon={<ShoppingBag className="w-5 h-5 text-brand-steel" />}
-              color="bg-blue-50"
-            />
-            <StatCard
-              label="New"
-              value={stats.new}
-              icon={<Package className="w-5 h-5 text-blue-500" />}
-              color="bg-blue-50"
-              action={() => router.push('/admin/orders?status=new')}
-            />
-            <StatCard
-              label="In Progress"
-              value={stats.in_progress}
-              icon={<Clock className="w-5 h-5 text-yellow-500" />}
-              color="bg-yellow-50"
-              action={() => router.push('/admin/orders?status=in_progress')}
-            />
-            {adminRole !== 'staff' && (
+          {/* ── STAFF STAT CARDS ── */}
+          {isStaff ? (
+            <div className="grid grid-cols-3 gap-4 mb-8">
+              <StatCard
+                label="Orders to Shop"
+                value={stats.new}
+                icon={<ShoppingCart className="w-5 h-5 text-blue-500" />}
+                color="bg-blue-50"
+                action={() => router.push('/admin/orders?status=new')}
+                highlight={stats.new > 0}
+              />
+              <StatCard
+                label="In Progress"
+                value={stats.in_progress}
+                icon={<Clock className="w-5 h-5 text-amber-500" />}
+                color="bg-amber-50"
+                action={() => router.push('/admin/orders?status=in_progress')}
+                highlight={stats.in_progress > 0}
+              />
+              <StatCard
+                label="Fulfilled"
+                value={stats.fulfilled}
+                icon={<CheckCircle2 className="w-5 h-5 text-green-500" />}
+                color="bg-green-50"
+                action={() => router.push('/admin/orders?status=fulfilled')}
+              />
+            </div>
+          ) : (
+            /* ── OWNER / MANAGER STAT CARDS ── */
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+              <StatCard
+                label="Total Orders"
+                value={stats.total}
+                icon={<ShoppingBag className="w-5 h-5 text-brand-steel" />}
+                color="bg-blue-50"
+              />
+              <StatCard
+                label="New"
+                value={stats.new}
+                icon={<Package className="w-5 h-5 text-blue-500" />}
+                color="bg-blue-50"
+                action={() => router.push('/admin/orders?status=new')}
+              />
+              <StatCard
+                label="In Progress"
+                value={stats.in_progress}
+                icon={<Clock className="w-5 h-5 text-yellow-500" />}
+                color="bg-yellow-50"
+                action={() => router.push('/admin/orders?status=in_progress')}
+              />
               <StatCard
                 label="Revenue"
                 value={formatCurrency(stats.total_revenue)}
@@ -176,18 +200,20 @@ export default function AdminDashboard() {
                 color="bg-green-50"
                 isString
               />
-            )}
-          </div>
+            </div>
+          )}
 
-          {/* Recent orders */}
+          {/* ── RECENT ORDERS ── */}
           <div className="card-base overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="font-display text-lg font-bold text-brand-navy">Recent Orders</h2>
+              <h2 className="font-display text-lg font-bold text-brand-navy">
+                {isStaff ? 'Orders Needing Attention' : 'Recent Orders'}
+              </h2>
               <button
-                onClick={() => router.push('/admin/orders')}
+                onClick={() => router.push(isStaff ? '/admin/orders?status=new' : '/admin/orders')}
                 className="text-brand-river text-sm hover:underline"
               >
-                View All →
+                {isStaff ? 'View All New →' : 'View All →'}
               </button>
             </div>
             <div className="overflow-x-auto">
@@ -196,7 +222,7 @@ export default function AdminDashboard() {
                   <tr className="bg-gray-50 text-left">
                     <th className="px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wide">Order</th>
                     <th className="px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wide">Vessel</th>
-                    {adminRole !== 'staff' && (
+                    {!isStaff && (
                       <th className="px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wide">Total</th>
                     )}
                     <th className="px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wide">Status</th>
@@ -214,7 +240,7 @@ export default function AdminDashboard() {
                         {order.order_number}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-700">{order.company_name}</td>
-                      {adminRole !== 'staff' && (
+                      {!isStaff && (
                         <td className="px-4 py-3 text-sm font-bold">{formatCurrency(order.subtotal)}</td>
                       )}
                       <td className="px-4 py-3">
@@ -236,7 +262,7 @@ export default function AdminDashboard() {
 }
 
 function StatCard({
-  label, value, icon, color, action, isString,
+  label, value, icon, color, action, isString, highlight,
 }: {
   label: string;
   value: number | string;
@@ -244,10 +270,13 @@ function StatCard({
   color: string;
   action?: () => void;
   isString?: boolean;
+  highlight?: boolean;
 }) {
   return (
     <div
-      className={`card-base p-4 ${action ? 'cursor-pointer hover:shadow-md transition-shadow' : ''}`}
+      className={`card-base p-4 transition-shadow ${
+        action ? 'cursor-pointer hover:shadow-md' : ''
+      } ${highlight ? 'ring-2 ring-brand-gold/40' : ''}`}
       onClick={action}
     >
       <div className={`w-9 h-9 ${color} rounded-lg flex items-center justify-center mb-3`}>
@@ -255,7 +284,7 @@ function StatCard({
       </div>
       <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{label}</p>
       <p className="font-display text-2xl font-bold text-brand-navy">
-        {isString ? value : value.toLocaleString()}
+        {isString ? value : (value as number).toLocaleString()}
       </p>
     </div>
   );

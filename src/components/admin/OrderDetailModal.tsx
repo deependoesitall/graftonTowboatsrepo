@@ -203,7 +203,10 @@ export function OrderDetailModal({
       {shoppingMode && (
         <ShoppingModeModal
           order={order}
-          onClose={() => setShoppingMode(false)}
+          onClose={() => {
+            setShoppingMode(false);
+            onRefresh(); // keep cached order in sync even if not completed
+          }}
           onComplete={() => {
             setShoppingMode(false);
             onRefresh();

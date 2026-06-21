@@ -1,5 +1,6 @@
 // src/app/api/orders/[id]/items/[itemId]/route.ts
 // Phase 2a: Per-item shopping mode actions for staff.
+// Phase 2b: Auto-advance order to in_progress on first item action.
 //
 // PATCH /api/orders/:id/items/:itemId
 // Body shapes:
@@ -26,6 +27,22 @@ const bodySchema = z.discriminatedUnion('action', [
     actual_weight: z.number().positive(),
   }),
 ]);
+
+/** If the order is still 'new', advance it to 'in_progress' (first item action). */
+async function maybeAdvanceToInProgress(supabase: ReturnType<typeof createServiceClient>, orderId: string) {
+  const { data: order } = await supabase
+    .from('orders')
+    .select('status')
+    .eq('id', orderId)
+    .single();
+
+  if (order?.status === 'new') {
+    await supabase
+      .from('orders')
+      .update({ status: 'in_progress', updated_at: new Date().toISOString() })
+      .eq('id', orderId);
+  }
+}
 
 export async function PATCH(
   req: NextRequest,
@@ -67,13 +84,16 @@ export async function PATCH(
       .single();
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    await maybeAdvanceToInProgress(supabase, orderId);
+
     return NextResponse.json({ item: updated });
   }
 
   // ── SET WEIGHT ────────────────────────────────────────────────────────────
   if (action === 'set_weight') {
     const { actual_weight } = parsed.data;
-    const actual_total = actual_weight * item.unit_price; // weight items: total = lbs × price/lb
+    const actual_total = actual_weight * item.unit_price;
 
     const { data: updated, error } = await supabase
       .from('order_items')
@@ -83,6 +103,9 @@ export async function PATCH(
       .single();
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    await maybeAdvanceToInProgress(supabase, orderId);
+
     return NextResponse.json({ item: updated });
   }
 
@@ -133,6 +156,8 @@ export async function PATCH(
       .single();
 
     if (subErr) return NextResponse.json({ error: subErr.message }, { status: 500 });
+
+    await maybeAdvanceToInProgress(supabase, orderId);
 
     // Return both updated original and new substitution
     const { data: originalUpdated } = await supabase
