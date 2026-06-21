@@ -55,21 +55,47 @@ function isWeightItem(item: OrderItem) {
 
 interface ConfirmDialogProps {
   customerEmail?: string;
+  pendingItems: OrderItem[];
   onConfirm: () => void;
   onCancel: () => void;
   completing: boolean;
 }
 
-function ConfirmCompleteDialog({ customerEmail, onConfirm, onCancel, completing }: ConfirmDialogProps) {
+function ConfirmCompleteDialog({ customerEmail, pendingItems, onConfirm, onCancel, completing }: ConfirmDialogProps) {
+  const hasPending = pendingItems.length > 0;
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 px-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 animate-fade-in">
         <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
-            <AlertTriangle className="w-5 h-5 text-amber-600" />
+          <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${hasPending ? 'bg-red-100' : 'bg-amber-100'}`}>
+            <AlertTriangle className={`w-5 h-5 ${hasPending ? 'text-red-600' : 'text-amber-600'}`} />
           </div>
           <h3 className="font-display text-lg font-bold text-brand-navy">Complete Order?</h3>
         </div>
+
+        {/* Unprocessed items warning */}
+        {hasPending && (
+          <div className="mb-4 bg-red-50 border border-red-200 rounded-xl p-3">
+            <p className="text-sm font-bold text-red-700 mb-1.5">
+              ⚠ {pendingItems.length} item{pendingItems.length !== 1 ? 's' : ''} not yet actioned:
+            </p>
+            <ul className="space-y-0.5">
+              {pendingItems.slice(0, 5).map(i => (
+                <li key={i.id} className="text-xs text-red-600 flex items-start gap-1.5">
+                  <span className="mt-0.5 shrink-0">•</span>
+                  <span>{i.description}{i.quantity !== 1 ? ` ×${i.quantity}` : ''}</span>
+                </li>
+              ))}
+              {pendingItems.length > 5 && (
+                <li className="text-xs text-red-500 italic">+ {pendingItems.length - 5} more</li>
+              )}
+            </ul>
+            <p className="text-xs text-red-500 mt-2">
+              These items will remain <strong>pending</strong> on the final order.
+            </p>
+          </div>
+        )}
+
         <p className="text-sm text-gray-600 mb-2">
           This will mark the order as <strong className="text-brand-green">Fulfilled</strong> and cannot be undone.
         </p>
@@ -94,11 +120,15 @@ function ConfirmCompleteDialog({ customerEmail, onConfirm, onCancel, completing 
           <button
             onClick={onConfirm}
             disabled={completing}
-            className="flex-1 py-2.5 rounded-xl bg-brand-green text-white text-sm font-bold flex items-center justify-center gap-1.5 hover:bg-brand-gmed transition-colors disabled:opacity-50"
+            className={`flex-1 py-2.5 rounded-xl text-white text-sm font-bold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50 ${
+              hasPending
+                ? 'bg-red-600 hover:bg-red-700'
+                : 'bg-brand-green hover:bg-brand-gmed'
+            }`}
           >
             {completing
               ? <><Loader2 className="w-4 h-4 animate-spin" /> Completing…</>
-              : <><CheckCircle2 className="w-4 h-4" /> Confirm & Send</>
+              : <><CheckCircle2 className="w-4 h-4" /> {hasPending ? 'Complete Anyway' : 'Confirm & Send'}</>
             }
           </button>
         </div>
@@ -494,12 +524,11 @@ export function ShoppingModeModal({ order, onClose, onComplete }: ShoppingModeMo
           )}
 
           <button
-            onClick={() => allDone && setShowConfirm(true)}
-            disabled={!allDone}
-            className={`w-full py-3.5 rounded-xl font-display font-bold text-base uppercase tracking-wide flex items-center justify-center gap-2 transition-all ${
+            onClick={() => setShowConfirm(true)}
+            className={`w-full py-3.5 rounded-xl font-display font-bold text-base uppercase tracking-wide flex items-center justify-center gap-2 transition-all shadow-lg ${
               allDone
-                ? 'bg-brand-green text-white hover:bg-brand-gmed shadow-lg'
-                : 'bg-gray-100 text-gray-300 cursor-not-allowed'
+                ? 'bg-brand-green text-white hover:bg-brand-gmed'
+                : 'bg-brand-navy text-white hover:bg-brand-steel'
             }`}
           >
             <CheckCircle2 className="w-5 h-5" />
@@ -512,6 +541,7 @@ export function ShoppingModeModal({ order, onClose, onComplete }: ShoppingModeMo
       {showConfirm && (
         <ConfirmCompleteDialog
           customerEmail={order.customer_email}
+          pendingItems={pendingItems}
           onConfirm={completeOrder}
           onCancel={() => setShowConfirm(false)}
           completing={completing}
