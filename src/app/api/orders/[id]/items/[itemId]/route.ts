@@ -73,7 +73,7 @@ export async function PATCH(
   // ── SET WEIGHT ────────────────────────────────────────────────────────────
   if (action === 'set_weight') {
     const { actual_weight } = parsed.data;
-    const actual_total = actual_weight * item.unit_price * item.quantity;
+    const actual_total = actual_weight * item.unit_price; // weight items: total = lbs × price/lb
 
     const { data: updated, error } = await supabase
       .from('order_items')

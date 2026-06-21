@@ -336,7 +336,7 @@ function ItemRow({
   const effectiveTotal = item.actual_total ?? item.line_total;
   const previewWeight = parseFloat(ui.weightInput);
   const weightPreview = !isNaN(previewWeight) && previewWeight > 0
-    ? previewWeight * item.unit_price * item.quantity
+    ? previewWeight * item.unit_price
     : null;
 
   return (
@@ -407,14 +407,12 @@ function ItemRow({
                 {ui.saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
                 Shopped
               </button>
-              {weight && (
-                <button
-                  onClick={onOpenWeight}
-                  className="flex items-center gap-1.5 bg-brand-orange text-white text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-orange-700 transition-colors"
-                >
-                  <Scale className="w-3 h-3" /> Enter Weight
-                </button>
-              )}
+              <button
+                onClick={onOpenWeight}
+                className="flex items-center gap-1.5 bg-brand-orange text-white text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-orange-700 transition-colors"
+              >
+                <Scale className="w-3 h-3" /> {weight ? 'Enter Weight' : 'By Weight'}
+              </button>
               <button
                 onClick={onOpenSub}
                 className="flex items-center gap-1.5 bg-gray-200 text-gray-700 text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-gray-300 transition-colors"
