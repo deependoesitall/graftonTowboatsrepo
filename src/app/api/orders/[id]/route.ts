@@ -72,7 +72,9 @@ export async function PATCH(
       po_number: existing.po_number,
     });
 
-    // When order is marked fulfilled, send the Order Shopped email
+    // When order is marked fulfilled, send the Order Shopped email.
+    // Must be fully awaited before returning — Vercel terminates the function
+    // as soon as the response is sent, so fire-and-forget won't work here.
     if (body.status === 'fulfilled') {
       const { data: fullOrder } = await supabase
         .from('orders')
@@ -81,23 +83,20 @@ export async function PATCH(
         .single();
 
       if (fullOrder) {
-        // Fire-and-forget is intentional here: don't block the status update response
-        // if the email fails. Errors are logged server-side.
-        (async () => {
-          try {
-            const { data: s } = await supabase
-              .from('admin_settings')
-              .select('business_email, order_email_cc')
-              .single();
+        try {
+          const { data: s } = await supabase
+            .from('admin_settings')
+            .select('business_email, order_email_cc')
+            .single();
 
-            await sendOrderShoppedEmail(fullOrder as Order, {
-              businessEmail: s?.business_email || process.env.BUSINESS_EMAIL,
-              ccEmailRaw: s?.order_email_cc,
-            });
-          } catch (err) {
-            console.error('Order Shopped email error:', err);
-          }
-        })();
+          await sendOrderShoppedEmail(fullOrder as Order, {
+            businessEmail: s?.business_email || process.env.BUSINESS_EMAIL,
+            ccEmailRaw: s?.order_email_cc,
+          });
+        } catch (err) {
+          console.error('Order Shopped email error:', err);
+          // Don't fail the status update if email fails
+        }
       }
     }
   }

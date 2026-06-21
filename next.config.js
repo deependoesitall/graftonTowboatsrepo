@@ -1,5 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Prevent webpack from bundling pdfkit — it loads font files via __dirname
+  // at runtime, which breaks when bundled. This lets Node.js require it natively.
+  serverExternalPackages: ['pdfkit'],
   reactStrictMode: true,
   images: {
     remotePatterns: [

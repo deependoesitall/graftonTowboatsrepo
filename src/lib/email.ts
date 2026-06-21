@@ -194,11 +194,8 @@ export async function sendOrderReceivedEmail(
   const fromEmail  = process.env.EMAIL_FROM || 'onboarding@resend.dev';
   const toEmail    = opts.businessEmail || process.env.BUSINESS_EMAIL || 'GraftonTowboatServices@gmail.com';
   const ccList     = parseCcList(opts.ccEmailRaw ?? process.env.ORDER_EMAIL_CC ?? '');
-  const pdfBuffer  = await generateOrderPdfBuffer(order);
-  const pdfAttachment = [{
-    filename: `order-${order.order_number}.pdf`,
-    content:  pdfBuffer,
-  }];
+  const pdfBuffer = await generateOrderPdfBuffer(order);
+  const pdfAttachment = [{ filename: `order-${order.order_number}.pdf`, content: pdfBuffer }];
 
   // 1) Business notification email
   const businessHtml = buildOrderEmailHtml(order, {
@@ -279,7 +276,8 @@ export async function sendOrderShoppedEmail(
   const fromEmail = process.env.EMAIL_FROM || 'onboarding@resend.dev';
   const toEmail   = opts.businessEmail || process.env.BUSINESS_EMAIL || 'GraftonTowboatServices@gmail.com';
   const ccList    = parseCcList(opts.ccEmailRaw ?? process.env.ORDER_EMAIL_CC ?? '');
-  const pdfBuffer = await generateOrderPdfBuffer(order);
+  const pdfBuffer2 = await generateOrderPdfBuffer(order);
+  const pdfAttachment2 = [{ filename: `order-${order.order_number}-fulfilled.pdf`, content: pdfBuffer2 }];
 
   const shoppedHtml = buildOrderEmailHtml(order, {
     tagline:    'Order Fulfilled',
@@ -302,10 +300,7 @@ export async function sendOrderShoppedEmail(
     replyTo:     toEmail,
     subject:     `📦 Your Order is Ready — ${order.order_number} — Grafton Towboat Services`,
     html:        shoppedHtml,
-    attachments: [{
-      filename: `order-${order.order_number}-fulfilled.pdf`,
-      content:  pdfBuffer,
-    }],
+    attachments: pdfAttachment2,
   });
 
   if (result.error) {
