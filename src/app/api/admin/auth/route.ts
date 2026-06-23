@@ -17,7 +17,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { hashPassword, verifyPassword, isLegacyHash } from '@/lib/password';
-import { signAdminSession, sessionCookieOptions, SESSION_COOKIE, AdminRole } from '@/lib/admin-auth-server';
+import { signAdminSession, sessionCookieOptions, SESSION_COOKIE, AdminRole, AdminPermission } from '@/lib/admin-auth-server';
 
 export async function POST(req: NextRequest) {
   let body: { password?: string; username?: string };
@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
   if (username) {
     const { data: user } = await supabase
       .from('admin_users')
-      .select('id, username, role, display_name, password_hash, is_active')
+      .select('id, username, role, display_name, password_hash, is_active, permissions')
       .eq('username', username.toLowerCase().trim())
       .eq('is_active', true)
       .single();
@@ -61,16 +61,20 @@ export async function POST(req: NextRequest) {
     await supabase.from('admin_users').update({ last_login: new Date().toISOString() }).eq('id', user.id);
 
     const role = user.role as AdminRole;
+    const permissions: AdminPermission[] = Array.isArray(user.permissions)
+      ? (user.permissions as string[]).filter((p): p is AdminPermission => p === 'sinclair')
+      : [];
     const token = signAdminSession({
       sub: user.id,
       username: user.username,
       role,
       display_name: user.display_name || user.username,
+      permissions,
     });
 
     const res = NextResponse.json({
       token,
-      user: { username: user.username, role, display_name: user.display_name },
+      user: { username: user.username, role, display_name: user.display_name, permissions },
     });
     res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
     return res;
@@ -119,13 +123,13 @@ export async function POST(req: NextRequest) {
     username: 'admin',
     role: 'owner',
     display_name: 'Jennifer',
+    permissions: [],
   });
 
   const res = NextResponse.json({
     token,
-    user: { username: 'admin', role: 'owner', display_name: 'Jennifer' },
+    user: { username: 'admin', role: 'owner', display_name: 'Jennifer', permissions: [] },
   });
   res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
   return res;
 }
-

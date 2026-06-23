@@ -7,7 +7,7 @@ import {
   ShoppingBag, Lock, Eye, EyeOff, Loader2, ShoppingCart,
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
-import { AdminRole, setAdminSession, setAdminUiState, fetchAdminSession, adminFetch } from '@/lib/admin-auth';
+import { AdminRole, AdminPermission, setAdminSession, setAdminUiState, fetchAdminSession, adminFetch } from '@/lib/admin-auth';
 
 export default function AdminDashboard() {
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
@@ -33,6 +33,11 @@ export default function AdminDashboard() {
       setLoggedIn(!!session);
       if (session) {
         setAdminRole(session.role);
+        // Sinclair users skip the dashboard and go straight to orders
+        if (session.permissions?.includes('sinclair')) {
+          window.location.href = '/admin/orders';
+          return;
+        }
         fetchStats();
       }
     })();
@@ -52,12 +57,14 @@ export default function AdminDashboard() {
         return;
       }
       const { token, user } = await res.json();
+      const permissions: AdminPermission[] = user?.permissions ?? [];
       if (token) {
-        setAdminSession(token, user?.role || 'owner', user?.display_name || user?.username || 'Admin', user?.username || 'admin');
+        setAdminSession(token, user?.role || 'owner', user?.display_name || user?.username || 'Admin', user?.username || 'admin', permissions);
       } else {
         setAdminUiState(user?.role || 'owner', user?.display_name || user?.username || 'Admin', user?.username || 'admin');
       }
-      window.location.href = '/admin';
+      // Sinclair users go directly to orders
+      window.location.href = permissions.includes('sinclair') ? '/admin/orders' : '/admin';
     } finally {
       setLogging(false);
     }

@@ -2,11 +2,11 @@
 // src/app/admin/orders/page.tsx
 import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, Download, Eye, Loader2, RefreshCw, Package, ArrowRight, Trash2 } from 'lucide-react';
+import { Search, Download, Eye, Loader2, RefreshCw, Package, ArrowRight, Trash2, Users, Wrench } from 'lucide-react';
 import { formatCurrency, formatDate, ORDER_STATUSES } from '@/lib/utils';
 import { Order, OrderStatus } from '@/types';
 import { OrderDetailModal } from '@/components/admin/OrderDetailModal';
-import { fetchAdminSession, getAdminRole, canEdit, adminFetch } from '@/lib/admin-auth';
+import { fetchAdminSession, getAdminRole, canEdit, adminFetch, hasAdminPermission } from '@/lib/admin-auth';
 
 const STATUS_CONFIG = {
   new:         { label: 'New',         bg: 'bg-blue-50',   text: 'text-blue-700',   border: 'border-blue-200',  dot: 'bg-blue-500'   },
@@ -50,6 +50,7 @@ function OrdersContent() {
 
   const canEditOrders = canEdit(typeof window !== 'undefined' ? getAdminRole() : null, 'orders');
   const isOwner = (typeof window !== 'undefined' ? getAdminRole() : null) === 'owner';
+  const isSinclair = typeof window !== 'undefined' ? hasAdminPermission('sinclair') : false;
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Auth guard — verify the session cookie with the server
@@ -71,7 +72,17 @@ function OrdersContent() {
     const res = await adminFetch(`/api/orders?${params.toString()}`);
     if (res.ok) {
       const data = await res.json();
-      setOrders(data.orders || []);
+      let fetchedOrders: Order[] = data.orders || [];
+      // Sinclair users see orders sorted by arrival date (soonest first)
+      if (isSinclair) {
+        fetchedOrders = [...fetchedOrders].sort((a, b) => {
+          if (!a.arrival_date && !b.arrival_date) return 0;
+          if (!a.arrival_date) return 1;
+          if (!b.arrival_date) return -1;
+          return a.arrival_date.localeCompare(b.arrival_date);
+        });
+      }
+      setOrders(fetchedOrders);
       setTotal(data.total || 0);
       setStatusCounts(data.status_counts || {});
     }
@@ -225,7 +236,7 @@ function OrdersContent() {
               <table className="w-full">
                 <thead>
                   <tr className="bg-brand-navy">
-                    {['Order #', 'Vessel / Company', 'Contact', 'Items', 'Total', 'Date', 'Status', ''].map(h => (
+                    {['Order #', 'Vessel / Company', 'Contact', isSinclair ? 'Grocery Items' : 'Items', ...(isSinclair ? [] : ['Total']), 'Date', 'Status', ''].map(h => (
                       <th key={h} className="px-4 py-3 text-left text-xs font-bold text-brand-sky uppercase tracking-wide whitespace-nowrap first:rounded-tl-none last:rounded-tr-none">
                         {h}
                       </th>
@@ -234,7 +245,13 @@ function OrdersContent() {
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {orders.map(order => {
-                    const itemCount = Array.isArray(order.items) ? order.items.reduce((s, i) => s + i.quantity, 0) : 0;
+                    const items = Array.isArray(order.items) ? order.items : [];
+                    const groceryItems = items.filter(i => i.item_type !== 'service');
+                    const groceryCount = groceryItems.reduce((s, i) => s + i.quantity, 0);
+                    const itemCount = items.reduce((s, i) => s + i.quantity, 0);
+                    const hasCrewChange = !!order.crew_change;
+                    const hasPartsPickup = items.some(i => i.item_type === 'service' && i.service_type === 'parts_pickup');
+                    const hasPkgDelivery = items.some(i => i.item_type === 'service' && i.service_type === 'package_delivery');
                     const nextStatus = NEXT_STATUS[order.status];
                     const isUpdating = updatingId === order.id;
 
@@ -251,13 +268,33 @@ function OrdersContent() {
                         </td>
                         <td className="px-4 py-3.5">
                           <p className="text-sm font-semibold text-brand-navy truncate max-w-[160px]">{order.company_name}</p>
-                          <p className="text-xs text-gray-400">{order.phone}</p>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {hasCrewChange && (
+                              <span className="inline-flex items-center gap-0.5 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-orange-100 text-brand-orange border border-orange-200">
+                                <Users className="w-2.5 h-2.5" /> Crew Change
+                              </span>
+                            )}
+                            {hasPartsPickup && (
+                              <span className="inline-flex items-center gap-0.5 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 border border-blue-200">
+                                <Wrench className="w-2.5 h-2.5" /> Parts
+                              </span>
+                            )}
+                            {hasPkgDelivery && (
+                              <span className="inline-flex items-center gap-0.5 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-purple-50 text-purple-600 border border-purple-200">
+                                <Package className="w-2.5 h-2.5" /> Package
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-4 py-3.5 text-sm text-gray-600">{order.contact_name}</td>
-                        <td className="px-4 py-3.5 text-sm text-center font-medium text-brand-navy">{itemCount}</td>
-                        <td className="px-4 py-3.5 text-sm font-bold text-brand-navy whitespace-nowrap">
-                          {formatCurrency(order.subtotal)}
+                        <td className="px-4 py-3.5 text-sm text-center font-medium text-brand-navy">
+                          {isSinclair ? groceryCount : itemCount}
                         </td>
+                        {!isSinclair && (
+                          <td className="px-4 py-3.5 text-sm font-bold text-brand-navy whitespace-nowrap">
+                            {formatCurrency(order.subtotal)}
+                          </td>
+                        )}
                         <td className="px-4 py-3.5 text-xs text-gray-400 whitespace-nowrap">
                           {new Date(order.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                         </td>

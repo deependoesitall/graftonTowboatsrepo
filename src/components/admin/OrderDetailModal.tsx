@@ -1,7 +1,7 @@
 'use client';
 // src/components/admin/OrderDetailModal.tsx
 import { useState } from 'react';
-import { X, Download, FileText, Printer, Trash2, Loader2, ShoppingCart, Ship, MapPin, Users, Package, Wrench } from 'lucide-react';
+import { X, Download, FileText, Printer, Trash2, Loader2, ShoppingCart, Ship, MapPin, Users, Package, Wrench, CheckCircle2 } from 'lucide-react';
 import { Order, OrderStatus } from '@/types';
 import { formatCurrency, formatDate, ORDER_STATUSES } from '@/lib/utils';
 import { ShoppingModeModal } from '@/components/admin/ShoppingModeModal';
@@ -24,6 +24,7 @@ export function OrderDetailModal({
   onDelete, onRefresh, canEdit = true, isOwner = false, deleting = false,
 }: OrderDetailModalProps) {
   const [shoppingMode, setShoppingMode] = useState(false);
+  const [markingFulfilled, setMarkingFulfilled] = useState(false);
 
   const groceryItems = order.items.filter(i => i.item_type !== 'service');
   const serviceItems = order.items.filter(i => i.item_type === 'service');
@@ -90,7 +91,6 @@ export function OrderDetailModal({
                   {order.captain_phone && <IB label="Captain Phone" value={order.captain_phone} />}
                   {order.vessel_email && <IB label="Vessel Email" value={order.vessel_email} />}
                 </div>
-                {/* Optional order contact */}
                 {ext?.order_contact_name && (
                   <div className="mt-3 pt-3 border-t border-gray-100">
                     <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">Order Contact</p>
@@ -116,7 +116,6 @@ export function OrderDetailModal({
                   {approachLabel       && <IB label="Approach Side"       value={approachLabel} />}
                   {order.vhf_channel   && <IB label="VHF Channel"         value={order.vhf_channel} />}
                 </div>
-                {/* Secondary delivery */}
                 {ext?.secondary_terminal_name && (
                   <div className="mt-3 pt-3 border-t border-gray-100">
                     <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">Secondary Delivery</p>
@@ -152,7 +151,7 @@ export function OrderDetailModal({
               </div>
             )}
 
-            {/* ── Status + Shopping Mode ── */}
+            {/* ── Status + action button ── */}
             <div className="flex flex-wrap items-center gap-4">
               <label className="text-xs font-bold text-gray-500 uppercase tracking-wide">Status</label>
               {canEdit ? (
@@ -175,12 +174,53 @@ export function OrderDetailModal({
                 </span>
               )}
               {canEdit && order.status !== 'fulfilled' && order.status !== 'cancelled' && (
-                <button onClick={() => setShoppingMode(true)}
-                  className="ml-auto flex items-center gap-1.5 bg-brand-green text-white text-xs font-bold uppercase tracking-wide px-4 py-2 rounded-lg hover:bg-brand-gmed transition-colors">
-                  <ShoppingCart className="w-4 h-4" /> Enter Shopping Mode
-                </button>
+                groceryItems.length === 0 ? (
+                  <button
+                    disabled={markingFulfilled}
+                    onClick={async () => {
+                      if (!confirm('Mark this order as fulfilled? A confirmation email will be sent to the customer.')) return;
+                      setMarkingFulfilled(true);
+                      await onStatusChange('fulfilled');
+                      setMarkingFulfilled(false);
+                    }}
+                    className="ml-auto flex items-center gap-1.5 bg-brand-orange text-white text-xs font-bold uppercase tracking-wide px-4 py-2 rounded-lg hover:bg-orange-700 transition-colors disabled:opacity-60">
+                    {markingFulfilled ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                    Mark as Fulfilled
+                  </button>
+                ) : (
+                  <button onClick={() => setShoppingMode(true)}
+                    className="ml-auto flex items-center gap-1.5 bg-brand-green text-white text-xs font-bold uppercase tracking-wide px-4 py-2 rounded-lg hover:bg-brand-gmed transition-colors">
+                    <ShoppingCart className="w-4 h-4" /> Enter Shopping Mode
+                  </button>
+                )
               )}
             </div>
+
+            {/* ── Crew Change callout (prominent, for service-only orders) ── */}
+            {order.crew_change && groceryItems.length === 0 && (
+              <div className="flex items-start gap-4 bg-orange-50 border-2 border-brand-orange rounded-lg p-4">
+                <Users className="w-6 h-6 text-brand-orange shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="font-bold text-brand-orange text-sm uppercase tracking-wide mb-2">Crew Change Required</p>
+                  <div className="flex gap-8">
+                    <div>
+                      <p className="text-xs text-gray-500">Arriving</p>
+                      <p className="text-2xl font-bold text-brand-navy">{order.crew_arriving ?? 0}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500">Departing</p>
+                      <p className="text-2xl font-bold text-brand-orange">{order.crew_departing ?? 0}</p>
+                    </div>
+                  </div>
+                  {(order.terminal_name || order.arrival_date) && (
+                    <p className="text-xs text-gray-500 mt-2">
+                      {order.terminal_name && <span><strong>Location:</strong> {order.terminal_name}&nbsp;&nbsp;</span>}
+                      {order.arrival_date  && <span><strong>Date:</strong> {order.arrival_date}{order.arrival_time ? ` at ${order.arrival_time}` : ''}</span>}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* ── Grocery Items ── */}
             {groceryItems.length > 0 && (

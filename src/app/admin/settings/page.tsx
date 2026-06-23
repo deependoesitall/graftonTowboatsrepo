@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Save, RefreshCw, Eye, EyeOff, Plus, Trash2, UserPlus, ShieldCheck, User, Lock, ScrollText, Search, ArrowRight, ChevronLeft, ChevronRight, MessageSquarePlus, Check, X, Loader2, Send, Wrench } from 'lucide-react';
-import { fetchAdminSession, getAdminRole, canAccess, adminFetch } from '@/lib/admin-auth';
+import { fetchAdminSession, getAdminRole, canAccess, adminFetch, AdminRole } from '@/lib/admin-auth';
 import { formatDate } from '@/lib/utils';
 
 interface AdminUser {
@@ -13,6 +13,7 @@ interface AdminUser {
   display_name: string;
   is_active: boolean;
   last_login: string | null;
+  permissions: string[];
 }
 
 interface Settings {
@@ -87,7 +88,7 @@ export default function AdminSettingsPage() {
 
   // Admin users
   const [users, setUsers] = useState<AdminUser[]>([]);
-  const [newUser, setNewUser] = useState({ username: '', password: '', role: 'staff', display_name: '' });
+  const [newUser, setNewUser] = useState({ username: '', password: '', role: 'staff', display_name: '', permissions: [] as string[] });
   const [addingUser, setAddingUser] = useState(false);
   const [showAddUser, setShowAddUser] = useState(false);
 
@@ -112,6 +113,7 @@ export default function AdminSettingsPage() {
   const [showPreview, setShowPreview] = useState(false);
 
   const [denied, setDenied] = useState(false);
+  const [sessionRole, setSessionRole] = useState<AdminRole | null>(null);
 
   // Auth guard — verify the session cookie with the server
   useEffect(() => {
@@ -119,8 +121,11 @@ export default function AdminSettingsPage() {
       const session = await fetchAdminSession();
       if (!session) { router.push('/admin'); return; }
       if (!canAccess(session.role, 'settings')) { setDenied(true); return; }
-      loadSettings();
+      setSessionRole(session.role);
+      // Managers only see the Users tab
+      if (session.role === 'manager') setTab('users');
       loadUsers();
+      if (session.role === 'owner') loadSettings();
     })();
   }, [router]);
 
@@ -261,10 +266,22 @@ export default function AdminSettingsPage() {
     if (res.ok) {
       const u = await res.json();
       setUsers(us => [...us, u]);
-      setNewUser({ username: '', password: '', role: 'staff', display_name: '' });
+      setNewUser({ username: '', password: '', role: 'staff', display_name: '', permissions: [] });
       setShowAddUser(false);
     }
     setAddingUser(false);
+  }
+
+  async function togglePermission(u: AdminUser, permission: string) {
+    const next = u.permissions.includes(permission)
+      ? u.permissions.filter(p => p !== permission)
+      : [...u.permissions, permission];
+    const res = await adminFetch('/api/admin/users', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: u.id, permissions: next }),
+    });
+    if (res.ok) setUsers(us => us.map(x => x.id === u.id ? { ...x, permissions: next } : x));
   }
 
   async function toggleUser(u: AdminUser) {
@@ -286,14 +303,17 @@ export default function AdminSettingsPage() {
     setUsers(us => us.filter(u => u.id !== id));
   }
 
-  const tabs = [
-    { key: 'logs', label: 'Logs' },
-    { key: 'general', label: 'General' },
-    { key: 'password', label: 'Password' },
-    { key: 'users', label: 'Admin Users' },
-    { key: 'email', label: 'Email' },
-    { key: 'features', label: 'Features' },
+  const allTabs = [
+    { key: 'logs',     label: 'Logs',        ownerOnly: true },
+    { key: 'general',  label: 'General',     ownerOnly: true },
+    { key: 'password', label: 'Password',    ownerOnly: true },
+    { key: 'users',    label: 'Admin Users', ownerOnly: false },
+    { key: 'email',    label: 'Email',       ownerOnly: true },
+    { key: 'features', label: 'Features',    ownerOnly: true },
   ] as const;
+  const tabs = sessionRole === 'manager'
+    ? allTabs.filter(t => !t.ownerOnly)
+    : allTabs;
 
   if (denied) return (
     <div className="flex flex-col items-center justify-center py-32 text-center px-4">
@@ -302,7 +322,7 @@ export default function AdminSettingsPage() {
       </div>
       <h2 className="font-bold text-brand-navy text-lg mb-1">Access Restricted</h2>
       <p className="text-gray-400 text-sm max-w-xs">
-        Only Owners can access Settings. Contact an owner if you need changes made here.
+        Only Owners and Managers can access Settings. Contact an owner if you need changes made here.
       </p>
     </div>
   );
@@ -616,7 +636,25 @@ export default function AdminSettingsPage() {
                     </select>
                   </div>
                 </div>
-                <div className="flex gap-2">
+                {/* Permissions */}
+                <div className="mt-4 border border-gray-200 rounded-lg p-4 bg-white">
+                  <p className="text-xs font-bold text-gray-600 uppercase tracking-wide mb-3">Permissions</p>
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input type="checkbox" className="mt-0.5"
+                      checked={newUser.permissions.includes('sinclair')}
+                      onChange={e => setNewUser(u => ({
+                        ...u,
+                        permissions: e.target.checked
+                          ? [...u.permissions, 'sinclair']
+                          : u.permissions.filter(p => p !== 'sinclair'),
+                      }))} />
+                    <div>
+                      <p className="text-sm font-semibold text-brand-navy">Sinclair Foods Access</p>
+                      <p className="text-xs text-gray-400 mt-0.5">Scopes order list and shopping to grocery items only. Crew change and service-only orders are hidden.</p>
+                    </div>
+                  </label>
+                </div>
+                <div className="flex gap-2 mt-4">
                   <button onClick={addUser} disabled={addingUser || !newUser.username || !newUser.password}
                     className="btn-primary text-sm flex items-center gap-2">
                     {addingUser ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
@@ -646,10 +684,22 @@ export default function AdminSettingsPage() {
                         <p className="text-xs text-gray-400">@{u.username} · {u.last_login ? `Last login ${new Date(u.last_login).toLocaleDateString()}` : 'Never logged in'}</p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 flex-wrap justify-end">
                       <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${ROLE_COLORS[u.role]}`}>
                         {ROLE_LABELS[u.role]}
                       </span>
+                      {u.permissions?.includes('sinclair') && (
+                        <span className="text-xs font-bold px-2.5 py-1 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">
+                          Sinclair
+                        </span>
+                      )}
+                      <button
+                        onClick={() => togglePermission(u, 'sinclair')}
+                        title={u.permissions?.includes('sinclair') ? 'Remove Sinclair access' : 'Grant Sinclair access'}
+                        className="text-xs text-gray-400 hover:text-emerald-600 transition-colors"
+                      >
+                        {u.permissions?.includes('sinclair') ? '− Sinclair' : '+ Sinclair'}
+                      </button>
                       <button onClick={() => toggleUser(u)}
                         className="text-xs text-gray-400 hover:text-brand-river transition-colors">
                         {u.is_active ? 'Deactivate' : 'Activate'}
@@ -665,7 +715,8 @@ export default function AdminSettingsPage() {
             )}
 
             <div className="bg-gray-50 px-6 py-3 text-xs text-gray-400 border-t border-gray-100">
-              Role permissions: Owner = all access · Manager = orders + products · Staff = orders only (read)
+              Roles: Owner = all access · Manager = orders + products + user management · Staff = orders only
+              <span className="ml-3 text-emerald-600">Sinclair permission = scopes view to grocery items only</span>
             </div>
           </div>
         </div>
@@ -825,58 +876,30 @@ export default function AdminSettingsPage() {
           {[
             { key: 'repeat_orders_enabled' as const, label: 'Repeat Last Order', desc: 'Let customers quickly re-add all items from their previous order' },
             { key: 'draft_orders_enabled' as const, label: 'Save Draft Orders', desc: 'Allow customers to save and resume orders later' },
-            { key: 'tax_enabled' as const, label: 'Enable Tax', desc: 'Apply tax rate to order totals' },
+            { key: 'tax_enabled' as const, label: 'Enable Tax', desc: 'Apply sales tax to orders based on the rate below' },
+            { key: 'email_debug_enabled' as const, label: 'Email Debug Mode', desc: 'Show email send results as a toast notification after each order submission (dev/testing only)' },
           ].map(({ key, label, desc }) => (
-            <div key={key} className="flex items-center justify-between gap-4 py-3 border-b border-gray-100 last:border-0">
+            <div key={key} className="flex items-start justify-between gap-4 py-3 border-b border-gray-100 last:border-0">
               <div>
-                <p className="font-semibold text-brand-navy text-sm">{label}</p>
-                <p className="text-xs text-gray-400">{desc}</p>
+                <p className="text-sm font-semibold text-brand-navy">{label}</p>
+                <p className="text-xs text-gray-400 mt-0.5">{desc}</p>
               </div>
-              <button onClick={() => setSettings(s => ({ ...s, [key]: !s[key] }))}
-                className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors ${
-                  settings[key] ? 'bg-brand-river' : 'bg-gray-200'}`}>
-                <span className={`inline-block h-5 w-5 rounded-full bg-white shadow transform transition-transform ${
-                  settings[key] ? 'translate-x-5' : 'translate-x-0'}`} />
+              <button
+                onClick={() => setSettings(s => ({ ...s, [key]: !s[key] }))}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ${settings[key] ? 'bg-brand-green' : 'bg-gray-200'}`}
+              >
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings[key] ? 'translate-x-6' : 'translate-x-1'}`} />
               </button>
             </div>
           ))}
           {settings.tax_enabled && (
             <div>
               <label className="label-base">Tax Rate (%)</label>
-              <input type="number" min="0" max="30" step="0.1" className="input-base w-32"
+              <input type="number" step="0.01" min="0" max="100" className="input-base w-32"
                 value={settings.tax_rate}
                 onChange={e => setSettings(s => ({ ...s, tax_rate: parseFloat(e.target.value) || 0 }))} />
             </div>
           )}
-        </div>
-      )}
-
-      {/* ── Diagnostics (Features tab) ── */}
-      {tab === 'features' && (
-        <div className="card-base p-6 mt-6 border-2 border-dashed border-amber-200 bg-amber-50/40">
-          <div className="flex items-center gap-2 mb-1">
-            <Wrench className="w-4 h-4 text-amber-600" />
-            <h2 className="font-bold text-brand-navy">Diagnostics</h2>
-          </div>
-          <p className="text-xs text-gray-400 mb-4">
-            Temporary tools for troubleshooting. Safe to leave off — turn on only when actively debugging an issue.
-          </p>
-          <div className="flex items-center justify-between gap-4 py-3">
-            <div>
-              <p className="font-semibold text-brand-navy text-sm">Email Send Diagnostics</p>
-              <p className="text-xs text-gray-400">
-                Shows a popup on the order page after checkout revealing whether the order notification email
-                was sent successfully (and the error if not). Customers will see this — only enable while
-                actively testing email delivery, then turn off.
-              </p>
-            </div>
-            <button onClick={() => setSettings(s => ({ ...s, email_debug_enabled: !s.email_debug_enabled }))}
-              className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors ${
-                settings.email_debug_enabled ? 'bg-amber-500' : 'bg-gray-200'}`}>
-              <span className={`inline-block h-5 w-5 rounded-full bg-white shadow transform transition-transform ${
-                settings.email_debug_enabled ? 'translate-x-5' : 'translate-x-0'}`} />
-            </button>
-          </div>
         </div>
       )}
     </div>

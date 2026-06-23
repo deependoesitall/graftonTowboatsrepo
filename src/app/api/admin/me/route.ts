@@ -1,5 +1,5 @@
 // src/app/api/admin/me/route.ts
-// Returns the current admin session's role/display info, or 401 if not
+// Returns the current admin session role/display info, or 401 if not
 // logged in. The client sends `Authorization: Bearer <jwt>` (read from
 // sessionStorage) — see src/lib/admin-auth-server.ts for verification.
 
@@ -14,5 +14,6 @@ export async function GET(req: NextRequest) {
     username: session.username,
     role: session.role,
     display_name: session.display_name,
+    permissions: session.permissions ?? [],
   });
 }

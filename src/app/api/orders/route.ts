@@ -21,7 +21,7 @@ async function getUserIdFromToken(req: NextRequest): Promise<string | null> {
 import { generateOrderNumber } from '@/lib/utils';
 import { sendOrderReceivedEmail } from '@/lib/email';
 import { Order } from '@/types';
-import { requireAdmin } from '@/lib/admin-auth-server';
+import { requireAdmin, hasPermission } from '@/lib/admin-auth-server';
 import { z } from 'zod';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -289,6 +289,8 @@ export async function GET(req: NextRequest) {
 
   const supabase = createServiceClient();
 
+  const isSinclair = hasPermission(session, 'sinclair');
+
   let query = supabase
     .from('orders')
     .select('*, items:order_items(*)', { count: 'exact' })
@@ -302,9 +304,27 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  // Sinclair users only see orders that have at least one grocery item
+  if (isSinclair) {
+    const { data: groceryOrderIds } = await supabase
+      .from('order_items')
+      .select('order_id')
+      .eq('item_type', 'grocery');
+    const ids = (groceryOrderIds || []).map((r: { order_id: string }) => r.order_id);
+    query = ids.length > 0 ? query.in('id', ids) : query.eq('id', 'no-match');
+  }
+
   const [{ data, count, error }, { data: statusRows }] = await Promise.all([
     query,
-    supabase.from('orders').select('status'),
+    // Status counts: apply same filter so tab numbers match what Sinclair sees
+    isSinclair
+      ? (async () => {
+          const { data: ids } = await supabase.from('order_items').select('order_id').eq('item_type', 'grocery');
+          const filtered = (ids || []).map((r: { order_id: string }) => r.order_id);
+          if (!filtered.length) return { data: [] };
+          return supabase.from('orders').select('status').in('id', filtered);
+        })()
+      : supabase.from('orders').select('status'),
   ]);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

@@ -12,8 +12,9 @@ export function generateOrderHTML(order: Order): string {
 
   const groceryItems = order.items.filter(i => i.item_type !== 'service' && i.shopping_status !== 'out_of_stock');
   const serviceItems = order.items.filter(i => i.item_type === 'service');
-  const isFulfilled  = order.status === 'fulfilled';
-  const itemCount    = groceryItems.reduce((s, i) => s + i.quantity, 0);
+  const isFulfilled       = order.status === 'fulfilled';
+  const itemCount         = groceryItems.reduce((s, i) => s + i.quantity, 0);
+  const isCrewChangeOnly  = !!order.crew_change && groceryItems.length === 0;
 
   // Group groceries by category
   const grouped = groceryItems.reduce((acc, item) => {
@@ -117,7 +118,7 @@ export function generateOrderHTML(order: Order): string {
       <div style="font-size:10px;color:#666;margin-top:3px;line-height:1.7;">
         Date: ${formatDate(order.created_at)}<br>
         Status: <strong style="color:#1E3D1E;">${order.status.replace('_', ' ').toUpperCase()}</strong><br>
-        Items: <strong>${itemCount}</strong>
+        ${isCrewChangeOnly ? 'Type: <strong style="color:#E8640A;">CREW CHANGE</strong>' : `Items: <strong>${itemCount}</strong>`}
       </div>
     </td>
   </tr>
@@ -200,6 +201,28 @@ ${order.notes ? `
   <div style="font-size:11px;color:#444;line-height:1.5;">${order.notes}</div>
 </div>` : ''}
 
+<!-- ===== CREW CHANGE BLOCK ===== -->
+${order.crew_change ? `
+<div style="border:3px solid #E8640A;padding:16px 20px;background:#fff8f0;border-radius:4px;margin-bottom:16px;">
+  <div style="font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:#E8640A;margin-bottom:10px;">&#9992; Crew Change Required</div>
+  <table width="100%">
+    <tr>
+      <td width="50%" style="padding:4px 0;">
+        <div style="font-size:9px;font-weight:800;text-transform:uppercase;color:#888;margin-bottom:3px;">Crew Arriving</div>
+        <div style="font-size:22px;font-weight:900;color:#1E3D1E;">${order.crew_arriving ?? 0}</div>
+      </td>
+      <td width="50%" style="padding:4px 0;">
+        <div style="font-size:9px;font-weight:800;text-transform:uppercase;color:#888;margin-bottom:3px;">Crew Departing</div>
+        <div style="font-size:22px;font-weight:900;color:#E8640A;">${order.crew_departing ?? 0}</div>
+      </td>
+    </tr>
+  </table>
+  ${order.terminal_name || order.arrival_date ? `<div style="margin-top:10px;padding-top:10px;border-top:1px solid #f0d0b0;font-size:11px;color:#555;">
+    ${order.terminal_name ? `<strong>Location:</strong> ${order.terminal_name}&nbsp;&nbsp;` : ''}
+    ${order.arrival_date ? `<strong>Date:</strong> ${order.arrival_date}${order.arrival_time ? ` at ${order.arrival_time}` : ''}` : ''}
+  </div>` : ''}
+</div>` : ''}
+
 <!-- ===== GROCERY ITEMS ===== -->
 ${groceryItems.length > 0 ? `
 <div style="font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:#1E3D1E;margin-bottom:6px;">
@@ -246,7 +269,7 @@ ${isFulfilled ? `
   <strong style="color:#E8640A;">Note:</strong> This is your final receipt reflecting actual items delivered, including any substitutions and weight adjustments.
 </div>` : ''}
 
-<!-- ===== SINCLAIR BOX ===== -->
+<!-- ===== SINCLAIR BOX (only for grocery orders) ===== -->
 ${groceryItems.length > 0 ? `
 <div style="border:2px solid #1E3D1E;padding:12px 16px;background:#f0f7f0;border-radius:4px;margin-bottom:16px;">
   <div style="font-size:11px;font-weight:800;color:#1E3D1E;margin-bottom:5px;">

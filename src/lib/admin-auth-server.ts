@@ -17,6 +17,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import jwt from 'jsonwebtoken';
 
 export type AdminRole = 'owner' | 'manager' | 'staff';
+export type AdminPermission = 'sinclair';
 export type Area = 'orders' | 'products' | 'settings' | 'reports' | 'logs';
 
 export const SESSION_COOKIE = 'gts_admin_session';
@@ -27,12 +28,17 @@ export interface AdminSessionPayload {
   username: string;
   role: AdminRole;
   display_name: string;
+  permissions: AdminPermission[];  // additive capability flags, e.g. ['sinclair']
+}
+
+/** Returns true if the session has the given permission flag. */
+export function hasPermission(session: AdminSessionPayload, permission: AdminPermission): boolean {
+  return (session.permissions ?? []).includes(permission);
 }
 
 function getSecret(): string {
   const secret = process.env.ADMIN_SECRET_KEY;
   if (!secret || secret.length < 16) {
-    // Fail loudly server-side; never leak this detail to the client.
     throw new Error(
       'ADMIN_SECRET_KEY is not set or too short (min 16 chars). Generate one with `openssl rand -hex 32` and set it in your environment variables.'
     );
@@ -50,7 +56,7 @@ export function verifyAdminSession(token: string): AdminSessionPayload | null {
   try {
     const decoded = jwt.verify(token, getSecret());
     if (typeof decoded === 'string') return null;
-    const { sub, username, role, display_name } = decoded as Record<string, unknown>;
+    const { sub, username, role, display_name, permissions } = decoded as Record<string, unknown>;
     if (
       typeof sub === 'string' &&
       typeof username === 'string' &&
@@ -58,7 +64,11 @@ export function verifyAdminSession(token: string): AdminSessionPayload | null {
       typeof display_name === 'string' &&
       (role === 'owner' || role === 'manager' || role === 'staff')
     ) {
-      return { sub, username, role, display_name };
+      // permissions may be absent in tokens issued before this migration — default to []
+      const perms: AdminPermission[] = Array.isArray(permissions)
+        ? (permissions as string[]).filter((p): p is AdminPermission => p === 'sinclair')
+        : [];
+      return { sub, username, role, display_name, permissions: perms };
     }
     return null;
   } catch {
@@ -70,10 +80,8 @@ export function verifyAdminSession(token: string): AdminSessionPayload | null {
  * Read and verify the admin session.
  *
  * Checks, in order:
- *  1. `Authorization: Bearer <jwt>` header — used by the client, which
- *     stores the token in sessionStorage (cleared when the tab closes).
- *  2. The legacy httpOnly session cookie — kept as a fallback for any
- *     in-flight requests during the transition.
+ *  1. `Authorization: Bearer <jwt>` header
+ *  2. The legacy httpOnly session cookie — kept as a fallback
  */
 export function getAdminSession(req: NextRequest): AdminSessionPayload | null {
   const authHeader = req.headers.get('authorization');
@@ -115,7 +123,7 @@ export function clearedCookieOptions() {
 
 export function canAccess(role: AdminRole, area: Area): boolean {
   if (role === 'owner') return true;
-  if (role === 'manager') return area === 'orders' || area === 'products';
+  if (role === 'manager') return area === 'orders' || area === 'products' || area === 'settings';
   if (role === 'staff') return area === 'orders';
   return false;
 }
@@ -129,12 +137,6 @@ export function canEdit(role: AdminRole, area: 'orders' | 'products' | 'settings
 
 /**
  * Verify the admin session and (optionally) enforce an area/role requirement.
- *
- * Usage in an API route:
- *
- *   const session = requireAdmin(req, { area: 'products', editRequired: true });
- *   if (session instanceof NextResponse) return session; // 401 / 403
- *   // ... session.role, session.username, session.display_name available
  *
  * Returns either the verified session payload, or a NextResponse
  * (401 Unauthorized / 403 Forbidden) that the caller should return immediately.

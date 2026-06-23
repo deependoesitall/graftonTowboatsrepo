@@ -13,15 +13,16 @@
 // `Authorization: Bearer <jwt>`. The server independently verifies the
 // JWT signature and re-checks role permissions on every request (see
 // src/lib/admin-auth-server.ts), so this token grants exactly what the
-// server allows for that role — nothing client-side tampering can
-// expand.
+// server allows for that role — nothing client-side tampering can expand.
 
 export type AdminRole = 'owner' | 'manager' | 'staff';
+export type AdminPermission = 'sinclair';
 
 const ADMIN_TOKEN_KEY = 'grafton_admin_token';
 const ADMIN_ROLE_KEY = 'grafton_admin_role';
 const ADMIN_NAME_KEY = 'grafton_admin_name';
 const ADMIN_USERNAME_KEY = 'grafton_admin_username';
+const ADMIN_PERMISSIONS_KEY = 'grafton_admin_permissions';
 
 /** Read the stored admin JWT, or null if not logged in (or tab was closed/reopened). */
 export function getAdminToken(): string | null {
@@ -46,12 +47,24 @@ export function getAdminUsername(): string {
   return sessionStorage.getItem(ADMIN_USERNAME_KEY) || '';
 }
 
+export function getAdminPermissions(): AdminPermission[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    return JSON.parse(sessionStorage.getItem(ADMIN_PERMISSIONS_KEY) || '[]');
+  } catch { return []; }
+}
+
+export function hasAdminPermission(permission: AdminPermission): boolean {
+  return getAdminPermissions().includes(permission);
+}
+
 /** Store the JWT and non-secret UI hints after a successful login. */
-export function setAdminSession(token: string, role: AdminRole, displayName: string, username?: string) {
+export function setAdminSession(token: string, role: AdminRole, displayName: string, username?: string, permissions?: AdminPermission[]) {
   sessionStorage.setItem(ADMIN_TOKEN_KEY, token);
   sessionStorage.setItem(ADMIN_ROLE_KEY, role);
   sessionStorage.setItem(ADMIN_NAME_KEY, displayName);
   sessionStorage.setItem(ADMIN_USERNAME_KEY, username || 'admin');
+  sessionStorage.setItem(ADMIN_PERMISSIONS_KEY, JSON.stringify(permissions ?? []));
 }
 
 /** @deprecated kept for backwards compatibility — use setAdminSession */
@@ -66,32 +79,29 @@ export function clearAdminUiState() {
   sessionStorage.removeItem(ADMIN_ROLE_KEY);
   sessionStorage.removeItem(ADMIN_NAME_KEY);
   sessionStorage.removeItem(ADMIN_USERNAME_KEY);
+  sessionStorage.removeItem(ADMIN_PERMISSIONS_KEY);
 }
 
 // Permission matrix — for UI show/hide only. The server enforces its own
-// authoritative copy of this matrix on every request
-// (see canAccess/canEdit in src/lib/admin-auth-server.ts).
+// authoritative copy of this matrix on every request.
 export function canAccess(role: AdminRole | null, area: 'orders' | 'products' | 'settings' | 'reports' | 'logs'): boolean {
   if (!role) return false;
-  if (role === 'owner') return true; // owner has access to everything, including reports & logs
+  if (role === 'owner') return true;
+  if (role === 'manager') return area === 'orders' || area === 'products' || area === 'settings';
+  if (role === 'staff') return area === 'orders';
+  return false;
+}
+
+export function canEdit(role: AdminRole | null, area: 'orders' | 'products' | 'settings'): boolean {
+  if (!role) return false;
+  if (role === 'owner') return true;
   if (role === 'manager') return area === 'orders' || area === 'products';
   if (role === 'staff') return area === 'orders';
   return false;
 }
 
-// Can the role modify data in this area, or only view?
-export function canEdit(role: AdminRole | null, area: 'orders' | 'products' | 'settings'): boolean {
-  if (!role) return false;
-  if (role === 'owner') return true;
-  if (role === 'manager') return area === 'orders' || area === 'products';
-  if (role === 'staff') return area === 'orders'; // staff can edit order status
-  return false;
-}
-
 /**
- * Standard headers for authenticated admin API requests. Includes the
- * Authorization Bearer token (the actual auth) plus non-secret display
- * hints used for activity log display names.
+ * Standard headers for authenticated admin API requests.
  */
 export function adminHeaders(extra?: Record<string, string>): Record<string, string> {
   const token = getAdminToken();
@@ -116,7 +126,7 @@ export function adminFetch(input: RequestInfo | URL, init?: RequestInit): Promis
   });
 }
 
-/** Log out: clear the token from sessionStorage (and best-effort clear any legacy cookie). */
+/** Log out: clear the token from sessionStorage. */
 export async function logoutAdmin(): Promise<void> {
   try {
     await fetch('/api/admin/logout', { method: 'POST', credentials: 'include' });
@@ -130,7 +140,7 @@ export async function logoutAdmin(): Promise<void> {
  * the role/display info for UI use and returns it; otherwise returns
  * null and clears any stale local state.
  */
-export async function fetchAdminSession(): Promise<{ role: AdminRole; display_name: string; username: string } | null> {
+export async function fetchAdminSession(): Promise<{ role: AdminRole; display_name: string; username: string; permissions: AdminPermission[] } | null> {
   const token = getAdminToken();
   if (!token) {
     clearAdminUiState();
@@ -144,5 +154,6 @@ export async function fetchAdminSession(): Promise<{ role: AdminRole; display_na
   }
   const data = await res.json();
   setAdminUiState(data.role, data.display_name, data.username);
-  return data;
+  sessionStorage.setItem(ADMIN_PERMISSIONS_KEY, JSON.stringify(data.permissions ?? []));
+  return { ...data, permissions: data.permissions ?? [] };
 }
