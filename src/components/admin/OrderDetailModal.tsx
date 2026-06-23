@@ -1,7 +1,7 @@
 'use client';
 // src/components/admin/OrderDetailModal.tsx
 import { useState } from 'react';
-import { X, Download, FileText, Printer, Trash2, Loader2, ShoppingCart, Ship, MapPin, Users, Package, Wrench, CheckCircle2 } from 'lucide-react';
+import { X, Download, FileText, Printer, Trash2, Loader2, ShoppingCart, Ship, MapPin, Users, Package, Wrench, CheckCircle2, Eye } from 'lucide-react';
 import { Order, OrderStatus } from '@/types';
 import { formatCurrency, formatDate, ORDER_STATUSES } from '@/lib/utils';
 import { ShoppingModeModal } from '@/components/admin/ShoppingModeModal';
@@ -49,6 +49,9 @@ export function OrderDetailModal({
               <h2 className="text-white font-display text-xl font-bold">{order.order_number}</h2>
             </div>
             <div className="flex items-center gap-3">
+              <button onClick={onDownloadPdf} className="text-brand-gold hover:text-brand-amber transition-colors" title="View PDF">
+                <Eye className="w-5 h-5" />
+              </button>
               <button onClick={onDownloadPdf} className="text-brand-gold hover:text-brand-amber transition-colors" title="Download PDF">
                 <Download className="w-5 h-5" />
               </button>
@@ -69,7 +72,7 @@ export function OrderDetailModal({
 
           <div className="p-6 space-y-5">
 
-            {/* ── Company / Billing ── */}
+            {/* Company / Billing */}
             <Section icon={<FileText className="w-3.5 h-3.5" />} title="Company &amp; Billing">
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 <IB label="Company" value={order.company_name} />
@@ -81,15 +84,15 @@ export function OrderDetailModal({
               </div>
             </Section>
 
-            {/* ── Vessel ── */}
+            {/* Vessel */}
             {(order.vessel_name || order.captain_name) && (
               <Section icon={<Ship className="w-3.5 h-3.5" />} title="Vessel Information">
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  {order.vessel_name  && <IB label="Vessel Name"  value={order.vessel_name} />}
-                  {order.vessel_type  && <IB label="Vessel Type"  value={order.vessel_type} />}
-                  {order.captain_name && <IB label="Captain"      value={order.captain_name} />}
-                  {order.captain_phone && <IB label="Captain Phone" value={order.captain_phone} />}
-                  {order.vessel_email && <IB label="Vessel Email" value={order.vessel_email} />}
+                  {order.vessel_name   && <IB label="Vessel Name"    value={order.vessel_name} />}
+                  {order.vessel_type   && <IB label="Vessel Type"    value={order.vessel_type} />}
+                  {order.captain_name  && <IB label="Captain"        value={order.captain_name} />}
+                  {order.captain_phone && <IB label="Captain Phone"  value={order.captain_phone} />}
+                  {order.vessel_email  && <IB label="Vessel Email"   value={order.vessel_email} />}
                 </div>
                 {ext?.order_contact_name && (
                   <div className="mt-3 pt-3 border-t border-gray-100">
@@ -105,7 +108,7 @@ export function OrderDetailModal({
               </Section>
             )}
 
-            {/* ── Delivery ── */}
+            {/* Delivery */}
             {(order.terminal_name || order.arrival_date || order.delivery_method) && (
               <Section icon={<MapPin className="w-3.5 h-3.5" />} title="Delivery Information">
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -132,7 +135,7 @@ export function OrderDetailModal({
               </Section>
             )}
 
-            {/* ── Crew Change ── */}
+            {/* Crew Change */}
             {order.crew_change && (
               <Section icon={<Users className="w-3.5 h-3.5" />} title="Crew Change">
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -142,7 +145,7 @@ export function OrderDetailModal({
               </Section>
             )}
 
-            {/* ── Notes ── */}
+            {/* Notes */}
             {(order.notes || order.eta) && (
               <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
                 <p className="text-xs font-bold text-amber-700 uppercase tracking-wide mb-1">Notes / Instructions</p>
@@ -151,7 +154,7 @@ export function OrderDetailModal({
               </div>
             )}
 
-            {/* ── Status + action button ── */}
+            {/* Status + action button */}
             <div className="flex flex-wrap items-center gap-4">
               <label className="text-xs font-bold text-gray-500 uppercase tracking-wide">Status</label>
               {canEdit ? (
@@ -196,7 +199,7 @@ export function OrderDetailModal({
               )}
             </div>
 
-            {/* ── Crew Change callout (prominent, for service-only orders) ── */}
+            {/* Crew Change callout for service-only orders */}
             {order.crew_change && groceryItems.length === 0 && (
               <div className="flex items-start gap-4 bg-orange-50 border-2 border-brand-orange rounded-lg p-4">
                 <Users className="w-6 h-6 text-brand-orange shrink-0 mt-0.5" />
@@ -222,7 +225,7 @@ export function OrderDetailModal({
               </div>
             )}
 
-            {/* ── Grocery Items ── */}
+            {/* Grocery Items */}
             {groceryItems.length > 0 && (
               <div>
                 <h3 className="font-display text-base font-bold text-brand-navy mb-3">
@@ -275,7 +278,7 @@ export function OrderDetailModal({
               </div>
             )}
 
-            {/* ── Additional Services ── */}
+            {/* Additional Services */}
             {serviceItems.length > 0 && (
               <div>
                 <h3 className="font-display text-base font-bold text-brand-navy mb-3 flex items-center gap-2">
@@ -315,7 +318,7 @@ export function OrderDetailModal({
               </div>
             )}
 
-            {/* ── Sinclair Foods Summary ── */}
+            {/* Sinclair Foods Summary */}
             {groceryItems.length > 0 && (
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                 <p className="text-xs font-bold text-blue-700 uppercase tracking-wide mb-2 flex items-center gap-1.5">
