@@ -2,7 +2,7 @@
 // src/components/catalog/AdditionalServicesTab.tsx
 
 import { useState, useEffect } from 'react';
-import { Package, Wrench, Check, Plus, X } from 'lucide-react';
+import { Package, Wrench, Check, X } from 'lucide-react';
 import { AdditionalServices } from '@/types';
 import { getAdditionalServices, saveAdditionalServices } from '@/lib/cart';
 
@@ -19,8 +19,6 @@ function Field({ label, required, children }: { label: string; required?: boolea
 
 export function AdditionalServicesTab() {
   const [services, setServices] = useState<AdditionalServices>(getAdditionalServices());
-  const [partsOpen, setPartsOpen]     = useState(services.parts_pickup.enabled);
-  const [packageOpen, setPackageOpen] = useState(services.package_delivery.enabled);
 
   useEffect(() => {
     saveAdditionalServices(services);
@@ -35,8 +33,6 @@ export function AdditionalServicesTab() {
   }
   function removeService(key: 'parts_pickup' | 'package_delivery') {
     setServices(prev => ({ ...prev, [key]: { ...prev[key], enabled: false } }));
-    if (key === 'parts_pickup')     setPartsOpen(false);
-    if (key === 'package_delivery') setPackageOpen(false);
   }
 
   const partsReady = !!(
@@ -61,9 +57,6 @@ export function AdditionalServicesTab() {
         title="Parts Pickup"
         subtitle="We'll pick up parts or supplies from a local supplier on our way to your vessel."
         added={services.parts_pickup.enabled}
-        open={partsOpen}
-        onAdd={() => setPartsOpen(true)}
-        onCancel={() => setPartsOpen(false)}
         onRemove={() => removeService('parts_pickup')}
       >
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -108,9 +101,6 @@ export function AdditionalServicesTab() {
         title="Package / Other Delivery"
         subtitle="We'll pick up a package from a store or supplier and deliver it with your order."
         added={services.package_delivery.enabled}
-        open={packageOpen}
-        onAdd={() => setPackageOpen(true)}
-        onCancel={() => setPackageOpen(false)}
         onRemove={() => removeService('package_delivery')}
       >
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -149,9 +139,9 @@ export function AdditionalServicesTab() {
         )}
       </ServiceCard>
 
-      {!services.parts_pickup.enabled && !services.package_delivery.enabled && !partsOpen && !packageOpen && (
-        <p className="text-center text-sm text-gray-400 py-6">
-          No additional services added. Use the buttons above if you need anything picked up.
+      {!services.parts_pickup.enabled && !services.package_delivery.enabled && (
+        <p className="text-center text-sm text-gray-400 py-2">
+          Fill in the fields above to add a service to your order.
         </p>
       )}
     </div>
@@ -159,15 +149,12 @@ export function AdditionalServicesTab() {
 }
 
 function ServiceCard({
-  icon, title, subtitle, added, open, onAdd, onCancel, onRemove, children,
+  icon, title, subtitle, added, onRemove, children,
 }: {
   icon: React.ReactNode;
   title: string;
   subtitle: string;
   added: boolean;
-  open: boolean;
-  onAdd: () => void;
-  onCancel: () => void;
   onRemove: () => void;
   children: React.ReactNode;
 }) {
@@ -183,28 +170,16 @@ function ServiceCard({
           <p className={`font-display font-bold text-sm ${added ? 'text-brand-green' : 'text-brand-navy'}`}>{title}</p>
           <p className="text-xs text-gray-400 mt-0.5">{subtitle}</p>
         </div>
-        {added ? (
+        {added && (
           <button type="button" onClick={onRemove}
             className="flex items-center gap-1 text-xs font-bold text-red-400 hover:text-red-600 px-2.5 py-1.5 rounded-lg hover:bg-red-50 transition-colors shrink-0">
             <X className="w-3.5 h-3.5" /> Remove
           </button>
-        ) : open ? (
-          <button type="button" onClick={onCancel}
-            className="text-xs font-bold bg-gray-100 text-gray-500 px-2.5 py-1.5 rounded-full transition-colors shrink-0">
-            Cancel
-          </button>
-        ) : (
-          <button type="button" onClick={onAdd}
-            className="flex items-center gap-1 text-xs font-bold bg-brand-navy text-white hover:bg-brand-steel px-3 py-1.5 rounded-full transition-colors shrink-0">
-            <Plus className="w-3 h-3" /> Add
-          </button>
         )}
       </div>
-      {(open || added) && (
-        <div className="border-t border-gray-100 px-4 pb-4 pt-3 space-y-3 bg-gray-50/50">
-          {children}
-        </div>
-      )}
+      <div className="border-t border-gray-100 px-4 pb-4 pt-3 space-y-3 bg-gray-50/50">
+        {children}
+      </div>
     </div>
   );
 }
