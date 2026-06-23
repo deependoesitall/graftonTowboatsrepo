@@ -6,6 +6,7 @@ export interface Product {
   sub_category: string;
   upc: string | null;
   description: string;
+  details: string | null;
   pkg_size: string | null;
   uom: string | null;
   price: number;

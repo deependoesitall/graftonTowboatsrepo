@@ -173,9 +173,16 @@ function ProductCard({ product, isLoggedIn, isFavorite }: { product: Product; is
         </span>
 
         {/* Product name */}
-        <h3 className="font-body font-semibold text-brand-navy text-sm leading-tight line-clamp-2 flex-1 min-h-[2.5rem]">
+        <h3 className="font-body font-semibold text-brand-navy text-sm leading-tight line-clamp-2 min-h-[2.5rem]">
           {product.description}
         </h3>
+
+        {/* Customer-facing description */}
+        {product.details && (
+          <p className="text-[11px] text-gray-500 leading-snug line-clamp-3 -mt-1">
+            {product.details}
+          </p>
+        )}
 
         {/* Pack size */}
         {product.pkg_size && (

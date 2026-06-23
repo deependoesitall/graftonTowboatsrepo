@@ -53,6 +53,7 @@ const STATUS_FILTERS: { key: string; label: string }[] = [
 
 interface EditState {
   description: string;
+  details: string;
   category: string;
   sub_category: string;
   pkg_size: string;
@@ -66,14 +67,14 @@ function AddProductRow({ onAdded }: {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
-    description: '', category: 'Pantry & Grocery', sub_category: '',
+    description: '', details: '', category: 'Pantry & Grocery', sub_category: '',
     pkg_size: '', uom: '', price: '',
   });
   const descRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { if (open) descRef.current?.focus(); }, [open]);
 
-  function reset() { setForm({ description: '', category: 'Pantry & Grocery', sub_category: '', pkg_size: '', uom: '', price: '' }); setOpen(false); }
+  function reset() { setForm({ description: '', details: '', category: 'Pantry & Grocery', sub_category: '', pkg_size: '', uom: '', price: '' }); setOpen(false); }
 
   async function save() {
     if (!form.description || !form.price) return;
@@ -85,6 +86,7 @@ function AddProductRow({ onAdded }: {
         mode: 'add_anyway',
         products: [{
           description: form.description.toUpperCase(),
+          details: form.details || null,
           category: form.category,
           sub_category: form.sub_category || form.category,
           pkg_size: form.pkg_size || null,
@@ -139,6 +141,9 @@ function AddProductRow({ onAdded }: {
           placeholder="Product name (required)" value={form.description}
           onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
           onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') reset(); }} />
+        <textarea className="input-base text-xs py-1 w-full mt-1 resize-none" rows={2}
+          placeholder="Description (optional — shown to customers)"
+          value={form.details} onChange={e => setForm(f => ({ ...f, details: e.target.value }))} />
       </td>
       <td className="px-2 py-2">
         <input className="input-base text-xs py-1.5 w-24" placeholder="e.g. 48 OZ"
@@ -180,6 +185,7 @@ function EditableRow({ product, selected, onSelect, onSaved, onToggleActive, onT
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<EditState>({
     description: product.description,
+    details: product.details || '',
     category: product.category,
     sub_category: product.sub_category || '',
     pkg_size: product.pkg_size || '',
@@ -195,6 +201,7 @@ function EditableRow({ product, selected, onSelect, onSaved, onToggleActive, onT
       body: JSON.stringify({
         id: product.id,
         description: form.description,
+        details: form.details || null,
         category: form.category,
         sub_category: form.sub_category,
         pkg_size: form.pkg_size || null,
@@ -225,6 +232,9 @@ function EditableRow({ product, selected, onSelect, onSaved, onToggleActive, onT
         <td className="px-3 py-2">
           <input className="input-base text-xs py-1 w-full font-medium" value={form.description}
             onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
+          <textarea className="input-base text-xs py-1 w-full mt-1 resize-none" rows={2}
+            placeholder="Description (optional — shown to customers)"
+            value={form.details} onChange={e => setForm(f => ({ ...f, details: e.target.value }))} />
         </td>
         <td className="px-3 py-2">
           <input className="input-base text-xs py-1 w-24" value={form.pkg_size}
