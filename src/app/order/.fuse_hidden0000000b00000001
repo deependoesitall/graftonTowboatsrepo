@@ -1,0 +1,22 @@
+'use client';
+// src/app/order/page.tsx  — Phase 2b: 3-step checkout with expanded vessel/delivery form
+
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import {
+  ShoppingCart, Trash2, Minus, ArrowLeft, ChevronRight,
+  Loader2, AlertCircle, Package, HelpCircle, X, LogIn,
+  Ship, MapPin, Users, Wrench, Check,
+  ClipboardList,
+} from 'lucide-react';
+import {
+  getCart, updateCartItem, removeFromCart, getCartTotal, getCartCount,
+  getVesselInfo, saveVesselInfo, getAdditionalServices, clearAdditionalServices,
+  clearCart,
+} from '@/lib/cart';
+import { formatCurrency } from '@/lib/utils';
+import { CartItem, VesselInfo, AdditionalServices, VESSEL_TYPES } from '@/types';
+import { SiteHeader } from '@/components/layout/SiteHeader';
+import { AuthModal } from '@/components/auth/AuthModal';
+import { useToast } from '@/hooks/use-toa

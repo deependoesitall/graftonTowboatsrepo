@@ -25,7 +25,7 @@ const DEFAULT_TEMPLATE: Required<EmailTemplateConfig> = {
 };
 
 function applyTemplateVars(text: string, order: Order, appUrl: string): string {
-  const itemCount = order.items.reduce((s, i) => s + i.quantity, 0);
+  const itemCount = order.items.filter(i => i.item_type !== 'service').reduce((s, i) => s + i.quantity, 0);
   return text
     .replaceAll('{order_number}', order.order_number)
     .replaceAll('{company_name}', order.company_name)
@@ -61,7 +61,12 @@ export function buildOrderEmailHtml(
     showSinclairNote?: boolean;
   }
 ): string {
-  const itemRows = order.items.map(item => `
+  const groceryItems  = order.items.filter(i => i.item_type !== 'service');
+  const serviceItems  = order.items.filter(i => i.item_type === 'service');
+  const itemCount     = groceryItems.reduce((s, i) => s + i.quantity, 0);
+  const ext           = order.extended_info || {};
+
+  const itemRows = groceryItems.map(item => `
     <tr style="border-bottom:1px solid #f0f0f0;">
       <td style="padding:8px 10px;font-size:11px;color:#888;">${item.upc || '—'}</td>
       <td style="padding:8px 10px;font-size:13px;color:#1E3D1E;font-weight:600;">${item.description}</td>
@@ -71,14 +76,35 @@ export function buildOrderEmailHtml(
       <td style="padding:8px 10px;font-size:13px;font-weight:700;text-align:right;">${formatCurrency(item.line_total)}</td>
     </tr>`).join('');
 
-  const itemCount = order.items.reduce((s, i) => s + i.quantity, 0);
-
   const sinclairNote = opts.showSinclairNote
     ? `<div style="background:#f0f7f0;border:1px solid #1E3D1E;padding:12px 16px;border-radius:4px;margin:16px 0;">
         <div style="font-size:9px;font-weight:800;color:#1E3D1E;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Fulfilled by Sinclair Foods</div>
         <div style="font-size:11px;color:#444;">Jerseyville, IL · (618) 498-6856 · sinclairfoods@jerseyville-il.net</div>
        </div>`
     : '';
+
+  const deliveryMethodLabel = order.delivery_method === 'boat' ? 'Boat Delivery'
+    : order.delivery_method === 'van' ? 'Van Delivery' : null;
+  const approachLabel = order.approach_side
+    ? order.approach_side.charAt(0).toUpperCase() + order.approach_side.slice(1)
+    : null;
+
+  const serviceSection = serviceItems.length > 0 ? `
+    <div style="font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:#1E3D1E;margin-bottom:6px;margin-top:20px;">
+      Additional Services
+    </div>
+    <table width="100%" style="border-collapse:collapse;font-size:12px;margin-bottom:16px;border:1px solid #ddd;border-radius:4px;">
+      ${serviceItems.map(item => {
+        const d = (item.service_details || {}) as Record<string, string>;
+        const details = item.service_type === 'parts_pickup'
+          ? [d.pickup_location && `Pickup: ${d.pickup_location}`, d.order_number && `Order #${d.order_number}`, d.contact_name && `Contact: ${d.contact_name}`, d.contact_phone && d.contact_phone].filter(Boolean).join(' · ')
+          : [d.description && `Item: ${d.description}`, d.origin && `From: ${d.origin}`, d.contact_name && `Contact: ${d.contact_name}`, d.contact_phone && d.contact_phone].filter(Boolean).join(' · ');
+        return `<tr style="border-bottom:1px solid #f0f0f0;">
+          <td style="padding:10px;font-size:13px;font-weight:700;color:#1E3D1E;width:35%;">${item.description}</td>
+          <td style="padding:10px;font-size:12px;color:#555;">${details}</td>
+        </tr>`;
+      }).join('')}
+    </table>` : '';
 
   return `<!DOCTYPE html>
 <html>
@@ -106,22 +132,54 @@ export function buildOrderEmailHtml(
 
     ${opts.intro ? `<div style="font-size:13px;color:#333;line-height:1.6;margin-bottom:18px;">${opts.intro}</div>` : ''}
 
-    <!-- Vessel info -->
-    <table width="100%" style="background:#f8fde8;border-left:3px solid #1E3D1E;padding:14px;border-radius:0 4px 4px 0;margin-bottom:20px;border-spacing:0;">
+    <!-- Vessel & billing info -->
+    <table width="100%" style="background:#f8fde8;border-left:3px solid #1E3D1E;padding:14px;border-radius:0 4px 4px 0;margin-bottom:16px;border-spacing:0;">
       <tr>
-        <td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Company / Vessel</div>
-        <div style="font-size:14px;font-weight:800;color:#1E3D1E;">${order.company_name}</div></td>
-        <td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Contact</div>
-        <div style="font-size:14px;font-weight:800;color:#1E3D1E;">${order.contact_name}</div></td>
+        <td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Company</div>
+          <div style="font-size:14px;font-weight:800;color:#1E3D1E;">${order.company_name}</div></td>
+        <td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Billing Contact</div>
+          <div style="font-size:14px;font-weight:800;color:#1E3D1E;">${order.contact_name}</div></td>
         <td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Phone</div>
-        <div style="font-size:14px;font-weight:800;color:#1E3D1E;">${order.phone}</div></td>
+          <div style="font-size:14px;font-weight:800;color:#1E3D1E;">${order.phone}</div></td>
       </tr>
       ${order.po_number || order.eta ? `<tr>
         ${order.po_number ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">PO Number</div><div style="font-size:13px;font-weight:600;">${order.po_number}</div></td>` : '<td></td>'}
-        ${order.eta ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Vessel ETA</div><div style="font-size:13px;font-weight:700;color:#E8640A;">${order.eta}</div></td>` : '<td></td>'}
+        ${order.eta ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">ETA</div><div style="font-size:13px;font-weight:700;color:#E8640A;">${order.eta}</div></td>` : '<td></td>'}
         <td></td>
       </tr>` : ''}
     </table>
+
+    <!-- Vessel details (if provided) -->
+    ${(order.vessel_name || order.captain_name) ? `
+    <table width="100%" style="background:#f8fde8;border-left:3px solid #1E3D1E;padding:14px;border-radius:0 4px 4px 0;margin-bottom:16px;border-spacing:0;">
+      <tr>
+        ${order.vessel_name ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Vessel Name</div><div style="font-size:14px;font-weight:800;color:#1E3D1E;">${order.vessel_name}${order.vessel_type ? ` <span style="font-size:11px;font-weight:normal;">(${order.vessel_type})</span>` : ''}</div></td>` : '<td></td>'}
+        ${order.captain_name ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Captain</div><div style="font-size:14px;font-weight:800;color:#1E3D1E;">${order.captain_name}</div></td>` : '<td></td>'}
+        ${order.captain_phone ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Captain Phone</div><div style="font-size:13px;font-weight:700;color:#1E3D1E;">${order.captain_phone}</div></td>` : '<td></td>'}
+      </tr>
+      ${ext.order_contact_name ? `<tr>
+        <td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Order Contact</div><div style="font-size:13px;font-weight:600;">${ext.order_contact_name}${ext.order_contact_title ? ` (${ext.order_contact_title})` : ''}</div></td>
+        ${ext.order_contact_phone ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Contact Phone</div><div style="font-size:13px;font-weight:600;">${ext.order_contact_phone}</div></td>` : '<td></td>'}
+        <td></td>
+      </tr>` : ''}
+    </table>` : ''}
+
+    <!-- Delivery info (if provided) -->
+    ${(order.terminal_name || order.arrival_date) ? `
+    <div style="background:#fff8f0;border-left:3px solid #E8640A;padding:14px;border-radius:0 4px 4px 0;margin-bottom:16px;">
+      <table width="100%" style="border-spacing:0;">
+        <tr>
+          ${order.terminal_name ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Deliver To</div><div style="font-size:15px;font-weight:900;color:#E8640A;">${order.terminal_name}</div></td>` : '<td></td>'}
+          ${order.arrival_date  ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Arrival Date</div><div style="font-size:15px;font-weight:900;color:#E8640A;">${order.arrival_date}</div></td>` : '<td></td>'}
+          ${order.arrival_time  ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Arrival Time</div><div style="font-size:15px;font-weight:900;color:#E8640A;">${order.arrival_time}</div></td>` : '<td></td>'}
+        </tr>
+        ${(deliveryMethodLabel || order.crew_change) ? `<tr>
+          ${deliveryMethodLabel ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Method</div><div style="font-size:13px;font-weight:700;">${deliveryMethodLabel}${approachLabel ? ` · ${approachLabel} side` : ''}</div></td>` : '<td></td>'}
+          ${order.vhf_channel ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">VHF</div><div style="font-size:13px;font-weight:600;">${order.vhf_channel}</div></td>` : '<td></td>'}
+          ${order.crew_change ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Crew Change</div><div style="font-size:13px;font-weight:700;color:#E8640A;">YES — ${order.crew_arriving ?? 0} in / ${order.crew_departing ?? 0} out</div></td>` : '<td></td>'}
+        </tr>` : ''}
+      </table>
+    </div>` : ''}
 
     ${order.notes ? `<div style="background:#fff8ec;border:1px solid #E8640A;padding:10px 14px;border-radius:4px;margin-bottom:20px;">
       <div style="font-size:9px;font-weight:800;color:#E8640A;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Special Instructions</div>
@@ -129,8 +187,9 @@ export function buildOrderEmailHtml(
     </div>` : ''}
 
     <!-- Items table -->
+    ${groceryItems.length > 0 ? `
     <div style="font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:#1E3D1E;margin-bottom:6px;">
-      Order Items (${itemCount} items)
+      Grocery Items (${itemCount} items)
     </div>
     <table width="100%" style="border-collapse:collapse;font-size:12px;margin-bottom:16px;">
       <thead>
@@ -150,7 +209,9 @@ export function buildOrderEmailHtml(
           <td style="padding:10px;text-align:right;font-size:16px;font-weight:900;color:#1E3D1E;">${formatCurrency(order.subtotal)}</td>
         </tr>
       </tfoot>
-    </table>
+    </table>` : ''}
+
+    ${serviceSection}
 
     ${sinclairNote}
 
@@ -194,7 +255,7 @@ export async function sendOrderReceivedEmail(
   const fromEmail  = process.env.EMAIL_FROM || 'onboarding@resend.dev';
   const toEmail    = opts.businessEmail || process.env.BUSINESS_EMAIL || 'GraftonTowboatServices@gmail.com';
   const ccList     = parseCcList(opts.ccEmailRaw ?? process.env.ORDER_EMAIL_CC ?? '');
-  const pdfBuffer = await generateOrderPdfBuffer(order);
+  const pdfBuffer  = await generateOrderPdfBuffer(order);
   const pdfAttachment = [{ filename: `order-${order.order_number}.pdf`, content: pdfBuffer }];
 
   // 1) Business notification email
@@ -253,7 +314,6 @@ export async function sendOrderReceivedEmail(
       attachments: pdfAttachment,
     });
     if (customerResult.error) {
-      // Log but don't fail order — business already notified
       console.error('Customer confirmation email error:', customerResult.error);
     }
   }
@@ -272,10 +332,10 @@ export async function sendOrderShoppedEmail(
     ccEmailRaw?: string;
   } = {}
 ) {
-  const appUrl    = getAppUrl();
-  const fromEmail = process.env.EMAIL_FROM || 'onboarding@resend.dev';
-  const toEmail   = opts.businessEmail || process.env.BUSINESS_EMAIL || 'GraftonTowboatServices@gmail.com';
-  const ccList    = parseCcList(opts.ccEmailRaw ?? process.env.ORDER_EMAIL_CC ?? '');
+  const appUrl     = getAppUrl();
+  const fromEmail  = process.env.EMAIL_FROM || 'onboarding@resend.dev';
+  const toEmail    = opts.businessEmail || process.env.BUSINESS_EMAIL || 'GraftonTowboatServices@gmail.com';
+  const ccList     = parseCcList(opts.ccEmailRaw ?? process.env.ORDER_EMAIL_CC ?? '');
   const pdfBuffer2 = await generateOrderPdfBuffer(order);
   const pdfAttachment2 = [{ filename: `order-${order.order_number}-fulfilled.pdf`, content: pdfBuffer2 }];
 
@@ -287,7 +347,6 @@ export async function sendOrderShoppedEmail(
     footerText: 'Grafton Towboat Services · Grafton, IL 62037 · (618) 556-0290 · GraftonTowboatServices@gmail.com',
   });
 
-  // Send to customer (primary) + business (CC) so Jennifer has visibility
   const recipients = order.customer_email ? [order.customer_email] : [toEmail];
   const cc = order.customer_email
     ? [toEmail, ...ccList].filter(Boolean)
@@ -321,11 +380,11 @@ export function buildOrderEmailHtmlLegacy(order: Order, templateRaw?: EmailTempl
   const buttonUrl = buttonUrlRaw.startsWith('http') ? buttonUrlRaw : `${appUrl}${buttonUrlRaw.startsWith('/') ? '' : '/'}${buttonUrlRaw}`;
 
   return buildOrderEmailHtml(order, {
-    tagline:         applyTemplateVars(t.header_tagline, order, appUrl),
-    intro:           applyTemplateVars(t.intro_message, order, appUrl),
-    buttonText:      applyTemplateVars(t.button_text, order, appUrl),
+    tagline:          applyTemplateVars(t.header_tagline, order, appUrl),
+    intro:            applyTemplateVars(t.intro_message, order, appUrl),
+    buttonText:       applyTemplateVars(t.button_text, order, appUrl),
     buttonUrl,
-    footerText:      applyTemplateVars(t.footer_text, order, appUrl),
+    footerText:       applyTemplateVars(t.footer_text, order, appUrl),
     showSinclairNote: true,
   });
 }

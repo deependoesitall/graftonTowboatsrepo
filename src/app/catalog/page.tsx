@@ -4,6 +4,8 @@ import { createClient } from '@/lib/supabase/server';
 import { ProductGrid } from '@/components/catalog/ProductGrid';
 import { CategoryFilter } from '@/components/catalog/CategoryFilter';
 import { SearchBar } from '@/components/catalog/SearchBar';
+import { CatalogTabBar } from '@/components/catalog/CatalogTabBar';
+import { AdditionalServicesTab } from '@/components/catalog/AdditionalServicesTab';
 import { MAIN_CATEGORIES } from '@/lib/utils';
 
 interface PageProps {
@@ -11,16 +13,18 @@ interface PageProps {
     search?: string;
     category?: string;
     page?: string;
+    tab?: string;
   }>;
 }
 
 export default async function CatalogPage({ searchParams }: PageProps) {
   const params = await searchParams;
-  const search = params.search?.trim() || '';
+  const search   = params.search?.trim() || '';
   const category = params.category || '';
-  const page = Math.max(1, parseInt(params.page || '1'));
-  const perPage = 60;
-  const offset = (page - 1) * perPage;
+  const page     = Math.max(1, parseInt(params.page || '1'));
+  const tab      = params.tab === 'services' ? 'services' : 'groceries';
+  const perPage  = 60;
+  const offset   = (page - 1) * perPage;
 
   const supabase = await createClient();
 
@@ -33,16 +37,10 @@ export default async function CatalogPage({ searchParams }: PageProps) {
     .order('description', { ascending: true })
     .range(offset, offset + perPage - 1);
 
-  // Use full-text search when query present, ilike for short strings
   if (search) {
     if (search.length >= 3) {
-      // Full-text search — uses the GIN index for speed
-      query = query.textSearch('description', search, {
-        type: 'websearch',
-        config: 'english',
-      });
+      query = query.textSearch('description', search, { type: 'websearch', config: 'english' });
     } else {
-      // For very short terms, prefix match
       query = query.ilike('description', `${search}%`);
     }
   }
@@ -63,40 +61,50 @@ export default async function CatalogPage({ searchParams }: PageProps) {
       {/* Page header */}
       <div className="mb-5">
         <h1 className="font-display text-2xl md:text-3xl text-brand-navy font-bold">
-          Order Groceries &amp; Supplies
+          Place an Order
         </h1>
         <p className="text-gray-500 text-sm mt-1">
-          Partnered with Sinclair&apos;s Foods &middot; {count?.toLocaleString() || '0'} items available
+          Grafton Towboat Services &middot; Groceries, supplies &amp; more
         </p>
       </div>
 
-      {/* Search */}
-      <SearchBar initialSearch={search} />
+      {/* ── TAB BAR ── */}
+      <CatalogTabBar activeTab={tab} />
 
-      <div className="flex flex-col md:flex-row gap-5 mt-5">
-        {/* Sidebar */}
-        <aside className="w-full md:w-52 shrink-0">
-          <CategoryFilter
-            categories={MAIN_CATEGORIES}
-            counts={catCounts || []}
-            activeCategory={category}
-          />
-        </aside>
+      {/* ── GROCERIES TAB ── */}
+      {tab === 'groceries' && (
+        <>
+          <SearchBar initialSearch={search} />
+          <div className="flex flex-col md:flex-row gap-5 mt-5">
+            <aside className="w-full md:w-52 shrink-0">
+              <CategoryFilter
+                categories={MAIN_CATEGORIES}
+                counts={catCounts || []}
+                activeCategory={category}
+              />
+            </aside>
+            <div className="flex-1 min-w-0">
+              <Suspense fallback={<ProductGridSkeleton />}>
+                <ProductGrid
+                  products={products || []}
+                  totalCount={count || 0}
+                  page={page}
+                  totalPages={totalPages}
+                  search={search}
+                  category={category}
+                />
+              </Suspense>
+            </div>
+          </div>
+        </>
+      )}
 
-        {/* Grid */}
-        <div className="flex-1 min-w-0">
-          <Suspense fallback={<ProductGridSkeleton />}>
-            <ProductGrid
-              products={products || []}
-              totalCount={count || 0}
-              page={page}
-              totalPages={totalPages}
-              search={search}
-              category={category}
-            />
-          </Suspense>
+      {/* ── ADDITIONAL SERVICES TAB ── */}
+      {tab === 'services' && (
+        <div className="mt-5 max-w-2xl">
+          <AdditionalServicesTab />
         </div>
-      </div>
+      )}
     </div>
   );
 }

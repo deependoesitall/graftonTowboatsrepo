@@ -1,438 +1,112 @@
 'use client';
-// src/app/order/page.tsx
+// src/app/order/page.tsx — Phase 2b: 3-step checkout
+
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
-  ShoppingCart, Trash2, Plus, Minus, ArrowLeft,
-  ChevronRight, Loader2, AlertCircle, Package, HelpCircle, X, LogIn
+  ShoppingCart, Trash2, Plus, Minus, ArrowLeft, ChevronRight,
+  Loader2, AlertCircle, Package, HelpCircle, X, LogIn,
+  Ship, MapPin, Users, Wrench, Check, ClipboardList,
 } from 'lucide-react';
-import { getCart, updateCartItem, removeFromCart, getCartTotal, getCartCount, getVesselInfo, saveVesselInfo } from '@/lib/cart';
+import {
+  getCart, updateCartItem, removeFromCart, getCartTotal, getCartCount,
+  getVesselInfo, saveVesselInfo, getAdditionalServices, clearAdditionalServices,
+} from '@/lib/cart';
 import { formatCurrency } from '@/lib/utils';
-import { CartItem, VesselInfo } from '@/types';
+import { CartItem, VesselInfo, AdditionalServices, VESSEL_TYPES } from '@/types';
 import { SiteHeader } from '@/components/layout/SiteHeader';
 import { AuthModal } from '@/components/auth/AuthModal';
 import { useToast } from '@/hooks/use-toast';
 import { createClient } from '@/lib/supabase/client';
 
-const ESTIMATED_TOTAL_EXPLANATION =
-  'Some orders may display an estimated total at checkout. This is because certain items are sold by weight, market prices may change, or substitutions may be necessary if an item is unavailable. Your final invoice will reflect the actual items delivered, including any approved substitutions, quantity adjustments, or weighted products. We make every effort to keep pricing accurate and will contact you if there are any significant changes to your order. At Grafton Towboat Services, our goal is to provide the products you need while making the ordering process as simple and convenient as possible. If you have any questions about your order or pricing, please contact us at (618) 556-0290 or GraftonTowboatServices@gmail.com.';
+const ESTIMATED_EXPLANATION =
+  'Some orders may display an estimated total at checkout. This is because certain items are sold by weight, market prices may change, or substitutions may be necessary if an item is unavailable. Your final invoice will reflect the actual items delivered, including any approved substitutions, quantity adjustments, or weighted products. We make every effort to keep pricing accurate and will contact you if there are any significant changes to your order. If you have any questions, please contact us at (618) 556-0290 or GraftonTowboatServices@gmail.com.';
 
-export default function OrderPage() {
-  const [items, setItems] = useState<CartItem[]>([]);
-  const [vessel, setVessel] = useState<VesselInfo>({
-    company_name: '', contact_name: '', phone: '',
-    email: '', po_number: '', notes: '', eta: '',
-  });
-  const [submitting, setSubmitting] = useState(false);
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [estimatedOpen, setEstimatedOpen] = useState(false);
-  const [authModalOpen, setAuthModalOpen] = useState(false);
-  const [emailHasAccount, setEmailHasAccount] = useState(false);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const tooltipRef = useRef<HTMLDivElement>(null);
-  const router = useRouter();
-  const { toast } = useToast();
-
-  useEffect(() => {
-    setItems(getCart());
-    setVessel(getVesselInfo());
-    const handler = () => setItems(getCart());
-    window.addEventListener('cart-updated', handler);
-
-    // Auto-fill from saved customer profile when logged in (only fills empty fields)
-    (async () => {
-      const supabase = createClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      setIsLoggedIn(true);
-      const { data: profile } = await supabase.from('customer_profiles').select('*').single();
-      if (profile) {
-        setVessel(v => ({
-          ...v,
-          company_name: v.company_name || profile.company_name || '',
-          contact_name: v.contact_name || profile.contact_name || '',
-          phone: v.phone || profile.phone || '',
-          email: v.email || user.email || '',
-        }));
-      } else {
-        // No profile but logged in — pre-fill email from auth
-        setVessel(v => ({ ...v, email: v.email || user.email || '' }));
-      }
-    })();
-
-    return () => window.removeEventListener('cart-updated', handler);
-  }, []);
-
-  // Close tooltip when clicking outside
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (tooltipRef.current && !tooltipRef.current.contains(e.target as Node)) {
-        setEstimatedOpen(false);
-      }
-    }
-    if (estimatedOpen) document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [estimatedOpen]);
-
-  function handleVesselChange(field: keyof VesselInfo, value: string) {
-    const updated = { ...vessel, [field]: value };
-    setVessel(updated);
-    saveVesselInfo(updated);
-    if (errors[field]) setErrors(e => { const n = { ...e }; delete n[field]; return n; });
-  }
-
-  function validate() {
-    const errs: Record<string, string> = {};
-    if (!vessel.company_name.trim()) errs.company_name = 'Company / Vessel name is required';
-    if (!vessel.contact_name.trim()) errs.contact_name = 'Contact person name is required';
-    if (!vessel.phone.trim()) errs.phone = 'Phone number is required';
-    if (!vessel.email.trim()) errs.email = 'Email address is required for order confirmation';
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(vessel.email.trim())) errs.email = 'Please enter a valid email address';
-    if (items.length === 0) errs.items = 'Your cart is empty';
-    return errs;
-  }
-
-  async function checkEmailForAccount(email: string) {
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || isLoggedIn) {
-      setEmailHasAccount(false);
-      return;
-    }
-    try {
-      const res = await fetch('/api/auth/check-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim() }),
-      });
-      const { exists } = await res.json();
-      setEmailHasAccount(exists);
-    } catch {
-      setEmailHasAccount(false);
-    }
-  }
-
-  async function handleSubmit() {
-    const errs = validate();
-    if (Object.keys(errs).length > 0) {
-      setErrors(errs);
-      const el = document.getElementById('error-top');
-      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      const supabase = createClient();
-      const { data: { session } } = await supabase.auth.getSession();
-      const authHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (session?.access_token) authHeaders['Authorization'] = `Bearer ${session.access_token}`;
-
-      const res = await fetch('/api/orders', {
-        method: 'POST',
-        headers: authHeaders,
-        body: JSON.stringify({ vessel, items }),
-      });
-
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || 'Failed to submit order');
-      }
-
-      const { order_id, order_number, _emailDebug } = await res.json();
-
-      if (_emailDebug) {
-        if (_emailDebug.ok) {
-          toast({ title: '✅ Email sent', description: `To: ${_emailDebug.to}`, duration: 6000 });
-        } else {
-          toast({ title: '❌ Email failed', description: _emailDebug.error, variant: 'destructive', duration: 10000 });
-        }
-      }
-
-      router.push(`/confirm?order=${order_id}&num=${order_number}`);
-    } catch (err) {
-      toast({
-        title: 'Error submitting order',
-        description: err instanceof Error ? err.message : 'Please try again.',
-        variant: 'destructive',
-      });
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  const total = getCartTotal(items);
-  const count = getCartCount(items);
-
+// ─── Step indicator ────────────────────────────────────────────
+function StepIndicator({ step }: { step: 1 | 2 | 3 }) {
+  const steps = ['Review Items', 'Vessel & Delivery', 'Confirm & Submit'];
   return (
-    <div className="min-h-screen bg-brand-cream flex flex-col">
-      <SiteHeader />
-      <main className="flex-1 max-w-3xl mx-auto w-full px-4 py-6 pb-20">
-        {/* Back */}
-        <Link href="/catalog" className="inline-flex items-center gap-1.5 text-brand-river text-sm mb-6 hover:text-brand-steel">
-          <ArrowLeft className="w-4 h-4" />
-          Continue Shopping
-        </Link>
-
-        <h1 className="font-display text-2xl md:text-3xl text-brand-navy font-bold mb-1">
-          Review &amp; Submit Order
-        </h1>
-        <p className="text-gray-500 text-sm mb-8">
-          {count} item{count !== 1 ? 's' : ''} · {formatCurrency(total)}
-        </p>
-
-        {/* Error banner */}
-        {Object.keys(errors).length > 0 && (
-          <div id="error-top" className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 flex gap-3">
-            <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
-            <div>
-              <p className="font-semibold text-red-700 text-sm">Please fix the following:</p>
-              <ul className="mt-1 text-sm text-red-600 list-disc list-inside">
-                {Object.values(errors).map((e, i) => <li key={i}>{e}</li>)}
-              </ul>
+    <div className="flex items-center mb-8">
+      {steps.map((label, i) => {
+        const num = (i + 1) as 1 | 2 | 3;
+        const done = num < step;
+        const active = num === step;
+        return (
+          <div key={num} className="flex items-center flex-1 last:flex-none">
+            <div className="flex flex-col items-center">
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all ${
+                done ? 'bg-brand-green text-white' : active ? 'bg-brand-navy text-white' : 'bg-gray-200 text-gray-400'
+              }`}>
+                {done ? <Check className="w-4 h-4" /> : num}
+              </div>
+              <span className={`text-xs mt-1 font-medium whitespace-nowrap ${
+                active ? 'text-brand-navy' : done ? 'text-brand-green' : 'text-gray-400'
+              }`}>{label}</span>
             </div>
-          </div>
-        )}
-
-        {/* Cart Items */}
-        <section className="card-base mb-6">
-          <div className="p-4 border-b border-gray-100 flex items-center justify-between">
-            <h2 className="font-display text-lg font-bold text-brand-navy flex items-center gap-2">
-              <ShoppingCart className="w-5 h-5 text-brand-gold" />
-              Order Items
-            </h2>
-            {items.length > 0 && (
-              <span className="text-sm text-gray-400">{count} items</span>
+            {i < steps.length - 1 && (
+              <div className={`flex-1 h-0.5 mx-2 mb-4 ${done ? 'bg-brand-green' : 'bg-gray-200'}`} />
             )}
           </div>
-
-          {items.length === 0 ? (
-            <div className="p-12 text-center">
-              <Package className="w-12 h-12 text-gray-200 mx-auto mb-4" />
-              <p className="text-gray-400 mb-4">Your cart is empty</p>
-              <Link href="/catalog" className="btn-primary text-sm px-6 py-2">
-                Browse Items
-              </Link>
-            </div>
-          ) : (
-            <div className="divide-y divide-gray-50">
-              {items.map(item => (
-                <CartItemRow
-                  key={item.product_id}
-                  item={item}
-                  onUpdate={(qty) => { updateCartItem(item.product_id, qty); }}
-                  onRemove={() => { removeFromCart(item.product_id); }}
-                />
-              ))}
-              <div className="p-4 bg-brand-sand/40">
-                <div className="flex justify-between items-center">
-                  <div className="flex items-center gap-2">
-                    <span className="font-body font-bold text-brand-navy">Order Total</span>
-                    {/* Estimated total disclaimer */}
-                    <div className="relative" ref={tooltipRef}>
-                      <button
-                        type="button"
-                        onClick={() => setEstimatedOpen(o => !o)}
-                        onMouseEnter={() => setEstimatedOpen(true)}
-                        onMouseLeave={() => !estimatedOpen && setEstimatedOpen(false)}
-                        className="flex items-center gap-1 text-xs text-brand-river hover:text-brand-navy transition-colors focus:outline-none"
-                        aria-label="Why is my total estimated?"
-                      >
-                        <HelpCircle className="w-3.5 h-3.5" />
-                        <span className="underline underline-offset-2">Why is my total estimated?</span>
-                      </button>
-                      {estimatedOpen && (
-                        <div className="absolute bottom-full left-0 mb-2 z-30 w-80 sm:w-96 bg-white border border-gray-200 rounded-lg shadow-xl p-4 text-xs text-gray-600 leading-relaxed">
-                          <div className="flex items-start justify-between gap-2 mb-2">
-                            <p className="font-bold text-gray-800 text-sm">Why is my total estimated?</p>
-                            <button
-                              onClick={() => setEstimatedOpen(false)}
-                              className="text-gray-400 hover:text-gray-600 shrink-0 mt-0.5"
-                            >
-                              <X className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                          <p>{ESTIMATED_TOTAL_EXPLANATION}</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  <span className="font-display text-2xl font-bold text-brand-navy">
-                    {formatCurrency(total)}
-                  </span>
-                </div>
-              </div>
-            </div>
-          )}
-        </section>
-
-        {/* Vessel Info */}
-        <section className="card-base mb-6">
-          <div className="p-4 border-b border-gray-100">
-            <h2 className="font-display text-lg font-bold text-brand-navy">
-              Vessel &amp; Contact Information
-            </h2>
-            <p className="text-gray-400 text-xs mt-1">Your info is saved for next time</p>
-          </div>
-          <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <FormField label="Company / Vessel Name *" error={errors.company_name}>
-              <input
-                type="text"
-                className={`input-base ${errors.company_name ? 'border-red-400' : ''}`}
-                placeholder="e.g. M/V River Queen"
-                value={vessel.company_name}
-                onChange={e => handleVesselChange('company_name', e.target.value)}
-              />
-            </FormField>
-
-            <FormField label="Contact Person Name *" error={errors.contact_name}>
-              <input
-                type="text"
-                className={`input-base ${errors.contact_name ? 'border-red-400' : ''}`}
-                placeholder="Your name"
-                value={vessel.contact_name}
-                onChange={e => handleVesselChange('contact_name', e.target.value)}
-              />
-            </FormField>
-
-            <FormField label="Phone Number *" error={errors.phone}>
-              <input
-                type="tel"
-                className={`input-base ${errors.phone ? 'border-red-400' : ''}`}
-                placeholder="(555) 123-4567"
-                value={vessel.phone}
-                onChange={e => handleVesselChange('phone', e.target.value)}
-              />
-            </FormField>
-
-            <FormField label="Email Address *" error={errors.email}>
-              <input
-                type="email"
-                className={`input-base ${errors.email ? 'border-red-400' : ''}`}
-                placeholder="captain@example.com"
-                value={vessel.email}
-                onChange={e => { handleVesselChange('email', e.target.value); setEmailHasAccount(false); }}
-                onBlur={e => checkEmailForAccount(e.target.value)}
-                autoComplete="email"
-              />
-              {emailHasAccount && !isLoggedIn && (
-                <div className="mt-2 flex items-center justify-between gap-3 bg-brand-sand border border-brand-gold/40 rounded-lg px-3 py-2">
-                  <p className="text-xs text-brand-navy leading-snug">
-                    <span className="font-semibold">Account found.</span> Sign in to auto-fill your vessel info and track your order.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => setAuthModalOpen(true)}
-                    className="shrink-0 flex items-center gap-1.5 bg-brand-navy text-white text-xs font-bold px-3 py-1.5 rounded-full hover:bg-brand-steel transition-colors"
-                  >
-                    <LogIn className="w-3.5 h-3.5" />
-                    Sign In
-                  </button>
-                </div>
-              )}
-            </FormField>
-
-            <FormField label="PO Number (optional)">
-              <input
-                type="text"
-                className="input-base"
-                placeholder="Optional PO#"
-                value={vessel.po_number}
-                onChange={e => handleVesselChange('po_number', e.target.value)}
-              />
-            </FormField>
-
-            <FormField label="Vessel ETA (optional)">
-              <input
-                type="text"
-                className="input-base"
-                placeholder="e.g. Tomorrow 6 AM, June 15"
-                value={vessel.eta}
-                onChange={e => handleVesselChange('eta', e.target.value)}
-              />
-            </FormField>
-
-            <FormField
-              label="Special Instructions (optional)"
-              className="sm:col-span-2"
-              hint="For delivery notes or special requests only. Item substitutions are handled separately — do not use this field to request product substitutions."
-            >
-              <textarea
-                className="input-base resize-none"
-                rows={3}
-                placeholder="Delivery notes, access instructions, special requests…"
-                value={vessel.notes}
-                onChange={e => handleVesselChange('notes', e.target.value)}
-              />
-            </FormField>
-          </div>
-        </section>
-
-        {/* Submit */}
-        <button
-          onClick={handleSubmit}
-          disabled={submitting || items.length === 0}
-          className="w-full btn-gold text-base py-4 flex items-center justify-center gap-2 rounded-lg"
-        >
-          {submitting ? (
-            <>
-              <Loader2 className="w-5 h-5 animate-spin" />
-              Submitting Order…
-            </>
-          ) : (
-            <>
-              Submit Order — {formatCurrency(total)}
-              <ChevronRight className="w-5 h-5" />
-            </>
-          )}
-        </button>
-        <p className="text-center text-xs text-gray-400 mt-3">
-          A confirmation will be sent to the email address you provided
-        </p>
-      </main>
-
-      <AuthModal
-        open={authModalOpen}
-        onClose={() => {
-          setAuthModalOpen(false);
-          // Re-check login state after modal closes
-          createClient().auth.getUser().then(({ data: { user } }) => {
-            if (user) {
-              setIsLoggedIn(true);
-              setEmailHasAccount(false);
-              setVessel(v => ({ ...v, email: v.email || user.email || '' }));
-            }
-          });
-        }}
-        defaultMode="signin"
-        defaultEmail={vessel.email}
-        title="Sign In to Your Account"
-      />
+        );
+      })}
     </div>
   );
 }
 
-function CartItemRow({
-  item,
-  onUpdate,
-  onRemove,
+// ─── Shared form helpers ───────────────────────────────────────
+function Field({
+  label, required, error, hint, children, col2,
 }: {
-  item: CartItem;
-  onUpdate: (qty: number) => void;
-  onRemove: () => void;
+  label: string; required?: boolean; error?: string;
+  hint?: string; children: React.ReactNode; col2?: boolean;
+}) {
+  return (
+    <div className={col2 ? 'sm:col-span-2' : ''}>
+      <label className="block text-xs font-bold text-gray-600 mb-1">
+        {label}{required && <span className="text-red-400 ml-0.5">*</span>}
+      </label>
+      {hint && <p className="text-xs text-gray-400 mb-1">{hint}</p>}
+      {children}
+      {error && <p className="text-red-500 text-xs mt-1">{error}</p>}
+    </div>
+  );
+}
+
+function SectionHead({ icon, title, sub }: { icon: React.ReactNode; title: string; sub?: string }) {
+  return (
+    <div className="flex items-center gap-3 pb-3 border-b border-gray-100 mb-4">
+      <div className="w-8 h-8 bg-brand-navy/10 rounded-lg flex items-center justify-center text-brand-navy shrink-0">
+        {icon}
+      </div>
+      <div>
+        <h3 className="font-display font-bold text-brand-navy text-sm">{title}</h3>
+        {sub && <p className="text-xs text-gray-400">{sub}</p>}
+      </div>
+    </div>
+  );
+}
+
+function ReviewRow({ label, value }: { label: string; value?: string | null }) {
+  if (!value) return null;
+  return (
+    <div className="flex flex-col">
+      <span className="text-xs text-gray-400">{label}</span>
+      <span className="text-sm font-semibold text-brand-navy">{value}</span>
+    </div>
+  );
+}
+
+// ─── Cart item row (step 1) ────────────────────────────────────
+function CartItemRow({ item, onUpdate, onRemove }: {
+  item: CartItem; onUpdate: (qty: number) => void; onRemove: () => void;
 }) {
   const [draft, setDraft] = useState(String(item.quantity));
-
-  useEffect(() => {
-    setDraft(String(item.quantity));
-  }, [item.quantity]);
+  useEffect(() => { setDraft(String(item.quantity)); }, [item.quantity]);
 
   function commit() {
     const n = parseInt(draft, 10);
-    if (!draft || isNaN(n) || n < 1) {
-      setDraft(String(item.quantity));
-      if (item.quantity < 1) onUpdate(1);
-      return;
-    }
+    if (!draft || isNaN(n) || n < 1) { setDraft(String(item.quantity)); return; }
     const clamped = Math.min(999, n);
     setDraft(String(clamped));
     if (clamped !== item.quantity) onUpdate(clamped);
@@ -442,51 +116,32 @@ function CartItemRow({
     <div className="p-3 flex items-start gap-3">
       <div className="flex-1 min-w-0">
         <p className="text-xs text-brand-river font-semibold mb-0.5">{item.category}</p>
-        <p className="font-body font-semibold text-brand-navy text-sm leading-snug">
-          {item.description}
-        </p>
-        {item.pkg_size && (
-          <p className="text-xs text-gray-400 mt-0.5">
-            {item.pkg_size}{item.uom ? ` / ${item.uom}` : ''}
-          </p>
-        )}
+        <p className="font-body font-semibold text-brand-navy text-sm leading-snug">{item.description}</p>
+        {item.pkg_size && <p className="text-xs text-gray-400 mt-0.5">{item.pkg_size}{item.uom ? ` / ${item.uom}` : ''}</p>}
         <p className="text-sm font-bold text-brand-navy mt-1">
-          {formatCurrency(item.price)} ea. ·{' '}
+          {formatCurrency(item.price)} ea. &nbsp;&middot;&nbsp;
           <span className="text-brand-gold">{formatCurrency(item.price * item.quantity)}</span>
         </p>
       </div>
-
       <div className="flex flex-col items-end gap-2">
-        <button
-          onClick={onRemove}
-          className="text-gray-300 hover:text-red-400 transition-colors p-1"
-          aria-label="Remove item"
-        >
+        <button onClick={onRemove} className="text-gray-300 hover:text-red-400 transition-colors p-1">
           <Trash2 className="w-4 h-4" />
         </button>
         <div className="flex items-center border border-gray-200 rounded overflow-hidden">
-          <button
-            onClick={() => onUpdate(item.quantity - 1)}
-            className="w-7 h-7 flex items-center justify-center text-gray-500 hover:bg-gray-100"
-          >
+          <button onClick={() => onUpdate(item.quantity - 1)}
+            className="w-7 h-7 flex items-center justify-center text-gray-500 hover:bg-gray-100">
             <Minus className="w-3 h-3" />
           </button>
           <input
-            type="text"
-            inputMode="numeric"
-            pattern="[0-9]*"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value.replace(/[^0-9]/g, ''))}
+            type="text" inputMode="numeric" pattern="[0-9]*" value={draft}
+            onChange={e => setDraft(e.target.value.replace(/[^0-9]/g, ''))}
             onBlur={commit}
-            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-            onFocus={(e) => e.target.select()}
-            className="w-8 text-center text-sm font-bold text-brand-navy bg-transparent border-0 focus:outline-none focus:ring-1 focus:ring-brand-steel rounded"
-            aria-label="Quantity"
+            onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+            onFocus={e => e.target.select()}
+            className="w-8 text-center text-sm font-bold text-brand-navy bg-transparent border-0 focus:outline-none"
           />
-          <button
-            onClick={() => onUpdate(item.quantity + 1)}
-            className="w-7 h-7 flex items-center justify-center text-gray-500 hover:bg-gray-100"
-          >
+          <button onClick={() => onUpdate(item.quantity + 1)}
+            className="w-7 h-7 flex items-center justify-center text-gray-500 hover:bg-gray-100">
             <Plus className="w-3 h-3" />
           </button>
         </div>
@@ -495,25 +150,780 @@ function CartItemRow({
   );
 }
 
-function FormField({
-  label,
-  error,
-  hint,
-  children,
-  className = '',
-}: {
-  label: string;
-  error?: string;
-  hint?: string;
-  children: React.ReactNode;
-  className?: string;
-}) {
+// ─── Main page component ───────────────────────────────────────
+export default function OrderPage() {
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [items, setItems] = useState<CartItem[]>([]);
+  const [services, setServices] = useState<AdditionalServices>({
+    parts_pickup:     { enabled: false, pickup_location: '', order_number: '', contact_name: '', contact_phone: '' },
+    package_delivery: { enabled: false, description: '', origin: '', contact_name: '', contact_phone: '' },
+  });
+  const [vessel, setVessel] = useState<VesselInfo>(getVesselInfo());
+  const [showOrderContact, setShowOrderContact] = useState(false);
+  const [showSecondary, setShowSecondary] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [tooltipOpen, setTooltipOpen] = useState(false);
+  const [authOpen, setAuthOpen] = useState(false);
+  const [emailHasAccount, setEmailHasAccount] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  const router = useRouter();
+  const { toast } = useToast();
+
+  useEffect(() => {
+    setServices(getAdditionalServices());
+    setItems(getCart());
+    const v = getVesselInfo();
+    setVessel(v);
+    if (v.order_contact_name || v.order_contact_phone) setShowOrderContact(true);
+    if (v.secondary_terminal_name) setShowSecondary(true);
+
+    const sync = () => setItems(getCart());
+    window.addEventListener('cart-updated', sync);
+
+    (async () => {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      setIsLoggedIn(true);
+      const { data: profile } = await supabase.from('customer_profiles').select('*').single();
+      setVessel(prev => ({
+        ...prev,
+        company_name: prev.company_name || (profile?.company_name ?? ''),
+        contact_name: prev.contact_name || (profile?.contact_name ?? ''),
+        phone:        prev.phone        || (profile?.phone        ?? ''),
+        email:        prev.email        || user.email             || '',
+      }));
+    })();
+
+    return () => window.removeEventListener('cart-updated', sync);
+  }, []);
+
+  useEffect(() => {
+    if (!tooltipOpen) return;
+    function outside(e: MouseEvent) {
+      if (tooltipRef.current && !tooltipRef.current.contains(e.target as Node)) setTooltipOpen(false);
+    }
+    document.addEventListener('mousedown', outside);
+    return () => document.removeEventListener('mousedown', outside);
+  }, [tooltipOpen]);
+
+  function setV(field: keyof VesselInfo, value: string | boolean) {
+    setVessel(prev => {
+      const next = { ...prev, [field]: value };
+      saveVesselInfo(next);
+      return next;
+    });
+    if (errors[field]) setErrors(e => { const n = { ...e }; delete n[field]; return n; });
+  }
+
+  function clearOptionalContact() {
+    (['order_contact_name', 'order_contact_title', 'order_contact_phone', 'order_contact_email'] as const)
+      .forEach(f => setV(f, ''));
+    setShowOrderContact(false);
+  }
+
+  function clearSecondary() {
+    (['secondary_terminal_name', 'secondary_arrival_date', 'secondary_arrival_time', 'secondary_delivery_method'] as const)
+      .forEach(f => setV(f, ''));
+    setShowSecondary(false);
+  }
+
+  // ── Validation ──
+  function validateStep1() {
+    const errs: Record<string, string> = {};
+    const hasItems = items.length > 0;
+    const hasSvc = services.parts_pickup.enabled || services.package_delivery.enabled;
+    if (!hasItems && !hasSvc) errs.items = 'Please add groceries or at least one additional service before continuing.';
+    return errs;
+  }
+
+  function validateStep2() {
+    const errs: Record<string, string> = {};
+    if (!vessel.company_name.trim())   errs.company_name    = 'Company name is required';
+    if (!vessel.contact_name.trim())   errs.contact_name    = 'Billing contact name is required';
+    if (!vessel.phone.trim())          errs.phone           = 'Billing phone is required';
+    if (!vessel.email.trim())          errs.email           = 'Billing email is required';
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(vessel.email.trim())) errs.email = 'Please enter a valid email address';
+    if (!vessel.vessel_name.trim())    errs.vessel_name     = 'Vessel name is required';
+    if (!vessel.vessel_type)           errs.vessel_type     = 'Vessel type is required';
+    if (vessel.vessel_type === 'Other' && !vessel.vessel_type_other.trim()) errs.vessel_type_other = 'Please specify vessel type';
+    if (!vessel.captain_name.trim())   errs.captain_name    = 'Captain name is required';
+    if (!vessel.captain_phone.trim())  errs.captain_phone   = 'Captain cell phone is required';
+    if (!vessel.terminal_name.trim())  errs.terminal_name   = 'Terminal / location name is required';
+    if (!vessel.arrival_date.trim())   errs.arrival_date    = 'Estimated arrival date is required';
+    if (!vessel.arrival_time.trim())   errs.arrival_time    = 'Estimated arrival time is required';
+    if (!vessel.delivery_method)       errs.delivery_method = 'Delivery method is required';
+    if (vessel.delivery_method === 'boat' && !vessel.approach_side) errs.approach_side = 'Please select an approach side';
+    if (vessel.crew_change) {
+      if (!vessel.crew_arriving.trim())  errs.crew_arriving  = 'Number arriving is required';
+      if (!vessel.crew_departing.trim()) errs.crew_departing = 'Number departing is required';
+    }
+    return errs;
+  }
+
+  function goStep2() {
+    const errs = validateStep1();
+    if (Object.keys(errs).length) { setErrors(errs); return; }
+    setErrors({});
+    setStep(2);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function goStep3() {
+    const errs = validateStep2();
+    if (Object.keys(errs).length) {
+      setErrors(errs);
+      setTimeout(() => document.getElementById('errbanner')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
+      return;
+    }
+    setErrors({});
+    setStep(3);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  async function checkEmailAccount(email: string) {
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || isLoggedIn) {
+      setEmailHasAccount(false); return;
+    }
+    try {
+      const res = await fetch('/api/auth/check-email', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      const { exists } = await res.json();
+      setEmailHasAccount(!!exists);
+    } catch { setEmailHasAccount(false); }
+  }
+
+  async function handleSubmit() {
+    setSubmitting(true);
+    try {
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`;
+
+      const res = await fetch('/api/orders', {
+        method: 'POST', headers,
+        body: JSON.stringify({ vessel, items, services }),
+      });
+      if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Failed to submit'); }
+      const { order_id, order_number, _emailDebug } = await res.json();
+      if (_emailDebug) {
+        toast(_emailDebug.ok
+          ? { title: 'Email sent', description: `To: ${_emailDebug.to}`, duration: 6000 }
+          : { title: 'Email failed', description: _emailDebug.error, variant: 'destructive', duration: 10000 });
+      }
+      clearAdditionalServices();
+      router.push(`/confirm?order=${order_id}&num=${order_number}`);
+    } catch (err) {
+      toast({ title: 'Error submitting order', description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const groceryTotal = getCartTotal(items);
+  const groceryCount = getCartCount(items);
+  const activeSvcs = [
+    services.parts_pickup.enabled     && 'parts_pickup',
+    services.package_delivery.enabled && 'package_delivery',
+  ].filter(Boolean) as string[];
+
+  // ════════════════════════════════════════════════════════════
+  // STEP 1 — Review Items
+  // ════════════════════════════════════════════════════════════
+  if (step === 1) return (
+    <div className="min-h-screen bg-brand-cream flex flex-col">
+      <SiteHeader />
+      <main className="flex-1 max-w-3xl mx-auto w-full px-4 py-6 pb-20">
+        <Link href="/catalog" className="inline-flex items-center gap-1.5 text-brand-river text-sm mb-6 hover:text-brand-steel">
+          <ArrowLeft className="w-4 h-4" /> Continue Shopping
+        </Link>
+        <StepIndicator step={1} />
+
+        {errors.items && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 flex gap-3">
+            <AlertCircle className="w-5 h-5 text-red-500 shrink-0" />
+            <p className="text-sm text-red-700">{errors.items}</p>
+          </div>
+        )}
+
+        {/* Groceries */}
+        <section className="card-base mb-4">
+          <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+            <h2 className="font-display text-lg font-bold text-brand-navy flex items-center gap-2">
+              <ShoppingCart className="w-5 h-5 text-brand-gold" /> Sinclair&apos;s Groceries
+            </h2>
+            {items.length > 0 && <span className="text-sm text-gray-400">{groceryCount} item{groceryCount !== 1 ? 's' : ''}</span>}
+          </div>
+
+          {items.length === 0 ? (
+            <div className="p-8 text-center">
+              <Package className="w-10 h-10 text-gray-200 mx-auto mb-3" />
+              <p className="text-gray-400 text-sm mb-3">No groceries added yet</p>
+              <Link href="/catalog?tab=groceries" className="text-brand-river text-sm hover:underline">
+                Browse Sinclair&apos;s catalog &rarr;
+              </Link>
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-50">
+              {items.map(item => (
+                <CartItemRow
+                  key={item.product_id}
+                  item={item}
+                  onUpdate={qty => { updateCartItem(item.product_id, qty); setItems(getCart()); }}
+                  onRemove={() => { removeFromCart(item.product_id); setItems(getCart()); }}
+                />
+              ))}
+              <div className="p-4 bg-brand-sand/40">
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-2">
+                    <span className="font-body font-bold text-brand-navy">Grocery Total</span>
+                    <div className="relative" ref={tooltipRef}>
+                      <button type="button" onClick={() => setTooltipOpen(o => !o)}
+                        className="flex items-center gap-1 text-xs text-brand-river hover:text-brand-navy focus:outline-none">
+                        <HelpCircle className="w-3.5 h-3.5" />
+                        <span className="underline underline-offset-2">Why estimated?</span>
+                      </button>
+                      {tooltipOpen && (
+                        <div className="absolute bottom-full left-0 mb-2 z-30 w-80 bg-white border border-gray-200 rounded-lg shadow-xl p-4">
+                          <div className="flex justify-between gap-2 mb-2">
+                            <p className="font-bold text-gray-800 text-sm">Why is my total estimated?</p>
+                            <button onClick={() => setTooltipOpen(false)} className="text-gray-400 hover:text-gray-600">
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                          <p className="text-xs text-gray-600 leading-relaxed">{ESTIMATED_EXPLANATION}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <span className="font-display text-2xl font-bold text-brand-navy">{formatCurrency(groceryTotal)}</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* Additional Services */}
+        {activeSvcs.length > 0 && (
+          <section className="card-base mb-6">
+            <div className="p-4 border-b border-gray-100">
+              <h2 className="font-display text-lg font-bold text-brand-navy flex items-center gap-2">
+                <Package className="w-5 h-5 text-brand-orange" /> Additional Services
+              </h2>
+            </div>
+            <div className="p-4 space-y-2">
+              {services.parts_pickup.enabled && (
+                <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
+                  <Wrench className="w-4 h-4 text-brand-navy mt-0.5 shrink-0" />
+                  <div className="flex-1 text-sm">
+                    <p className="font-bold text-brand-navy">Parts Pickup</p>
+                    <p className="text-gray-500 text-xs">
+                      {services.parts_pickup.pickup_location}
+                      {services.parts_pickup.order_number ? ` · #${services.parts_pickup.order_number}` : ''}
+                    </p>
+                  </div>
+                  <Link href="/catalog?tab=services" className="text-xs text-brand-river hover:underline shrink-0">Edit</Link>
+                </div>
+              )}
+              {services.package_delivery.enabled && (
+                <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
+                  <Package className="w-4 h-4 text-brand-orange mt-0.5 shrink-0" />
+                  <div className="flex-1 text-sm">
+                    <p className="font-bold text-brand-navy">Package Delivery</p>
+                    <p className="text-gray-500 text-xs">{services.package_delivery.description} &middot; from {services.package_delivery.origin}</p>
+                  </div>
+                  <Link href="/catalog?tab=services" className="text-xs text-brand-river hover:underline shrink-0">Edit</Link>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
+        {activeSvcs.length === 0 && items.length > 0 && (
+          <p className="text-center text-xs text-gray-400 mb-6">
+            Need parts pickup or a package delivered?{' '}
+            <Link href="/catalog?tab=services" className="text-brand-river hover:underline">Add additional services &rarr;</Link>
+          </p>
+        )}
+
+        <button onClick={goStep2}
+          className="w-full btn-gold text-base py-4 flex items-center justify-center gap-2 rounded-lg">
+          Next: Vessel &amp; Delivery Info <ChevronRight className="w-5 h-5" />
+        </button>
+      </main>
+      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} defaultMode="signin" defaultEmail={vessel.email} title="Sign In" />
+    </div>
+  );
+
+  // ════════════════════════════════════════════════════════════
+  // STEP 2 — Vessel & Delivery Info
+  // ════════════════════════════════════════════════════════════
+  if (step === 2) return (
+    <div className="min-h-screen bg-brand-cream flex flex-col">
+      <SiteHeader />
+      <main className="flex-1 max-w-3xl mx-auto w-full px-4 py-6 pb-20">
+        <button onClick={() => setStep(1)}
+          className="inline-flex items-center gap-1.5 text-brand-river text-sm mb-6 hover:text-brand-steel">
+          <ArrowLeft className="w-4 h-4" /> Back to Items
+        </button>
+        <StepIndicator step={2} />
+
+        {Object.keys(errors).length > 0 && (
+          <div id="errbanner" className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 flex gap-3">
+            <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold text-red-700 text-sm mb-1">Please fix the following:</p>
+              <ul className="text-sm text-red-600 list-disc list-inside space-y-0.5">
+                {Object.values(errors).map((e, i) => <li key={i}>{e}</li>)}
+              </ul>
+            </div>
+          </div>
+        )}
+
+        {/* ── Company Information ── */}
+        <section className="card-base mb-4 p-5">
+          <SectionHead icon={<ClipboardList className="w-4 h-4" />} title="Company Information" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field label="Company Name" required error={errors.company_name}>
+              <input type="text" className={`input-base w-full ${errors.company_name ? 'border-red-400' : ''}`}
+                placeholder="e.g. River Queen LLC" value={vessel.company_name}
+                onChange={e => setV('company_name', e.target.value)} />
+            </Field>
+            <Field label="PO Number">
+              <input type="text" className="input-base w-full" placeholder="Optional"
+                value={vessel.po_number} onChange={e => setV('po_number', e.target.value)} />
+            </Field>
+            <Field label="Billing Contact Name" required error={errors.contact_name}>
+              <input type="text" className={`input-base w-full ${errors.contact_name ? 'border-red-400' : ''}`}
+                placeholder="Full name" value={vessel.contact_name}
+                onChange={e => setV('contact_name', e.target.value)} />
+            </Field>
+            <Field label="Billing Phone" required error={errors.phone}>
+              <input type="tel" className={`input-base w-full ${errors.phone ? 'border-red-400' : ''}`}
+                placeholder="(555) 123-4567" value={vessel.phone}
+                onChange={e => setV('phone', e.target.value)} />
+            </Field>
+            <Field label="Billing Email" required error={errors.email} col2>
+              <input type="email" className={`input-base w-full ${errors.email ? 'border-red-400' : ''}`}
+                placeholder="billing@example.com" value={vessel.email}
+                onChange={e => { setV('email', e.target.value); setEmailHasAccount(false); }}
+                onBlur={e => checkEmailAccount(e.target.value)} autoComplete="email" />
+              {emailHasAccount && !isLoggedIn && (
+                <div className="mt-2 flex items-center justify-between gap-3 bg-brand-sand border border-brand-gold/40 rounded-lg px-3 py-2">
+                  <p className="text-xs text-brand-navy">
+                    <span className="font-semibold">Account found.</span> Sign in to auto-fill vessel info.
+                  </p>
+                  <button type="button" onClick={() => setAuthOpen(true)}
+                    className="shrink-0 flex items-center gap-1.5 bg-brand-navy text-white text-xs font-bold px-3 py-1.5 rounded-full hover:bg-brand-steel transition-colors">
+                    <LogIn className="w-3.5 h-3.5" /> Sign In
+                  </button>
+                </div>
+              )}
+            </Field>
+          </div>
+        </section>
+
+        {/* ── Vessel Information ── */}
+        <section className="card-base mb-4 p-5">
+          <SectionHead icon={<Ship className="w-4 h-4" />} title="Vessel Information" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field label="Vessel Name" required error={errors.vessel_name}>
+              <input type="text" className={`input-base w-full ${errors.vessel_name ? 'border-red-400' : ''}`}
+                placeholder="e.g. M/V River Queen" value={vessel.vessel_name}
+                onChange={e => setV('vessel_name', e.target.value)} />
+            </Field>
+            <Field label="Vessel Type" required error={errors.vessel_type}>
+              <select className={`input-base w-full ${errors.vessel_type ? 'border-red-400' : ''}`}
+                value={vessel.vessel_type} onChange={e => setV('vessel_type', e.target.value)}>
+                <option value="">Select type…</option>
+                {VESSEL_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </Field>
+            {vessel.vessel_type === 'Other' && (
+              <Field label="Specify Vessel Type" required error={errors.vessel_type_other} col2>
+                <input type="text" className={`input-base w-full ${errors.vessel_type_other ? 'border-red-400' : ''}`}
+                  placeholder="Describe the vessel type" value={vessel.vessel_type_other}
+                  onChange={e => setV('vessel_type_other', e.target.value)} />
+              </Field>
+            )}
+            <Field label="Captain Name" required error={errors.captain_name}>
+              <input type="text" className={`input-base w-full ${errors.captain_name ? 'border-red-400' : ''}`}
+                placeholder="Captain's full name" value={vessel.captain_name}
+                onChange={e => setV('captain_name', e.target.value)} />
+            </Field>
+            <Field label="Captain Cell Phone" required error={errors.captain_phone}>
+              <input type="tel" className={`input-base w-full ${errors.captain_phone ? 'border-red-400' : ''}`}
+                placeholder="(555) 123-4567" value={vessel.captain_phone}
+                onChange={e => setV('captain_phone', e.target.value)} />
+            </Field>
+            <Field label="Vessel Email Address">
+              <input type="email" className="input-base w-full" placeholder="Optional"
+                value={vessel.vessel_email} onChange={e => setV('vessel_email', e.target.value)} />
+            </Field>
+          </div>
+
+          {/* Optional order contact */}
+          {!showOrderContact ? (
+            <button type="button" onClick={() => setShowOrderContact(true)}
+              className="mt-4 text-xs text-brand-river hover:text-brand-steel flex items-center gap-1">
+              <Plus className="w-3.5 h-3.5" /> Add order contact (cook, crew member, etc.)
+            </button>
+          ) : (
+            <div className="mt-4 pt-4 border-t border-gray-100">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Order Contact <span className="font-normal text-gray-400">(optional)</span></p>
+                <button type="button" onClick={clearOptionalContact} className="text-xs text-gray-400 hover:text-gray-600">Remove</button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <Field label="Name">
+                  <input type="text" className="input-base w-full" placeholder="e.g. John Smith"
+                    value={vessel.order_contact_name} onChange={e => setV('order_contact_name', e.target.value)} />
+                </Field>
+                <Field label="Position / Title">
+                  <input type="text" className="input-base w-full" placeholder="e.g. Cook"
+                    value={vessel.order_contact_title} onChange={e => setV('order_contact_title', e.target.value)} />
+                </Field>
+                <Field label="Phone">
+                  <input type="tel" className="input-base w-full" placeholder="(555) 123-4567"
+                    value={vessel.order_contact_phone} onChange={e => setV('order_contact_phone', e.target.value)} />
+                </Field>
+                <Field label="Email">
+                  <input type="email" className="input-base w-full" placeholder="Optional"
+                    value={vessel.order_contact_email} onChange={e => setV('order_contact_email', e.target.value)} />
+                </Field>
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* ── Delivery Information ── */}
+        <section className="card-base mb-4 p-5">
+          <SectionHead icon={<MapPin className="w-4 h-4" />} title="Delivery Information" sub="Primary delivery location" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field label="Location / Terminal Name" required error={errors.terminal_name} col2>
+              <input type="text" className={`input-base w-full ${errors.terminal_name ? 'border-red-400' : ''}`}
+                placeholder="e.g. Mel Price Locks, Alton IL" value={vessel.terminal_name}
+                onChange={e => setV('terminal_name', e.target.value)} />
+            </Field>
+            <Field label="Estimated Arrival Date" required error={errors.arrival_date}>
+              <input type="text" className={`input-base w-full ${errors.arrival_date ? 'border-red-400' : ''}`}
+                placeholder="e.g. June 15 or Tomorrow" value={vessel.arrival_date}
+                onChange={e => setV('arrival_date', e.target.value)} />
+            </Field>
+            <Field label="Estimated Arrival Time" required error={errors.arrival_time}>
+              <input type="text" className={`input-base w-full ${errors.arrival_time ? 'border-red-400' : ''}`}
+                placeholder="e.g. 6 AM or Early afternoon" value={vessel.arrival_time}
+                onChange={e => setV('arrival_time', e.target.value)} />
+            </Field>
+
+            {/* Delivery method */}
+            <Field label="Delivery Method" required error={errors.delivery_method} col2>
+              <div className="flex gap-3 mt-1">
+                {(['boat', 'van'] as const).map(m => (
+                  <button key={m} type="button"
+                    onClick={() => { setV('delivery_method', m); if (m === 'van') setV('approach_side', ''); }}
+                    className={`flex-1 py-2.5 rounded-xl border-2 text-sm font-bold transition-all ${
+                      vessel.delivery_method === m
+                        ? 'border-brand-navy bg-brand-navy text-white'
+                        : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                    }`}>
+                    {m === 'boat' ? '⛵ Boat Delivery' : '🚐 Van Delivery'}
+                  </button>
+                ))}
+              </div>
+            </Field>
+
+            {vessel.delivery_method === 'boat' && (<>
+              <Field label="Approach Side" required error={errors.approach_side} col2>
+                <div className="flex gap-2 mt-1 flex-wrap">
+                  {([
+                    ['port',      '⬅ Port (Left)'],
+                    ['starboard', 'Starboard (Right) ➡'],
+                    ['either',    'Either Side'],
+                  ] as const).map(([val, lbl]) => (
+                    <button key={val} type="button" onClick={() => setV('approach_side', val)}
+                      className={`px-4 py-2 rounded-lg border-2 text-xs font-bold transition-all ${
+                        vessel.approach_side === val
+                          ? 'border-brand-navy bg-brand-navy text-white'
+                          : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                      }`}>{lbl}</button>
+                  ))}
+                </div>
+              </Field>
+              <Field label="Best VHF Radio Channel">
+                <input type="text" className="input-base w-full" placeholder="e.g. Channel 16 (optional)"
+                  value={vessel.vhf_channel} onChange={e => setV('vhf_channel', e.target.value)} />
+              </Field>
+            </>)}
+          </div>
+
+          {/* Secondary delivery */}
+          {!showSecondary ? (
+            <button type="button" onClick={() => setShowSecondary(true)}
+              className="mt-4 text-xs text-brand-river hover:text-brand-steel flex items-center gap-1">
+              <Plus className="w-3.5 h-3.5" /> Add secondary delivery location
+            </button>
+          ) : (
+            <div className="mt-4 pt-4 border-t border-gray-100">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Secondary Delivery <span className="font-normal text-gray-400">(optional)</span></p>
+                <button type="button" onClick={clearSecondary} className="text-xs text-gray-400 hover:text-gray-600">Remove</button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <Field label="Location / Terminal Name" col2>
+                  <input type="text" className="input-base w-full" placeholder="e.g. Grafton Ferry Landing"
+                    value={vessel.secondary_terminal_name} onChange={e => setV('secondary_terminal_name', e.target.value)} />
+                </Field>
+                <Field label="Est. Arrival Date">
+                  <input type="text" className="input-base w-full" placeholder="e.g. June 16"
+                    value={vessel.secondary_arrival_date} onChange={e => setV('secondary_arrival_date', e.target.value)} />
+                </Field>
+                <Field label="Est. Arrival Time">
+                  <input type="text" className="input-base w-full" placeholder="e.g. 2 PM"
+                    value={vessel.secondary_arrival_time} onChange={e => setV('secondary_arrival_time', e.target.value)} />
+                </Field>
+                <Field label="Delivery Method" col2>
+                  <div className="flex gap-3 mt-1">
+                    {(['boat', 'van'] as const).map(m => (
+                      <button key={m} type="button" onClick={() => setV('secondary_delivery_method', m)}
+                        className={`flex-1 py-2 rounded-xl border-2 text-sm font-bold transition-all ${
+                          vessel.secondary_delivery_method === m
+                            ? 'border-brand-navy bg-brand-navy text-white'
+                            : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                        }`}>{m === 'boat' ? '⛵ Boat' : '🚐 Van'}</button>
+                    ))}
+                  </div>
+                </Field>
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* ── Crew Change ── */}
+        <section className="card-base mb-4 p-5">
+          <SectionHead icon={<Users className="w-4 h-4" />} title="Crew Change" />
+          <div className="flex gap-3 mb-4">
+            {([true, false] as const).map(val => (
+              <button key={String(val)} type="button" onClick={() => setV('crew_change', val)}
+                className={`flex-1 py-2.5 rounded-xl border-2 text-sm font-bold transition-all ${
+                  vessel.crew_change === val
+                    ? 'border-brand-navy bg-brand-navy text-white'
+                    : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                }`}>{val ? 'Yes' : 'No'}</button>
+            ))}
+          </div>
+          {vessel.crew_change && (
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="# Crew Members Arriving" required error={errors.crew_arriving}>
+                <input type="number" min="0" className={`input-base w-full ${errors.crew_arriving ? 'border-red-400' : ''}`}
+                  placeholder="0" value={vessel.crew_arriving}
+                  onChange={e => setV('crew_arriving', e.target.value)} />
+              </Field>
+              <Field label="# Crew Members Departing" required error={errors.crew_departing}>
+                <input type="number" min="0" className={`input-base w-full ${errors.crew_departing ? 'border-red-400' : ''}`}
+                  placeholder="0" value={vessel.crew_departing}
+                  onChange={e => setV('crew_departing', e.target.value)} />
+              </Field>
+            </div>
+          )}
+        </section>
+
+        {/* ── Notes ── */}
+        <section className="card-base mb-6 p-5">
+          <SectionHead icon={<ClipboardList className="w-4 h-4" />} title="Additional Notes" sub="Docking access, security, special instructions" />
+          <textarea className="input-base resize-none w-full" rows={3}
+            placeholder="Docking notes, security requirements, access instructions, special requests…"
+            value={vessel.notes} onChange={e => setV('notes', e.target.value)} />
+        </section>
+
+        <div className="flex gap-3">
+          <button onClick={() => setStep(1)} className="btn-outline flex-1 py-4">&larr; Back</button>
+          <button onClick={goStep3} className="btn-gold flex-[2] py-4 flex items-center justify-center gap-2">
+            Review &amp; Submit <ChevronRight className="w-5 h-5" />
+          </button>
+        </div>
+      </main>
+      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} defaultMode="signin" defaultEmail={vessel.email} title="Sign In" />
+    </div>
+  );
+
+  // ════════════════════════════════════════════════════════════
+  // STEP 3 — Review & Submit
+  // ════════════════════════════════════════════════════════════
+  const vesselTypeDisplay = vessel.vessel_type === 'Other' ? vessel.vessel_type_other : vessel.vessel_type;
+
   return (
-    <div className={className}>
-      <label className="label-base">{label}</label>
-      {hint && <p className="text-xs text-gray-400 mb-1 leading-snug">{hint}</p>}
-      {children}
-      {error && <p className="text-red-500 text-xs mt-1">{error}</p>}
+    <div className="min-h-screen bg-brand-cream flex flex-col">
+      <SiteHeader />
+      <main className="flex-1 max-w-3xl mx-auto w-full px-4 py-6 pb-20">
+        <button onClick={() => setStep(2)}
+          className="inline-flex items-center gap-1.5 text-brand-river text-sm mb-6 hover:text-brand-steel">
+          <ArrowLeft className="w-4 h-4" /> Edit Info
+        </button>
+        <StepIndicator step={3} />
+        <h2 className="font-display text-xl font-bold text-brand-navy mb-4">Review Your Order</h2>
+
+        {/* Grocery summary */}
+        {items.length > 0 && (
+          <section className="card-base mb-4 overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+              <h3 className="font-display font-bold text-brand-navy flex items-center gap-2">
+                <ShoppingCart className="w-4 h-4 text-brand-gold" />
+                Groceries ({groceryCount} item{groceryCount !== 1 ? 's' : ''})
+              </h3>
+              <button onClick={() => setStep(1)} className="text-xs text-brand-river hover:underline">Edit</button>
+            </div>
+            <div className="divide-y divide-gray-50">
+              {items.map(item => (
+                <div key={item.product_id} className="px-4 py-2.5 flex justify-between gap-3 text-sm">
+                  <div>
+                    <span className="font-semibold text-brand-navy">{item.description}</span>
+                    {item.pkg_size && <span className="text-gray-400 text-xs ml-1.5">{item.pkg_size}</span>}
+                  </div>
+                  <div className="text-right shrink-0">
+                    <span className="text-gray-500 text-xs">&times;{item.quantity}</span>
+                    <span className="font-bold text-brand-navy ml-2">{formatCurrency(item.price * item.quantity)}</span>
+                  </div>
+                </div>
+              ))}
+              <div className="px-4 py-3 flex justify-between font-bold bg-brand-sand/30">
+                <span className="text-brand-navy">Grocery Total</span>
+                <span className="text-brand-navy text-lg">{formatCurrency(groceryTotal)}</span>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* Services summary */}
+        {activeSvcs.length > 0 && (
+          <section className="card-base mb-4 overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+              <h3 className="font-display font-bold text-brand-navy flex items-center gap-2">
+                <Package className="w-4 h-4 text-brand-orange" /> Additional Services
+              </h3>
+              <Link href="/catalog?tab=services" className="text-xs text-brand-river hover:underline">Edit</Link>
+            </div>
+            {services.parts_pickup.enabled && (
+              <div className="px-4 py-3 border-b border-gray-50">
+                <p className="text-sm font-bold text-brand-navy mb-1">Parts Pickup</p>
+                <div className="grid grid-cols-2 gap-1">
+                  <ReviewRow label="Location" value={services.parts_pickup.pickup_location} />
+                  {services.parts_pickup.order_number && <ReviewRow label="Order #" value={services.parts_pickup.order_number} />}
+                  <ReviewRow label="Contact" value={`${services.parts_pickup.contact_name} · ${services.parts_pickup.contact_phone}`} />
+                </div>
+              </div>
+            )}
+            {services.package_delivery.enabled && (
+              <div className="px-4 py-3">
+                <p className="text-sm font-bold text-brand-navy mb-1">Package Delivery</p>
+                <div className="grid grid-cols-2 gap-1">
+                  <ReviewRow label="Description" value={services.package_delivery.description} />
+                  <ReviewRow label="From" value={services.package_delivery.origin} />
+                  <ReviewRow label="Contact" value={`${services.package_delivery.contact_name} · ${services.package_delivery.contact_phone}`} />
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* Vessel info summary */}
+        <section className="card-base mb-6 overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+            <h3 className="font-display font-bold text-brand-navy">Vessel &amp; Delivery Info</h3>
+            <button onClick={() => setStep(2)} className="text-xs text-brand-river hover:underline">Edit</button>
+          </div>
+          <div className="p-4 space-y-4">
+            <div>
+              <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1.5">Company</p>
+              <div className="grid grid-cols-2 gap-1">
+                <ReviewRow label="Company" value={vessel.company_name} />
+                {vessel.po_number && <ReviewRow label="PO #" value={vessel.po_number} />}
+                <ReviewRow label="Billing Contact" value={vessel.contact_name} />
+                <ReviewRow label="Billing Phone" value={vessel.phone} />
+                <ReviewRow label="Billing Email" value={vessel.email} />
+              </div>
+            </div>
+            <div>
+              <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1.5">Vessel</p>
+              <div className="grid grid-cols-2 gap-1">
+                <ReviewRow label="Vessel Name" value={vessel.vessel_name} />
+                <ReviewRow label="Type" value={vesselTypeDisplay} />
+                <ReviewRow label="Captain" value={vessel.captain_name} />
+                <ReviewRow label="Captain Phone" value={vessel.captain_phone} />
+                {vessel.vessel_email && <ReviewRow label="Vessel Email" value={vessel.vessel_email} />}
+              </div>
+            </div>
+            {vessel.order_contact_name && (
+              <div>
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1.5">Order Contact</p>
+                <div className="grid grid-cols-2 gap-1">
+                  <ReviewRow label="Name" value={vessel.order_contact_name} />
+                  {vessel.order_contact_title && <ReviewRow label="Title" value={vessel.order_contact_title} />}
+                  {vessel.order_contact_phone && <ReviewRow label="Phone" value={vessel.order_contact_phone} />}
+                  {vessel.order_contact_email && <ReviewRow label="Email" value={vessel.order_contact_email} />}
+                </div>
+              </div>
+            )}
+            <div>
+              <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1.5">Primary Delivery</p>
+              <div className="grid grid-cols-2 gap-1">
+                <ReviewRow label="Terminal" value={vessel.terminal_name} />
+                <ReviewRow label="Arrival" value={[vessel.arrival_date, vessel.arrival_time].filter(Boolean).join(', ')} />
+                <ReviewRow label="Method" value={vessel.delivery_method === 'boat' ? 'Boat Delivery' : vessel.delivery_method === 'van' ? 'Van Delivery' : ''} />
+                {vessel.delivery_method === 'boat' && vessel.approach_side && (
+                  <ReviewRow label="Approach" value={vessel.approach_side.charAt(0).toUpperCase() + vessel.approach_side.slice(1)} />
+                )}
+                {vessel.vhf_channel && <ReviewRow label="VHF Channel" value={vessel.vhf_channel} />}
+              </div>
+            </div>
+            {vessel.secondary_terminal_name && (
+              <div>
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1.5">Secondary Delivery</p>
+                <div className="grid grid-cols-2 gap-1">
+                  <ReviewRow label="Terminal" value={vessel.secondary_terminal_name} />
+                  <ReviewRow label="Arrival" value={[vessel.secondary_arrival_date, vessel.secondary_arrival_time].filter(Boolean).join(', ')} />
+                  {vessel.secondary_delivery_method && (
+                    <ReviewRow label="Method" value={vessel.secondary_delivery_method === 'boat' ? 'Boat' : 'Van'} />
+                  )}
+                </div>
+              </div>
+            )}
+            {vessel.crew_change && (
+              <div>
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1.5">Crew Change</p>
+                <div className="grid grid-cols-2 gap-1">
+                  <ReviewRow label="Arriving" value={vessel.crew_arriving} />
+                  <ReviewRow label="Departing" value={vessel.crew_departing} />
+                </div>
+              </div>
+            )}
+            {vessel.notes && (
+              <div>
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1">Notes</p>
+                <p className="text-sm text-gray-700 bg-amber-50 rounded p-2">{vessel.notes}</p>
+              </div>
+            )}
+          </div>
+        </section>
+
+        <div className="flex gap-3">
+          <button onClick={() => setStep(2)} className="btn-outline flex-1 py-4">&larr; Edit</button>
+          <button onClick={handleSubmit} disabled={submitting}
+            className="btn-gold flex-[2] py-4 flex items-center justify-center gap-2 disabled:opacity-60">
+            {submitting
+              ? <><Loader2 className="w-5 h-5 animate-spin" /> Submitting&hellip;</>
+              : <>Submit Order <ChevronRight className="w-5 h-5" /></>}
+          </button>
+        </div>
+        <p className="text-center text-xs text-gray-400 mt-3">
+          A confirmation will be sent to {vessel.email || 'your billing email'}
+        </p>
+      </main>
     </div>
   );
 }
