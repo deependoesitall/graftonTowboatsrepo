@@ -117,7 +117,7 @@ export function AdditionalServicesTab() {
             <input
               type="text"
               className="input-base text-sm"
-              placeholder="e.g. NAPA Auto Parts, Grafton"
+              placeholder="e.g. NAPA Auto Parts"
               value={services.parts_pickup.pickup_location}
               onChange={e => patch('parts_pickup', { pickup_location: e.target.value })}
             />
@@ -174,7 +174,7 @@ export function AdditionalServicesTab() {
             <input
               type="text"
               className="input-base text-sm"
-              placeholder="e.g. Sam's Club, Jerseyville IL"
+              placeholder="e.g. Walmart"
               value={services.package_delivery.origin}
               onChange={e => patch('package_delivery', { origin: e.target.value })}
             />
