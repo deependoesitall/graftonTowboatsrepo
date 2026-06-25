@@ -162,9 +162,13 @@ export async function POST(req: NextRequest) {
 
     if (items.length > 0) {
       const productIds = items.map(i => i.product_id).filter(Boolean);
-      const { data: products } = await supabase.from('products').select('id, upc').in('id', productIds);
+      const { data: products } = await supabase.from('products').select('id, upc, location').in('id', productIds);
       const upcMap: Record<string, string | null> = {};
-      (products || []).forEach((p: { id: string; upc: string | null }) => { upcMap[p.id] = p.upc; });
+      const locationMap: Record<string, string | null> = {};
+      (products || []).forEach((p: { id: string; upc: string | null; location: string | null }) => {
+        upcMap[p.id] = p.upc;
+        locationMap[p.id] = p.location;
+      });
 
       items.forEach(item => {
         allOrderItems.push({
@@ -175,6 +179,7 @@ export async function POST(req: NextRequest) {
           pkg_size: item.pkg_size || null,
           uom: item.uom || null,
           upc: upcMap[item.product_id] ?? null,
+          location: locationMap[item.product_id] ?? null,
           unit_price: item.price,
           quantity: item.quantity,
           line_total: item.price * item.quantity,

@@ -632,6 +632,11 @@ function ItemRow({
               <p className={`text-sm font-bold leading-snug ${outOfStock ? 'line-through text-gray-400' : 'text-brand-navy'}`}>
                 {item.description}
               </p>
+              {item.location && (
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-teal-700 bg-teal-50 border border-teal-200 rounded px-1.5 py-0.5 mt-0.5 mb-0.5">
+                  📍 {item.location}
+                </span>
+              )}
               <p className="text-xs text-gray-400 mt-0.5">
                 {item.upc && <span className="font-mono mr-2">{item.upc}</span>}
                 Qty: <strong>{item.quantity}</strong>

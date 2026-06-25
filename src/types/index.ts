@@ -7,6 +7,8 @@ export interface Product {
   upc: string | null;
   description: string;
   details: string | null;
+  image_url: string | null;
+  location: string | null;
   pkg_size: string | null;
   uom: string | null;
   price: number;
@@ -30,58 +32,41 @@ export interface Cart {
   vessel_info: VesselInfo;
 }
 
-// ── Vessel / order contact info collected at checkout ─────────
+// -- Vessel / order contact info collected at checkout
 export interface VesselInfo {
-  // Company
   company_name: string;
   po_number: string;
-
-  // Billing contact (maps to legacy contact_name / phone / email columns)
-  contact_name: string;   // billing contact name
-  phone: string;          // billing phone
-  email: string;          // billing email
-
-  // Vessel
+  contact_name: string;
+  phone: string;
+  email: string;
   vessel_name: string;
-  vessel_type: string;    // Towboat | Line Boat | Dredge | … | Other
-  vessel_type_other: string; // filled when vessel_type === 'Other'
+  vessel_type: string;
+  vessel_type_other: string;
   captain_name: string;
   captain_phone: string;
-  vessel_email: string;   // optional
-
-  // Optional order contact (i.e. cook)
+  vessel_email: string;
   order_contact_name: string;
   order_contact_title: string;
   order_contact_phone: string;
   order_contact_email: string;
-
-  // Primary delivery
   terminal_name: string;
-  arrival_date: string;   // free-text
-  arrival_time: string;   // free-text
+  arrival_date: string;
+  arrival_time: string;
   delivery_method: 'boat' | 'van' | '';
-  approach_side: 'port' | 'starboard' | 'either' | '';  // boat only
-  vhf_channel: string;    // optional
-
-  // Secondary delivery (optional)
+  approach_side: 'port' | 'starboard' | 'either' | '';
+  vhf_channel: string;
   secondary_terminal_name: string;
   secondary_arrival_date: string;
   secondary_arrival_time: string;
   secondary_delivery_method: 'boat' | 'van' | '';
-
-  // Crew change
   crew_change: boolean;
   crew_arriving: string;
   crew_departing: string;
-
-  // Notes (docking, security, other)
   notes: string;
-
-  // Legacy compat — kept so existing saved localStorage values don't break
   eta: string;
 }
 
-// ── Additional services (parts pickup, package delivery) ──────
+// -- Additional services
 export interface PartsPickup {
   enabled: boolean;
   pickup_location: string;
@@ -103,39 +88,29 @@ export interface AdditionalServices {
   package_delivery: PackageDelivery;
 }
 
-// ── Orders ────────────────────────────────────────────────────
+// -- Orders
 export interface Order {
   id: string;
   order_number: string;
-
-  // Company / billing (legacy columns kept)
   company_name: string;
   contact_name: string;
   phone: string;
   customer_email: string | null;
   po_number: string | null;
-
-  // Vessel (new)
   vessel_name: string | null;
   vessel_type: string | null;
   captain_name: string | null;
   captain_phone: string | null;
   vessel_email: string | null;
-
-  // Delivery (new)
   delivery_method: 'boat' | 'van' | null;
   terminal_name: string | null;
   arrival_date: string | null;
   arrival_time: string | null;
   approach_side: 'port' | 'starboard' | 'either' | null;
   vhf_channel: string | null;
-
-  // Crew change (new)
   crew_change: boolean;
   crew_arriving: number | null;
   crew_departing: number | null;
-
-  // Extended / catch-all JSONB (new)
   extended_info: {
     order_contact_name?: string;
     order_contact_title?: string;
@@ -147,11 +122,8 @@ export interface Order {
     secondary_delivery_method?: string;
     docking_notes?: string;
   } | null;
-
-  // Legacy
   notes: string | null;
   eta: string | null;
-
   items: OrderItem[];
   subtotal: number;
   status: OrderStatus;
@@ -168,16 +140,15 @@ export interface OrderItem {
   pkg_size: string | null;
   uom: string | null;
   upc: string | null;
+  location: string | null;
   unit_price: number;
   quantity: number;
   line_total: number;
-  // Phase 2a: shopping mode fields
   shopping_status: 'pending' | 'shopped' | 'out_of_stock';
   actual_weight: number | null;
   actual_total: number | null;
   is_substitution: boolean;
   substitutes_item_id: string | null;
-  // Phase 2b: service items
   item_type: 'grocery' | 'service';
   service_type: 'parts_pickup' | 'package_delivery' | null;
   service_details: Record<string, string> | null;

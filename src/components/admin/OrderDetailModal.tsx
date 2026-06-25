@@ -387,7 +387,12 @@ export function OrderDetailModal({
                             <p className={`font-medium text-brand-navy text-xs inline ${item.shopping_status === 'out_of_stock' ? 'line-through' : ''}`}>
                               {item.description}
                             </p>
-                            <p className="text-xs text-gray-400">{item.category}</p>
+                            <p className="text-xs text-gray-400">
+                              {item.category}
+                              {item.location && (
+                                <span className="ml-2 text-teal-600 font-semibold">📍 {item.location}</span>
+                              )}
+                            </p>
                           </td>
                           <td className="px-3 py-2 text-xs text-gray-500">{item.pkg_size || '—'}</td>
                           <td className="px-3 py-2 text-center font-bold">

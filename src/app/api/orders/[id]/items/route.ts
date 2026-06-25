@@ -72,7 +72,7 @@ export async function POST(
   // Look up active product
   const { data: product, error: prodErr } = await supabase
     .from('products')
-    .select('*')
+    .select('id, description, category, pkg_size, uom, upc, price, location, is_active')
     .eq('id', product_id)
     .eq('is_active', true)
     .single();
@@ -93,6 +93,7 @@ export async function POST(
       pkg_size: product.pkg_size || null,
       uom: product.uom || null,
       upc: product.upc || null,
+      location: product.location || null,
       unit_price: product.price,
       quantity,
       line_total: lineTotal,

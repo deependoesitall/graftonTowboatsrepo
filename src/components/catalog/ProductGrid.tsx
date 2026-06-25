@@ -6,6 +6,7 @@ import { formatCurrency } from '@/lib/utils';
 import { addToCart } from '@/lib/cart';
 import { Plus, Minus, ShoppingCart, Package, Check, Star } from 'lucide-react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/lib/auth-context';
 import { getFavoriteIds, addFavorite, removeFavorite } from '@/lib/favorites';
@@ -163,8 +164,21 @@ function ProductCard({ product, isLoggedIn, isFavorite }: { product: Product; is
       >
         <Star className={`w-4 h-4 ${isFavorite ? 'fill-brand-orange' : ''}`} />
       </button>
-      {/* Top color band by category */}
-      <div className={`h-1 w-full ${getCategoryColor(product.category)}`} />
+      {/* Product image or category color band */}
+      {product.image_url ? (
+        <div className="relative w-full aspect-square bg-gray-50 overflow-hidden">
+          <Image
+            src={product.image_url}
+            alt={product.description}
+            fill
+            className="object-contain p-2"
+            unoptimized
+          />
+          <div className={`absolute bottom-0 left-0 right-0 h-0.5 ${getCategoryColor(product.category)}`} />
+        </div>
+      ) : (
+        <div className={`h-1.5 w-full ${getCategoryColor(product.category)}`} />
+      )}
 
       <div className="p-3 flex flex-col gap-2 flex-1">
         {/* Category label — show main category only, not internal Sinclair sub-category */}

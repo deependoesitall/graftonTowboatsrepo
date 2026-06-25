@@ -4,11 +4,101 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { Upload, Package, AlertCircle, CheckCircle2, Loader2,
          Search, Pencil, Check, X, ToggleLeft, ToggleRight,
          ChevronLeft, ChevronRight, RefreshCw, Plus, Lock,
-         Download, Trash2, Layers, PackageX, PackageCheck, Filter } from 'lucide-react';
+         Download, Trash2, Layers, PackageX, PackageCheck, Filter,
+         ImagePlus } from 'lucide-react';
+import Image from 'next/image';
 import { normalizeCategory, formatCurrency, MAIN_CATEGORIES } from '@/lib/utils';
 import { Product } from '@/types';
 import { useRouter } from 'next/navigation';
 import { fetchAdminSession, getAdminRole, canAccess, adminFetch } from '@/lib/admin-auth';
+
+
+// -- Shared image upload cell
+function ProductImageCell({ productId, imageUrl, onUploaded }: {
+  productId: string | null;
+  imageUrl: string | null;
+  onUploaded: (url: string | null) => void;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const [preview, setPreview] = useState<string | null>(imageUrl);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { setPreview(imageUrl); }, [imageUrl]);
+
+  async function handleFile(file: File) {
+    if (!productId) { setError('Save the product first, then add an image.'); return; }
+    setUploading(true); setError(null);
+    const objectUrl = URL.createObjectURL(file);
+    setPreview(objectUrl);
+    const form = new FormData();
+    form.append('file', file);
+    const res = await adminFetch(`/api/products/${productId}/image`, { method: 'POST', body: form });
+    if (res.ok) {
+      const data = await res.json();
+      URL.revokeObjectURL(objectUrl);
+      setPreview(data.image_url);
+      onUploaded(data.image_url);
+    } else {
+      const err = await res.json().catch(() => ({ error: 'Upload failed' }));
+      setError(err.error || 'Upload failed');
+      setPreview(imageUrl);
+    }
+    setUploading(false);
+  }
+
+  async function handleRemove(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!productId) return;
+    setUploading(true);
+    const res = await adminFetch(`/api/products/${productId}/image`, { method: 'DELETE' });
+    if (res.ok) { setPreview(null); onUploaded(null); }
+    setUploading(false);
+  }
+
+  return (
+    <div className="relative w-12 h-12 flex-shrink-0 group">
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp,image/gif"
+        className="hidden"
+        onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ''; }}
+      />
+      <button
+        type="button"
+        title={preview ? 'Replace image' : 'Upload image'}
+        onClick={() => inputRef.current?.click()}
+        disabled={uploading}
+        className={`w-12 h-12 rounded border-2 overflow-hidden flex items-center justify-center transition-colors
+          ${preview ? 'border-gray-200 hover:border-brand-river' : 'border-dashed border-gray-300 hover:border-brand-river bg-gray-50'}`}
+      >
+        {uploading ? (
+          <Loader2 className="w-4 h-4 animate-spin text-brand-river" />
+        ) : preview ? (
+          <Image src={preview} alt="product" width={48} height={48} className="object-cover w-full h-full" unoptimized />
+        ) : (
+          <ImagePlus className="w-5 h-5 text-gray-300 group-hover:text-brand-river" />
+        )}
+      </button>
+      {preview && !uploading && (
+        <button
+          type="button"
+          title="Remove image"
+          onClick={handleRemove}
+          className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"
+        >
+          <X className="w-2.5 h-2.5 text-white" />
+        </button>
+      )}
+      {error && (
+        <div className="absolute top-full left-0 mt-1 z-20 bg-red-50 border border-red-200 rounded text-[10px] text-red-600 px-2 py-1 whitespace-nowrap max-w-[180px] shadow-md">
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
 
 interface ParsedProduct {
   category: string; sub_category: string; upc: string | null;
@@ -56,9 +146,11 @@ interface EditState {
   details: string;
   category: string;
   sub_category: string;
+  location: string;
   pkg_size: string;
   uom: string;
   price: string;
+  image_url: string | null;
 }
 
 function AddProductRow({ onAdded }: {
@@ -66,15 +158,16 @@ function AddProductRow({ onAdded }: {
 }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [newProductId, setNewProductId] = useState<string | null>(null);
   const [form, setForm] = useState({
     description: '', details: '', category: 'Pantry & Grocery', sub_category: '',
-    pkg_size: '', uom: '', price: '',
+    location: '', pkg_size: '', uom: '', price: '', image_url: null as string | null,
   });
   const descRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { if (open) descRef.current?.focus(); }, [open]);
 
-  function reset() { setForm({ description: '', details: '', category: 'Pantry & Grocery', sub_category: '', pkg_size: '', uom: '', price: '' }); setOpen(false); }
+  function reset() { setForm({ description: '', details: '', category: 'Pantry & Grocery', sub_category: '', location: '', pkg_size: '', uom: '', price: '', image_url: null }); setNewProductId(null); setOpen(false); }
 
   async function save() {
     if (!form.description || !form.price) return;
@@ -89,6 +182,7 @@ function AddProductRow({ onAdded }: {
           details: form.details || null,
           category: form.category,
           sub_category: form.sub_category || form.category,
+          location: form.location || null,
           pkg_size: form.pkg_size || null,
           uom: form.uom || null,
           price: parseFloat(form.price) || 0,
@@ -99,12 +193,13 @@ function AddProductRow({ onAdded }: {
       }),
     });
     if (res.ok) {
-      reset();
-      // Fetch the newly added product to get its ID
       const listRes = await adminFetch(`/api/products?search=${encodeURIComponent(form.description)}&per_page=1`);
       if (listRes.ok) {
         const data = await listRes.json();
-        if (data.products?.[0]) onAdded(data.products[0]);
+        if (data.products?.[0]) {
+          setNewProductId(data.products[0].id);
+          onAdded(data.products[0]);
+        }
       }
     }
     setSaving(false);
@@ -113,7 +208,7 @@ function AddProductRow({ onAdded }: {
   if (!open) {
     return (
       <tr>
-        <td colSpan={8} className="px-3 py-2 border-b border-dashed border-gray-200">
+        <td colSpan={9} className="px-3 py-2 border-b border-dashed border-gray-200">
           <button onClick={() => setOpen(true)}
             className="flex items-center gap-2 text-sm text-brand-river hover:text-brand-navy font-medium transition-colors w-full py-1">
             <Plus className="w-4 h-4" /> Add new product
@@ -127,6 +222,13 @@ function AddProductRow({ onAdded }: {
     <tr className="bg-green-50 border-b border-green-200">
       <td className="px-2 py-2"></td>
       <td className="px-2 py-2">
+        <ProductImageCell
+          productId={newProductId}
+          imageUrl={form.image_url}
+          onUploaded={url => setForm(f => ({ ...f, image_url: url }))}
+        />
+      </td>
+      <td className="px-2 py-2">
         <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value, sub_category: '' }))}
           className="input-base text-xs py-1.5 w-full">
           {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
@@ -135,6 +237,8 @@ function AddProductRow({ onAdded }: {
       <td className="px-2 py-2">
         <input className="input-base text-xs py-1.5 w-full" placeholder="Sub-category"
           value={form.sub_category} onChange={e => setForm(f => ({ ...f, sub_category: e.target.value }))} />
+        <input className="input-base text-xs py-1 w-full mt-1" placeholder="Location (e.g. Cold Deli)"
+          value={form.location} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} />
       </td>
       <td className="px-2 py-2">
         <input ref={descRef} className="input-base text-xs py-1.5 w-full font-medium"
@@ -188,9 +292,11 @@ function EditableRow({ product, selected, onSelect, onSaved, onToggleActive, onT
     details: product.details || '',
     category: product.category,
     sub_category: product.sub_category || '',
+    location: product.location || '',
     pkg_size: product.pkg_size || '',
     uom: product.uom || '',
     price: product.price.toFixed(2),
+    image_url: product.image_url ?? null,
   });
 
   async function save() {
@@ -222,12 +328,22 @@ function EditableRow({ product, selected, onSelect, onSaved, onToggleActive, onT
       <tr className="bg-blue-50 border-b border-blue-100">
         <td className="px-3 py-2"></td>
         <td className="px-3 py-2">
+          <ProductImageCell
+            productId={product.id}
+            imageUrl={form.image_url}
+            onUploaded={url => setForm(f => ({ ...f, image_url: url }))}
+          />
+        </td>
+        <td className="px-3 py-2">
           <input className="input-base text-xs py-1 w-full" value={form.category}
             onChange={e => setForm(f => ({ ...f, category: e.target.value }))} />
         </td>
         <td className="px-3 py-2">
           <input className="input-base text-xs py-1 w-full" value={form.sub_category}
             onChange={e => setForm(f => ({ ...f, sub_category: e.target.value }))} />
+          <input className="input-base text-xs py-1 w-full mt-1" placeholder="Location"
+            value={form.location}
+            onChange={e => setForm(f => ({ ...f, location: e.target.value }))} />
         </td>
         <td className="px-3 py-2">
           <input className="input-base text-xs py-1 w-full font-medium" value={form.description}
@@ -271,8 +387,22 @@ function EditableRow({ product, selected, onSelect, onSaved, onToggleActive, onT
           onChange={e => onSelect(product.id, e.target.checked)}
           className="w-4 h-4 rounded border-gray-300 text-brand-river focus:ring-brand-river" />
       </td>
+      <td className="px-3 py-2.5">
+        <div className="group">
+          <ProductImageCell
+            productId={product.id}
+            imageUrl={product.image_url ?? null}
+            onUploaded={url => onSaved({ ...product, image_url: url })}
+          />
+        </div>
+      </td>
       <td className="px-3 py-2.5 text-xs text-brand-river font-medium">{product.category}</td>
-      <td className="px-3 py-2.5 text-xs text-gray-400">{product.sub_category}</td>
+      <td className="px-3 py-2.5 text-xs text-gray-400">
+        <div>{product.sub_category}</div>
+        {product.location && (
+          <div className="text-[10px] text-teal-600 font-medium mt-0.5">📍 {product.location}</div>
+        )}
+      </td>
       <td className="px-3 py-2.5 text-sm font-medium text-brand-navy max-w-xs">
         <span className="line-clamp-1">{product.description}</span>
         <div className="flex items-center gap-1.5 mt-0.5">
@@ -765,7 +895,7 @@ export default function AdminProductsPage() {
                         onChange={e => toggleSelectAll(e.target.checked)}
                         className="w-4 h-4 rounded border-gray-300" />
                     </th>
-                    {['Category', 'Sub-Category', 'Description', 'Pack Size', 'UOM', 'Price', 'Actions'].map(h => (
+                    {['Image', 'Category', 'Sub-Category', 'Description', 'Pack Size', 'UOM', 'Price', 'Actions'].map(h => (
                       <th key={h} className="px-3 py-3 text-xs font-bold text-brand-sky uppercase tracking-wide whitespace-nowrap">
                         {h}
                       </th>
