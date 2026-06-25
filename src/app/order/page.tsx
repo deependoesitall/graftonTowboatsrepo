@@ -19,6 +19,7 @@ import { SiteHeader } from '@/components/layout/SiteHeader';
 import { AuthModal } from '@/components/auth/AuthModal';
 import { useToast } from '@/hooks/use-toast';
 import { createClient } from '@/lib/supabase/client';
+import { useAuth } from '@/lib/auth-context';
 
 const ESTIMATED_EXPLANATION =
   'Some orders may display an estimated total at checkout. This is because certain items are sold by weight, market prices may change, or substitutions may be necessary if an item is unavailable. Your final invoice will reflect the actual items delivered, including any approved substitutions, quantity adjustments, or weighted products. We make every effort to keep pricing accurate and will contact you if there are any significant changes to your order. If you have any questions, please contact us at (618) 556-0290 or GraftonTowboatServices@gmail.com.';
@@ -166,10 +167,11 @@ export default function OrderPage() {
   const [tooltipOpen, setTooltipOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [emailHasAccount, setEmailHasAccount] = useState(false);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
   const { toast } = useToast();
+  const { user: authUser } = useAuth();
+  const isLoggedIn = !!authUser;
 
   useEffect(() => {
     setServices(getAdditionalServices());
@@ -186,7 +188,6 @@ export default function OrderPage() {
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      setIsLoggedIn(true);
       const { data: profile } = await supabase.from('customer_profiles').select('*').single();
       setVessel(prev => ({
         ...prev,

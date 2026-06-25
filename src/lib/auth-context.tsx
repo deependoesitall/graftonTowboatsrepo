@@ -22,7 +22,7 @@ interface AuthContextType {
   user: User | null;
   profile: CustomerProfile | null;
   loading: boolean;
-  signUp: (email: string, password: string, details: SignUpDetails) => Promise<{ error: string | null }>;
+  signUp: (email: string, password: string, details: SignUpDetails) => Promise<{ error: string | null; needsConfirmation?: boolean }>;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -30,7 +30,7 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType>({
   user: null, profile: null, loading: true,
-  signUp: async () => ({ error: null }),
+  signUp: async () => ({ error: null, needsConfirmation: false }),
   signIn: async () => ({ error: null }),
   signOut: async () => {},
   refreshProfile: async () => {},
@@ -105,11 +105,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           company_name: details.companyName || null,
           contact_name: contactName || null,
         });
-        await loadProfile();
+        // If session is present, user is immediately signed in (email confirmation disabled)
+        if (data.session) {
+          await loadProfile();
+        }
+        // If no session, Supabase requires email confirmation — caller should show that message
       }
-      return { error: null };
+      return { error: null, needsConfirmation: !data.session };
     } catch (e: any) {
-      return { error: e?.message || 'Sign up failed' };
+      return { error: e?.message || 'Sign up failed', needsConfirmation: false };
     }
   }
 
