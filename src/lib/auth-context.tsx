@@ -57,22 +57,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => {
-    // Safety net — never show a loading state longer than 3 seconds
-    const timeout = setTimeout(() => setLoading(false), 3000);
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      clearTimeout(timeout);
-      setLoading(false);
-      if (session?.user) {
-        // Defer: NEVER call supabase queries synchronously in auth callbacks
-        setTimeout(() => { loadProfile(); }, 0);
-      }
-    }).catch(() => {
-      clearTimeout(timeout);
-      setLoading(false);
-    });
-
+    // Use onAuthStateChange exclusively — it fires INITIAL_SESSION on mount with
+    // the correct state, avoiding the race condition between getSession() and
+    // onAuthStateChange that causes a user→null flicker on OAuth redirects.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, session) => {
         // CRITICAL: do NOT await supabase calls inside this callback.
@@ -87,6 +74,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       }
     );
+
+    // Safety net — if onAuthStateChange never fires, unblock the UI
+    const timeout = setTimeout(() => setLoading(false), 3000);
 
     return () => {
       clearTimeout(timeout);
