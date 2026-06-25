@@ -16,7 +16,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/admin-auth-server';
 import { z } from 'zod';
-import { recalcSubtotal } from '../route';
+import { recalcSubtotal } from '@/lib/recalc-subtotal';
 
 const bodySchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('shopped') }),
