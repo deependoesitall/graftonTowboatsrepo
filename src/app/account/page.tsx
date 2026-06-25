@@ -31,6 +31,13 @@ function AccountContent() {
   const { toast } = useToast();
   const [tab, setTab] = useState<'orders' | 'favorites' | 'profile'>('orders');
   const [authOpen, setAuthOpen] = useState(false);
+  // Independently verify session with a server-validated getUser() call.
+  // This prevents a brief onAuthStateChange null-flash (e.g. after Google OAuth)
+  // from kicking the user to the sign-in screen before auth settles.
+  const [serverUser, setServerUser] = useState<boolean | null>(null);
+  useEffect(() => {
+    createClient().auth.getUser().then(({ data }) => setServerUser(!!data.user));
+  }, []);
 
   // Past orders
   const [orders, setOrders] = useState<Order[]>([]);
@@ -145,13 +152,14 @@ function AccountContent() {
   }
 
   // While auth is resolving, show nothing — avoids flash of wrong content
-  if (loading) return (
+  // Also wait for the server-verified user check before potentially showing sign-in
+  if (loading || serverUser === null) return (
     <div className="min-h-screen">
       <SiteHeader />
     </div>
   );
 
-  if (!user) return (
+  if (!user && !serverUser) return (
     <div className="min-h-screen">
       <SiteHeader />
       <div className="max-w-md mx-auto px-4 py-20 text-center">
