@@ -1,10 +1,16 @@
 'use client';
 // src/components/admin/OrderDetailModal.tsx
-import { useState } from 'react';
-import { X, Download, FileText, Printer, Trash2, Loader2, ShoppingCart, Ship, MapPin, Users, Package, Wrench, CheckCircle2, Eye } from 'lucide-react';
-import { Order, OrderStatus } from '@/types';
+
+import { useState, useCallback } from 'react';
+import {
+  X, Download, FileText, Printer, Trash2, Loader2, ShoppingCart,
+  Ship, MapPin, Users, Package, Wrench, CheckCircle2, Eye,
+  Pencil, Plus, Search, Check,
+} from 'lucide-react';
+import { Order, OrderItem, OrderStatus, Product } from '@/types';
 import { formatCurrency, formatDate, ORDER_STATUSES } from '@/lib/utils';
 import { ShoppingModeModal } from '@/components/admin/ShoppingModeModal';
+import { adminFetch } from '@/lib/admin-auth';
 
 interface OrderDetailModalProps {
   order: Order;
@@ -26,9 +32,34 @@ export function OrderDetailModal({
   const [shoppingMode, setShoppingMode] = useState(false);
   const [markingFulfilled, setMarkingFulfilled] = useState(false);
 
-  const groceryItems = order.items.filter(i => i.item_type !== 'service');
-  const serviceItems = order.items.filter(i => i.item_type === 'service');
-  const subtotal = groceryItems.reduce((s, i) => s + i.unit_price * i.quantity, 0);
+  // ── Local item state (so edits reflect immediately without closing modal) ──
+  const [localItems, setLocalItems] = useState<OrderItem[]>(order.items);
+  const [localSubtotal, setLocalSubtotal] = useState(order.subtotal);
+
+  // Edit quantity inline
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editQty, setEditQty] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+
+  // Delete item
+  const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
+
+  // Add item panel
+  const [addingItem, setAddingItem] = useState(false);
+  const [addSearch, setAddSearch] = useState('');
+  const [addResults, setAddResults] = useState<Product[]>([]);
+  const [addSearching, setAddSearching] = useState(false);
+  const [addSelected, setAddSelected] = useState<Product | null>(null);
+  const [addQty, setAddQty] = useState('1');
+  const [addSaving, setAddSaving] = useState(false);
+  const [itemError, setItemError] = useState('');
+
+  const groceryItems = localItems.filter(i => i.item_type !== 'service');
+  const serviceItems = localItems.filter(i => i.item_type === 'service');
+  const subtotal = groceryItems
+    .filter(i => i.shopping_status !== 'out_of_stock')
+    .reduce((s, i) => s + (i.actual_total ?? i.unit_price * i.quantity), 0);
+
   const ext = order.extended_info;
 
   const deliveryMethodLabel = order.delivery_method === 'boat' ? 'Boat Delivery'
@@ -36,6 +67,99 @@ export function OrderDetailModal({
   const approachLabel = order.approach_side
     ? order.approach_side.charAt(0).toUpperCase() + order.approach_side.slice(1)
     : null;
+
+  // ── Product search for Add Item ───────────────────────────────────────────
+  const searchProducts = useCallback(async (q: string) => {
+    if (q.trim().length < 2) { setAddResults([]); return; }
+    setAddSearching(true);
+    try {
+      const res = await adminFetch(`/api/products?search=${encodeURIComponent(q)}&status=active&per_page=12`);
+      const { products } = await res.json();
+      setAddResults(products || []);
+    } finally {
+      setAddSearching(false);
+    }
+  }, []);
+
+  // ── Save quantity edit ────────────────────────────────────────────────────
+  async function saveQty(item: OrderItem) {
+    const qty = parseInt(editQty);
+    if (!qty || qty < 1) return;
+    setEditSaving(true);
+    setItemError('');
+    try {
+      const res = await adminFetch(`/api/orders/${order.id}/items/${item.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'update_quantity', quantity: qty }),
+      });
+      if (!res.ok) throw new Error('Failed to update');
+      const { item: updated } = await res.json();
+      setLocalItems(prev => prev.map(i => i.id === updated.id ? updated : i));
+      onRefresh();
+    } catch {
+      setItemError('Failed to save — please try again');
+    } finally {
+      setEditSaving(false);
+      setEditingId(null);
+    }
+  }
+
+  // ── Delete item ───────────────────────────────────────────────────────────
+  async function deleteItem(itemId: string) {
+    if (!confirm('Remove this item from the order?')) return;
+    setDeletingItemId(itemId);
+    setItemError('');
+    try {
+      const res = await adminFetch(`/api/orders/${order.id}/items/${itemId}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) throw new Error('Failed to delete');
+      setLocalItems(prev => prev.filter(i => i.id !== itemId && i.substitutes_item_id !== itemId));
+      onRefresh();
+    } catch {
+      setItemError('Failed to remove item — please try again');
+    } finally {
+      setDeletingItemId(null);
+    }
+  }
+
+  // ── Add item ──────────────────────────────────────────────────────────────
+  async function confirmAdd() {
+    if (!addSelected) return;
+    const qty = parseInt(addQty) || 1;
+    setAddSaving(true);
+    setItemError('');
+    try {
+      const res = await adminFetch(`/api/orders/${order.id}/items`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ product_id: addSelected.id, quantity: qty }),
+      });
+      if (!res.ok) throw new Error('Failed to add item');
+      const { item } = await res.json();
+      setLocalItems(prev => [...prev, item]);
+      setAddingItem(false);
+      setAddSearch('');
+      setAddResults([]);
+      setAddSelected(null);
+      setAddQty('1');
+      onRefresh();
+    } catch {
+      setItemError('Failed to add item — please try again');
+    } finally {
+      setAddSaving(false);
+    }
+  }
+
+  function cancelAdd() {
+    setAddingItem(false);
+    setAddSearch('');
+    setAddResults([]);
+    setAddSelected(null);
+    setAddQty('1');
+    setItemError('');
+  }
 
   return (
     <>
@@ -231,6 +355,14 @@ export function OrderDetailModal({
                 <h3 className="font-display text-base font-bold text-brand-navy mb-3">
                   Grocery Items ({groceryItems.length} lines)
                 </h3>
+
+                {/* Item error banner */}
+                {itemError && (
+                  <div className="mb-2 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                    {itemError}
+                  </div>
+                )}
+
                 <div className="border border-gray-200 rounded-lg overflow-hidden">
                   <table className="w-full text-sm">
                     <thead>
@@ -241,40 +373,205 @@ export function OrderDetailModal({
                         <th className="px-3 py-2 text-center text-xs font-bold text-gray-500 uppercase">Qty</th>
                         <th className="px-3 py-2 text-right text-xs font-bold text-gray-500 uppercase">Unit</th>
                         <th className="px-3 py-2 text-right text-xs font-bold text-gray-500 uppercase">Total</th>
+                        {canEdit && <th className="px-3 py-2 w-16" />}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                       {groceryItems.map(item => (
-                        <tr key={item.id} className={item.shopping_status === 'out_of_stock' ? 'opacity-40 line-through' : ''}>
+                        <tr key={item.id} className={item.shopping_status === 'out_of_stock' ? 'opacity-40' : ''}>
                           <td className="px-3 py-2 text-xs text-gray-400 font-mono">{item.upc || '—'}</td>
                           <td className="px-3 py-2">
                             {item.is_substitution && (
                               <span className="inline-block text-[9px] font-bold uppercase tracking-wide text-brand-orange bg-brand-orange/10 px-1 py-0.5 rounded mr-1">Sub</span>
                             )}
-                            <p className="font-medium text-brand-navy text-xs inline">{item.description}</p>
+                            <p className={`font-medium text-brand-navy text-xs inline ${item.shopping_status === 'out_of_stock' ? 'line-through' : ''}`}>
+                              {item.description}
+                            </p>
                             <p className="text-xs text-gray-400">{item.category}</p>
                           </td>
                           <td className="px-3 py-2 text-xs text-gray-500">{item.pkg_size || '—'}</td>
-                          <td className="px-3 py-2 text-center font-bold">{item.quantity}</td>
+                          <td className="px-3 py-2 text-center font-bold">
+                            {canEdit && editingId === item.id ? (
+                              <div className="flex items-center justify-center gap-1">
+                                <input
+                                  type="number"
+                                  min="1"
+                                  className="w-14 border border-brand-sky rounded px-1.5 py-0.5 text-center text-xs font-bold focus:outline-none focus:ring-1 focus:ring-brand-sky"
+                                  value={editQty}
+                                  onChange={e => setEditQty(e.target.value)}
+                                  autoFocus
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') saveQty(item);
+                                    if (e.key === 'Escape') setEditingId(null);
+                                  }}
+                                />
+                                <button
+                                  onClick={() => saveQty(item)}
+                                  disabled={editSaving}
+                                  className="text-brand-green hover:text-green-700 disabled:opacity-50"
+                                  title="Save"
+                                >
+                                  {editSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                                </button>
+                                <button
+                                  onClick={() => setEditingId(null)}
+                                  className="text-gray-400 hover:text-gray-600"
+                                  title="Cancel"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            ) : (
+                              item.quantity
+                            )}
+                          </td>
                           <td className="px-3 py-2 text-right text-xs">{formatCurrency(item.unit_price)}</td>
                           <td className="px-3 py-2 text-right font-bold text-xs">
                             {formatCurrency(item.actual_total ?? item.unit_price * item.quantity)}
                           </td>
+                          {canEdit && (
+                            <td className="px-3 py-2">
+                              <div className="flex items-center justify-end gap-1">
+                                {editingId !== item.id && (
+                                  <button
+                                    onClick={() => { setEditingId(item.id); setEditQty(String(item.quantity)); setItemError(''); }}
+                                    className="p-1 text-gray-400 hover:text-brand-navy transition-colors"
+                                    title="Edit quantity"
+                                  >
+                                    <Pencil className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => deleteItem(item.id)}
+                                  disabled={deletingItemId === item.id}
+                                  className="p-1 text-gray-400 hover:text-red-500 transition-colors disabled:opacity-50"
+                                  title="Remove item"
+                                >
+                                  {deletingItemId === item.id
+                                    ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    : <Trash2 className="w-3.5 h-3.5" />
+                                  }
+                                </button>
+                              </div>
+                            </td>
+                          )}
                         </tr>
                       ))}
                     </tbody>
                     <tfoot>
                       <tr className="bg-brand-sand/30 border-t-2 border-brand-gold/30">
-                        <td colSpan={5} className="px-3 py-2 font-bold text-brand-navy text-sm">
+                        <td colSpan={canEdit ? 5 : 5} className="px-3 py-2 font-bold text-brand-navy text-sm">
                           TOTAL ({groceryItems.reduce((s, i) => s + i.quantity, 0)} items)
                         </td>
                         <td className="px-3 py-2 text-right font-display text-base font-bold text-brand-navy">
                           {formatCurrency(subtotal)}
                         </td>
+                        {canEdit && <td />}
                       </tr>
                     </tfoot>
                   </table>
                 </div>
+
+                {/* Add Item */}
+                {canEdit && (
+                  <div className="mt-2">
+                    {!addingItem ? (
+                      <button
+                        onClick={() => { setAddingItem(true); setItemError(''); }}
+                        className="flex items-center gap-1.5 text-xs font-bold text-brand-river hover:text-brand-navy transition-colors py-1"
+                      >
+                        <Plus className="w-3.5 h-3.5" /> Add Item
+                      </button>
+                    ) : (
+                      <div className="mt-3 border border-brand-sky/30 rounded-lg bg-blue-50/40 p-3 space-y-2">
+                        <p className="text-xs font-bold text-brand-navy uppercase tracking-wide">Add Item to Order</p>
+
+                        {!addSelected ? (
+                          <>
+                            <div className="relative">
+                              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                              <input
+                                type="text"
+                                className="input-base pl-9"
+                                placeholder="Search products…"
+                                value={addSearch}
+                                autoFocus
+                                onChange={e => { setAddSearch(e.target.value); searchProducts(e.target.value); }}
+                              />
+                              {addSearching && (
+                                <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 animate-spin text-gray-400" />
+                              )}
+                            </div>
+                            {addResults.length > 0 && (
+                              <div className="border border-gray-200 rounded-lg overflow-hidden max-h-48 overflow-y-auto bg-white">
+                                {addResults.map(p => (
+                                  <button
+                                    key={p.id}
+                                    onClick={() => { setAddSelected(p); setAddResults([]); }}
+                                    className="w-full text-left px-3 py-2 hover:bg-brand-sand/40 border-b border-gray-100 last:border-0 flex items-center justify-between gap-2"
+                                  >
+                                    <div>
+                                      <p className="text-sm font-semibold text-brand-navy">{p.description}</p>
+                                      <p className="text-xs text-gray-400">{p.category}{p.pkg_size ? ` · ${p.pkg_size}` : ''}</p>
+                                    </div>
+                                    <div className="text-right shrink-0">
+                                      <p className="text-sm font-bold text-brand-green">{formatCurrency(p.price)}</p>
+                                      <p className="text-xs text-gray-400">{p.uom || 'EACH'}</p>
+                                    </div>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <div className="bg-white rounded-lg border border-brand-green/30 px-3 py-2 flex items-center justify-between">
+                              <div>
+                                <p className="text-sm font-bold text-brand-navy">{addSelected.description}</p>
+                                <p className="text-xs text-gray-400">
+                                  {addSelected.category} · {formatCurrency(addSelected.price)}/{addSelected.uom || 'EACH'}
+                                </p>
+                              </div>
+                              <button
+                                onClick={() => { setAddSelected(null); setAddSearch(''); }}
+                                className="text-gray-400 hover:text-gray-600 text-xs underline ml-2 shrink-0"
+                              >
+                                Change
+                              </button>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <label className="text-xs font-bold text-gray-600 shrink-0">Quantity</label>
+                              <input
+                                type="number"
+                                min="1"
+                                className="input-base w-24 text-center font-bold"
+                                value={addQty}
+                                onChange={e => setAddQty(e.target.value)}
+                              />
+                              <p className="text-xs text-gray-500">
+                                = {formatCurrency(addSelected.price * (parseInt(addQty) || 1))}
+                              </p>
+                            </div>
+                          </>
+                        )}
+
+                        <div className="flex gap-2 pt-1">
+                          <button
+                            onClick={confirmAdd}
+                            disabled={addSaving || !addSelected}
+                            className="flex items-center gap-1.5 bg-brand-navy text-white text-xs font-bold px-4 py-2 rounded-lg hover:bg-brand-steel transition-colors disabled:opacity-50"
+                          >
+                            {addSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                            Add to Order
+                          </button>
+                          <button onClick={cancelAdd} className="text-sm text-gray-500 hover:text-gray-700 px-2">
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 

@@ -1,17 +1,22 @@
 // src/app/api/orders/[id]/items/[itemId]/route.ts
 // Phase 2a: Per-item shopping mode actions for staff.
 // Phase 2b: Auto-advance order to in_progress on first item action.
+// Task 14: update_quantity action + DELETE for admin item editing.
 //
 // PATCH /api/orders/:id/items/:itemId
 // Body shapes:
 //   { "action": "shopped" }
 //   { "action": "out_of_stock", "substitution": { "product_id": "uuid", "quantity": 2 } }
 //   { "action": "set_weight", "actual_weight": 2.4 }
+//   { "action": "update_quantity", "quantity": 3 }
+//
+// DELETE /api/orders/:id/items/:itemId
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/admin-auth-server';
 import { z } from 'zod';
+import { recalcSubtotal } from '../route';
 
 const bodySchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('shopped') }),
@@ -25,6 +30,10 @@ const bodySchema = z.discriminatedUnion('action', [
   z.object({
     action: z.literal('set_weight'),
     actual_weight: z.number().positive(),
+  }),
+  z.object({
+    action: z.literal('update_quantity'),
+    quantity: z.number().int().positive(),
   }),
 ]);
 
@@ -169,5 +178,58 @@ export async function PATCH(
     return NextResponse.json({ item: originalUpdated, substitution: subItem });
   }
 
+  // ── UPDATE QUANTITY ───────────────────────────────────────────────────────
+  if (action === 'update_quantity') {
+    const { quantity } = parsed.data;
+    const lineTotal = item.unit_price * quantity;
+    const actual_total = item.actual_weight != null ? item.actual_weight * item.unit_price : null;
+
+    const { data: updated, error } = await supabase
+      .from('order_items')
+      .update({ quantity, line_total: lineTotal, actual_total })
+      .eq('id', itemId)
+      .select()
+      .single();
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    await recalcSubtotal(supabase, orderId);
+
+    return NextResponse.json({ item: updated });
+  }
+
   return NextResponse.json({ error: 'Unhandled action' }, { status: 400 });
+}
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string; itemId: string }> },
+) {
+  const session = requireAdmin(req, { area: 'orders', editRequired: true });
+  if (session instanceof NextResponse) return session;
+
+  const { id: orderId, itemId } = await params;
+  const supabase = createServiceClient();
+
+  // Verify item belongs to this order
+  const { data: item, error: itemErr } = await supabase
+    .from('order_items')
+    .select('id, is_substitution, substitutes_item_id')
+    .eq('id', itemId)
+    .eq('order_id', orderId)
+    .single();
+
+  if (itemErr || !item) {
+    return NextResponse.json({ error: 'Item not found' }, { status: 404 });
+  }
+
+  // If deleting an original item that has substitutions, also delete those
+  await supabase.from('order_items').delete().eq('substitutes_item_id', itemId);
+
+  const { error } = await supabase.from('order_items').delete().eq('id', itemId);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  await recalcSubtotal(supabase, orderId);
+
+  return NextResponse.json({ success: true });
 }
