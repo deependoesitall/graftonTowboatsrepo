@@ -159,6 +159,13 @@ function AccountContent() {
     </div>
   );
 
+  // Server confirmed a session exists but onAuthStateChange hasn't hydrated yet
+  if (!user && serverUser) return (
+    <div className="min-h-screen">
+      <SiteHeader />
+    </div>
+  );
+
   if (!user && !serverUser) return (
     <div className="min-h-screen">
       <SiteHeader />
