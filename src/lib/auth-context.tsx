@@ -25,6 +25,7 @@ interface AuthContextType {
   signUp: (email: string, password: string, details: SignUpDetails) => Promise<{ error: string | null; needsConfirmation?: boolean }>;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
+  resetPassword: (email: string) => Promise<{ error: string | null }>;
   refreshProfile: () => Promise<void>;
 }
 
@@ -33,6 +34,7 @@ const AuthContext = createContext<AuthContextType>({
   signUp: async () => ({ error: null, needsConfirmation: false }),
   signIn: async () => ({ error: null }),
   signOut: async () => {},
+  resetPassword: async () => ({ error: null }),
   refreshProfile: async () => {},
 });
 
@@ -128,6 +130,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  async function resetPassword(email: string) {
+    try {
+      const redirectTo = `${window.location.origin}/auth/callback?type=recovery`;
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo });
+      if (error) return { error: error.message };
+      return { error: null };
+    } catch (e: any) {
+      return { error: e?.message || 'Failed to send reset email' };
+    }
+  }
+
   async function signOut() {
     await supabase.auth.signOut();
     setProfile(null);
@@ -135,7 +148,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, signUp, signIn, signOut, refreshProfile: loadProfile }}>
+    <AuthContext.Provider value={{ user, profile, loading, signUp, signIn, signOut, resetPassword, refreshProfile: loadProfile }}>
       {children}
     </AuthContext.Provider>
   );
