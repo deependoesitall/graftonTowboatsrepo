@@ -288,16 +288,10 @@ function OrdersContent() {
                         </td>
                         <td className="px-4 py-3.5 text-sm text-gray-600">{order.contact_name}</td>
                         <td className="px-4 py-3.5 text-sm text-center font-medium text-brand-navy">
-                          {(() => {
-                            const count = isSinclair ? groceryCount : groceryCount;
-                            const servicesOnly = count === 0 && (hasCrewChange || hasPartsPickup || hasPkgDelivery);
-                            if (servicesOnly) {
-                              return (
-                                <span className="text-xs text-gray-400 italic">services only</span>
-                              );
-                            }
-                            return isSinclair ? groceryCount : itemCount;
-                          })()}
+                          {groceryCount === 0 && (hasCrewChange || hasPartsPickup || hasPkgDelivery)
+                            ? <span className="text-xs text-gray-400 italic">services only</span>
+                            : (isSinclair ? groceryCount : itemCount)
+                          }
                         </td>
                         {!isSinclair && (
                           <td className="px-4 py-3.5 text-sm font-bold text-brand-navy whitespace-nowrap">

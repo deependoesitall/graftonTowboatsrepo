@@ -1,6 +1,6 @@
 'use client';
 // src/app/confirm/page.tsx
-import { useEffect, useState, Suspense } from 'react';
+import { useEffect, useRef, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { clearCart } from '@/lib/cart';
@@ -10,10 +10,12 @@ import { SiteHeader } from '@/components/layout/SiteHeader';
 import { CheckCircle2, Download, ShoppingCart, Phone, Anchor, Star, History } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { AuthModal } from '@/components/auth/AuthModal';
+import { createClient } from '@/lib/supabase/client';
 
 function ConfirmContent() {
   const { user, loading: authLoading } = useAuth();
   const [authOpen, setAuthOpen] = useState(false);
+  const prevUserRef = useRef<string | null>(null);
   const searchParams = useSearchParams();
   const orderId = searchParams.get('order');
   const orderNumber = searchParams.get('num');
@@ -31,6 +33,26 @@ function ConfirmContent() {
       setLoading(false);
     }
   }, [orderId]);
+
+  // Claim guest orders when user signs up / signs in on this page
+  useEffect(() => {
+    if (authLoading) return;
+    const wasLoggedOut = prevUserRef.current === null;
+    const isNowLoggedIn = !!user;
+    prevUserRef.current = user?.id ?? null;
+
+    if (wasLoggedOut && isNowLoggedIn) {
+      // Fire-and-forget — link all orders placed with this email to the new account
+      createClient().auth.getSession().then(({ data }) => {
+        const token = data.session?.access_token;
+        if (!token) return;
+        fetch('/api/customer/claim-orders', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      });
+    }
+  }, [user, authLoading]);
 
   function openPdf() {
     if (!orderId) return;
