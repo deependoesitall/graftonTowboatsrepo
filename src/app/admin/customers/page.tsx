@@ -4,15 +4,37 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Lock, RefreshCw, Download, ChevronDown, ChevronRight, RotateCcw,
-  Search, Calendar,
+  Search, Calendar, X, CheckCircle, AlertCircle, Loader2,
 } from 'lucide-react';
 import { fetchAdminSession, canAccess, adminFetch } from '@/lib/admin-auth';
 import { formatCurrency, formatDate } from '@/lib/utils';
 
-interface VesselOrder {
-  id: string; order_number: string; subtotal: number; status: string; created_at: string;
-  items: Array<{ description: string; category: string; quantity: number; unit_price: number; line_total: number }>;
+interface VesselOrderItem {
+  product_id: string | null;
+  description: string;
+  category: string;
+  quantity: number;
+  unit_price: number;
+  line_total: number;
+  item_type: string | null;
 }
+
+interface VesselOrder {
+  id: string;
+  order_number: string;
+  subtotal: number;
+  status: string;
+  created_at: string;
+  customer_email: string | null;
+  vessel_name: string | null;
+  vessel_type: string | null;
+  arrival_date: string | null;
+  arrival_time: string | null;
+  notes: string | null;
+  eta: string | null;
+  items: VesselOrderItem[];
+}
+
 interface Vessel {
   company_name: string; contact_name: string; phone: string;
   orderCount: number; totalSpent: number; avgOrderValue: number;
@@ -23,6 +45,254 @@ interface ReportData {
   vessels: Vessel[];
 }
 
+// ── Repeat Order Modal ────────────────────────────────────────────────────────
+interface RepeatState {
+  vessel: Vessel;
+  order: VesselOrder;
+}
+
+function RepeatOrderModal({
+  state,
+  onClose,
+  onSuccess,
+}: {
+  state: RepeatState;
+  onClose: () => void;
+  onSuccess: (orderNumber: string) => void;
+}) {
+  const { vessel, order } = state;
+
+  // Only grocery items can be repeated
+  const groceryItems = order.items.filter(i => i.item_type !== 'service');
+
+  const [quantities, setQuantities] = useState<Record<number, number>>(() =>
+    Object.fromEntries(groceryItems.map((item, idx) => [idx, item.quantity]))
+  );
+  const [email, setEmail] = useState(order.customer_email || '');
+  const [vesselName, setVesselName] = useState(order.vessel_name || '');
+  const [arrivalDate, setArrivalDate] = useState('');
+  const [arrivalTime, setArrivalTime] = useState(order.arrival_time || '');
+  const [notes, setNotes] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  const activeItems = groceryItems.filter((_, idx) => quantities[idx] > 0);
+  const total = activeItems.reduce((s, item, _) => {
+    const idx = groceryItems.indexOf(item);
+    return s + item.unit_price * (quantities[idx] ?? 0);
+  }, 0);
+
+  async function submit() {
+    if (!email.trim()) { setError('Email is required to place the order.'); return; }
+    if (activeItems.length === 0) { setError('Add at least one item.'); return; }
+    setError('');
+    setSubmitting(true);
+
+    const body = {
+      vessel: {
+        company_name: vessel.company_name,
+        contact_name: vessel.contact_name,
+        phone: vessel.phone,
+        email: email.trim(),
+        vessel_name: vesselName || undefined,
+        arrival_date: arrivalDate || undefined,
+        arrival_time: arrivalTime || undefined,
+        notes: notes || undefined,
+      },
+      items: activeItems.map(item => {
+        const idx = groceryItems.indexOf(item);
+        return {
+          product_id: item.product_id ?? `repeat-${order.id}-${idx}`,
+          description: item.description,
+          category: item.category,
+          pkg_size: null,
+          uom: null,
+          price: item.unit_price,
+          quantity: quantities[idx],
+        };
+      }),
+      services: {},
+    };
+
+    try {
+      const res = await fetch('/api/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setError(json?.error || 'Failed to place order.');
+      } else {
+        onSuccess(json.order?.order_number || json.order_number || '');
+      }
+    } catch (e: any) {
+      setError(e?.message || 'Network error.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div>
+            <h2 className="font-display font-bold text-brand-navy text-lg">Repeat Order</h2>
+            <p className="text-xs text-gray-400 mt-0.5">
+              From {order.order_number} · {vessel.company_name}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="overflow-y-auto flex-1 px-6 py-4 space-y-5">
+          {/* Items */}
+          <div>
+            <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Items</p>
+            {groceryItems.length === 0 ? (
+              <p className="text-sm text-gray-400">This order has no grocery items to repeat.</p>
+            ) : (
+              <div className="space-y-2">
+                {groceryItems.map((item, idx) => (
+                  <div key={idx} className="flex items-center justify-between gap-3 bg-gray-50 rounded-lg px-3 py-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-brand-navy truncate">{item.description}</p>
+                      <p className="text-xs text-gray-400">{formatCurrency(item.unit_price)} each</p>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        onClick={() => setQuantities(q => ({ ...q, [idx]: Math.max(0, (q[idx] ?? 1) - 1) }))}
+                        className="w-6 h-6 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center text-sm font-bold transition-colors">
+                        −
+                      </button>
+                      <span className="w-7 text-center text-sm font-bold text-brand-navy">{quantities[idx] ?? 0}</span>
+                      <button
+                        onClick={() => setQuantities(q => ({ ...q, [idx]: (q[idx] ?? 0) + 1 }))}
+                        className="w-6 h-6 rounded-full bg-brand-river/20 hover:bg-brand-river/30 flex items-center justify-center text-sm font-bold text-brand-river transition-colors">
+                        +
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Vessel info */}
+          <div className="space-y-3">
+            <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Delivery Info</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2">
+                <label className="block text-xs text-gray-500 mb-1">
+                  Customer Email <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  placeholder="Required for order confirmation"
+                  className="input-base text-sm w-full"
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-xs text-gray-500 mb-1">Vessel Name</label>
+                <input
+                  type="text"
+                  value={vesselName}
+                  onChange={e => setVesselName(e.target.value)}
+                  placeholder={order.vessel_name || vessel.company_name}
+                  className="input-base text-sm w-full"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Arrival Date</label>
+                <input
+                  type="date"
+                  value={arrivalDate}
+                  onChange={e => setArrivalDate(e.target.value)}
+                  className="input-base text-sm w-full"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Arrival Time</label>
+                <input
+                  type="time"
+                  value={arrivalTime}
+                  onChange={e => setArrivalTime(e.target.value)}
+                  className="input-base text-sm w-full"
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-xs text-gray-500 mb-1">Notes</label>
+                <textarea
+                  value={notes}
+                  onChange={e => setNotes(e.target.value)}
+                  rows={2}
+                  placeholder="Any special instructions…"
+                  className="input-base text-sm w-full resize-none"
+                />
+              </div>
+            </div>
+          </div>
+
+          {error && (
+            <div className="flex items-start gap-2 text-red-600 bg-red-50 rounded-lg px-3 py-2.5 text-sm">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              {error}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between gap-3">
+          <div className="text-sm">
+            <span className="text-gray-400">{activeItems.length} items · </span>
+            <span className="font-bold text-brand-navy">{formatCurrency(total)}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={onClose} className="btn-outline text-sm px-4 py-2">Cancel</button>
+            <button
+              onClick={submit}
+              disabled={submitting || groceryItems.length === 0}
+              className="bg-brand-orange text-white text-sm font-bold px-5 py-2 rounded-full hover:bg-brand-ored transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
+              {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
+              Place Order
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Success toast ─────────────────────────────────────────────────────────────
+function SuccessBanner({ orderNumber, onClose }: { orderNumber: string; onClose: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onClose, 6000);
+    return () => clearTimeout(t);
+  }, [onClose]);
+
+  return (
+    <div className="fixed bottom-6 right-6 z-50 bg-brand-green text-white rounded-2xl px-5 py-4 shadow-2xl flex items-start gap-3 max-w-sm">
+      <CheckCircle className="w-5 h-5 shrink-0 mt-0.5" />
+      <div>
+        <p className="font-bold text-sm">Order placed!</p>
+        <p className="text-xs text-white/80 mt-0.5">
+          {orderNumber} is now in the admin orders queue.
+        </p>
+      </div>
+      <button onClick={onClose} className="text-white/60 hover:text-white ml-2">
+        <X className="w-4 h-4" />
+      </button>
+    </div>
+  );
+}
+
+// ── Preset ranges ─────────────────────────────────────────────────────────────
 const PRESETS = [
   { key: 'this_week', label: 'This Week' },
   { key: 'this_month', label: 'This Month' },
@@ -71,6 +341,7 @@ function getPresetRange(preset: PresetKey, customFrom?: string, customTo?: strin
   }
 }
 
+// ── Page ──────────────────────────────────────────────────────────────────────
 export default function CustomersPage() {
   const router = useRouter();
   const [denied, setDenied] = useState(false);
@@ -86,7 +357,10 @@ export default function CustomersPage() {
   const [vesselSearch, setVesselSearch] = useState('');
   const [expandedVessel, setExpandedVessel] = useState<string | null>(null);
 
-  // Auth guard — verify the session cookie with the server
+  const [repeatState, setRepeatState] = useState<RepeatState | null>(null);
+  const [successOrderNumber, setSuccessOrderNumber] = useState<string | null>(null);
+
+  // Auth guard
   useEffect(() => {
     (async () => {
       const session = await fetchAdminSession();
@@ -121,37 +395,6 @@ export default function CustomersPage() {
     });
   }
 
-  function repeatVesselOrder(order: VesselOrder) {
-    try {
-      const raw = localStorage.getItem('grafton_cart');
-      let existing: any[] = [];
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        existing = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.items) ? parsed.items : []);
-      }
-      order.items.forEach((item, idx) => {
-        const product_id = `repeat-${order.id}-${idx}`;
-        const existingIdx = existing.findIndex((i: any) => i.description === item.description);
-        if (existingIdx >= 0) {
-          existing[existingIdx].quantity += item.quantity;
-        } else {
-          existing.push({
-            product_id,
-            description: item.description,
-            category: item.category,
-            pkg_size: null,
-            uom: null,
-            price: item.unit_price,
-            quantity: item.quantity,
-          });
-        }
-      });
-      localStorage.setItem('grafton_cart', JSON.stringify(existing));
-      window.dispatchEvent(new CustomEvent('cart-updated'));
-    } catch {}
-    window.open('/order', '_blank');
-  }
-
   if (denied) return (
     <div className="flex flex-col items-center justify-center py-32 text-center px-4">
       <div className="w-14 h-14 bg-red-50 rounded-full flex items-center justify-center mb-4">
@@ -174,6 +417,17 @@ export default function CustomersPage() {
 
   return (
     <div className="space-y-6">
+      {repeatState && (
+        <RepeatOrderModal
+          state={repeatState}
+          onClose={() => setRepeatState(null)}
+          onSuccess={num => { setRepeatState(null); setSuccessOrderNumber(num); }}
+        />
+      )}
+      {successOrderNumber && (
+        <SuccessBanner orderNumber={successOrderNumber} onClose={() => setSuccessOrderNumber(null)} />
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl font-bold text-brand-navy">Customers</h1>
@@ -298,12 +552,16 @@ export default function CustomersPage() {
                               <div key={o.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
                                 <div className="min-w-0">
                                   <p className="font-mono text-xs font-bold text-brand-navy">{o.order_number}</p>
-                                  <p className="text-xs text-gray-400">{formatDate(o.created_at)} · {o.items.length} items</p>
+                                  <p className="text-xs text-gray-400">
+                                    {formatDate(o.created_at)} · {o.items.filter(i => i.item_type !== 'service').length} items
+                                  </p>
                                 </div>
                                 <div className="flex items-center gap-3 shrink-0">
                                   <span className="font-bold text-sm text-brand-navy">{formatCurrency(o.subtotal)}</span>
-                                  <button onClick={() => repeatVesselOrder(o)}
-                                    className="flex items-center gap-1.5 bg-brand-orange text-white text-xs font-bold uppercase tracking-wide px-3 py-1.5 rounded-full hover:bg-brand-ored transition-colors">
+                                  <button
+                                    onClick={() => setRepeatState({ vessel: v, order: o })}
+                                    disabled={o.items.filter(i => i.item_type !== 'service').length === 0}
+                                    className="flex items-center gap-1.5 bg-brand-orange text-white text-xs font-bold uppercase tracking-wide px-3 py-1.5 rounded-full hover:bg-brand-ored transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                                     <RotateCcw className="w-3.5 h-3.5" /> Repeat
                                   </button>
                                 </div>
