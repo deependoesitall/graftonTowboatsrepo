@@ -81,7 +81,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // This prevents a spurious second auth event (common after Google OAuth)
           // from kicking an authenticated user to the sign-in screen.
           setTimeout(async () => {
-            const { data } = await supabase.auth.getUser();
+            const { data, error } = await supabase.auth.getUser();
+            if (error) return; // API error (e.g. 429) — keep current state, don't sign out
             setUser(data.user ?? null);
             if (!data.user) setProfile(null);
             else loadProfile();

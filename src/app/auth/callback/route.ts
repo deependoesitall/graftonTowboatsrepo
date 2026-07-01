@@ -4,7 +4,6 @@
 //   2. Password reset link — exchanges ?code for a session, sends user to /auth/reset-password
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
-import { cookies } from 'next/headers';
 
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
@@ -16,17 +15,28 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(`${origin}/`);
   }
 
-  const cookieStore = await cookies();
+  // Build the redirect response FIRST, then set cookies ON IT.
+  // Using cookies() from next/headers + NextResponse.redirect() loses the
+  // Set-Cookie headers — the browser never receives the session cookies.
+  const redirectUrl = type === 'recovery'
+    ? `${origin}/auth/reset-password`
+    : `${origin}${next}`;
+
+  const response = NextResponse.redirect(redirectUrl);
+
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        getAll() { return cookieStore.getAll(); },
+        getAll() { return request.cookies.getAll(); },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) =>
-            cookieStore.set(name, value, options)
-          );
+          cookiesToSet.forEach(({ name, value, options }) => {
+            // Write to request so downstream server code sees them,
+            // and to response so the browser receives the Set-Cookie headers.
+            request.cookies.set(name, value);
+            response.cookies.set(name, value, options);
+          });
         },
       },
     }
@@ -39,11 +49,5 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(`${origin}/?auth_error=true`);
   }
 
-  // Password reset: send to the reset form
-  if (type === 'recovery') {
-    return NextResponse.redirect(`${origin}/auth/reset-password`);
-  }
-
-  // OAuth or magic link: send to account page (or wherever next points)
-  return NextResponse.redirect(`${origin}${next}`);
+  return response;
 }
