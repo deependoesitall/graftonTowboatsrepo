@@ -31,18 +31,6 @@ function AccountContent() {
   const { toast } = useToast();
   const [tab, setTab] = useState<'orders' | 'favorites' | 'profile'>('orders');
   const [authOpen, setAuthOpen] = useState(false);
-  // Grace period: hold the loading screen briefly after auth resolves with no user.
-  // This covers two cases: (1) Google OAuth — onAuthStateChange fires null then
-  // SIGNED_IN in quick succession; (2) storage mismatch — auth-context's 500ms
-  // getUser() fallback may not have fired yet.
-  const [showSignIn, setShowSignIn] = useState(false);
-  useEffect(() => {
-    if (!loading && !user) {
-      const t = setTimeout(() => setShowSignIn(true), 600);
-      return () => clearTimeout(t);
-    }
-    setShowSignIn(false);
-  }, [loading, user]);
 
   // Past orders
   const [orders, setOrders] = useState<Order[]>([]);
@@ -156,8 +144,8 @@ function AccountContent() {
     toast({ title: 'Added to cart', description: p.description, variant: 'success', duration: 1500 });
   }
 
-  // Show loading screen while auth resolves or during the grace period
-  if (loading || (!user && !showSignIn)) return (
+  // Show loading screen while auth resolves
+  if (loading) return (
     <div className="min-h-screen">
       <SiteHeader />
     </div>
