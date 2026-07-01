@@ -60,25 +60,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let hydrated = false;
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
+      (event, session) => {
         // CRITICAL: do NOT await supabase calls inside this callback.
         // The client holds an auth lock during this callback — any query
         // made here deadlocks the entire client. Defer with setTimeout.
         hydrated = true;
-        setUser(session?.user ?? null);
         setLoading(false);
+
         if (session?.user) {
+          // Clearly authenticated — update state immediately.
+          setUser(session.user);
           setTimeout(() => { loadProfile(); }, 0);
-        } else {
+        } else if (event === 'SIGNED_OUT') {
+          // Explicit sign-out — clear immediately.
+          setUser(null);
           setProfile(null);
+        } else {
+          // Null session from INITIAL_SESSION or a background token event.
+          // Don't blindly clear the user — verify with the server first.
+          // This prevents a spurious second auth event (common after Google OAuth)
+          // from kicking an authenticated user to the sign-in screen.
+          setTimeout(async () => {
+            const { data } = await supabase.auth.getUser();
+            setUser(data.user ?? null);
+            if (!data.user) setProfile(null);
+            else loadProfile();
+          }, 200);
         }
       }
     );
 
-    // Fallback: onAuthStateChange fires INITIAL_SESSION with null when it can't
-    // read the session cookie (e.g. accounts created before @supabase/ssr was added,
-    // or cookie/storage format mismatch). After 500ms, verify directly with the
-    // server and hydrate from there if needed.
+    // Fallback: if INITIAL_SESSION never fires (cookie/storage mismatch for accounts
+    // created before @supabase/ssr was added), verify directly with the server.
     const fallback = setTimeout(async () => {
       if (!hydrated) {
         const { data } = await supabase.auth.getUser();
