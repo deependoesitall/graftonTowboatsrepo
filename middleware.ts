@@ -1,5 +1,7 @@
-// middleware.ts — refresh Supabase session cookies on every request
-// Required by @supabase/ssr so that customer sessions persist across page navigations and refreshes.
+// middleware.ts — refresh Supabase session cookies on every page request.
+// Uses getSession() (not getUser()) to avoid making a server-side network call
+// on every request — getUser() was causing excessive auth API calls and rate-limit
+// errors (429) that triggered spurious SIGNED_OUT events in the browser SDK.
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
@@ -27,15 +29,18 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  // Refreshes the session if expired — MUST be called before any other Supabase call
-  await supabase.auth.getUser();
+  // getSession() reads from cookies and only calls Supabase if the token needs
+  // refreshing (i.e. it's expired). This is much cheaper than getUser() which
+  // makes a server-side validation call on every single request.
+  await supabase.auth.getSession();
 
   return response;
 }
 
 export const config = {
   matcher: [
-    // Run on all routes except Next.js internals and static files
-    '/((?!_next/static|_next/image|favicon.ico|manifest.json|icons|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    // Skip Next.js internals, static assets, and API routes.
+    // API routes (/api/*) handle their own auth and don't need session refresh.
+    '/((?!_next/static|_next/image|favicon.ico|manifest.json|icons|api/|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };

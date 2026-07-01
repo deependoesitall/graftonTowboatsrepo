@@ -57,35 +57,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => {
-    // Step 1: Read the current session from cookies immediately (no network call).
-    // This is the fast path that handles page loads with an existing session,
-    // including after Google OAuth where the callback sets cookies then redirects here.
+    // Read session from cookies on mount. This handles:
+    // 1. Page loads with an existing session (returning user)
+    // 2. After Google OAuth redirect — the /auth/callback route sets cookies,
+    //    then redirects here; getSession() picks up those cookies immediately.
+    //
+    // We do NOT use onAuthStateChange because the SDK fires SIGNED_OUT for
+    // non-genuine reasons (e.g. rate-limit 429 on token refresh), which would
+    // immediately kick the user back to the sign-in screen. Managing state
+    // directly in signIn/signUp/signOut is simpler and more reliable.
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
       setLoading(false);
       if (session?.user) loadProfile();
     });
-
-    // Step 2: Subscribe to all subsequent auth changes (sign in, sign out, token refresh).
-    // Skip INITIAL_SESSION — getSession() above already handled it. Without this skip,
-    // INITIAL_SESSION can fire null AFTER getSession() correctly found a session,
-    // causing a false sign-out flash (the root cause of the Google OAuth flicker).
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        if (event === 'INITIAL_SESSION') return;
-        // CRITICAL: do NOT await Supabase calls inside this callback —
-        // the client holds an auth lock here. Defer with setTimeout if needed.
-        setUser(session?.user ?? null);
-        setLoading(false);
-        if (session?.user) {
-          setTimeout(() => { loadProfile(); }, 0);
-        } else {
-          setProfile(null);
-        }
-      }
-    );
-
-    return () => subscription.unsubscribe();
   }, []);
 
   async function signUp(email: string, password: string, details: SignUpDetails) {
@@ -101,11 +86,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           company_name: details.companyName || null,
           contact_name: contactName || null,
         });
-        // If session is present, user is immediately signed in (email confirmation disabled)
         if (data.session) {
+          // Email confirmation is disabled — user is signed in immediately
+          setUser(data.user);
+          setLoading(false);
           await loadProfile();
         }
-        // If no session, Supabase requires email confirmation — caller should show that message
       }
       return { error: null, needsConfirmation: !data.session };
     } catch (e: any) {
@@ -115,9 +101,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function signIn(email: string, password: string) {
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) return { error: error.message };
-      // Profile loads via the deferred onAuthStateChange handler
+      // Update state directly from the sign-in response — no event subscription needed
+      if (data.user) {
+        setUser(data.user);
+        setLoading(false);
+        await loadProfile();
+      }
       return { error: null };
     } catch (e: any) {
       return { error: e?.message || 'Sign in failed' };
