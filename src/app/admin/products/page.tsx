@@ -5,7 +5,7 @@ import { Upload, Package, AlertCircle, CheckCircle2, Loader2,
          Search, Pencil, Check, X, ToggleLeft, ToggleRight,
          ChevronLeft, ChevronRight, RefreshCw, Plus, Lock,
          Download, Trash2, Layers, PackageX, PackageCheck, Filter,
-         ImagePlus } from 'lucide-react';
+         ImagePlus, Tag } from 'lucide-react';
 import Image from 'next/image';
 import { normalizeCategory, formatCurrency, MAIN_CATEGORIES } from '@/lib/utils';
 import { Product } from '@/types';
@@ -100,6 +100,53 @@ function ProductImageCell({ productId, imageUrl, onUploaded }: {
   );
 }
 
+
+// ── Tag chip editor ──────────────────────────────────────────────────
+function TagEditor({ tags, onChange }: { tags: string[]; onChange: (tags: string[]) => void }) {
+  const [input, setInput] = useState('');
+
+  function addTag(raw: string) {
+    const tag = raw.trim().toLowerCase().replace(/,/g, '');
+    if (!tag || tags.includes(tag)) { setInput(''); return; }
+    onChange([...tags, tag]);
+    setInput('');
+  }
+
+  function removeTag(tag: string) {
+    onChange(tags.filter(t => t !== tag));
+  }
+
+  return (
+    <div>
+      <div className="flex flex-wrap gap-1 mb-1.5">
+        {tags.map(tag => (
+          <span key={tag}
+            className="inline-flex items-center gap-1 bg-brand-river/10 text-brand-river text-[11px] font-semibold px-2 py-0.5 rounded-full">
+            <Tag className="w-2.5 h-2.5" />
+            {tag}
+            <button type="button" onClick={() => removeTag(tag)}
+              className="ml-0.5 text-brand-river/50 hover:text-red-500 transition-colors">
+              <X className="w-2.5 h-2.5" />
+            </button>
+          </span>
+        ))}
+      </div>
+      <input
+        type="text"
+        className="input-base text-xs py-1 w-full"
+        placeholder="Add tag, press Enter (e.g. spices, baking)"
+        value={input}
+        onChange={e => setInput(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addTag(input); }
+          if (e.key === 'Backspace' && !input && tags.length) { onChange(tags.slice(0, -1)); }
+        }}
+        onBlur={() => { if (input.trim()) addTag(input); }}
+      />
+    </div>
+  );
+}
+
 interface ParsedProduct {
   category: string; sub_category: string; upc: string | null;
   description: string; pkg_size: string | null; uom: string | null;
@@ -150,6 +197,7 @@ interface EditState {
   pkg_size: string;
   uom: string;
   price: string;
+  tags: string[];
   image_url: string | null;
 }
 
@@ -161,13 +209,13 @@ function AddProductRow({ onAdded }: {
   const [newProductId, setNewProductId] = useState<string | null>(null);
   const [form, setForm] = useState({
     description: '', details: '', category: 'Pantry & Grocery', sub_category: '',
-    location: '', pkg_size: '', uom: '', price: '', image_url: null as string | null,
+    location: '', pkg_size: '', uom: '', price: '', tags: [] as string[], image_url: null as string | null,
   });
   const descRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { if (open) descRef.current?.focus(); }, [open]);
 
-  function reset() { setForm({ description: '', details: '', category: 'Pantry & Grocery', sub_category: '', location: '', pkg_size: '', uom: '', price: '', image_url: null }); setNewProductId(null); setOpen(false); }
+  function reset() { setForm({ description: '', details: '', category: 'Pantry & Grocery', sub_category: '', location: '', pkg_size: '', uom: '', price: '', tags: [], image_url: null }); setNewProductId(null); setOpen(false); }
 
   async function save() {
     if (!form.description || !form.price) return;
@@ -186,6 +234,7 @@ function AddProductRow({ onAdded }: {
           pkg_size: form.pkg_size || null,
           uom: form.uom || null,
           price: parseFloat(form.price) || 0,
+          tags: form.tags,
           is_active: true,
           is_available: true,
           upc: null,
@@ -248,6 +297,9 @@ function AddProductRow({ onAdded }: {
         <textarea className="input-base text-xs py-1 w-full mt-1 resize-none" rows={2}
           placeholder="Description (optional — shown to customers)"
           value={form.details} onChange={e => setForm(f => ({ ...f, details: e.target.value }))} />
+        <div className="mt-1">
+          <TagEditor tags={form.tags} onChange={tags => setForm(f => ({ ...f, tags }))} />
+        </div>
       </td>
       <td className="px-2 py-2">
         <input className="input-base text-xs py-1.5 w-24" placeholder="e.g. 48 OZ"
@@ -296,6 +348,7 @@ function EditableRow({ product, selected, onSelect, onSaved, onToggleActive, onT
     pkg_size: product.pkg_size || '',
     uom: product.uom || '',
     price: product.price.toFixed(2),
+    tags: product.tags || [],
     image_url: product.image_url ?? null,
   });
 
@@ -313,6 +366,7 @@ function EditableRow({ product, selected, onSelect, onSaved, onToggleActive, onT
         pkg_size: form.pkg_size || null,
         uom: form.uom || null,
         price: parseFloat(form.price) || 0,
+        tags: form.tags,
       }),
     });
     if (res.ok) {
@@ -351,6 +405,10 @@ function EditableRow({ product, selected, onSelect, onSaved, onToggleActive, onT
           <textarea className="input-base text-xs py-1 w-full mt-1 resize-none" rows={2}
             placeholder="Description (optional — shown to customers)"
             value={form.details} onChange={e => setForm(f => ({ ...f, details: e.target.value }))} />
+          <div className="mt-1.5">
+            <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wide mb-1">Search Tags</p>
+            <TagEditor tags={form.tags} onChange={tags => setForm(f => ({ ...f, tags }))} />
+          </div>
         </td>
         <td className="px-3 py-2">
           <input className="input-base text-xs py-1 w-24" value={form.pkg_size}
@@ -405,13 +463,18 @@ function EditableRow({ product, selected, onSelect, onSaved, onToggleActive, onT
       </td>
       <td className="px-3 py-2.5 text-sm font-medium text-brand-navy max-w-xs">
         <span className="line-clamp-1">{product.description}</span>
-        <div className="flex items-center gap-1.5 mt-0.5">
+        <div className="flex flex-wrap items-center gap-1 mt-0.5">
           {!product.is_active && (
             <span className="inline-block text-[10px] font-bold uppercase tracking-wide text-gray-400 bg-gray-100 rounded px-1.5 py-0.5">Inactive</span>
           )}
           {!product.is_available && (
             <span className="inline-block text-[10px] font-bold uppercase tracking-wide text-red-500 bg-red-50 rounded px-1.5 py-0.5">Out of Stock</span>
           )}
+          {(product.tags || []).map(tag => (
+            <span key={tag} className="inline-flex items-center gap-0.5 text-[10px] text-brand-river/70 bg-blue-50 rounded-full px-1.5 py-0.5 font-semibold">
+              <Tag className="w-2 h-2" />{tag}
+            </span>
+          ))}
         </div>
       </td>
       <td className="px-3 py-2.5 text-xs text-gray-500">{product.pkg_size || '—'}</td>

@@ -38,12 +38,9 @@ export default async function CatalogPage({ searchParams }: PageProps) {
     .range(offset, offset + perPage - 1);
 
   if (search) {
-    // Search description AND category with partial matching.
-    // textSearch (FTS) was too strict — "spices" wouldn't match the "Spices" category.
-    // ilike with wildcards on both fields gives intuitive partial/category matching.
-    query = query.or(
-      `description.ilike.%${search}%,category.ilike.%${search}%`
-    );
+    // search_text is a stored generated column: lower(description || ' ' || category || ' ' || tags).
+    // A single ilike covers product name, category, AND admin-defined keyword tags.
+    query = query.ilike('search_text', `%${search}%`);
   }
 
   if (category && category !== 'All') {

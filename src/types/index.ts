@@ -12,6 +12,7 @@ export interface Product {
   pkg_size: string | null;
   uom: string | null;
   price: number;
+  tags: string[];
   is_active: boolean;
   is_available: boolean;
   created_at?: string;
@@ -206,3 +207,5 @@ export const VESSEL_TYPES = [
   'Ferry',
   'Other',
 ] as const;
+
+export type VesselType = typeof VESSEL_TYPES[number];

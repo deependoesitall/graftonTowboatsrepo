@@ -28,8 +28,8 @@ export async function GET(req: NextRequest) {
   }
 
   if (search) {
-    // Search by description or UPC
-    query = query.or(`description.ilike.%${search}%,upc.ilike.%${search}%`);
+    // Admin search: use search_text (covers description + category + tags) OR UPC exact match
+    query = query.or(`search_text.ilike.%${search}%,upc.ilike.%${search}%`);
   }
   if (category && category !== 'All') query = query.eq('category', category);
 
