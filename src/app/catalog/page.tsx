@@ -38,11 +38,12 @@ export default async function CatalogPage({ searchParams }: PageProps) {
     .range(offset, offset + perPage - 1);
 
   if (search) {
-    if (search.length >= 3) {
-      query = query.textSearch('description', search, { type: 'websearch', config: 'english' });
-    } else {
-      query = query.ilike('description', `${search}%`);
-    }
+    // Search description AND category with partial matching.
+    // textSearch (FTS) was too strict — "spices" wouldn't match the "Spices" category.
+    // ilike with wildcards on both fields gives intuitive partial/category matching.
+    query = query.or(
+      `description.ilike.%${search}%,category.ilike.%${search}%`
+    );
   }
 
   if (category && category !== 'All') {

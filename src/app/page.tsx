@@ -1,7 +1,6 @@
 // src/app/page.tsx
 import Link from 'next/link';
-import { ShoppingCart, Phone, MapPin, Clock, ChevronRight, Package, FileText } from 'lucide-react';
-import Image from 'next/image';
+import { ShoppingCart, Phone, MapPin, ChevronRight, Package, FileText, Truck } from 'lucide-react';
 
 export default function HomePage() {
   return (
@@ -64,6 +63,19 @@ export default function HomePage() {
         <p className="text-brand-green/50 text-xs mt-4 tracking-widest uppercase">
           No login required · Instant confirmation · PDF receipt
         </p>
+
+        {/* Delivery callout */}
+        <div className="mt-10 inline-flex items-center gap-4 bg-brand-green text-white rounded-2xl px-8 py-5 shadow-lg text-left">
+          <div className="w-12 h-12 bg-brand-yellow/20 rounded-full flex items-center justify-center shrink-0">
+            <Truck className="w-6 h-6 text-brand-yellow" />
+          </div>
+          <div>
+            <p className="font-bold text-base leading-tight">We deliver directly to your vessel.</p>
+            <p className="text-brand-yellow/80 text-sm mt-0.5 font-body leading-snug">
+              Order online · we pack &amp; bring it to your boat at Mile Marker 218.
+            </p>
+          </div>
+        </div>
       </section>
 
       {/* How it works */}
@@ -73,7 +85,7 @@ export default function HomePage() {
           {[
             { num: '01', icon: ShoppingCart, title: 'Browse & Build', desc: 'Search hundreds of grocery and supply items. Add to cart instantly.' },
             { num: '02', icon: Package, title: 'Enter Vessel Info', desc: 'Company name, contact, PO#, ETA, and any special instructions.' },
-            { num: '03', icon: FileText, title: 'Submit & Done', desc: 'We receive your order instantly. Download your PDF receipt.' },
+            { num: '03', icon: Truck, title: 'We Deliver to Your Boat', desc: "Submit your order and we'll have it packed and waiting at your vessel when you arrive." },
           ].map(({ num, icon: Icon, title, desc }) => (
             <div key={num} className="bg-white/60 backdrop-blur-sm rounded-2xl p-8 border border-brand-green/10 text-center hover:bg-white/80 transition-colors">
               <div className="w-16 h-16 bg-brand-green rounded-full flex items-center justify-center mx-auto mb-4 shadow-md">
@@ -101,7 +113,6 @@ export default function HomePage() {
             {[
               { icon: Phone, label: '(618) 556-0290', sub: '24/7 Support', href: 'tel:6185560290' },
               { icon: MapPin, label: 'Mile Marker 218', sub: 'Grafton, IL 62037', href: null },
-              
             ].map(({ icon: Icon, label, sub, href }) => (
               <div key={label} className="flex flex-col items-center gap-2">
                 <div className="w-10 h-10 bg-brand-yellow/20 rounded-full flex items-center justify-center mb-1">

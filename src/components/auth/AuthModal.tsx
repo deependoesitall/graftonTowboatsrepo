@@ -2,7 +2,7 @@
 // src/components/auth/AuthModal.tsx
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Loader2, Star, History, Zap, CheckCircle2 } from 'lucide-react';
+import { X, Loader2, Star, History, Zap, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { createClient } from '@/lib/supabase/client';
 
@@ -24,6 +24,9 @@ export function AuthModal({ open, onClose, defaultMode = 'signin', defaultEmail 
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [companyName, setCompanyName] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -34,6 +37,9 @@ export function AuthModal({ open, onClose, defaultMode = 'signin', defaultEmail 
     if (open) {
       setError('');
       setPassword('');
+      setConfirmPassword('');
+      setShowPassword(false);
+      setShowConfirmPassword(false);
       setFirstName('');
       setLastName('');
       setCompanyName('');
@@ -45,7 +51,7 @@ export function AuthModal({ open, onClose, defaultMode = 'signin', defaultEmail 
   if (!open || !mounted) return null;
 
   const canSubmit = screen === 'signup'
-    ? email && password.length >= 6 && firstName.trim().length > 0
+    ? email && password.length >= 6 && firstName.trim().length > 0 && confirmPassword === password
     : screen === 'forgot'
     ? !!email
     : email && password.length >= 6;
@@ -135,7 +141,7 @@ export function AuthModal({ open, onClose, defaultMode = 'signin', defaultEmail 
                 onClick={() => { setScreen('signin'); setPassword(''); }}
                 className="text-brand-orange text-xs font-bold hover:underline"
               >
-                Sign in instead →
+                Sign in instead &rarr;
               </button>
             </div>
           )}
@@ -156,7 +162,7 @@ export function AuthModal({ open, onClose, defaultMode = 'signin', defaultEmail 
                 onClick={() => { setScreen('signin'); }}
                 className="text-brand-orange text-xs font-bold hover:underline"
               >
-                Back to sign in →
+                Back to sign in &rarr;
               </button>
             </div>
           )}
@@ -182,7 +188,7 @@ export function AuthModal({ open, onClose, defaultMode = 'signin', defaultEmail 
               <p className="text-center text-xs text-gray-400">
                 <button onClick={() => { setScreen('signin'); setError(''); }}
                   className="text-brand-orange font-bold hover:underline">
-                  ← Back to sign in
+                  &larr; Back to sign in
                 </button>
               </p>
             </div>
@@ -276,11 +282,53 @@ export function AuthModal({ open, onClose, defaultMode = 'signin', defaultEmail 
                       </button>
                     )}
                   </div>
-                  <input type="password" className="input-base" placeholder="At least 6 characters"
-                    value={password} onChange={e => setPassword(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && submit()}
-                    autoComplete={screen === 'signup' ? 'new-password' : 'current-password'} />
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      className="input-base pr-10"
+                      placeholder="At least 6 characters"
+                      value={password}
+                      onChange={e => setPassword(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && submit()}
+                      autoComplete={screen === 'signup' ? 'new-password' : 'current-password'}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(v => !v)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                      tabIndex={-1}
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                 </div>
+                {screen === 'signup' && (
+                  <div>
+                    <label className="label-base">Confirm Password</label>
+                    <div className="relative">
+                      <input
+                        type={showConfirmPassword ? 'text' : 'password'}
+                        className={`input-base pr-10 ${confirmPassword && confirmPassword !== password ? 'border-red-400 focus:ring-red-300' : ''}`}
+                        placeholder="Re-enter password"
+                        value={confirmPassword}
+                        onChange={e => setConfirmPassword(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && submit()}
+                        autoComplete="new-password"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword(v => !v)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                        tabIndex={-1}
+                      >
+                        {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    {confirmPassword && confirmPassword !== password && (
+                      <p className="text-red-500 text-[11px] mt-1">Passwords don&apos;t match</p>
+                    )}
+                  </div>
+                )}
                 {error && <p className="text-red-500 text-xs bg-red-50 rounded p-2.5">{error}</p>}
                 <button onClick={submit} disabled={busy || !canSubmit}
                   className="btn-primary w-full flex items-center justify-center gap-2">
