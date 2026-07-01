@@ -57,14 +57,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => {
-    // Use onAuthStateChange exclusively — it fires INITIAL_SESSION on mount with
-    // the correct state, avoiding the race condition between getSession() and
-    // onAuthStateChange that causes a user→null flicker on OAuth redirects.
+    let hydrated = false;
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, session) => {
         // CRITICAL: do NOT await supabase calls inside this callback.
         // The client holds an auth lock during this callback — any query
         // made here deadlocks the entire client. Defer with setTimeout.
+        hydrated = true;
         setUser(session?.user ?? null);
         setLoading(false);
         if (session?.user) {
@@ -75,11 +75,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     );
 
-    // Safety net — if onAuthStateChange never fires, unblock the UI
-    const timeout = setTimeout(() => setLoading(false), 3000);
+    // Fallback: onAuthStateChange fires INITIAL_SESSION with null when it can't
+    // read the session cookie (e.g. accounts created before @supabase/ssr was added,
+    // or cookie/storage format mismatch). After 500ms, verify directly with the
+    // server and hydrate from there if needed.
+    const fallback = setTimeout(async () => {
+      if (!hydrated) {
+        const { data } = await supabase.auth.getUser();
+        if (data.user) {
+          setUser(data.user);
+          setTimeout(() => { loadProfile(); }, 0);
+        }
+        setLoading(false);
+      }
+    }, 500);
 
     return () => {
-      clearTimeout(timeout);
+      clearTimeout(fallback);
       subscription.unsubscribe();
     };
   }, []);
