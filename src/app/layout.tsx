@@ -4,6 +4,7 @@ import { Oswald, Inter } from 'next/font/google';
 import './globals.css';
 import { Toaster } from '@/components/ui/toaster';
 import { AuthProvider } from '@/lib/auth-context';
+import { SpeedInsights } from '@vercel/speed-insights/next';
 
 // Oswald = heavy condensed uppercase — matches GTS site heading style
 const oswald = Oswald({
@@ -48,6 +49,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           {children}
           <Toaster />
         </AuthProvider>
+        <SpeedInsights />
       </body>
     </html>
   );
