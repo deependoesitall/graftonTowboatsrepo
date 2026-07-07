@@ -4,7 +4,13 @@ import { Order } from '@/types';
 import { formatCurrency, formatDate } from './utils';
 import { generateOrderPdfBuffer } from './pdf-attachment';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Lazily construct the Resend client so importing this module (e.g. during
+// `next build` page-data collection) doesn't require RESEND_API_KEY to be set.
+let _resend: Resend | null = null;
+function getResend(): Resend {
+  if (!_resend) _resend = new Resend(process.env.RESEND_API_KEY);
+  return _resend;
+}
 
 export interface EmailTemplateConfig {
   subject_template?: string;
@@ -293,7 +299,7 @@ export async function sendOrderReceivedEmail(
     ? applyTemplateVars(opts.template.subject_template, order, appUrl)
     : `🚢 New Order #${order.order_number} — ${order.company_name} (${formatCurrency(order.subtotal)})`;
 
-  const businessResult = await resend.emails.send({
+  const businessResult = await getResend().emails.send({
     from:        fromEmail,
     to:          [toEmail],
     ...(ccList.length > 0 ? { cc: ccList } : {}),
@@ -316,7 +322,7 @@ export async function sendOrderReceivedEmail(
       buttonUrl:  `mailto:GraftonTowboatServices@gmail.com`,
       footerText: 'Grafton Towboat Services · Grafton, IL 62037 · (618) 556-0290 · GraftonTowboatServices@gmail.com',
     });
-    const customerResult = await resend.emails.send({
+    const customerResult = await getResend().emails.send({
       from:        fromEmail,
       to:          [order.customer_email],
       replyTo:     toEmail,
@@ -370,7 +376,7 @@ export async function sendOrderShoppedEmail(
     ? [toEmail, ...ccList].filter(Boolean)
     : ccList;
 
-  const result = await resend.emails.send({
+  const result = await getResend().emails.send({
     from:        fromEmail,
     to:          recipients,
     ...(cc.length > 0 ? { cc } : {}),
