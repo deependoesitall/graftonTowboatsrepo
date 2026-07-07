@@ -28,6 +28,9 @@ const POST_COOLDOWN_BUFFER_SECS = 15;
 const MAX_STUCK_COOLDOWNS = 3;
 const CHECKPOINT_KEY = 'freshop_enrich_checkpoint_v1';
 const CHECKPOINT_TTL_MS = 24 * 60 * 60 * 1000;
+// After a rate-limit pause, Sinclair's API often needs several quiet minutes
+// before it accepts requests again — resuming too soon fails on the first try.
+const RESUME_MIN_WAIT_MS = 5 * 60 * 1000;
 
 interface FreshopProduct {
   upc?: string;
@@ -232,14 +235,41 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
         if (!products?.length || ours.length >= (total || 0)) break;
       }
 
-      // Sinclair's catalog, page by page with live progress
-      const head = await fetch(`https://api.freshop.ncrcloud.com/1/products?app_key=${APP_KEY}&store_id=${STORE_ID}&limit=1`).then(r => r.json());
-      const total: number = head?.total ?? 0;
-      if (!total) throw new Error("Couldn't reach Sinclair's product catalog.");
-      const pages = Math.ceil(total / PAGE_SIZE);
-
       // Resume a partial download if the last run was interrupted by rate limits.
       const saved = loadCheckpoint();
+
+      if (saved && Date.now() - saved.savedAt < RESUME_MIN_WAIT_MS) {
+        const waitMs = RESUME_MIN_WAIT_MS - (Date.now() - saved.savedAt);
+        const waitMins = Math.ceil(waitMs / 60000);
+        pauseForResume(
+          new Set(saved.donePages),
+          saved.products,
+          saved.total,
+          saved.pages,
+          saved.donePages.length,
+          saved.pages - saved.donePages.length,
+        );
+        setError(
+          `Sinclair's API needs a quiet break after the last attempt. ` +
+          `Wait about ${waitMins} more minute${waitMins === 1 ? '' : 's'}, then click Resume download.`
+        );
+        return;
+      }
+
+      // Sinclair's catalog, page by page with live progress
+      let total: number;
+      let pages: number;
+      if (saved?.total && saved.pages) {
+        total = saved.total;
+        pages = saved.pages;
+      } else {
+        const head = await fetch(
+          `https://api.freshop.ncrcloud.com/1/products?app_key=${APP_KEY}&store_id=${STORE_ID}&limit=1`
+        ).then(r => r.json());
+        total = head?.total ?? 0;
+        if (!total) throw new Error("Couldn't reach Sinclair's product catalog.");
+        pages = Math.ceil(total / PAGE_SIZE);
+      }
       const doneSet = new Set<number>(saved?.pages === pages ? saved.donePages : []);
       const collected: FreshopProduct[] = saved?.pages === pages ? [...saved.products] : [];
       let indexed = collected.length;
