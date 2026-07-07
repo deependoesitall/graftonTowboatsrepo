@@ -589,22 +589,27 @@ export default function AdminSettingsPage() {
         <div className="space-y-6">
           <div className="card-base p-6 space-y-4">
             <h2 className="font-bold text-brand-navy">Weekly Ad</h2>
+            <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-xs text-green-800">
+              <p className="font-semibold mb-0.5">✓ Automatic</p>
+              The current ad is pulled from shop.sinclairsfoods.com/weekly-ad each week and shown
+              inline on the ordering site — customers never leave the site. Nothing to update here
+              unless auto-detection stops working.
+            </div>
             <div>
-              <label className="label-base">Weekly Ad PDF URL</label>
+              <label className="label-base">Manual Override — Weekly Ad PDF URL <span className="text-gray-400 font-normal normal-case">(optional)</span></label>
               <input type="url" className="input-base" value={settings.weekly_ad_url}
                 onChange={e => setSettings(s => ({ ...s, weekly_ad_url: e.target.value }))}
-                placeholder="https://…/weekly-ad.pdf" />
+                placeholder="Leave blank to auto-pull from Sinclair's website" />
               <p className="text-xs text-gray-400 mt-1">
-                Paste the link to this week&apos;s ad PDF. It displays inline on the ordering site
-                (customers never leave the site). Update it each week when the new ad comes out.
+                Only needed if the automatic pull breaks: paste the direct PDF link (right-click the
+                &quot;HERE&quot; print link on Sinclair&apos;s weekly ad page → Copy Link). Clear this field to
+                go back to automatic.
               </p>
             </div>
-            {settings.weekly_ad_url && (
-              <a href="/weekly-ad" target="_blank" rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs text-brand-river underline">
-                <Eye className="w-3.5 h-3.5" /> Preview how customers see it
-              </a>
-            )}
+            <a href="/weekly-ad" target="_blank" rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-xs text-brand-river underline">
+              <Eye className="w-3.5 h-3.5" /> Preview how customers see it
+            </a>
           </div>
 
           <div className="card-base p-6 space-y-4">
@@ -715,11 +720,27 @@ export default function AdminSettingsPage() {
                   <div>
                     <label className="label-base">Role</label>
                     <select className="input-base" value={newUser.role}
-                      onChange={e => setNewUser(u => ({ ...u, role: e.target.value }))}>
+                      onChange={e => {
+                        const role = e.target.value;
+                        setNewUser(u => ({
+                          ...u,
+                          role,
+                          // Managers here are Sinclair's staff — pre-check their access flag
+                          permissions: role === 'manager' && !u.permissions.includes('sinclair')
+                            ? [...u.permissions, 'sinclair']
+                            : u.permissions,
+                        }));
+                      }}>
                       <option value="owner">Owner — Full access</option>
-                      <option value="manager">Manager — Orders + Products</option>
+                      <option value="manager">Sinclair&apos;s Manager — products, orders, weekly ad, coupons</option>
                       <option value="staff">Staff — Orders only</option>
                     </select>
+                    {newUser.role === 'manager' && (
+                      <p className="text-[11px] text-gray-400 mt-1">
+                        Managers see: Sinclair-filtered orders, the full product catalog + import,
+                        weekly ad &amp; coupon management, and their own password. Nothing else.
+                      </p>
+                    )}
                   </div>
                 </div>
                 {/* Permissions */}
@@ -736,7 +757,7 @@ export default function AdminSettingsPage() {
                       }))} />
                     <div>
                       <p className="text-sm font-semibold text-brand-navy">Sinclair Foods Access</p>
-                      <p className="text-xs text-gray-400 mt-0.5">Scopes order list and shopping to grocery items only. Crew change and service-only orders are hidden.</p>
+                      <p className="text-xs text-gray-400 mt-0.5">Scopes the order list and shopping to grocery items only — crew change and service-only orders are hidden. Combine with the Sinclair&apos;s Manager role for Dave&apos;s team.</p>
                     </div>
                   </label>
                 </div>
@@ -801,8 +822,8 @@ export default function AdminSettingsPage() {
             )}
 
             <div className="bg-gray-50 px-6 py-3 text-xs text-gray-400 border-t border-gray-100">
-              Roles: Owner = all access · Manager = orders + products + user management · Staff = orders only
-              <span className="ml-3 text-emerald-600">Sinclair permission = scopes view to grocery items only</span>
+              Roles: Owner = all access · Sinclair&apos;s Manager = orders + products + weekly ad + coupons + own password · Staff = orders only
+              <span className="ml-3 text-emerald-600">Sinclair permission = scopes order view to grocery items only</span>
             </div>
           </div>
         </div>
