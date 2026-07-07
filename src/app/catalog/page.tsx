@@ -1,7 +1,7 @@
 // src/app/catalog/page.tsx
 import { Suspense } from 'react';
 import Link from 'next/link';
-import { Newspaper } from 'lucide-react';
+import { Newspaper, BadgePercent } from 'lucide-react';
 import { CouponStrip } from '@/components/catalog/CouponStrip';
 import { createClient } from '@/lib/supabase/server';
 import { ProductGrid } from '@/components/catalog/ProductGrid';
