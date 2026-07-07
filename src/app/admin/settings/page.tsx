@@ -116,6 +116,7 @@ export default function AdminSettingsPage() {
   const [newUser, setNewUser] = useState({ username: '', password: '', role: 'staff', display_name: '', permissions: [] as string[] });
   const [addingUser, setAddingUser] = useState(false);
   const [showAddUser, setShowAddUser] = useState(false);
+  const [showNewUserPw, setShowNewUserPw] = useState(false);
 
   // Activity logs
   const [logs, setLogs] = useState<ActivityLog[]>([]);
@@ -737,8 +738,16 @@ export default function AdminSettingsPage() {
                   </div>
                   <div>
                     <label className="label-base">Password</label>
-                    <input type="password" className="input-base" placeholder="At least 4 characters"
-                      value={newUser.password} onChange={e => setNewUser(u => ({ ...u, password: e.target.value }))} />
+                    <div className="relative">
+                      <input type={showNewUserPw ? 'text' : 'password'} className="input-base pr-10"
+                        placeholder="At least 4 characters"
+                        value={newUser.password} onChange={e => setNewUser(u => ({ ...u, password: e.target.value }))} />
+                      <button type="button" onClick={() => setShowNewUserPw(s => !s)}
+                        aria-label={showNewUserPw ? 'Hide password' : 'Show password'}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                        {showNewUserPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
                   </div>
                   <div>
                     <label className="label-base">Role</label>
