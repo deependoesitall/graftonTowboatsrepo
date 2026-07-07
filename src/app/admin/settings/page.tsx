@@ -33,6 +33,7 @@ interface Settings {
   weekly_ad_url: string;
   grocery_cutoff_hours: number;
   service_cutoff_hours: number;
+  show_digital_coupons: boolean;
 }
 
 interface Coupon {
@@ -95,6 +96,7 @@ export default function AdminSettingsPage() {
     weekly_ad_url: '',
     grocery_cutoff_hours: 4,
     service_cutoff_hours: 2,
+    show_digital_coupons: true,
   });
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
@@ -247,6 +249,7 @@ export default function AdminSettingsPage() {
           weekly_ad_url: settings.weekly_ad_url,
           grocery_cutoff_hours: settings.grocery_cutoff_hours,
           service_cutoff_hours: settings.service_cutoff_hours,
+          show_digital_coupons: settings.show_digital_coupons,
         }
       : settings;
     const res = await adminFetch('/api/admin/settings', {
@@ -634,6 +637,26 @@ export default function AdminSettingsPage() {
                   value={settings.service_cutoff_hours}
                   onChange={e => setSettings(s => ({ ...s, service_cutoff_hours: parseFloat(e.target.value) || 0 }))} />
               </div>
+            </div>
+          </div>
+
+          <div className="card-base p-6 space-y-3">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="font-bold text-brand-navy">Digital Coupons on the Catalog</h2>
+                <p className="text-xs text-gray-400 mt-1 leading-relaxed">
+                  Shows Sinclair&apos;s digital coupons (auto-pulled from your website) to boat crews on
+                  the ordering catalog. <strong className="text-brand-navy">Only leave this on if your
+                  staff will apply digital-coupon prices when shopping boat orders</strong> — crews
+                  don&apos;t have loyalty accounts to clip with, so showing savings you won&apos;t honor
+                  creates billing disputes.
+                </p>
+              </div>
+              <button
+                onClick={() => setSettings(s => ({ ...s, show_digital_coupons: !s.show_digital_coupons }))}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ${settings.show_digital_coupons ? 'bg-brand-green' : 'bg-gray-200'}`}>
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.show_digital_coupons ? 'translate-x-6' : 'translate-x-1'}`} />
+              </button>
             </div>
           </div>
 

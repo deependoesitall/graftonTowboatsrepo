@@ -21,6 +21,45 @@ interface PageProps {
   }>;
 }
 
+// ── Sinclair's digital coupons — auto-pulled from Freshop's public API ──
+// (Same platform behind shop.sinclairsfoods.com/digital-coupons; no auth
+// required. Verified against live traffic.)
+interface SinclairCoupon {
+  id: string;
+  name: string;
+  description: string | null;
+  brand: string | null;
+  offer_value: string | null;
+  cover_image_url: string | null;
+  finish_date: string | null;
+}
+
+async function fetchSinclairCoupons(): Promise<SinclairCoupon[]> {
+  try {
+    const res = await fetch(
+      'https://api.freshop.ncrcloud.com/1/offers?app_key=sinclair&is_clippable=true&limit=60&store_id=4297',
+      { next: { revalidate: 900 }, headers: { Accept: 'application/json' } }
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    const items: any[] = data?.items || [];
+    return items
+      .sort((a, b) => (b.popularity ?? 0) - (a.popularity ?? 0))
+      .slice(0, 12)
+      .map(o => ({
+        id: String(o.id),
+        name: o.name || '',
+        description: o.description || null,
+        brand: o.brand || null,
+        offer_value: o.offer_value || null,
+        cover_image_url: o.cover_image_url || null,
+        finish_date: o.finish_date || null,
+      }));
+  } catch {
+    return [];
+  }
+}
+
 export default async function CatalogPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const search   = params.search?.trim() || '';
@@ -51,7 +90,7 @@ export default async function CatalogPage({ searchParams }: PageProps) {
     query = query.eq('category', category);
   }
 
-  const [{ data: products, count }, { data: catCounts }, { data: coupons }] = await Promise.all([
+  const [{ data: products, count }, { data: catCounts }, { data: coupons }, sinclairCoupons] = await Promise.all([
     query,
     supabase.rpc('get_category_counts'),
     // Display-only coupons — RLS exposes only active, unexpired ones
@@ -59,6 +98,10 @@ export default async function CatalogPage({ searchParams }: PageProps) {
       .select('id, name, description, discount_type, discount_value, discount_text, applies_to, category, expires_at')
       .order('created_at', { ascending: false })
       .limit(6),
+    // Auto-pulled from Sinclair's digital coupons (cached 15 min) —
+    // only when the Sinclair manager has the toggle on
+    supabase.from('admin_settings').select('show_digital_coupons').single()
+      .then(({ data: s }) => (s?.show_digital_coupons ?? true) ? fetchSinclairCoupons() : []),
   ]);
 
   const totalPages = Math.ceil((count || 0) / perPage);
@@ -89,6 +132,39 @@ export default async function CatalogPage({ searchParams }: PageProps) {
               <span className="text-sm font-bold">View Sinclair&apos;s Weekly Ad</span>
               <span className="text-xs text-white/60 hidden sm:inline">— this week&apos;s specials, right here on the ordering site</span>
             </Link>
+            {/* Sinclair's digital coupons — auto-pulled, horizontal scroll */}
+            {sinclairCoupons.length > 0 && (
+              <div className="bg-white border border-gray-200 rounded-xl px-4 py-3">
+                <div className="flex items-baseline justify-between gap-2 mb-2">
+                  <p className="flex items-center gap-1.5 text-xs font-bold text-brand-navy uppercase tracking-wide">
+                    <BadgePercent className="w-3.5 h-3.5 text-brand-orange" /> Sinclair&apos;s Digital Coupons
+                  </p>
+                  <p className="text-[10px] text-gray-400">Savings applied when your order is shopped</p>
+                </div>
+                <div className="flex gap-2.5 overflow-x-auto pb-1 -mx-1 px-1 snap-x">
+                  {sinclairCoupons.map(c => (
+                    <div key={c.id}
+                      className="shrink-0 w-40 snap-start border border-gray-100 rounded-lg p-2.5 bg-gray-50/50">
+                      {c.cover_image_url && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={c.cover_image_url} alt={c.brand || c.name}
+                          loading="lazy" decoding="async"
+                          className="w-full h-16 object-contain mb-1.5 mix-blend-multiply" />
+                      )}
+                      <p className="text-xs font-bold text-brand-orange leading-tight">{c.offer_value ? `${c.offer_value} off` : c.name}</p>
+                      {c.brand && <p className="text-[10px] font-semibold text-brand-navy truncate">{c.brand}</p>}
+                      {c.description && <p className="text-[10px] text-gray-500 leading-snug line-clamp-2">{c.description}</p>}
+                      {c.finish_date && (
+                        <p className="text-[9px] text-gray-400 mt-1">
+                          thru {new Date(c.finish_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' })}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {coupons && coupons.length > 0 && (
               <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
                 <p className="flex items-center gap-1.5 text-xs font-bold text-amber-800 uppercase tracking-wide mb-1.5">
