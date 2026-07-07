@@ -73,8 +73,12 @@ function imageFrom(p: FreshopProduct): string | null {
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
+// NCR's API enforces a per-minute request quota: after ~60 rapid requests it
+// returns 400 for EVERYTHING until the window resets. So: one attempt per
+// page (plus one quick retry for network blips) — quota handling happens in
+// the outer loop with a cooldown, not by hammering retries.
 async function fetchFreshopPage(skip: number): Promise<FreshopProduct[] | null> {
-  for (let attempt = 0; attempt < 4; attempt++) {
+  for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const res = await fetch(
         `https://api.freshop.ncrcloud.com/1/products?app_key=${APP_KEY}&store_id=${STORE_ID}&limit=${PAGE_SIZE}&skip=${skip}&sort=name&name_sort=asc`
@@ -83,8 +87,8 @@ async function fetchFreshopPage(skip: number): Promise<FreshopProduct[] | null> 
         const data = await res.json();
         if (Array.isArray(data?.items)) return data.items as FreshopProduct[];
       }
-    } catch { /* retry */ }
-    await sleep(500 * (attempt + 1));
+      return null; // 400/429 → quota hit; let the outer loop cool down
+    } catch { await sleep(400); }
   }
   return null;
 }
@@ -132,28 +136,44 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
       setProgress({ done: 0, total: pages, label: `Downloading Sinclair's catalog…` });
 
       const index = new Map<string, FreshopProduct>();
-      let indexed = 0, failedPages = 0, donePages = 0;
-      for (let batchStart = 0; batchStart < pages; batchStart += 6) {
+      let indexed = 0, donePages = 0, cooldowns = 0;
+      const queue = Array.from({ length: pages }, (_, i) => i);
+
+      while (queue.length) {
         if (cancelRef.current) return;
-        const batch = [];
-        for (let p = batchStart; p < Math.min(batchStart + 6, pages); p++) {
-          batch.push(fetchFreshopPage(p * PAGE_SIZE));
-        }
-        const results = await Promise.all(batch);
-        for (const items of results) {
+        const batch = queue.splice(0, 3);
+        const results = await Promise.all(batch.map(p => fetchFreshopPage(p * PAGE_SIZE)));
+        const failed: number[] = [];
+        results.forEach((items, i) => {
+          if (items === null) { failed.push(batch[i]); return; }
           donePages++;
-          if (items === null) { failedPages++; continue; }
           indexed += items.length;
           for (const item of items) {
             for (const key of freshopKeys(item)) {
               if (!index.has(key)) index.set(key, item);
             }
           }
-        }
+        });
         setProgress({ done: donePages, total: pages, label: `Downloading Sinclair's catalog…` });
+
+        if (failed.length) {
+          // Quota wall — put the pages back and wait out the window
+          queue.unshift(...failed);
+          cooldowns++;
+          if (cooldowns > 10) {
+            throw new Error(`Sinclair's API kept rate-limiting after ${donePages} of ${pages} pages. Try again later.`);
+          }
+          for (let s = 65; s > 0; s--) {
+            if (cancelRef.current) return;
+            setProgress({ done: donePages, total: pages, label: `Sinclair's API limit reached — resuming in ${s}s…` });
+            await sleep(1000);
+          }
+        } else {
+          await sleep(600); // stay under the per-minute quota (~90 req/min)
+        }
       }
       if (indexed < total * 0.95) {
-        throw new Error(`Only ${indexed.toLocaleString()} of ${total.toLocaleString()} Sinclair products downloaded (${failedPages} pages failed). Try again in a minute.`);
+        throw new Error(`Only ${indexed.toLocaleString()} of ${total.toLocaleString()} Sinclair products downloaded. Try again in a few minutes.`);
       }
 
       // Match + compute updates locally
@@ -263,7 +283,7 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
                 </div>
                 <p className="text-xs text-gray-400">
                   {phase === 'scanning'
-                    ? `${progress.done} of ${progress.total} pages · runs in your browser, keep this tab open`
+                    ? `${progress.done} of ${progress.total} pages · takes 2–4 minutes (Sinclair's API is rate-limited) · keep this tab open`
                     : `${progress.done.toLocaleString()} of ${progress.total.toLocaleString()} products saved`}
                 </p>
               </div>
