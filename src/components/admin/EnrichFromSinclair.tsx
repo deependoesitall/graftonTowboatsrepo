@@ -7,7 +7,7 @@
 //   2. Matches YOUR products by UPC (exact, normalized — no fuzzy matching).
 //   3. Sends only the computed field updates to the server for validation
 //      and saving (details, image_url, billed_by_weight — nothing else).
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Sparkles, Loader2, X, CheckCircle2, AlertCircle, ImagePlus, FileText, Scale } from 'lucide-react';
 import { adminFetch } from '@/lib/admin-auth';
 
@@ -15,14 +15,19 @@ const APP_KEY = 'sinclair';
 const STORE_ID = '4297';
 const PAGE_SIZE = 100;
 const IMAGE_BASE = 'https://images.freshop.ncrcloud.com';
-// NCR Freshop returns error_code 429 (as HTTP 400) after ~50 req/min.
-// Verified live: 3 parallel pages + 600ms gaps still trips the limit around
-// page 8; one request every ~1.3s completes all ~124 pages reliably.
-const REQUEST_DELAY_MS = 1300;
-const COOLDOWN_SECS = 90;
-const MAX_COOLDOWNS = 15;
+// NCR Freshop returns error_code 429 (as HTTP 400). Limits appear to be both
+// per-minute (~50 req/min) and cumulative over a multi-minute run — the last
+// few pages often need a longer pause after a cooldown before retrying.
+const REQUEST_DELAY_MS = 1500;
+const SLOW_REQUEST_DELAY_MS = 3500;
+const COOLDOWN_BASE_SECS = 90;
+const COOLDOWN_MAX_SECS = 180;
+const POST_COOLDOWN_BUFFER_SECS = 15;
+// After this many cooldowns on the same page in one sitting, pause so the
+// admin can close the tab, wait a few minutes, and resume for the rest.
+const MAX_STUCK_COOLDOWNS = 3;
 const CHECKPOINT_KEY = 'freshop_enrich_checkpoint_v1';
-const CHECKPOINT_EVERY = 10;
+const CHECKPOINT_TTL_MS = 24 * 60 * 60 * 1000;
 
 interface FreshopProduct {
   upc?: string;
@@ -96,8 +101,8 @@ function loadCheckpoint(): EnrichCheckpoint | null {
     if (!raw) return null;
     const cp = JSON.parse(raw) as EnrichCheckpoint;
     if (cp.version !== 1 || !Array.isArray(cp.donePages) || !Array.isArray(cp.products)) return null;
-    // Expire after 2 hours — the catalog won't change that fast.
-    if (Date.now() - cp.savedAt > 2 * 60 * 60 * 1000) {
+    // Expire after 24 hours — enough time to pause and resume across sessions.
+    if (Date.now() - cp.savedAt > CHECKPOINT_TTL_MS) {
       sessionStorage.removeItem(CHECKPOINT_KEY);
       return null;
     }
@@ -147,13 +152,40 @@ async function fetchFreshopPage(skip: number): Promise<FreshopProduct[] | null> 
 
 export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
   const [open, setOpen] = useState(false);
-  const [phase, setPhase] = useState<'idle' | 'scanning' | 'ready' | 'applying' | 'done'>('idle');
+  const [phase, setPhase] = useState<'idle' | 'scanning' | 'paused' | 'ready' | 'applying' | 'done'>('idle');
   const [progress, setProgress] = useState({ done: 0, total: 0, label: '' });
   const [summary, setSummary] = useState<Summary | null>(null);
   const [overwrite, setOverwrite] = useState(false);
   const [error, setError] = useState('');
+  const [resumeHint, setResumeHint] = useState<string | null>(null);
   const updatesRef = useRef<{ id: string; fields: Record<string, unknown> }[]>([]);
   const cancelRef = useRef(false);
+  const scanningRef = useRef(false);
+  const checkpointRef = useRef<EnrichCheckpoint | null>(null);
+
+  useEffect(() => {
+    const cp = loadCheckpoint();
+    setResumeHint(cp ? `${cp.donePages.length}/${cp.pages} pages saved` : null);
+  }, [phase, open]);
+
+  function touchCheckpoint(
+    doneSet: Set<number>,
+    collected: FreshopProduct[],
+    total: number,
+    pages: number,
+  ) {
+    const cp: EnrichCheckpoint = {
+      version: 1,
+      total,
+      pages,
+      donePages: Array.from(doneSet),
+      products: collected,
+      savedAt: Date.now(),
+    };
+    checkpointRef.current = cp;
+    saveCheckpoint(cp);
+    return cp;
+  }
 
   async function readError(res: Response): Promise<string> {
     const text = await res.text();
@@ -161,10 +193,30 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
     catch { return text.slice(0, 200) || `HTTP ${res.status}`; }
   }
 
+  function pauseForResume(
+    doneSet: Set<number>,
+    collected: FreshopProduct[],
+    total: number,
+    pages: number,
+    donePages: number,
+    pagesLeft: number,
+  ) {
+    touchCheckpoint(doneSet, collected, total, pages);
+    setProgress({
+      done: donePages,
+      total: pages,
+      label: `Paused at ${donePages} of ${pages} pages (${pagesLeft} left)`,
+    });
+    setPhase('paused');
+    scanningRef.current = false;
+  }
+
   // ── Phase 1+2: download Sinclair catalog in the browser, match locally ──
   async function scan() {
     setOpen(true); setPhase('scanning'); setError(''); setSummary(null);
     cancelRef.current = false;
+    scanningRef.current = true;
+    checkpointRef.current = null;
     try {
       // Our catalog first (admin API, paginated)
       setProgress({ done: 0, total: 1, label: 'Loading your catalog…' });
@@ -192,7 +244,11 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
       const collected: FreshopProduct[] = saved?.pages === pages ? [...saved.products] : [];
       let indexed = collected.length;
       let donePages = doneSet.size;
-      let cooldowns = 0;
+      let slowMode = false;
+      let streakSinceLimit = 0;
+      let requestDelayMs = REQUEST_DELAY_MS;
+      let stuckPage: number | null = null;
+      let stuckCooldowns = 0;
       const queue = Array.from({ length: pages }, (_, i) => i).filter(i => !doneSet.has(i));
 
       setProgress({
@@ -202,36 +258,54 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
           ? `Resuming Sinclair's catalog (${donePages} of ${pages} pages already downloaded)…`
           : `Downloading Sinclair's catalog…`,
       });
+      touchCheckpoint(doneSet, collected, total, pages);
 
       while (queue.length) {
-        if (cancelRef.current) return;
+        if (cancelRef.current) {
+          touchCheckpoint(doneSet, collected, total, pages);
+          return;
+        }
         const page = queue.shift()!;
         const items = await fetchFreshopPage(page * PAGE_SIZE);
 
         if (items === null) {
           queue.unshift(page);
-          cooldowns++;
-          if (cooldowns > MAX_COOLDOWNS) {
-            saveCheckpoint({
-              version: 1, total, pages,
-              donePages: Array.from(doneSet),
-              products: collected,
-              savedAt: Date.now(),
-            });
-            throw new Error(
-              `Sinclair's API kept rate-limiting after ${donePages} of ${pages} pages. ` +
-              `Progress was saved — click Enrich again to resume where it left off.`
-            );
+          slowMode = true;
+          requestDelayMs = SLOW_REQUEST_DELAY_MS;
+          streakSinceLimit = 0;
+          if (stuckPage === page) stuckCooldowns++;
+          else { stuckPage = page; stuckCooldowns = 1; }
+
+          touchCheckpoint(doneSet, collected, total, pages);
+
+          if (stuckCooldowns >= MAX_STUCK_COOLDOWNS) {
+            pauseForResume(doneSet, collected, total, pages, donePages, queue.length);
+            return;
           }
-          for (let s = COOLDOWN_SECS; s > 0; s--) {
-            if (cancelRef.current) return;
+
+          const waitSecs = Math.min(
+            COOLDOWN_BASE_SECS + (stuckCooldowns - 1) * 30,
+            COOLDOWN_MAX_SECS,
+          );
+          for (let s = waitSecs; s > 0; s--) {
+            if (cancelRef.current) {
+              touchCheckpoint(doneSet, collected, total, pages);
+              return;
+            }
             setProgress({
               done: donePages,
               total: pages,
-              label: `Sinclair's API limit reached — resuming in ${s}s…`,
+              label: `Sinclair's API limit — resuming in ${s}s (${queue.length} pages left after this)…`,
             });
             await sleep(1000);
           }
+          // Extra buffer after the countdown — immediate retries often 429 again.
+          setProgress({
+            done: donePages,
+            total: pages,
+            label: `Cool-down complete — retrying slowly (${queue.length} pages left)…`,
+          });
+          await sleep(POST_COOLDOWN_BUFFER_SECS * 1000);
           continue;
         }
 
@@ -239,25 +313,33 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
         donePages++;
         indexed += items.length;
         collected.push(...items);
-        setProgress({ done: donePages, total: pages, label: `Downloading Sinclair's catalog…` });
-
-        if (donePages % CHECKPOINT_EVERY === 0) {
-          saveCheckpoint({
-            version: 1, total, pages,
-            donePages: Array.from(doneSet),
-            products: collected,
-            savedAt: Date.now(),
-          });
+        streakSinceLimit++;
+        stuckPage = null;
+        stuckCooldowns = 0;
+        if (slowMode && streakSinceLimit >= 5) {
+          requestDelayMs = REQUEST_DELAY_MS;
         }
+        setProgress({
+          done: donePages,
+          total: pages,
+          label: slowMode
+            ? `Downloading Sinclair's catalog (slow mode — ${queue.length} pages left)…`
+            : `Downloading Sinclair's catalog…`,
+        });
 
-        await sleep(REQUEST_DELAY_MS);
+        touchCheckpoint(doneSet, collected, total, pages);
+
+        await sleep(requestDelayMs);
+      }
+
+      if (donePages < pages) {
+        pauseForResume(doneSet, collected, total, pages, donePages, pages - donePages);
+        return;
       }
 
       clearCheckpoint();
+      setResumeHint(null);
       const index = indexFromProducts(collected);
-      if (indexed < total * 0.95) {
-        throw new Error(`Only ${indexed.toLocaleString()} of ${total.toLocaleString()} Sinclair products downloaded. Try again in a few minutes.`);
-      }
 
       // Match + compute updates locally
       const updates: { id: string; fields: Record<string, unknown> }[] = [];
@@ -287,6 +369,8 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Scan failed');
       setPhase('idle');
+    } finally {
+      scanningRef.current = false;
     }
   }
 
@@ -328,6 +412,9 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
 
   function close() {
     cancelRef.current = true;
+    if (scanningRef.current && checkpointRef.current) {
+      saveCheckpoint(checkpointRef.current);
+    }
     setOpen(false); setPhase('idle'); setSummary(null); setError('');
   }
 
@@ -338,7 +425,8 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
       <button onClick={scan}
         className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5"
         title="Pull matching product images & descriptions from Sinclair's website">
-        <Sparkles className="w-4 h-4" /> Enrich from Sinclair&apos;s
+        <Sparkles className="w-4 h-4" />
+        {resumeHint ? `Resume (${resumeHint})` : <>Enrich from Sinclair&apos;s</>}
       </button>
 
       {open && (
@@ -366,9 +454,38 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
                 </div>
                 <p className="text-xs text-gray-400">
                   {phase === 'scanning'
-                    ? `${progress.done} of ${progress.total} pages · ~3 min (Sinclair's API allows ~50 requests/min) · keep this tab open`
+                    ? `${progress.done} of ${progress.total} pages · you can close anytime — progress is saved and resumes next run`
                     : `${progress.done.toLocaleString()} of ${progress.total.toLocaleString()} products saved`}
                 </p>
+              </div>
+            )}
+
+            {phase === 'paused' && (
+              <div className="py-2">
+                <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="text-sm text-amber-900">
+                    <p className="font-semibold mb-1">
+                      Paused at {progress.done} of {progress.total} pages
+                    </p>
+                    <p>
+                      Sinclair&apos;s API needs a longer break before the remaining pages.
+                      Progress is saved — wait a few minutes, then click <strong>Resume</strong> to
+                      finish the full catalog (all {progress.total} pages required before matching).
+                    </p>
+                  </div>
+                </div>
+                <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden mb-4">
+                  <div className="bg-brand-gold h-3 rounded-full" style={{ width: `${pct}%` }} />
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={scan} className="btn-gold flex-1 py-2.5 rounded-lg text-sm font-bold">
+                    Resume download
+                  </button>
+                  <button onClick={close} className="btn-outline text-sm px-4 py-2.5 rounded-lg">
+                    Close
+                  </button>
+                </div>
               </div>
             )}
 
