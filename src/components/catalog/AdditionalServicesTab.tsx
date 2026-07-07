@@ -4,7 +4,7 @@
 // delivery-area wording, and crew change (tri-state) card.
 
 import { useState, useEffect } from 'react';
-import { Package, Wrench, Check, X, ChevronDown, Users, Info, Ship, Truck, Phone } from 'lucide-react';
+import { Package, Wrench, Check, X, ChevronDown, Users, Info, Ship, Truck } from 'lucide-react';
 import { AdditionalServices, VesselInfo } from '@/types';
 import {
   getAdditionalServices, saveAdditionalServices,
@@ -99,8 +99,8 @@ export function AdditionalServicesTab() {
           <div>
             <p className="text-sm font-bold text-brand-navy">By land</p>
             <p className="text-xs text-gray-500 leading-relaxed">
-              Van delivery to terminals, locks, and fleeting areas in the Grafton area. Not sure if
-              we reach you? <a href="tel:6185560290" className="text-brand-river underline">Give us a call</a>.
+              Van delivery to terminals, locks, and fleeting areas in the Grafton area — note your
+              exact location at checkout and we&apos;ll confirm.
             </p>
           </div>
         </div>
@@ -252,10 +252,6 @@ export function AdditionalServicesTab() {
         </p>
       </AccordionCard>
 
-      <p className="flex items-center justify-center gap-1.5 text-xs text-gray-400 pt-1">
-        <Phone className="w-3.5 h-3.5" />
-        Delivery / logistics questions? <a href="tel:6185560290" className="text-brand-river font-semibold">Call Grafton Towboat Services (618) 556-0290</a>
-      </p>
     </div>
   );
 }

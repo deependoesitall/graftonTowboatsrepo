@@ -515,8 +515,6 @@ export default function OrderPage() {
           className="w-full btn-gold text-base py-4 flex items-center justify-center gap-2 rounded-lg">
           Next: Vessel &amp; Delivery Info <ChevronRight className="w-5 h-5" />
         </button>
-
-        <ContactPhones className="mt-8" />
       </main>
       <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} defaultMode="signin" defaultEmail={vessel.email} title="Sign In" />
     </div>

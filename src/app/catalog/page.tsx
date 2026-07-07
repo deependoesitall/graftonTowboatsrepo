@@ -9,7 +9,7 @@ import { SearchBar } from '@/components/catalog/SearchBar';
 import { CatalogTabBar } from '@/components/catalog/CatalogTabBar';
 import { AdditionalServicesTab } from '@/components/catalog/AdditionalServicesTab';
 import { OtherPickupCard } from '@/components/catalog/OtherPickupCard';
-import { ContactPhones } from '@/components/layout/ContactPhones';
+import { fetchSinclairCoupons } from '@/lib/sinclair-coupons';
 import { MAIN_CATEGORIES } from '@/lib/utils';
 
 interface PageProps {
@@ -21,43 +21,13 @@ interface PageProps {
   }>;
 }
 
-// ── Sinclair's digital coupons — auto-pulled from Freshop's public API ──
-// (Same platform behind shop.sinclairsfoods.com/digital-coupons; no auth
-// required. Verified against live traffic.)
-interface SinclairCoupon {
-  id: string;
-  name: string;
-  description: string | null;
-  brand: string | null;
-  offer_value: string | null;
-  cover_image_url: string | null;
-  finish_date: string | null;
-}
-
-async function fetchSinclairCoupons(): Promise<SinclairCoupon[]> {
-  try {
-    const res = await fetch(
-      'https://api.freshop.ncrcloud.com/1/offers?app_key=sinclair&is_clippable=true&limit=60&store_id=4297',
-      { next: { revalidate: 900 }, headers: { Accept: 'application/json' } }
-    );
-    if (!res.ok) return [];
-    const data = await res.json();
-    const items: any[] = data?.items || [];
-    return items
-      .sort((a, b) => (b.popularity ?? 0) - (a.popularity ?? 0))
-      .slice(0, 12)
-      .map(o => ({
-        id: String(o.id),
-        name: o.name || '',
-        description: o.description || null,
-        brand: o.brand || null,
-        offer_value: o.offer_value || null,
-        cover_image_url: o.cover_image_url || null,
-        finish_date: o.finish_date || null,
-      }));
-  } catch {
-    return [];
-  }
+// ── Sinclair's digital coupons — auto-pulled (see src/lib/sinclair-coupons) ──
+async function fetchCouponPreview() {
+  const { items, total } = await fetchSinclairCoupons(60);
+  return {
+    total,
+    preview: items.sort((a, b) => b.popularity - a.popularity).slice(0, 12),
+  };
 }
 
 export default async function CatalogPage({ searchParams }: PageProps) {
@@ -90,7 +60,7 @@ export default async function CatalogPage({ searchParams }: PageProps) {
     query = query.eq('category', category);
   }
 
-  const [{ data: products, count }, { data: catCounts }, { data: coupons }, sinclairCoupons] = await Promise.all([
+  const [{ data: products, count }, { data: catCounts }, { data: coupons }, couponData] = await Promise.all([
     query,
     supabase.rpc('get_category_counts'),
     // Display-only coupons — RLS exposes only active, unexpired ones
@@ -101,8 +71,9 @@ export default async function CatalogPage({ searchParams }: PageProps) {
     // Auto-pulled from Sinclair's digital coupons (cached 15 min) —
     // only when the Sinclair manager has the toggle on
     supabase.from('admin_settings').select('show_digital_coupons').single()
-      .then(({ data: s }) => (s?.show_digital_coupons ?? true) ? fetchSinclairCoupons() : []),
+      .then(({ data: s }) => (s?.show_digital_coupons ?? true) ? fetchCouponPreview() : { total: 0, preview: [] }),
   ]);
+  const sinclairCoupons = couponData.preview;
 
   const totalPages = Math.ceil((count || 0) / perPage);
 
@@ -135,11 +106,14 @@ export default async function CatalogPage({ searchParams }: PageProps) {
             {/* Sinclair's digital coupons — auto-pulled, horizontal scroll */}
             {sinclairCoupons.length > 0 && (
               <div className="bg-white border border-gray-200 rounded-xl px-4 py-3">
-                <div className="flex items-baseline justify-between gap-2 mb-2">
+                <div className="flex items-baseline justify-between gap-2 mb-2 flex-wrap">
                   <p className="flex items-center gap-1.5 text-xs font-bold text-brand-navy uppercase tracking-wide">
                     <BadgePercent className="w-3.5 h-3.5 text-brand-orange" /> Sinclair&apos;s Digital Coupons
+                    <span className="font-normal normal-case text-gray-400">— top picks</span>
                   </p>
-                  <p className="text-[10px] text-gray-400">Savings applied when your order is shopped</p>
+                  <Link href="/coupons" className="text-xs font-bold text-brand-river hover:underline whitespace-nowrap">
+                    View all {couponData.total.toLocaleString()} coupons →
+                  </Link>
                 </div>
                 <div className="flex gap-2.5 overflow-x-auto pb-1 -mx-1 px-1 snap-x">
                   {sinclairCoupons.map(c => (
@@ -224,8 +198,6 @@ export default async function CatalogPage({ searchParams }: PageProps) {
         </div>
       )}
 
-      {/* Contact phone numbers */}
-      <ContactPhones className="mt-8 max-w-2xl" />
     </div>
   );
 }

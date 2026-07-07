@@ -70,6 +70,7 @@ interface BillingOrder {
   company_name: string;
   contact_name: string;
   phone: string;
+  customer_email: string | null;
   po_number: string | null;
   vessel_name: string | null;
   subtotal: number;
@@ -134,7 +135,7 @@ function csvEscape(val: unknown): string {
 }
 
 function billingCsv(orders: BillingOrder[]): string {
-  const header = 'Order #,Company,Contact,Date,Items Ordered,Items Delivered (subs noted),Estimated Total,Final Total\n';
+  const header = 'Order #,Company,Contact,Phone,Billing Email,Vessel,PO #,Date,Items Ordered,Items Delivered (subs noted),Estimated Total,Final Total\n';
   const rows = orders.map(o => {
     const grocery = o.items.filter(i => i.item_type !== 'service');
     const services = o.items.filter(i => i.item_type === 'service');
@@ -157,6 +158,10 @@ function billingCsv(orders: BillingOrder[]): string {
       o.order_number,
       o.company_name,
       o.contact_name,
+      o.phone,
+      o.customer_email || '',
+      o.vessel_name || '',
+      o.po_number || '',
       new Date(o.created_at).toLocaleDateString(),
       orderedCol,
       deliveredCol,
@@ -251,7 +256,7 @@ function statementHtml(companies: [string, BillingOrder[]][], monthLabel: string
       <td style="padding:12px 22px;">
         <div style="font-size:8px;font-weight:800;color:#666;text-transform:uppercase;letter-spacing:1px;">Bill To</div>
         <div style="font-size:16px;font-weight:900;color:${GREEN};">${esc(company)}</div>
-        <div style="font-size:10px;color:#555;">${esc(first.contact_name)}${first.phone ? ` · ${esc(first.phone)}` : ''}</div>
+        <div style="font-size:10px;color:#555;">${esc(first.contact_name)}${first.phone ? ` · ${esc(first.phone)}` : ''}${first.customer_email ? ` · ${esc(first.customer_email)}` : ''}</div>
       </td>
       <td style="padding:12px 22px;text-align:right;">
         <div style="font-size:8px;font-weight:800;color:#666;text-transform:uppercase;letter-spacing:1px;">Orders This Period</div>
@@ -664,7 +669,17 @@ function BillingOrderTable({ orders, selected, onToggle, showCompany = false, sh
                 </td>
                 <td className="px-4 py-2.5 font-mono text-xs font-bold text-brand-navy">{o.order_number}</td>
                 {showCompany && <td className="px-4 py-2.5 text-xs text-brand-navy font-semibold">{o.company_name}</td>}
-                <td className="px-4 py-2.5 text-xs text-gray-600">{o.contact_name}</td>
+                <td className="px-4 py-2.5 text-xs text-gray-600">
+                  {o.contact_name}
+                  <span className="block text-[10px] text-gray-400">
+                    {[o.phone, o.customer_email].filter(Boolean).join(' · ')}
+                  </span>
+                  {(o.vessel_name || o.po_number) && (
+                    <span className="block text-[10px] text-gray-400">
+                      {[o.vessel_name, o.po_number ? `PO #${o.po_number}` : ''].filter(Boolean).join(' · ')}
+                    </span>
+                  )}
+                </td>
                 <td className="px-4 py-2.5 text-xs text-gray-400 whitespace-nowrap">{new Date(o.created_at).toLocaleDateString()}</td>
                 <td className="px-4 py-2.5 text-xs">{orderedQty} items{svcCount > 0 && <span className="text-gray-400"> +{svcCount} svc</span>}</td>
                 <td className="px-4 py-2.5 text-xs">

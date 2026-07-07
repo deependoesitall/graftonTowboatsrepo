@@ -2,7 +2,7 @@
 // src/components/layout/SiteHeader.tsx
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
-import { ShoppingCart, Menu, X, Phone, User } from 'lucide-react';
+import { ShoppingCart, Menu, X, User } from 'lucide-react';
 import { getCart, getCartCount, getCartTotal } from '@/lib/cart';
 import { formatCurrency } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
@@ -38,15 +38,12 @@ export function SiteHeader() {
           />
         </Link>
 
-        {/* Desktop nav */}
+        {/* Desktop nav — no phone number here on purpose: contact options
+            appear only late in the order flow (review/submit + confirmation) */}
         <nav className="hidden md:flex items-center gap-6">
           <Link href="/catalog" className="text-brand-green font-body font-semibold text-sm hover:text-brand-orange transition-colors tracking-wide">
             Browse Items
           </Link>
-          <a href="tel:6185560290" className="flex items-center gap-1.5 text-brand-green/70 hover:text-brand-green text-sm font-body transition-colors">
-            <Phone className="w-3.5 h-3.5" />
-            (618) 556-0290
-          </a>
         </nav>
 
         {/* Cart + hamburger */}
@@ -137,9 +134,6 @@ export function SiteHeader() {
               <User className="w-4 h-4" /> Sign In / Create Account
             </button>
           )}
-          <a href="tel:6185560290" className="text-brand-yellow/80 text-sm py-3 px-3 flex items-center gap-2 font-body">
-            <Phone className="w-4 h-4" /> (618) 556-0290
-          </a>
         </div>
       )}
       <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
