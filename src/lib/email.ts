@@ -98,6 +98,8 @@ export function buildOrderEmailHtml(
         const d = (item.service_details || {}) as Record<string, string>;
         const details = item.service_type === 'parts_pickup'
           ? [d.pickup_location && `Pickup: ${d.pickup_location}`, d.order_number && `Order #${d.order_number}`, d.contact_name && `Contact: ${d.contact_name}`, d.contact_phone && d.contact_phone].filter(Boolean).join(' · ')
+          : item.service_type === 'other_pickup'
+          ? [d.url && `Link: ${d.url}`, d.notes && d.notes, 'Handled by Sinclair’s'].filter(Boolean).join(' · ')
           : [d.description && `Item: ${d.description}`, d.origin && `From: ${d.origin}`, d.contact_name && `Contact: ${d.contact_name}`, d.contact_phone && d.contact_phone].filter(Boolean).join(' · ');
         return `<tr style="border-bottom:1px solid #f0f0f0;">
           <td style="padding:10px;font-size:13px;font-weight:700;color:#1E3D1E;width:35%;">${item.description}</td>
@@ -173,10 +175,14 @@ export function buildOrderEmailHtml(
           ${order.arrival_date  ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Arrival Date</div><div style="font-size:15px;font-weight:900;color:#E8640A;">${order.arrival_date}</div></td>` : '<td></td>'}
           ${order.arrival_time  ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Arrival Time</div><div style="font-size:15px;font-weight:900;color:#E8640A;">${order.arrival_time}</div></td>` : '<td></td>'}
         </tr>
-        ${(deliveryMethodLabel || order.crew_change) ? `<tr>
+        ${(deliveryMethodLabel || order.crew_change !== 'no') ? `<tr>
           ${deliveryMethodLabel ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Method</div><div style="font-size:13px;font-weight:700;">${deliveryMethodLabel}${approachLabel ? ` · ${approachLabel} side` : ''}</div></td>` : '<td></td>'}
           ${order.vhf_channel ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">VHF</div><div style="font-size:13px;font-weight:600;">${order.vhf_channel}</div></td>` : '<td></td>'}
-          ${order.crew_change ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Crew Change</div><div style="font-size:13px;font-weight:700;color:#E8640A;">YES — ${order.crew_arriving ?? 0} in / ${order.crew_departing ?? 0} out</div></td>` : '<td></td>'}
+          ${order.crew_change === 'yes'
+            ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Crew Change</div><div style="font-size:13px;font-weight:700;color:#E8640A;">YES — ${order.crew_arriving ?? 0} in / ${order.crew_departing ?? 0} out</div></td>`
+            : order.crew_change === 'maybe'
+            ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Crew Change</div><div style="font-size:13px;font-weight:700;color:#B45309;">MAYBE${order.crew_change_notes ? ` — ${order.crew_change_notes}` : ''}</div></td>`
+            : '<td></td>'}
         </tr>` : ''}
       </table>
     </div>` : ''}
@@ -184,6 +190,11 @@ export function buildOrderEmailHtml(
     ${order.notes ? `<div style="background:#fff8ec;border:1px solid #E8640A;padding:10px 14px;border-radius:4px;margin-bottom:20px;">
       <div style="font-size:9px;font-weight:800;color:#E8640A;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Special Instructions</div>
       <div style="font-size:12px;color:#444;">${order.notes}</div>
+    </div>` : ''}
+
+    ${ext.personal_cod_notes ? `<div style="background:#faf5ff;border:1px solid #9333ea;padding:10px 14px;border-radius:4px;margin-bottom:20px;">
+      <div style="font-size:9px;font-weight:800;color:#9333ea;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Personal / COD Items — collect payment on delivery</div>
+      <div style="font-size:12px;color:#444;">${ext.personal_cod_notes}</div>
     </div>` : ''}
 
     <!-- Items table -->
@@ -205,7 +216,7 @@ export function buildOrderEmailHtml(
       <tbody>${itemRows}</tbody>
       <tfoot>
         <tr style="background:#D9E84A;">
-          <td colspan="5" style="padding:10px;font-size:14px;font-weight:900;color:#1E3D1E;text-transform:uppercase;">ORDER TOTAL</td>
+          <td colspan="5" style="padding:10px;font-size:14px;font-weight:900;color:#1E3D1E;text-transform:uppercase;">ESTIMATED TOTAL</td>
           <td style="padding:10px;text-align:right;font-size:16px;font-weight:900;color:#1E3D1E;">${formatCurrency(order.subtotal)}</td>
         </tr>
       </tfoot>
@@ -339,9 +350,16 @@ export async function sendOrderShoppedEmail(
   const pdfBuffer2 = await generateOrderPdfBuffer(order);
   const pdfAttachment2 = [{ filename: `order-${order.order_number}-fulfilled.pdf`, content: pdfBuffer2 }];
 
+  // Orders with no grocery items (crew change / services only) were never
+  // "shopped" — use neutral fulfillment language for those.
+  const hasGroceryItems = order.items.some(i => i.item_type !== 'service');
+  const intro = hasGroceryItems
+    ? `Great news, ${order.contact_name}! Your order has been shopped and is ready. Please find your final order summary attached.`
+    : `Good news, ${order.contact_name}! Your request has been fulfilled. Please find your final order summary attached.`;
+
   const shoppedHtml = buildOrderEmailHtml(order, {
     tagline:    'Order Fulfilled',
-    intro:      `Great news, ${order.contact_name}! Your order has been shopped and is ready. Please find your final order summary attached.`,
+    intro,
     buttonText: 'Questions? Contact Us',
     buttonUrl:  `mailto:GraftonTowboatServices@gmail.com`,
     footerText: 'Grafton Towboat Services · Grafton, IL 62037 · (618) 556-0290 · GraftonTowboatServices@gmail.com',
@@ -357,7 +375,9 @@ export async function sendOrderShoppedEmail(
     to:          recipients,
     ...(cc.length > 0 ? { cc } : {}),
     replyTo:     toEmail,
-    subject:     `📦 Your Order is Ready — ${order.order_number} — Grafton Towboat Services`,
+    subject:     hasGroceryItems
+                   ? `📦 Your Order is Ready — ${order.order_number} — Grafton Towboat Services`
+                   : `✅ Your Request is Fulfilled — ${order.order_number} — Grafton Towboat Services`,
     html:        shoppedHtml,
     attachments: pdfAttachment2,
   });

@@ -14,7 +14,7 @@ export function generateOrderHTML(order: Order): string {
   const serviceItems = order.items.filter(i => i.item_type === 'service');
   const isFulfilled       = order.status === 'fulfilled';
   const itemCount         = groceryItems.reduce((s, i) => s + i.quantity, 0);
-  const isCrewChangeOnly  = !!order.crew_change && groceryItems.length === 0;
+  const isCrewChangeOnly  = order.crew_change !== 'no' && groceryItems.length === 0;
 
   // Group groceries by category
   const grouped = groceryItems.reduce((acc, item) => {
@@ -69,6 +69,8 @@ export function generateOrderHTML(order: Order): string {
     const d = (item.service_details || {}) as Record<string, string>;
     const details = item.service_type === 'parts_pickup'
       ? [d.pickup_location && `Pickup: ${d.pickup_location}`, d.order_number && `Order #: ${d.order_number}`, d.contact_name && `Contact: ${d.contact_name}`, d.contact_phone && `Phone: ${d.contact_phone}`].filter(Boolean).join(' &nbsp;&bull;&nbsp; ')
+      : item.service_type === 'other_pickup'
+      ? [d.url && `Link: ${d.url}`, d.notes && d.notes, 'Handled by Sinclair’s'].filter(Boolean).join(' &nbsp;&bull;&nbsp; ')
       : [d.description && `Item: ${d.description}`, d.origin && `From: ${d.origin}`, d.contact_name && `Contact: ${d.contact_name}`, d.contact_phone && `Phone: ${d.contact_phone}`].filter(Boolean).join(' &nbsp;&bull;&nbsp; ');
     return `<tr style="border-bottom:1px solid #eee;">
       <td style="padding:8px 10px;font-weight:700;color:#1E3D1E;width:30%;">${item.description}</td>
@@ -109,7 +111,7 @@ export function generateOrderHTML(order: Order): string {
       <div style="font-size:20px;font-weight:900;color:#1E3D1E;text-transform:uppercase;letter-spacing:-0.5px;">Grafton Towboat Services</div>
       <div style="font-size:11px;color:#E8640A;font-weight:700;margin:2px 0;">GROCERIES, SUPPLIES &amp; CREW CHANGE</div>
       <div style="font-size:10px;color:#555;line-height:1.6;margin-top:4px;">
-        25 Dagget Hollow &middot; Grafton, IL 62037 &middot; Mile Marker 218<br>
+        25 Dagget Hollow &middot; Grafton, IL 62037 &middot; Mile Marker 219 on the Mississippi River, Mile Marker 0 on the Illinois River<br>
         (618) 556-0290 &middot; GraftonTowboatServices@gmail.com
       </div>
     </td>
@@ -178,10 +180,14 @@ ${(order.terminal_name || order.arrival_date) ? `
       ${order.arrival_date ? `<td width="30%" style="padding-bottom:6px;"><div style="font-size:9px;color:#666;">ARRIVAL DATE</div><div style="font-size:13px;font-weight:700;color:#E8640A;">${order.arrival_date}</div></td>` : '<td></td>'}
       ${order.arrival_time ? `<td width="30%" style="padding-bottom:6px;"><div style="font-size:9px;color:#666;">ARRIVAL TIME</div><div style="font-size:13px;font-weight:700;color:#E8640A;">${order.arrival_time}</div></td>` : '<td></td>'}
     </tr>
-    ${deliveryMethod || order.vhf_channel || order.crew_change ? `<tr>
+    ${deliveryMethod || order.vhf_channel || order.crew_change !== 'no' ? `<tr>
       ${deliveryMethod ? `<td style="padding-bottom:4px;"><div style="font-size:9px;color:#666;">METHOD</div><div style="font-size:11px;font-weight:700;">${deliveryMethod}${approachSide ? ` &middot; ${approachSide} side` : ''}</div></td>` : '<td></td>'}
       ${order.vhf_channel ? `<td><div style="font-size:9px;color:#666;">VHF CHANNEL</div><div style="font-size:11px;font-weight:600;">${order.vhf_channel}</div></td>` : '<td></td>'}
-      ${order.crew_change ? `<td><div style="font-size:9px;color:#666;">CREW CHANGE</div><div style="font-size:11px;font-weight:700;color:#E8640A;">YES &mdash; ${order.crew_arriving ?? 0} arriving / ${order.crew_departing ?? 0} departing</div></td>` : '<td></td>'}
+      ${order.crew_change === 'yes'
+        ? `<td><div style="font-size:9px;color:#666;">CREW CHANGE</div><div style="font-size:11px;font-weight:700;color:#E8640A;">YES &mdash; ${order.crew_arriving ?? 0} arriving / ${order.crew_departing ?? 0} departing</div></td>`
+        : order.crew_change === 'maybe'
+        ? `<td><div style="font-size:9px;color:#666;">CREW CHANGE</div><div style="font-size:11px;font-weight:700;color:#B45309;">MAYBE &mdash; to be confirmed</div></td>`
+        : '<td></td>'}
     </tr>` : ''}
     ${ext.secondary_terminal_name ? `<tr>
       <td colspan="3" style="padding-top:6px;border-top:1px solid #eee;">
@@ -202,7 +208,7 @@ ${order.notes ? `
 </div>` : ''}
 
 <!-- ===== CREW CHANGE BLOCK ===== -->
-${order.crew_change ? `
+${order.crew_change === 'yes' ? `
 <div style="border:3px solid #E8640A;padding:16px 20px;background:#fff8f0;border-radius:4px;margin-bottom:16px;">
   <div style="font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:#E8640A;margin-bottom:10px;">&#9992; Crew Change Required</div>
   <table width="100%">
@@ -217,10 +223,25 @@ ${order.crew_change ? `
       </td>
     </tr>
   </table>
+  ${order.crew_change_notes ? `<div style="margin-top:8px;font-size:11px;color:#555;"><strong>Notes:</strong> ${order.crew_change_notes}</div>` : ''}
   ${order.terminal_name || order.arrival_date ? `<div style="margin-top:10px;padding-top:10px;border-top:1px solid #f0d0b0;font-size:11px;color:#555;">
     ${order.terminal_name ? `<strong>Location:</strong> ${order.terminal_name}&nbsp;&nbsp;` : ''}
     ${order.arrival_date ? `<strong>Date:</strong> ${order.arrival_date}${order.arrival_time ? ` at ${order.arrival_time}` : ''}` : ''}
   </div>` : ''}
+</div>` : ''}
+${order.crew_change === 'maybe' ? `
+<div style="border:3px solid #F59E0B;padding:14px 20px;background:#fffbeb;border-radius:4px;margin-bottom:16px;">
+  <div style="font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:#B45309;margin-bottom:6px;">&#9992; Possible Crew Change &mdash; To Be Confirmed</div>
+  <div style="font-size:11px;color:#555;">The customer indicated a crew change may be needed. Confirm details before the vessel arrives.</div>
+  ${order.crew_change_notes ? `<div style="margin-top:6px;font-size:11px;color:#555;"><strong>Customer notes:</strong> ${order.crew_change_notes}</div>` : ''}
+</div>` : ''}
+
+<!-- ===== PERSONAL / COD ITEMS ===== -->
+${ext.personal_cod_notes ? `
+<div style="border:3px solid #9333ea;padding:14px 20px;background:#faf5ff;border-radius:4px;margin-bottom:16px;">
+  <div style="font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:#9333ea;margin-bottom:6px;">&#36; Personal / COD Items &mdash; Driver: Collect Payment on Delivery</div>
+  <div style="font-size:11px;color:#555;">These items are paid personally by a crew member and are NOT part of the company invoice.</div>
+  <div style="margin-top:6px;font-size:12px;font-weight:700;color:#333;">${ext.personal_cod_notes}</div>
 </div>` : ''}
 
 <!-- ===== GROCERY ITEMS ===== -->
@@ -254,7 +275,7 @@ ${groceryItems.length > 0 ? `
           <td style="padding:6px 8px;text-align:right;font-weight:700;">${formatCurrency(order.subtotal)}</td>
         </tr>
         <tr>
-          <td style="padding:8px;font-size:14px;font-weight:900;color:#1E3D1E;text-transform:uppercase;">TOTAL</td>
+          <td style="padding:8px;font-size:14px;font-weight:900;color:#1E3D1E;text-transform:uppercase;">ESTIMATED TOTAL</td>
           <td style="padding:8px;text-align:right;font-size:16px;font-weight:900;color:#1E3D1E;">${formatCurrency(order.subtotal)}</td>
         </tr>
       </table>
@@ -284,7 +305,7 @@ ${groceryItems.length > 0 ? `
 
 <!-- ===== FOOTER ===== -->
 <div style="text-align:center;font-size:9px;color:#aaa;border-top:1px solid #eee;padding-top:10px;">
-  Grafton Towboat Services &middot; 25 Dagget Hollow, Grafton, IL 62037 &middot; Mile Marker 218<br>
+  Grafton Towboat Services &middot; 25 Dagget Hollow, Grafton, IL 62037 &middot; Mile Marker 219 on the Mississippi River, Mile Marker 0 on the Illinois River<br>
   ${order.order_number} &middot; Generated ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
 </div>
 

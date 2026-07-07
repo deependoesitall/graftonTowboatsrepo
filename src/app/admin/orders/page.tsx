@@ -249,9 +249,12 @@ function OrdersContent() {
                     const groceryItems = items.filter(i => i.item_type !== 'service');
                     const groceryCount = groceryItems.reduce((s, i) => s + i.quantity, 0);
                     const itemCount = items.reduce((s, i) => s + i.quantity, 0);
-                    const hasCrewChange = !!order.crew_change;
+                    const hasCrewChange = order.crew_change === 'yes';
+                    const maybeCrewChange = order.crew_change === 'maybe';
+                    const hasCod = !!order.extended_info?.personal_cod_notes;
                     const hasPartsPickup = items.some(i => i.item_type === 'service' && i.service_type === 'parts_pickup');
                     const hasPkgDelivery = items.some(i => i.item_type === 'service' && i.service_type === 'package_delivery');
+                    const hasOtherPickup = items.some(i => i.item_type === 'service' && i.service_type === 'other_pickup');
                     const nextStatus = NEXT_STATUS[order.status];
                     const isUpdating = updatingId === order.id;
 
@@ -274,6 +277,21 @@ function OrdersContent() {
                                 <Users className="w-2.5 h-2.5" /> Crew Change
                               </span>
                             )}
+                            {maybeCrewChange && (
+                              <span className="inline-flex items-center gap-0.5 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-300">
+                                <Users className="w-2.5 h-2.5" /> Crew Change?
+                              </span>
+                            )}
+                            {hasCod && (
+                              <span className="inline-flex items-center gap-0.5 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 border border-purple-200">
+                                $ COD
+                              </span>
+                            )}
+                            {hasOtherPickup && (
+                              <span className="inline-flex items-center gap-0.5 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-green-50 text-green-700 border border-green-200">
+                                <Package className="w-2.5 h-2.5" /> Other Item
+                              </span>
+                            )}
                             {hasPartsPickup && (
                               <span className="inline-flex items-center gap-0.5 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 border border-blue-200">
                                 <Wrench className="w-2.5 h-2.5" /> Parts
@@ -288,7 +306,7 @@ function OrdersContent() {
                         </td>
                         <td className="px-4 py-3.5 text-sm text-gray-600">{order.contact_name}</td>
                         <td className="px-4 py-3.5 text-sm text-center font-medium text-brand-navy">
-                          {groceryCount === 0 && (hasCrewChange || hasPartsPickup || hasPkgDelivery)
+                          {groceryCount === 0 && (hasCrewChange || maybeCrewChange || hasPartsPickup || hasPkgDelivery || hasOtherPickup)
                             ? <span className="text-xs text-gray-400 italic">services only</span>
                             : (isSinclair ? groceryCount : itemCount)
                           }

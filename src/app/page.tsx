@@ -50,7 +50,8 @@ export default function HomePage() {
           When You Need It.
         </h1>
         <p className="text-brand-green/70 text-lg mb-10 font-body max-w-xl mx-auto">
-          Partnered with Sinclair&apos;s Foods · Mississippi Mile Marker 218 · Grafton, IL
+          Partnered with Sinclair&apos;s Foods · Grafton, IL<br />
+          Mile Marker 219 on the Mississippi River, Mile Marker 0 on the Illinois River
         </p>
         <Link
           href="/catalog"
@@ -72,7 +73,7 @@ export default function HomePage() {
           <div>
             <p className="font-bold text-base leading-tight">We deliver directly to your vessel.</p>
             <p className="text-brand-yellow/80 text-sm mt-0.5 font-body leading-snug">
-              Order online · we pack &amp; bring it to your boat at Mile Marker 218.
+              Order online · we pack &amp; bring it to your boat at Mile Marker 219 on the Mississippi River, Mile Marker 0 on the Illinois River.
             </p>
           </div>
         </div>
@@ -112,7 +113,7 @@ export default function HomePage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8 text-center">
             {[
               { icon: Phone, label: '(618) 556-0290', sub: '24/7 Support', href: 'tel:6185560290' },
-              { icon: MapPin, label: 'Mile Marker 218', sub: 'Grafton, IL 62037', href: null },
+              { icon: MapPin, label: 'Mile Marker 219 (Mississippi River) · Mile Marker 0 (Illinois River)', sub: 'Grafton, IL 62037', href: null },
             ].map(({ icon: Icon, label, sub, href }) => (
               <div key={label} className="flex flex-col items-center gap-2">
                 <div className="w-10 h-10 bg-brand-yellow/20 rounded-full flex items-center justify-center mb-1">

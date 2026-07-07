@@ -7,7 +7,8 @@ import { clearCart } from '@/lib/cart';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { Order } from '@/types';
 import { SiteHeader } from '@/components/layout/SiteHeader';
-import { CheckCircle2, Download, ShoppingCart, Phone, Anchor, Star, History } from 'lucide-react';
+import { CheckCircle2, Download, ShoppingCart, Anchor, Star, History } from 'lucide-react';
+import { ContactPhones } from '@/components/layout/ContactPhones';
 import { useAuth } from '@/lib/auth-context';
 import { AuthModal } from '@/components/auth/AuthModal';
 import { createClient } from '@/lib/supabase/client';
@@ -83,7 +84,7 @@ function ConfirmContent() {
             </p>
             {order && (
               <p className="text-gray-400 text-xs">
-                Total: <span className="font-bold text-brand-navy">{formatCurrency(order.subtotal)}</span>
+                Estimated Total: <span className="font-bold text-brand-navy">{formatCurrency(order.subtotal)}</span>
                 {' · '}Placed {formatDate(order.created_at)}
               </p>
             )}
@@ -135,7 +136,7 @@ function ConfirmContent() {
                 ))}
               </div>
               <div className="bg-brand-sand/40 px-4 py-3 flex justify-between">
-                <span className="font-bold text-brand-navy">Total</span>
+                <span className="font-bold text-brand-navy">Estimated Total</span>
                 <span className="font-display text-lg font-bold text-brand-navy">
                   {formatCurrency(order.subtotal)}
                 </span>
@@ -193,23 +194,12 @@ function ConfirmContent() {
           )}
 
           {/* Contact */}
-          <div className="mt-6 p-4 bg-brand-steel/10 rounded-lg border border-brand-steel/20 flex items-start gap-3">
-            <Phone className="w-5 h-5 text-brand-steel shrink-0 mt-0.5" />
-            <div>
-              <p className="font-semibold text-brand-navy text-sm">Questions?</p>
-              <p className="text-gray-500 text-sm">
-                Call us at{' '}
-                <a href="tel:6185560290" className="text-brand-river font-semibold">
-                  (618) 556-0290
-                </a>
-              </p>
-            </div>
-          </div>
+          <ContactPhones className="mt-6" />
 
           <div className="text-center mt-6">
             <div className="flex items-center justify-center gap-2 text-brand-navy/40">
               <Anchor className="w-4 h-4" />
-              <span className="text-xs">Grafton Towboat Services &middot; Mile Marker 218</span>
+              <span className="text-xs">Grafton Towboat Services &middot; Mile Marker 219 on the Mississippi River, Mile Marker 0 on the Illinois River</span>
             </div>
           </div>
         </div>

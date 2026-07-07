@@ -16,6 +16,7 @@ import {
 import { formatCurrency } from '@/lib/utils';
 import { CartItem, VesselInfo, AdditionalServices, VESSEL_TYPES } from '@/types';
 import { SiteHeader } from '@/components/layout/SiteHeader';
+import { ContactPhones } from '@/components/layout/ContactPhones';
 import { AuthModal } from '@/components/auth/AuthModal';
 import { useToast } from '@/hooks/use-toast';
 import { createClient } from '@/lib/supabase/client';
@@ -119,10 +120,18 @@ function CartItemRow({ item, onUpdate, onRemove }: {
         <p className="text-xs text-brand-river font-semibold mb-0.5">{item.category}</p>
         <p className="font-body font-semibold text-brand-navy text-sm leading-snug">{item.description}</p>
         {item.pkg_size && <p className="text-xs text-gray-400 mt-0.5">{item.pkg_size}{item.uom ? ` / ${item.uom}` : ''}</p>}
-        <p className="text-sm font-bold text-brand-navy mt-1">
-          {formatCurrency(item.price)} ea. &nbsp;&middot;&nbsp;
-          <span className="text-brand-gold">{formatCurrency(item.price * item.quantity)}</span>
-        </p>
+        {item.billed_by_weight ? (
+          <p className="text-sm font-bold text-brand-navy mt-1">
+            {formatCurrency(item.price)} /lb &nbsp;&middot;&nbsp;
+            <span className="text-brand-gold">~{formatCurrency(item.price * item.quantity)} est.</span>
+            <span className="block text-[10px] font-normal text-amber-700">Sold by weight — billed at actual weight</span>
+          </p>
+        ) : (
+          <p className="text-sm font-bold text-brand-navy mt-1">
+            {formatCurrency(item.price)} ea. &nbsp;&middot;&nbsp;
+            <span className="text-brand-gold">{formatCurrency(item.price * item.quantity)}</span>
+          </p>
+        )}
       </div>
       <div className="flex flex-col items-end gap-2">
         <button onClick={onRemove} className="text-gray-300 hover:text-red-400 transition-colors p-1">
@@ -158,6 +167,7 @@ export default function OrderPage() {
   const [services, setServices] = useState<AdditionalServices>({
     parts_pickup:     { enabled: false, pickup_location: '', order_number: '', contact_name: '', contact_phone: '' },
     package_delivery: { enabled: false, description: '', origin: '', contact_name: '', contact_phone: '' },
+    other_pickup:     { enabled: false, url: '', notes: '' },
   });
   const [vessel, setVessel] = useState<VesselInfo>(getVesselInfo());
   const [showOrderContact, setShowOrderContact] = useState(false);
@@ -167,6 +177,7 @@ export default function OrderPage() {
   const [tooltipOpen, setTooltipOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [emailHasAccount, setEmailHasAccount] = useState(false);
+  const [cutoffs, setCutoffs] = useState({ grocery_cutoff_hours: 4, service_cutoff_hours: 2 });
   const tooltipRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
   const { toast } = useToast();
@@ -183,6 +194,12 @@ export default function OrderPage() {
 
     const sync = () => setItems(getCart());
     window.addEventListener('cart-updated', sync);
+
+    // Order cutoff buffers (manager-configured)
+    fetch('/api/order-config')
+      .then(r => r.ok ? r.json() : null)
+      .then(cfg => { if (cfg) setCutoffs(cfg); })
+      .catch(() => {});
 
     (async () => {
       const supabase = createClient();
@@ -235,9 +252,17 @@ export default function OrderPage() {
   function validateStep1() {
     const errs: Record<string, string> = {};
     const hasItems = items.length > 0;
-    const hasSvc = services.parts_pickup.enabled || services.package_delivery.enabled;
+    const hasSvc = services.parts_pickup.enabled || services.package_delivery.enabled || services.other_pickup?.enabled;
     if (!hasItems && !hasSvc) errs.items = 'Please add groceries or at least one additional service before continuing.';
     return errs;
+  }
+
+  // Parse structured ETA (date + time pickers). Null when incomplete/legacy.
+  function parseEta(date: string, time: string): Date | null {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+    const t = /^\d{2}:\d{2}/.test(time) ? time.slice(0, 5) : '23:59';
+    const d = new Date(`${date}T${t}:00`);
+    return isNaN(d.getTime()) ? null : d;
   }
 
   function validateStep2() {
@@ -255,9 +280,21 @@ export default function OrderPage() {
     if (!vessel.terminal_name.trim())  errs.terminal_name   = 'Terminal / location name is required';
     if (!vessel.arrival_date.trim())   errs.arrival_date    = 'Estimated arrival date is required';
     if (!vessel.arrival_time.trim())   errs.arrival_time    = 'Estimated arrival time is required';
+    // Cutoff timer: block ETAs inside the manager-configured buffer
+    const eta = parseEta(vessel.arrival_date, vessel.arrival_time);
+    if (eta) {
+      const bufferHours = items.length > 0 ? cutoffs.grocery_cutoff_hours : cutoffs.service_cutoff_hours;
+      if (bufferHours > 0) {
+        if (eta.getTime() < Date.now()) {
+          errs.arrival_date = 'Arrival time is in the past — please pick a future date and time';
+        } else if ((eta.getTime() - Date.now()) / 3_600_000 < bufferHours) {
+          errs.arrival_date = `Orders need at least ${bufferHours} hour${bufferHours === 1 ? '' : 's'} before your arrival so we can shop and deliver. Pick a later ETA, or call us at (618) 556-0290 for rush requests.`;
+        }
+      }
+    }
     if (!vessel.delivery_method)       errs.delivery_method = 'Delivery method is required';
     if (vessel.delivery_method === 'boat' && !vessel.approach_side) errs.approach_side = 'Please select an approach side';
-    if (vessel.crew_change) {
+    if (vessel.crew_change === 'yes') {
       if (!vessel.crew_arriving.trim())  errs.crew_arriving  = 'Number arriving is required';
       if (!vessel.crew_departing.trim()) errs.crew_departing = 'Number departing is required';
     }
@@ -329,8 +366,9 @@ export default function OrderPage() {
   const groceryTotal = getCartTotal(items);
   const groceryCount = getCartCount(items);
   const activeSvcs = [
-    services.parts_pickup.enabled     && 'parts_pickup',
-    services.package_delivery.enabled && 'package_delivery',
+    services.parts_pickup.enabled      && 'parts_pickup',
+    services.package_delivery.enabled  && 'package_delivery',
+    services.other_pickup?.enabled     && 'other_pickup',
   ].filter(Boolean) as string[];
 
   // ════════════════════════════════════════════════════════════
@@ -382,7 +420,7 @@ export default function OrderPage() {
               <div className="p-4 bg-brand-sand/40">
                 <div className="flex justify-between items-center">
                   <div className="flex items-center gap-2">
-                    <span className="font-body font-bold text-brand-navy">Grocery Total</span>
+                    <span className="font-body font-bold text-brand-navy">Estimated Total</span>
                     <div className="relative" ref={tooltipRef}>
                       <button type="button" onClick={() => setTooltipOpen(o => !o)}
                         className="flex items-center gap-1 text-xs text-brand-river hover:text-brand-navy focus:outline-none">
@@ -441,9 +479,30 @@ export default function OrderPage() {
                   <Link href="/catalog?tab=services" className="text-xs text-brand-river hover:underline shrink-0">Edit</Link>
                 </div>
               )}
+              {services.other_pickup?.enabled && (
+                <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
+                  <ShoppingCart className="w-4 h-4 text-brand-green mt-0.5 shrink-0" />
+                  <div className="flex-1 text-sm">
+                    <p className="font-bold text-brand-navy">Other Third-Party Item <span className="text-[10px] font-normal text-gray-400">(handled by Sinclair&apos;s)</span></p>
+                    {services.other_pickup.url && <p className="text-gray-500 text-xs break-all">{services.other_pickup.url}</p>}
+                    {services.other_pickup.notes && <p className="text-gray-500 text-xs">{services.other_pickup.notes}</p>}
+                  </div>
+                  <Link href="/catalog?tab=groceries" className="text-xs text-brand-river hover:underline shrink-0">Edit</Link>
+                </div>
+              )}
             </div>
           </section>
         )}
+
+        {/* Personal / COD items */}
+        <section className="card-base mb-6 p-5">
+          <SectionHead icon={<ClipboardList className="w-4 h-4" />} title="Personal / COD Items"
+            sub="Items a crew member is paying for personally (cash on delivery) — kept separate from the company invoice" />
+          <textarea className="input-base resize-none w-full" rows={2}
+            placeholder="Optional — e.g. 1 carton cigarettes for J. Smith, pays cash on delivery"
+            value={vessel.personal_cod_notes}
+            onChange={e => setV('personal_cod_notes', e.target.value)} />
+        </section>
 
         {activeSvcs.length === 0 && items.length > 0 && (
           <p className="text-center text-xs text-gray-400 mb-6">
@@ -456,6 +515,8 @@ export default function OrderPage() {
           className="w-full btn-gold text-base py-4 flex items-center justify-center gap-2 rounded-lg">
           Next: Vessel &amp; Delivery Info <ChevronRight className="w-5 h-5" />
         </button>
+
+        <ContactPhones className="mt-8" />
       </main>
       <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} defaultMode="signin" defaultEmail={vessel.email} title="Sign In" />
     </div>
@@ -612,13 +673,17 @@ export default function OrderPage() {
                 onChange={e => setV('terminal_name', e.target.value)} />
             </Field>
             <Field label="Estimated Arrival Date" required error={errors.arrival_date}>
-              <input type="text" className={`input-base w-full ${errors.arrival_date ? 'border-red-400' : ''}`}
-                placeholder="e.g. June 15 or Tomorrow" value={vessel.arrival_date}
+              <input type="date" className={`input-base w-full ${errors.arrival_date ? 'border-red-400' : ''}`}
+                min={new Date().toISOString().slice(0, 10)}
+                value={vessel.arrival_date}
                 onChange={e => setV('arrival_date', e.target.value)} />
             </Field>
-            <Field label="Estimated Arrival Time" required error={errors.arrival_time}>
-              <input type="text" className={`input-base w-full ${errors.arrival_time ? 'border-red-400' : ''}`}
-                placeholder="e.g. 6 AM or Early afternoon" value={vessel.arrival_time}
+            <Field label="Estimated Arrival Time" required error={errors.arrival_time}
+              hint={items.length > 0 && cutoffs.grocery_cutoff_hours > 0
+                ? `Grocery orders need at least ${cutoffs.grocery_cutoff_hours} hours before arrival`
+                : undefined}>
+              <input type="time" className={`input-base w-full ${errors.arrival_time ? 'border-red-400' : ''}`}
+                value={vessel.arrival_time}
                 onChange={e => setV('arrival_time', e.target.value)} />
             </Field>
 
@@ -681,11 +746,12 @@ export default function OrderPage() {
                     value={vessel.secondary_terminal_name} onChange={e => setV('secondary_terminal_name', e.target.value)} />
                 </Field>
                 <Field label="Est. Arrival Date">
-                  <input type="text" className="input-base w-full" placeholder="e.g. June 16"
+                  <input type="date" className="input-base w-full"
+                    min={new Date().toISOString().slice(0, 10)}
                     value={vessel.secondary_arrival_date} onChange={e => setV('secondary_arrival_date', e.target.value)} />
                 </Field>
                 <Field label="Est. Arrival Time">
-                  <input type="text" className="input-base w-full" placeholder="e.g. 2 PM"
+                  <input type="time" className="input-base w-full"
                     value={vessel.secondary_arrival_time} onChange={e => setV('secondary_arrival_time', e.target.value)} />
                 </Field>
                 <Field label="Delivery Method" col2>
@@ -707,18 +773,20 @@ export default function OrderPage() {
 
         {/* ── Crew Change ── */}
         <section className="card-base mb-4 p-5">
-          <SectionHead icon={<Users className="w-4 h-4" />} title="Crew Change" />
+          <SectionHead icon={<Users className="w-4 h-4" />} title="Crew Change" sub="Not sure yet? Choose Maybe and we'll follow up." />
           <div className="flex gap-3 mb-4">
-            {([true, false] as const).map(val => (
-              <button key={String(val)} type="button" onClick={() => setV('crew_change', val)}
+            {([['no', 'No'], ['maybe', 'Maybe'], ['yes', 'Yes']] as const).map(([val, lbl]) => (
+              <button key={val} type="button" onClick={() => setV('crew_change', val)}
                 className={`flex-1 py-2.5 rounded-xl border-2 text-sm font-bold transition-all ${
                   vessel.crew_change === val
-                    ? 'border-brand-navy bg-brand-navy text-white'
+                    ? val === 'maybe'
+                      ? 'border-amber-500 bg-amber-500 text-white'
+                      : 'border-brand-navy bg-brand-navy text-white'
                     : 'border-gray-200 text-gray-500 hover:border-gray-300'
-                }`}>{val ? 'Yes' : 'No'}</button>
+                }`}>{lbl}</button>
             ))}
           </div>
-          {vessel.crew_change && (
+          {vessel.crew_change === 'yes' && (
             <div className="grid grid-cols-2 gap-4">
               <Field label="# Crew Members Arriving" required error={errors.crew_arriving}>
                 <input type="number" min="0" className={`input-base w-full ${errors.crew_arriving ? 'border-red-400' : ''}`}
@@ -731,6 +799,14 @@ export default function OrderPage() {
                   onChange={e => setV('crew_departing', e.target.value)} />
               </Field>
             </div>
+          )}
+          {vessel.crew_change === 'maybe' && (
+            <Field label="Crew Change Notes" hint="Optional — anything that helps us plan (possible timing, headcount, etc.)">
+              <textarea className="input-base resize-none w-full" rows={2}
+                placeholder="e.g. Might swap 2 crew depending on schedule…"
+                value={vessel.crew_change_notes}
+                onChange={e => setV('crew_change_notes', e.target.value)} />
+            </Field>
           )}
         </section>
 
@@ -788,12 +864,14 @@ export default function OrderPage() {
                   </div>
                   <div className="text-right shrink-0">
                     <span className="text-gray-500 text-xs">&times;{item.quantity}</span>
-                    <span className="font-bold text-brand-navy ml-2">{formatCurrency(item.price * item.quantity)}</span>
+                    <span className="font-bold text-brand-navy ml-2">
+                      {item.billed_by_weight ? '~' : ''}{formatCurrency(item.price * item.quantity)}{item.billed_by_weight ? ' est.' : ''}
+                    </span>
                   </div>
                 </div>
               ))}
               <div className="px-4 py-3 flex justify-between font-bold bg-brand-sand/30">
-                <span className="text-brand-navy">Grocery Total</span>
+                <span className="text-brand-navy">Estimated Total</span>
                 <span className="text-brand-navy text-lg">{formatCurrency(groceryTotal)}</span>
               </div>
             </div>
@@ -820,12 +898,21 @@ export default function OrderPage() {
               </div>
             )}
             {services.package_delivery.enabled && (
-              <div className="px-4 py-3">
+              <div className="px-4 py-3 border-b border-gray-50">
                 <p className="text-sm font-bold text-brand-navy mb-1">Package Delivery</p>
                 <div className="grid grid-cols-2 gap-1">
                   <ReviewRow label="Description" value={services.package_delivery.description} />
                   <ReviewRow label="From" value={services.package_delivery.origin} />
                   <ReviewRow label="Contact" value={`${services.package_delivery.contact_name} · ${services.package_delivery.contact_phone}`} />
+                </div>
+              </div>
+            )}
+            {services.other_pickup?.enabled && (
+              <div className="px-4 py-3">
+                <p className="text-sm font-bold text-brand-navy mb-1">Other Third-Party Item <span className="text-xs font-normal text-gray-400">(handled by Sinclair&apos;s)</span></p>
+                <div className="grid grid-cols-1 gap-1">
+                  {services.other_pickup.url && <ReviewRow label="Item Link" value={services.other_pickup.url} />}
+                  {services.other_pickup.notes && <ReviewRow label="Details" value={services.other_pickup.notes} />}
                 </div>
               </div>
             )}
@@ -894,13 +981,28 @@ export default function OrderPage() {
                 </div>
               </div>
             )}
-            {vessel.crew_change && (
+            {vessel.crew_change !== 'no' && (
               <div>
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1.5">Crew Change</p>
-                <div className="grid grid-cols-2 gap-1">
-                  <ReviewRow label="Arriving" value={vessel.crew_arriving} />
-                  <ReviewRow label="Departing" value={vessel.crew_departing} />
-                </div>
+                {vessel.crew_change === 'yes' ? (
+                  <div className="grid grid-cols-2 gap-1">
+                    <ReviewRow label="Arriving" value={vessel.crew_arriving} />
+                    <ReviewRow label="Departing" value={vessel.crew_departing} />
+                  </div>
+                ) : (
+                  <div>
+                    <span className="inline-block text-xs font-bold uppercase tracking-wide px-2 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-200">Maybe</span>
+                    {vessel.crew_change_notes && (
+                      <p className="text-sm text-gray-700 mt-1">{vessel.crew_change_notes}</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+            {vessel.personal_cod_notes && (
+              <div>
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1">Personal / COD Items</p>
+                <p className="text-sm text-gray-700 bg-purple-50 border border-purple-200 rounded p-2">{vessel.personal_cod_notes}</p>
               </div>
             )}
             {vessel.notes && (
@@ -924,6 +1026,8 @@ export default function OrderPage() {
         <p className="text-center text-xs text-gray-400 mt-3">
           A confirmation will be sent to {vessel.email || 'your billing email'}
         </p>
+
+        <ContactPhones className="mt-8" />
       </main>
     </div>
   );

@@ -30,6 +30,26 @@ interface Settings {
   email_footer_text: string;
   email_button_text: string;
   email_button_url: string;
+  weekly_ad_url: string;
+  grocery_cutoff_hours: number;
+  service_cutoff_hours: number;
+}
+
+interface Coupon {
+  id: string;
+  name: string;
+  description: string | null;
+  discount_type: 'amount' | 'percent' | 'other';
+  discount_value: number | null;
+  discount_text: string | null;
+  applies_to: 'all' | 'category' | 'products';
+  category: string | null;
+  product_ids: string[];
+  starts_at: string | null;
+  expires_at: string | null;
+  is_active: boolean;
+  created_by: string | null;
+  created_at: string;
 }
 
 interface ActivityLog {
@@ -59,7 +79,7 @@ const ROLE_COLORS = {
 
 export default function AdminSettingsPage() {
   const router = useRouter();
-  const [tab, setTab] = useState<'logs' | 'general' | 'password' | 'users' | 'email' | 'features'>('general');
+  const [tab, setTab] = useState<'logs' | 'general' | 'sinclair' | 'password' | 'users' | 'email' | 'features'>('general');
   const [settings, setSettings] = useState<Settings>({
     business_email: 'GraftonTowboatServices@gmail.com',
     order_email_cc: '',
@@ -72,6 +92,9 @@ export default function AdminSettingsPage() {
     email_footer_text: 'Grafton Towboat Services · Grafton, IL 62037 · (618) 556-0290',
     email_button_text: 'Order Dashboard',
     email_button_url: '/admin/orders',
+    weekly_ad_url: '',
+    grocery_cutoff_hours: 4,
+    service_cutoff_hours: 2,
   });
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
@@ -122,10 +145,11 @@ export default function AdminSettingsPage() {
       if (!session) { router.push('/admin'); return; }
       if (!canAccess(session.role, 'settings')) { setDenied(true); return; }
       setSessionRole(session.role);
-      // Managers only see the Users tab
-      if (session.role === 'manager') setTab('users');
-      loadUsers();
-      if (session.role === 'owner') loadSettings();
+      // Managers only see the Sinclair tools + their own password.
+      // The server scopes the settings API the same way.
+      if (session.role === 'manager') setTab('sinclair');
+      if (session.role === 'owner') loadUsers();
+      loadSettings();
     })();
   }, [router]);
 
@@ -216,10 +240,19 @@ export default function AdminSettingsPage() {
 
   async function saveSettings() {
     setSaving(true); setSaveMsg('');
+    // Managers may only save the Sinclair-owned fields — the server enforces
+    // this too, but sending owner-only fields would 403 the whole request.
+    const payload = sessionRole === 'manager'
+      ? {
+          weekly_ad_url: settings.weekly_ad_url,
+          grocery_cutoff_hours: settings.grocery_cutoff_hours,
+          service_cutoff_hours: settings.service_cutoff_hours,
+        }
+      : settings;
     const res = await adminFetch('/api/admin/settings', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(settings),
+      body: JSON.stringify(payload),
     });
     setSaving(false);
     if (res.ok) { setSaveMsg('Saved!'); setTimeout(() => setSaveMsg(''), 3000); }
@@ -240,8 +273,8 @@ export default function AdminSettingsPage() {
     if (newPw.length < 4) { setPwError('New password must be at least 4 characters'); return; }
     if (newPw !== confirmPw) { setPwError('New passwords do not match'); return; }
     setSavingPw(true);
-    const res = await adminFetch('/api/admin/settings', {
-      method: 'PATCH',
+    const res = await adminFetch('/api/admin/me/password', {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ current_password: currentPw, new_password: newPw }),
     });
@@ -304,12 +337,13 @@ export default function AdminSettingsPage() {
   }
 
   const allTabs = [
-    { key: 'logs',     label: 'Logs',        ownerOnly: true },
-    { key: 'general',  label: 'General',     ownerOnly: true },
-    { key: 'password', label: 'Password',    ownerOnly: true },
-    { key: 'users',    label: 'Admin Users', ownerOnly: false },
-    { key: 'email',    label: 'Email',       ownerOnly: true },
-    { key: 'features', label: 'Features',    ownerOnly: true },
+    { key: 'logs',     label: 'Logs',         ownerOnly: true },
+    { key: 'general',  label: 'General',      ownerOnly: true },
+    { key: 'sinclair', label: "Sinclair's",   ownerOnly: false },
+    { key: 'password', label: 'Password',     ownerOnly: false },
+    { key: 'users',    label: 'Admin Users',  ownerOnly: true },
+    { key: 'email',    label: 'Email',        ownerOnly: true },
+    { key: 'features', label: 'Features',     ownerOnly: true },
   ] as const;
   const tabs = sessionRole === 'manager'
     ? allTabs.filter(t => !t.ownerOnly)
@@ -547,6 +581,58 @@ export default function AdminSettingsPage() {
               {process.env.NEXT_PUBLIC_APP_URL || '(set NEXT_PUBLIC_APP_URL in Vercel)'}/catalog
             </code>
           </div>
+        </div>
+      )}
+
+      {/* ── SINCLAIR'S (weekly ad, order cutoff, coupons) ── */}
+      {tab === 'sinclair' && (
+        <div className="space-y-6">
+          <div className="card-base p-6 space-y-4">
+            <h2 className="font-bold text-brand-navy">Weekly Ad</h2>
+            <div>
+              <label className="label-base">Weekly Ad PDF URL</label>
+              <input type="url" className="input-base" value={settings.weekly_ad_url}
+                onChange={e => setSettings(s => ({ ...s, weekly_ad_url: e.target.value }))}
+                placeholder="https://…/weekly-ad.pdf" />
+              <p className="text-xs text-gray-400 mt-1">
+                Paste the link to this week&apos;s ad PDF. It displays inline on the ordering site
+                (customers never leave the site). Update it each week when the new ad comes out.
+              </p>
+            </div>
+            {settings.weekly_ad_url && (
+              <a href="/weekly-ad" target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-xs text-brand-river underline">
+                <Eye className="w-3.5 h-3.5" /> Preview how customers see it
+              </a>
+            )}
+          </div>
+
+          <div className="card-base p-6 space-y-4">
+            <h2 className="font-bold text-brand-navy">Order Cutoff Timer</h2>
+            <p className="text-xs text-gray-400 -mt-2">
+              Blocks new orders placed too close to the vessel&apos;s ETA so there&apos;s time to shop and
+              deliver. We recommend at least 4 hours for grocery orders. Set to 0 to disable.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="label-base">Grocery Orders — hours before ETA</label>
+                <input type="number" min="0" step="0.5" className="input-base w-32"
+                  value={settings.grocery_cutoff_hours}
+                  onChange={e => setSettings(s => ({ ...s, grocery_cutoff_hours: parseFloat(e.target.value) || 0 }))} />
+                {settings.grocery_cutoff_hours > 0 && settings.grocery_cutoff_hours < 4 && (
+                  <p className="text-xs text-amber-600 mt-1">Below the recommended 4-hour minimum.</p>
+                )}
+              </div>
+              <div>
+                <label className="label-base">Crew Change / Services Only — hours before ETA</label>
+                <input type="number" min="0" step="0.5" className="input-base w-32"
+                  value={settings.service_cutoff_hours}
+                  onChange={e => setSettings(s => ({ ...s, service_cutoff_hours: parseFloat(e.target.value) || 0 }))} />
+              </div>
+            </div>
+          </div>
+
+          <CouponsManager />
         </div>
       )}
 
@@ -902,6 +988,227 @@ export default function AdminSettingsPage() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Coupons manager (Sinclair-owned, display-only coupons) ───
+function CouponsManager() {
+  const [coupons, setCoupons] = useState<Coupon[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState<Coupon | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    name: '', description: '', discount_type: 'amount' as Coupon['discount_type'],
+    discount_value: '', discount_text: '', applies_to: 'all' as Coupon['applies_to'],
+    category: '', expires_at: '',
+  });
+
+  useEffect(() => {
+    (async () => {
+      const res = await adminFetch('/api/admin/coupons');
+      if (res.ok) setCoupons(await res.json());
+      setLoading(false);
+    })();
+  }, []);
+
+  function startNew() {
+    setEditing(null);
+    setForm({ name: '', description: '', discount_type: 'amount', discount_value: '', discount_text: '', applies_to: 'all', category: '', expires_at: '' });
+    setShowForm(true);
+  }
+  function startEdit(c: Coupon) {
+    setEditing(c);
+    setForm({
+      name: c.name, description: c.description || '',
+      discount_type: c.discount_type, discount_value: c.discount_value != null ? String(c.discount_value) : '',
+      discount_text: c.discount_text || '', applies_to: c.applies_to,
+      category: c.category || '', expires_at: c.expires_at || '',
+    });
+    setShowForm(true);
+  }
+
+  async function save() {
+    if (!form.name.trim()) return;
+    setSaving(true);
+    const payload = {
+      name: form.name,
+      description: form.description || null,
+      discount_type: form.discount_type,
+      discount_value: form.discount_type === 'other' ? null : (parseFloat(form.discount_value) || 0),
+      discount_text: form.discount_type === 'other' ? form.discount_text : null,
+      applies_to: form.applies_to,
+      category: form.applies_to === 'category' ? form.category : null,
+      expires_at: form.expires_at || null,
+    };
+    const res = editing
+      ? await adminFetch('/api/admin/coupons', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: editing.id, ...payload }) })
+      : await adminFetch('/api/admin/coupons', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    if (res.ok) {
+      const saved = await res.json();
+      setCoupons(cs => editing ? cs.map(c => c.id === saved.id ? saved : c) : [saved, ...cs]);
+      setShowForm(false);
+      setEditing(null);
+    }
+    setSaving(false);
+  }
+
+  async function toggleActive(c: Coupon) {
+    const res = await adminFetch('/api/admin/coupons', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: c.id, is_active: !c.is_active }),
+    });
+    if (res.ok) {
+      const saved = await res.json();
+      setCoupons(cs => cs.map(x => x.id === saved.id ? saved : x));
+    }
+  }
+
+  async function remove(id: string) {
+    if (!confirm('Delete this coupon?')) return;
+    await adminFetch('/api/admin/coupons', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+    setCoupons(cs => cs.filter(c => c.id !== id));
+  }
+
+  function couponLabel(c: Coupon): string {
+    if (c.discount_type === 'amount') return `$${Number(c.discount_value || 0).toFixed(2)} off`;
+    if (c.discount_type === 'percent') return `${Number(c.discount_value || 0)}% off`;
+    return c.discount_text || 'Special deal';
+  }
+  function isExpired(c: Coupon): boolean {
+    return !!c.expires_at && new Date(c.expires_at + 'T23:59:59') < new Date();
+  }
+
+  return (
+    <div className="card-base overflow-hidden">
+      <div className="bg-brand-navy px-6 py-4 flex items-center justify-between">
+        <div>
+          <h2 className="text-white font-bold">Coupons</h2>
+          <p className="text-brand-sky text-xs">Shown to customers in the catalog. Savings are applied at the register — not in the cart.</p>
+        </div>
+        <button onClick={startNew}
+          className="flex items-center gap-1.5 bg-brand-gold text-white text-xs font-bold uppercase tracking-wide px-3 py-1.5 rounded-full hover:bg-brand-amber transition-colors">
+          <Plus className="w-3.5 h-3.5" /> New Coupon
+        </button>
+      </div>
+
+      {showForm && (
+        <div className="border-b border-gray-100 p-6 bg-green-50 space-y-4">
+          <h3 className="font-bold text-brand-navy text-sm">{editing ? 'Edit Coupon' : 'New Coupon'}</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="label-base">Coupon Name</label>
+              <input className="input-base" placeholder="e.g. Summer Meat Sale" value={form.name}
+                onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+            </div>
+            <div>
+              <label className="label-base">Expires On</label>
+              <input type="date" className="input-base" value={form.expires_at}
+                onChange={e => setForm(f => ({ ...f, expires_at: e.target.value }))} />
+            </div>
+            <div>
+              <label className="label-base">Discount Type</label>
+              <select className="input-base" value={form.discount_type}
+                onChange={e => setForm(f => ({ ...f, discount_type: e.target.value as Coupon['discount_type'] }))}>
+                <option value="amount">Dollars off</option>
+                <option value="percent">Percent off</option>
+                <option value="other">Other deal (free text)</option>
+              </select>
+            </div>
+            {form.discount_type !== 'other' ? (
+              <div>
+                <label className="label-base">{form.discount_type === 'amount' ? 'Amount ($)' : 'Percent (%)'}</label>
+                <input type="number" min="0" step="0.01" className="input-base" value={form.discount_value}
+                  onChange={e => setForm(f => ({ ...f, discount_value: e.target.value }))} />
+              </div>
+            ) : (
+              <div>
+                <label className="label-base">Deal Text</label>
+                <input className="input-base" placeholder='e.g. "2 for $5"' value={form.discount_text}
+                  onChange={e => setForm(f => ({ ...f, discount_text: e.target.value }))} />
+              </div>
+            )}
+            <div>
+              <label className="label-base">Applies To</label>
+              <select className="input-base" value={form.applies_to}
+                onChange={e => setForm(f => ({ ...f, applies_to: e.target.value as Coupon['applies_to'] }))}>
+                <option value="all">Whole store</option>
+                <option value="category">A category</option>
+              </select>
+            </div>
+            {form.applies_to === 'category' && (
+              <div>
+                <label className="label-base">Category</label>
+                <input className="input-base" placeholder="e.g. Meat & Seafood" value={form.category}
+                  onChange={e => setForm(f => ({ ...f, category: e.target.value }))} />
+              </div>
+            )}
+            <div className="sm:col-span-2">
+              <label className="label-base">Description (shown to customers)</label>
+              <input className="input-base" placeholder="e.g. All hand-cut steaks while supplies last" value={form.description}
+                onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={save} disabled={saving || !form.name.trim()}
+              className="btn-primary text-sm flex items-center gap-2 disabled:opacity-50">
+              {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              {editing ? 'Save Changes' : 'Create Coupon'}
+            </button>
+            <button onClick={() => { setShowForm(false); setEditing(null); }} className="btn-outline text-sm">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="flex items-center justify-center py-12">
+          <RefreshCw className="w-5 h-5 animate-spin text-brand-river" />
+        </div>
+      ) : coupons.length === 0 ? (
+        <p className="p-8 text-center text-sm text-gray-400">No coupons yet. Create one to show it in the customer catalog.</p>
+      ) : (
+        <div className="divide-y divide-gray-100">
+          {coupons.map(c => {
+            const expired = isExpired(c);
+            const inactive = !c.is_active || expired;
+            return (
+              <div key={c.id} className={`px-6 py-4 flex items-center justify-between gap-4 ${inactive ? 'opacity-50' : ''}`}>
+                <div className="min-w-0">
+                  <p className="font-semibold text-brand-navy text-sm">
+                    {c.name}
+                    <span className="ml-2 text-xs font-bold text-brand-orange">{couponLabel(c)}</span>
+                    {c.applies_to === 'category' && c.category && (
+                      <span className="ml-2 text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">{c.category}</span>
+                    )}
+                    {expired && <span className="ml-2 text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-red-50 text-red-500">Expired</span>}
+                    {!c.is_active && !expired && <span className="ml-2 text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">Inactive</span>}
+                  </p>
+                  <p className="text-xs text-gray-400 truncate">
+                    {c.description || 'No description'}
+                    {c.expires_at && <span> · expires {new Date(c.expires_at + 'T00:00:00').toLocaleDateString()}</span>}
+                    {c.created_by && <span> · by {c.created_by}</span>}
+                  </p>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <button onClick={() => startEdit(c)} className="text-xs text-gray-400 hover:text-brand-river">Edit</button>
+                  <button onClick={() => toggleActive(c)} className="text-xs text-gray-400 hover:text-brand-orange">
+                    {c.is_active ? 'Expire now' : 'Reactivate'}
+                  </button>
+                  <button onClick={() => remove(c.id)} className="text-gray-300 hover:text-red-500">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="bg-gray-50 px-6 py-3 text-xs text-gray-400 border-t border-gray-100">
+        Coupons are informational for customers — Sinclair&apos;s applies the savings when the order is
+        shopped. All coupon changes are recorded in the activity log.
+      </div>
     </div>
   );
 }

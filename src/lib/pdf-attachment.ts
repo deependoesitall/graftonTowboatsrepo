@@ -57,7 +57,7 @@ export async function generateOrderPdfBuffer(order: Order): Promise<Buffer> {
     doc.fillColor(ORANGE).fontSize(8).font('Helvetica-Bold')
        .text('GROCERIES, SUPPLIES & CREW CHANGE', MARGIN + 10, MARGIN + 30);
     doc.fillColor('#a8c86a').fontSize(7).font('Helvetica')
-       .text('25 Dagget Hollow · Grafton, IL 62037 · Mile Marker 218 · (618) 556-0290 · GraftonTowboatServices@gmail.com',
+       .text('25 Dagget Hollow · Grafton, IL 62037 · Mile Marker 219 Mississippi River / Mile Marker 0 Illinois River · (618) 556-0290 · GraftonTowboatServices@gmail.com',
          MARGIN + 10, MARGIN + 42);
 
     // Order number top-right
@@ -114,6 +114,34 @@ export async function generateOrderPdfBuffer(order: Order): Promise<Buffer> {
       doc.fillColor('#444444').fontSize(9).font('Helvetica')
          .text(order.notes, MARGIN + 8, y + 14, { width: CONTENT_W - 16 });
       y += 34;
+    }
+
+    // ── CREW CHANGE ──────────────────────────────────────────
+    if (order.crew_change === 'yes' || order.crew_change === 'maybe') {
+      doc.rect(MARGIN, y, CONTENT_W, 30).fill(order.crew_change === 'yes' ? '#fff8f0' : '#fffbeb');
+      doc.rect(MARGIN, y, 3, 30).fill(order.crew_change === 'yes' ? ORANGE : '#F59E0B');
+      const label = order.crew_change === 'yes'
+        ? `CREW CHANGE — YES: ${order.crew_arriving ?? 0} arriving / ${order.crew_departing ?? 0} departing`
+        : 'CREW CHANGE — MAYBE (to be confirmed)';
+      doc.fillColor(order.crew_change === 'yes' ? ORANGE : '#B45309').fontSize(8).font('Helvetica-Bold')
+         .text(label, MARGIN + 8, y + 5, { characterSpacing: 0.5 });
+      if (order.crew_change_notes) {
+        doc.fillColor('#555555').fontSize(8).font('Helvetica')
+           .text(`Notes: ${order.crew_change_notes}`, MARGIN + 8, y + 16, { width: CONTENT_W - 16 });
+      }
+      y += 36;
+    }
+
+    // ── PERSONAL / COD ITEMS (driver collects payment) ───────
+    const codNotes = order.extended_info?.personal_cod_notes;
+    if (codNotes) {
+      doc.rect(MARGIN, y, CONTENT_W, 32).fill('#faf5ff');
+      doc.rect(MARGIN, y, 3, 32).fill('#9333ea');
+      doc.fillColor('#9333ea').fontSize(8).font('Helvetica-Bold')
+         .text('PERSONAL / COD ITEMS — DRIVER: COLLECT PAYMENT ON DELIVERY', MARGIN + 8, y + 5, { characterSpacing: 0.5 });
+      doc.fillColor('#444444').fontSize(9).font('Helvetica-Bold')
+         .text(codNotes, MARGIN + 8, y + 16, { width: CONTENT_W - 16 });
+      y += 38;
     }
 
     y += 4;
@@ -232,7 +260,7 @@ export async function generateOrderPdfBuffer(order: Order): Promise<Buffer> {
     const totalRowW = CONTENT_W * 0.45;
     doc.rect(totalRowX, y, totalRowW, 26).fill(LIME);
     doc.fillColor(DARK_GREEN).fontSize(12).font('Helvetica-Bold')
-       .text(`TOTAL  ${formatCurrency(order.subtotal)}`, totalRowX + 8, y + 7,
+       .text(`ESTIMATED TOTAL  ${formatCurrency(order.subtotal)}`, totalRowX + 8, y + 7,
          { width: totalRowW - 16, align: 'right' });
     y += 34;
 
@@ -265,7 +293,7 @@ export async function generateOrderPdfBuffer(order: Order): Promise<Buffer> {
     doc.moveTo(MARGIN, footerY).lineTo(MARGIN + CONTENT_W, footerY).strokeColor('#eeeeee').lineWidth(1).stroke();
     doc.fillColor(LIGHT_GRAY).fontSize(7).font('Helvetica')
        .text(
-         `Grafton Towboat Services · 25 Dagget Hollow, Grafton, IL 62037 · Mile Marker 218 · ${order.order_number} · Generated ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`,
+         `Grafton Towboat Services · 25 Dagget Hollow, Grafton, IL 62037 · Mile Marker 219 Mississippi River / Mile Marker 0 Illinois River · ${order.order_number} · Generated ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`,
          MARGIN, footerY + 6, { align: 'center', width: CONTENT_W }
        );
 

@@ -1,4 +1,4 @@
-// src/app/layout.tsx
+// src/app/layout.tsx — root layout
 import type { Metadata, Viewport } from 'next';
 import { Oswald, Inter } from 'next/font/google';
 import './globals.css';
@@ -23,7 +23,7 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: 'Grafton Towboat Services — Order Groceries & Supplies',
   description:
-    "Order groceries, provisions, and supplies for your vessel through Grafton Towboat Services. Partnered with Sinclair's Foods. Mississippi Mile Marker 218.",
+    "Order groceries, provisions, and supplies for your vessel through Grafton Towboat Services. Partnered with Sinclair's Foods. Mile Marker 219 on the Mississippi River, Mile Marker 0 on the Illinois River.",
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,

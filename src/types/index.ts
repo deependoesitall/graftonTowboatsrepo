@@ -1,5 +1,9 @@
 // src/types/index.ts
 
+// Crew change is a tri-state: 'maybe' means the crew isn't sure yet —
+// no required counts, just an optional note.
+export type CrewChange = 'yes' | 'no' | 'maybe';
+
 export interface Product {
   id: string;
   category: string;
@@ -15,6 +19,7 @@ export interface Product {
   tags: string[];
   is_active: boolean;
   is_available: boolean;
+  billed_by_weight: boolean;
   created_at?: string;
 }
 
@@ -26,6 +31,8 @@ export interface CartItem {
   uom: string | null;
   price: number;
   quantity: number;
+  /** Optional for backwards compatibility with carts saved before this field existed. */
+  billed_by_weight?: boolean;
 }
 
 export interface Cart {
@@ -60,9 +67,11 @@ export interface VesselInfo {
   secondary_arrival_date: string;
   secondary_arrival_time: string;
   secondary_delivery_method: 'boat' | 'van' | '';
-  crew_change: boolean;
+  crew_change: CrewChange;
+  crew_change_notes: string;
   crew_arriving: string;
   crew_departing: string;
+  personal_cod_notes: string;
   notes: string;
   eta: string;
 }
@@ -84,9 +93,18 @@ export interface PackageDelivery {
   contact_phone: string;
 }
 
+// "Other" third-party pickup — handled by Sinclair's (lives on the Sinclair's
+// catalog tab, not Additional Services). E.g. a small Walmart online order.
+export interface OtherPickup {
+  enabled: boolean;
+  url: string;
+  notes: string; // size, color, quantity, etc.
+}
+
 export interface AdditionalServices {
   parts_pickup: PartsPickup;
   package_delivery: PackageDelivery;
+  other_pickup: OtherPickup;
 }
 
 // -- Orders
@@ -109,7 +127,8 @@ export interface Order {
   arrival_time: string | null;
   approach_side: 'port' | 'starboard' | 'either' | null;
   vhf_channel: string | null;
-  crew_change: boolean;
+  crew_change: CrewChange;
+  crew_change_notes: string | null;
   crew_arriving: number | null;
   crew_departing: number | null;
   extended_info: {
@@ -122,6 +141,7 @@ export interface Order {
     secondary_arrival_time?: string;
     secondary_delivery_method?: string;
     docking_notes?: string;
+    personal_cod_notes?: string;
   } | null;
   notes: string | null;
   eta: string | null;
@@ -151,7 +171,7 @@ export interface OrderItem {
   is_substitution: boolean;
   substitutes_item_id: string | null;
   item_type: 'grocery' | 'service';
-  service_type: 'parts_pickup' | 'package_delivery' | null;
+  service_type: 'parts_pickup' | 'package_delivery' | 'other_pickup' | null;
   service_details: Record<string, string> | null;
 }
 

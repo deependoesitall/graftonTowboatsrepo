@@ -53,9 +53,16 @@ const submitSchema = z.object({
     secondary_arrival_date: z.string().optional().default(''),
     secondary_arrival_time: z.string().optional().default(''),
     secondary_delivery_method: z.enum(['boat', 'van', '']).optional().default(''),
-    crew_change: z.boolean().optional().default(false),
+    // Tri-state. z.preprocess keeps backwards compatibility with cached
+    // clients that still submit the old boolean.
+    crew_change: z.preprocess(
+      v => (v === true ? 'yes' : v === false ? 'no' : v),
+      z.enum(['yes', 'no', 'maybe']).optional().default('no')
+    ),
+    crew_change_notes: z.string().optional().default(''),
     crew_arriving: z.string().optional().default(''),
     crew_departing: z.string().optional().default(''),
+    personal_cod_notes: z.string().optional().default(''),
     notes: z.string().optional().default(''),
     eta: z.string().optional().default(''),
   }),
@@ -83,12 +90,31 @@ const submitSchema = z.object({
       contact_name: z.string().optional().default(''),
       contact_phone: z.string().optional().default(''),
     }).optional(),
+    other_pickup: z.object({
+      enabled: z.boolean(),
+      url: z.string().optional().default(''),
+      notes: z.string().optional().default(''),
+    }).optional(),
   }).optional().default({}),
 }).refine(data => {
   const hasItems = data.items.length > 0;
-  const hasSvc = data.services?.parts_pickup?.enabled || data.services?.package_delivery?.enabled;
+  const hasSvc = data.services?.parts_pickup?.enabled
+    || data.services?.package_delivery?.enabled
+    || data.services?.other_pickup?.enabled;
   return hasItems || hasSvc;
 }, { message: 'Order must have at least one item or service' });
+
+/**
+ * Parse the structured ETA (date picker YYYY-MM-DD + time picker HH:MM) into
+ * a Date. Returns null when unparseable (e.g. legacy free-text values), in
+ * which case cutoff enforcement is skipped rather than blocking the order.
+ */
+function parseEta(arrivalDate: string, arrivalTime: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(arrivalDate)) return null;
+  const time = /^\d{2}:\d{2}/.test(arrivalTime) ? arrivalTime.slice(0, 5) : '23:59';
+  const d = new Date(`${arrivalDate}T${time}:00`);
+  return isNaN(d.getTime()) ? null : d;
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -100,6 +126,28 @@ export async function POST(req: NextRequest) {
 
     const { vessel, items, services } = parsed.data;
     const supabase = createServiceClient();
+
+    // ── Order cutoff enforcement (manager-configured buffer before ETA) ──
+    const eta = parseEta(vessel.arrival_date, vessel.arrival_time);
+    if (eta) {
+      const { data: cfg } = await supabase
+        .from('admin_settings')
+        .select('grocery_cutoff_hours, service_cutoff_hours')
+        .single();
+      const hasGroceries = items.length > 0;
+      const bufferHours = hasGroceries
+        ? Number(cfg?.grocery_cutoff_hours ?? 4)
+        : Number(cfg?.service_cutoff_hours ?? 2);
+      if (bufferHours > 0) {
+        const hoursUntilEta = (eta.getTime() - Date.now()) / 3_600_000;
+        if (hoursUntilEta < bufferHours) {
+          return NextResponse.json({
+            error: `Orders must be placed at least ${bufferHours} hour${bufferHours === 1 ? '' : 's'} before your arrival time so we can shop and deliver. Your ETA is too soon — please adjust it, or call Grafton Towboat Services at (618) 556-0290 and we'll do our best to help.`,
+            code: 'cutoff',
+          }, { status: 400 });
+        }
+      }
+    }
     const orderNumber = generateOrderNumber();
     const userId = await getUserIdFromToken(req);
     const subtotal = items.reduce((s, i) => s + i.price * i.quantity, 0);
@@ -119,6 +167,8 @@ export async function POST(req: NextRequest) {
     if (vessel.secondary_delivery_method) extendedInfo.secondary_delivery_method = vessel.secondary_delivery_method;
     if (vessel.vessel_type === 'Other' && vessel.vessel_type_other)
       extendedInfo.vessel_type_raw = vessel.vessel_type_other;
+    if (vessel.personal_cod_notes)
+      extendedInfo.personal_cod_notes = vessel.personal_cod_notes;
 
     const { data: order, error: orderError } = await supabase
       .from('orders')
@@ -140,9 +190,10 @@ export async function POST(req: NextRequest) {
         arrival_time: vessel.arrival_time || null,
         approach_side: vessel.approach_side || null,
         vhf_channel: vessel.vhf_channel || null,
-        crew_change: vessel.crew_change ?? false,
-        crew_arriving: vessel.crew_arriving ? parseInt(vessel.crew_arriving, 10) : null,
-        crew_departing: vessel.crew_departing ? parseInt(vessel.crew_departing, 10) : null,
+        crew_change: vessel.crew_change ?? 'no',
+        crew_change_notes: vessel.crew_change !== 'no' && vessel.crew_change_notes ? vessel.crew_change_notes : null,
+        crew_arriving: vessel.crew_change === 'yes' && vessel.crew_arriving ? parseInt(vessel.crew_arriving, 10) : null,
+        crew_departing: vessel.crew_change === 'yes' && vessel.crew_departing ? parseInt(vessel.crew_departing, 10) : null,
         extended_info: Object.keys(extendedInfo).length > 0 ? extendedInfo : null,
         notes: vessel.notes || null,
         eta: vessel.eta || null,
@@ -226,6 +277,24 @@ export async function POST(req: NextRequest) {
           origin: d.origin || '',
           contact_name: d.contact_name || '',
           contact_phone: d.contact_phone || '',
+        },
+      });
+    }
+
+    if (services?.other_pickup?.enabled) {
+      const o = services.other_pickup;
+      allOrderItems.push({
+        order_id: order.id,
+        product_id: 'service-other-pickup',
+        description: 'Other Third-Party Item (Sinclair\'s)',
+        category: 'Additional Services',
+        pkg_size: null, uom: null, upc: null,
+        unit_price: 0, quantity: 1, line_total: 0,
+        item_type: 'service',
+        service_type: 'other_pickup',
+        service_details: {
+          url: o.url || '',
+          notes: o.notes || '',
         },
       });
     }

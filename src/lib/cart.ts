@@ -65,7 +65,13 @@ export function getVesselInfo(): VesselInfo {
   if (typeof window === 'undefined') return defaultVesselInfo();
   try {
     const raw = localStorage.getItem(VESSEL_KEY);
-    return raw ? { ...defaultVesselInfo(), ...JSON.parse(raw) } : defaultVesselInfo();
+    if (!raw) return defaultVesselInfo();
+    const parsed = JSON.parse(raw);
+    // Migrate legacy boolean crew_change (saved before the tri-state existed)
+    if (typeof parsed.crew_change === 'boolean') {
+      parsed.crew_change = parsed.crew_change ? 'yes' : 'no';
+    }
+    return { ...defaultVesselInfo(), ...parsed };
   } catch { return defaultVesselInfo(); }
 }
 
@@ -107,10 +113,13 @@ function defaultVesselInfo(): VesselInfo {
     secondary_arrival_date: '',
     secondary_arrival_time: '',
     secondary_delivery_method: '',
-    // Crew change
-    crew_change: false,
+    // Crew change (tri-state: 'yes' | 'no' | 'maybe')
+    crew_change: 'no',
+    crew_change_notes: '',
     crew_arriving: '',
     crew_departing: '',
+    // Personal / COD items (paid by crew member directly)
+    personal_cod_notes: '',
     // Notes
     notes: '',
     // Legacy
@@ -142,7 +151,8 @@ export function clearAdditionalServices() {
 
 export function getActiveServicesCount(services: AdditionalServices): number {
   return (services.parts_pickup.enabled ? 1 : 0)
-       + (services.package_delivery.enabled ? 1 : 0);
+       + (services.package_delivery.enabled ? 1 : 0)
+       + (services.other_pickup?.enabled ? 1 : 0);
 }
 
 function defaultServices(): AdditionalServices {
@@ -160,6 +170,11 @@ function defaultServices(): AdditionalServices {
       origin: '',
       contact_name: '',
       contact_phone: '',
+    },
+    other_pickup: {
+      enabled: false,
+      url: '',
+      notes: '',
     },
   };
 }

@@ -56,6 +56,10 @@ interface ImportRow {
   price: number;
   is_active: boolean;
   is_available?: boolean;
+  billed_by_weight?: boolean;
+  details?: string | null;
+  location?: string | null;
+  tags?: string[];
 }
 
 // Admin: import products from CSV with duplicate detection
@@ -74,6 +78,25 @@ export async function POST(req: NextRequest) {
   if (mode === 'preview') {
     const result = await classifyImportRows(supabase, products);
     return NextResponse.json(result);
+  }
+
+  // ── LOG MODE: record a completed wizard import in the activity log ──
+  // Called once by the import wizard after all batches finish, so multi-batch
+  // imports produce a single log entry with the aggregate counts.
+  if (mode === 'log_import') {
+    const meta = body.import_meta || {};
+    await supabase.from('activity_logs').insert({
+      order_id: null,
+      order_number: null,
+      action: 'catalog_import',
+      from_value: meta.filename || 'unknown file',
+      to_value: `${meta.added ?? 0} added / ${meta.updated ?? 0} updated / ${meta.skipped ?? 0} skipped`,
+      admin_username: session.username,
+      admin_display_name: session.display_name,
+      admin_role: session.role,
+      note: meta.note || null,
+    });
+    return NextResponse.json({ success: true });
   }
 
   // ── COMMIT MODES ──
@@ -120,6 +143,7 @@ export async function POST(req: NextRequest) {
         pkg_size: row.pkg_size,
         uom: row.uom,
         price: row.price,
+        ...(row.billed_by_weight !== undefined ? { billed_by_weight: row.billed_by_weight } : {}),
       })
       .eq('id', id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });

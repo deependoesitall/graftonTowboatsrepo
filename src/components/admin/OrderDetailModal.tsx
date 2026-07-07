@@ -260,13 +260,35 @@ export function OrderDetailModal({
             )}
 
             {/* Crew Change */}
-            {order.crew_change && (
+            {order.crew_change === 'yes' && (
               <Section icon={<Users className="w-3.5 h-3.5" />} title="Crew Change">
+                <span className="inline-block mb-2 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded bg-orange-100 text-brand-orange border border-orange-200">Yes</span>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   {order.crew_arriving  != null && <IB label="Arriving"  value={String(order.crew_arriving)} />}
                   {order.crew_departing != null && <IB label="Departing" value={String(order.crew_departing)} />}
                 </div>
+                {order.crew_change_notes && (
+                  <p className="text-sm text-gray-600 mt-2">{order.crew_change_notes}</p>
+                )}
               </Section>
+            )}
+            {order.crew_change === 'maybe' && (
+              <Section icon={<Users className="w-3.5 h-3.5" />} title="Crew Change">
+                <span className="inline-block mb-2 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-300">Maybe — to be confirmed</span>
+                {order.crew_change_notes ? (
+                  <p className="text-sm text-gray-600">{order.crew_change_notes}</p>
+                ) : (
+                  <p className="text-sm text-gray-400 italic">Customer may need a crew change — confirm before arrival.</p>
+                )}
+              </Section>
+            )}
+
+            {/* Personal / COD items */}
+            {ext?.personal_cod_notes && (
+              <div className="bg-purple-50 border-2 border-purple-300 rounded-lg p-3">
+                <p className="text-xs font-bold text-purple-700 uppercase tracking-wide mb-1">$ Personal / COD Items — collect payment on delivery</p>
+                <p className="text-sm text-purple-900">{ext.personal_cod_notes}</p>
+              </div>
             )}
 
             {/* Notes */}
@@ -324,7 +346,7 @@ export function OrderDetailModal({
             </div>
 
             {/* Crew Change callout for service-only orders */}
-            {order.crew_change && groceryItems.length === 0 && (
+            {order.crew_change === 'yes' && groceryItems.length === 0 && (
               <div className="flex items-start gap-4 bg-orange-50 border-2 border-brand-orange rounded-lg p-4">
                 <Users className="w-6 h-6 text-brand-orange shrink-0 mt-0.5" />
                 <div className="flex-1">
@@ -610,6 +632,17 @@ export function OrderDetailModal({
                               {d.origin       && <IB label="From"        value={d.origin} />}
                               {d.contact_name && <IB label="Contact"     value={d.contact_name} />}
                               {d.contact_phone && <IB label="Phone"      value={d.contact_phone} />}
+                            </>)}
+                            {item.service_type === 'other_pickup' && (<>
+                              {d.url && (
+                                <div className="col-span-2">
+                                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Item Link</p>
+                                  <a href={d.url} target="_blank" rel="noopener noreferrer"
+                                    className="text-sm text-brand-river underline break-all">{d.url}</a>
+                                </div>
+                              )}
+                              {d.notes && <IB label="Details (size, color, qty)" value={d.notes} />}
+                              <IB label="Handled By" value="Sinclair's Foods" />
                             </>)}
                           </div>
                         )}

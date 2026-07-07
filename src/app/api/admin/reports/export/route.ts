@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
 
   if (type === 'orders') {
     filename = `orders_${from || 'all'}_${to || 'all'}.csv`;
-    csv = 'Order Number,Vessel,Contact,Phone,Date,Status,Items,Total\n';
+    csv = 'Order Number,Vessel,Contact,Phone,Date,Status,Items,Estimated Total\n';
     for (const o of orders) {
       const itemCount = o.items.reduce((s: number, i: any) => s + i.quantity, 0);
       csv += [

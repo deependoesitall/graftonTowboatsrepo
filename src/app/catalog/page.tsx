@@ -1,11 +1,15 @@
 // src/app/catalog/page.tsx
 import { Suspense } from 'react';
+import Link from 'next/link';
+import { Newspaper, BadgePercent } from 'lucide-react';
 import { createClient } from '@/lib/supabase/server';
 import { ProductGrid } from '@/components/catalog/ProductGrid';
 import { CategoryFilter } from '@/components/catalog/CategoryFilter';
 import { SearchBar } from '@/components/catalog/SearchBar';
 import { CatalogTabBar } from '@/components/catalog/CatalogTabBar';
 import { AdditionalServicesTab } from '@/components/catalog/AdditionalServicesTab';
+import { OtherPickupCard } from '@/components/catalog/OtherPickupCard';
+import { ContactPhones } from '@/components/layout/ContactPhones';
 import { MAIN_CATEGORIES } from '@/lib/utils';
 
 interface PageProps {
@@ -47,9 +51,14 @@ export default async function CatalogPage({ searchParams }: PageProps) {
     query = query.eq('category', category);
   }
 
-  const [{ data: products, count }, { data: catCounts }] = await Promise.all([
+  const [{ data: products, count }, { data: catCounts }, { data: coupons }] = await Promise.all([
     query,
     supabase.rpc('get_category_counts'),
+    // Display-only coupons — RLS exposes only active, unexpired ones
+    supabase.from('coupons')
+      .select('id, name, description, discount_type, discount_value, discount_text, applies_to, category, expires_at')
+      .order('created_at', { ascending: false })
+      .limit(6),
   ]);
 
   const totalPages = Math.ceil((count || 0) / perPage);
@@ -72,6 +81,39 @@ export default async function CatalogPage({ searchParams }: PageProps) {
       {/* ── GROCERIES TAB ── */}
       {tab === 'groceries' && (
         <>
+          {/* Weekly ad + coupons strip */}
+          <div className="mb-4 space-y-2">
+            <Link href="/weekly-ad"
+              className="flex items-center gap-3 bg-brand-navy text-white rounded-xl px-4 py-3 hover:bg-brand-steel transition-colors">
+              <Newspaper className="w-5 h-5 text-brand-gold shrink-0" />
+              <span className="text-sm font-bold">View Sinclair&apos;s Weekly Ad</span>
+              <span className="text-xs text-white/60 hidden sm:inline">— this week&apos;s specials, right here on the ordering site</span>
+            </Link>
+            {coupons && coupons.length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                <p className="flex items-center gap-1.5 text-xs font-bold text-amber-800 uppercase tracking-wide mb-1.5">
+                  <BadgePercent className="w-3.5 h-3.5" /> Current Coupons — applied by Sinclair&apos;s when your order is shopped
+                </p>
+                <ul className="space-y-1">
+                  {coupons.map((c: { id: string; name: string; description: string | null; discount_type: string; discount_value: number | null; discount_text: string | null; applies_to: string; category: string | null; expires_at: string | null }) => (
+                    <li key={c.id} className="text-xs text-amber-900">
+                      <span className="font-bold">{c.name}</span>
+                      {' — '}
+                      <span className="font-semibold text-brand-orange">
+                        {c.discount_type === 'amount' ? `$${Number(c.discount_value || 0).toFixed(2)} off`
+                          : c.discount_type === 'percent' ? `${Number(c.discount_value || 0)}% off`
+                          : (c.discount_text || 'special deal')}
+                      </span>
+                      {c.applies_to === 'category' && c.category && <span> on {c.category}</span>}
+                      {c.description && <span className="text-amber-700"> · {c.description}</span>}
+                      {c.expires_at && <span className="text-amber-600/70"> · through {new Date(c.expires_at + 'T00:00:00').toLocaleDateString()}</span>}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+
           <SearchBar initialSearch={search} />
           <div className="flex flex-col md:flex-row gap-5 mt-5">
             <aside className="w-full md:w-52 shrink-0">
@@ -92,6 +134,8 @@ export default async function CatalogPage({ searchParams }: PageProps) {
                   category={category}
                 />
               </Suspense>
+              {/* "Other" third-party item — Sinclair-handled pickup */}
+              <OtherPickupCard />
             </div>
           </div>
         </>
@@ -103,6 +147,9 @@ export default async function CatalogPage({ searchParams }: PageProps) {
           <AdditionalServicesTab />
         </div>
       )}
+
+      {/* Contact phone numbers */}
+      <ContactPhones className="mt-8 max-w-2xl" />
     </div>
   );
 }

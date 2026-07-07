@@ -7,10 +7,11 @@ import { Upload, Package, AlertCircle, CheckCircle2, Loader2,
          Download, Trash2, Layers, PackageX, PackageCheck, Filter,
          ImagePlus, Tag } from 'lucide-react';
 import Image from 'next/image';
-import { normalizeCategory, formatCurrency, MAIN_CATEGORIES } from '@/lib/utils';
+import { formatCurrency, MAIN_CATEGORIES } from '@/lib/utils';
 import { Product } from '@/types';
 import { useRouter } from 'next/navigation';
 import { fetchAdminSession, getAdminRole, canAccess, adminFetch } from '@/lib/admin-auth';
+import { ImportWizard } from '@/components/admin/ImportWizard';
 
 
 // -- Shared image upload cell
@@ -147,37 +148,6 @@ function TagEditor({ tags, onChange }: { tags: string[]; onChange: (tags: string
   );
 }
 
-interface ParsedProduct {
-  category: string; sub_category: string; upc: string | null;
-  description: string; pkg_size: string | null; uom: string | null;
-  price: number; is_active: boolean;
-}
-
-function parsePrice(raw: string): number {
-  if (!raw) return 0;
-  const n = parseFloat(raw.toString().replace(/[$,\s]/g, ''));
-  return isNaN(n) ? 0 : n;
-}
-
-function parseRow(headers: string[], values: string[]): ParsedProduct | null {
-  const row: Record<string, string> = {};
-  headers.forEach((h, i) => { row[h.toLowerCase().trim()] = (values[i] || '').trim(); });
-  const description = row['description'] || row['item description'] || row['item name'] || row['name'] || '';
-  if (!description) return null;
-  const rawCategory = row['category'] || row['cat'] || row['department'] || row['dept'] || 'General';
-  const subCategory = row['sub_category'] || row['sub category'] || row['subcategory'] || rawCategory;
-  return {
-    category: normalizeCategory(rawCategory),
-    sub_category: subCategory || rawCategory,
-    upc: row['upc'] || row['barcode'] || null,
-    description,
-    pkg_size: row['pkg_size'] || row['pkg size'] || row['pack size'] || row['size'] || null,
-    uom: row['uom'] || row['unit'] || row['unit of measure'] || null,
-    price: parsePrice(row['price'] || row['unit price'] || row['cost'] || '0'),
-    is_active: true,
-  };
-}
-
 const CATEGORIES = [...MAIN_CATEGORIES];
 
 const STATUS_FILTERS: { key: string; label: string }[] = [
@@ -199,6 +169,7 @@ interface EditState {
   price: string;
   tags: string[];
   image_url: string | null;
+  billed_by_weight: boolean;
 }
 
 function AddProductRow({ onAdded }: {
@@ -210,12 +181,13 @@ function AddProductRow({ onAdded }: {
   const [form, setForm] = useState({
     description: '', details: '', category: 'Pantry & Grocery', sub_category: '',
     location: '', pkg_size: '', uom: '', price: '', tags: [] as string[], image_url: null as string | null,
+    billed_by_weight: false,
   });
   const descRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { if (open) descRef.current?.focus(); }, [open]);
 
-  function reset() { setForm({ description: '', details: '', category: 'Pantry & Grocery', sub_category: '', location: '', pkg_size: '', uom: '', price: '', tags: [], image_url: null }); setNewProductId(null); setOpen(false); }
+  function reset() { setForm({ description: '', details: '', category: 'Pantry & Grocery', sub_category: '', location: '', pkg_size: '', uom: '', price: '', tags: [], image_url: null, billed_by_weight: false }); setNewProductId(null); setOpen(false); }
 
   async function save() {
     if (!form.description || !form.price) return;
@@ -237,6 +209,7 @@ function AddProductRow({ onAdded }: {
           tags: form.tags,
           is_active: true,
           is_available: true,
+          billed_by_weight: form.billed_by_weight,
           upc: null,
         }],
       }),
@@ -257,7 +230,7 @@ function AddProductRow({ onAdded }: {
   if (!open) {
     return (
       <tr>
-        <td colSpan={9} className="px-3 py-2 border-b border-dashed border-gray-200">
+        <td colSpan={10} className="px-3 py-2 border-b border-dashed border-gray-200">
           <button onClick={() => setOpen(true)}
             className="flex items-center gap-2 text-sm text-brand-river hover:text-brand-navy font-medium transition-colors w-full py-1">
             <Plus className="w-4 h-4" /> Add new product
@@ -313,7 +286,14 @@ function AddProductRow({ onAdded }: {
         <input className="input-base text-xs py-1.5 w-20" placeholder="0.00" type="number" min="0" step="0.01"
           value={form.price} onChange={e => setForm(f => ({ ...f, price: e.target.value }))}
           onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') reset(); }} />
+        <label className="flex items-center gap-1.5 mt-1.5 cursor-pointer" title="Customer enters a quantity; final price is by actual weight">
+          <input type="checkbox" checked={form.billed_by_weight}
+            onChange={e => setForm(f => ({ ...f, billed_by_weight: e.target.checked }))}
+            className="w-3.5 h-3.5 rounded border-gray-300" />
+          <span className="text-[10px] font-semibold text-gray-500 whitespace-nowrap">/lb</span>
+        </label>
       </td>
+      <td className="px-2 py-2"></td>
       <td className="px-2 py-2">
         <div className="flex items-center gap-1.5">
           <button onClick={save} disabled={saving || !form.description || !form.price}
@@ -350,6 +330,7 @@ function EditableRow({ product, selected, onSelect, onSaved, onToggleActive, onT
     price: product.price.toFixed(2),
     tags: product.tags || [],
     image_url: product.image_url ?? null,
+    billed_by_weight: !!product.billed_by_weight,
   });
 
   async function save() {
@@ -367,6 +348,7 @@ function EditableRow({ product, selected, onSelect, onSaved, onToggleActive, onT
         uom: form.uom || null,
         price: parseFloat(form.price) || 0,
         tags: form.tags,
+        billed_by_weight: form.billed_by_weight,
       }),
     });
     if (res.ok) {
@@ -421,7 +403,14 @@ function EditableRow({ product, selected, onSelect, onSaved, onToggleActive, onT
         <td className="px-3 py-2">
           <input className="input-base text-xs py-1 w-20" value={form.price}
             onChange={e => setForm(f => ({ ...f, price: e.target.value }))} />
+          <label className="flex items-center gap-1.5 mt-1.5 cursor-pointer" title="Customer enters a quantity; final price is by actual weight">
+            <input type="checkbox" checked={form.billed_by_weight}
+              onChange={e => setForm(f => ({ ...f, billed_by_weight: e.target.checked }))}
+              className="w-3.5 h-3.5 rounded border-gray-300" />
+            <span className="text-[10px] font-semibold text-gray-500 whitespace-nowrap">Billed by weight (/lb)</span>
+          </label>
         </td>
+        <td className="px-3 py-2"></td>
         <td className="px-3 py-2">
           <div className="flex items-center gap-1.5">
             <button onClick={save} disabled={saving}
@@ -467,8 +456,8 @@ function EditableRow({ product, selected, onSelect, onSaved, onToggleActive, onT
           {!product.is_active && (
             <span className="inline-block text-[10px] font-bold uppercase tracking-wide text-gray-400 bg-gray-100 rounded px-1.5 py-0.5">Inactive</span>
           )}
-          {!product.is_available && (
-            <span className="inline-block text-[10px] font-bold uppercase tracking-wide text-red-500 bg-red-50 rounded px-1.5 py-0.5">Out of Stock</span>
+          {product.billed_by_weight && (
+            <span className="inline-block text-[10px] font-bold uppercase tracking-wide text-amber-700 bg-amber-50 rounded px-1.5 py-0.5">/lb</span>
           )}
           {(product.tags || []).map(tag => (
             <span key={tag} className="inline-flex items-center gap-0.5 text-[10px] text-brand-river/70 bg-blue-50 rounded-full px-1.5 py-0.5 font-semibold">
@@ -480,22 +469,28 @@ function EditableRow({ product, selected, onSelect, onSaved, onToggleActive, onT
       <td className="px-3 py-2.5 text-xs text-gray-500">{product.pkg_size || '—'}</td>
       <td className="px-3 py-2.5 text-xs text-gray-500">{product.uom || '—'}</td>
       <td className="px-3 py-2.5 text-sm font-bold text-brand-navy">{formatCurrency(product.price)}</td>
+      {/* One-tap in/out-of-stock pill — the most frequent daily action */}
+      <td className="px-3 py-2.5">
+        <button
+          onClick={() => onToggleAvailable(product)}
+          title={product.is_available ? 'Tap to mark Out of Stock' : 'Tap to mark In Stock'}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wide border-2 whitespace-nowrap transition-all active:scale-95 ${
+            product.is_available
+              ? 'bg-green-50 text-green-700 border-green-300 hover:bg-green-100'
+              : 'bg-red-50 text-red-600 border-red-300 hover:bg-red-100'
+          }`}>
+          {product.is_available
+            ? <><PackageCheck className="w-3.5 h-3.5" /> In Stock</>
+            : <><PackageX className="w-3.5 h-3.5" /> Out of Stock</>}
+        </button>
+      </td>
       <td className="px-3 py-2.5">
         <div className="flex items-center gap-1.5">
           <button onClick={() => setEditing(true)} title="Edit"
             className="p-1.5 text-gray-400 hover:text-brand-river hover:bg-blue-50 rounded transition-colors">
             <Pencil className="w-3.5 h-3.5" />
           </button>
-          <button onClick={() => onToggleAvailable(product)}
-            title={product.is_available ? 'Mark Out of Stock' : 'Mark In Stock'}
-            className={`p-1.5 rounded transition-colors ${product.is_available
-              ? 'text-blue-400 hover:text-red-500 hover:bg-red-50'
-              : 'text-red-400 hover:text-blue-500 hover:bg-blue-50'}`}>
-            {product.is_available
-              ? <PackageCheck className="w-4 h-4" />
-              : <PackageX className="w-4 h-4" />}
-          </button>
-          <button onClick={() => onToggleActive(product)} title={product.is_active ? 'Deactivate' : 'Activate'}
+          <button onClick={() => onToggleActive(product)} title={product.is_active ? 'Deactivate (hide from catalog)' : 'Activate'}
             className={`p-1.5 rounded transition-colors ${product.is_active
               ? 'text-green-500 hover:text-red-500 hover:bg-red-50'
               : 'text-gray-300 hover:text-green-500 hover:bg-green-50'}`}>
@@ -508,15 +503,6 @@ function EditableRow({ product, selected, onSelect, onSaved, onToggleActive, onT
     </tr>
   );
 }
-
-interface ImportSummary {
-  total: number;
-  new_items: number;
-  strong_duplicates: number;
-  weak_duplicates: number;
-}
-
-type ImportMode = 'skip_duplicates' | 'update_duplicates' | 'add_anyway';
 
 export default function AdminProductsPage() {
   const router = useRouter();
@@ -537,16 +523,6 @@ export default function AdminProductsPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkCategory, setBulkCategory] = useState('');
-
-  // Import state
-  const [isDragging, setIsDragging] = useState(false);
-  const [parsing, setParsing] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [previewAll, setPreviewAll] = useState<ParsedProduct[]>([]);
-  const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
-  const [importMode, setImportMode] = useState<ImportMode>('skip_duplicates');
-  const [analyzing, setAnalyzing] = useState(false);
-  const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
 
   // Duplicates tab state
   const [dupGroups, setDupGroups] = useState<any[]>([]);
@@ -679,88 +655,6 @@ export default function AdminProductsPage() {
     URL.revokeObjectURL(url);
   }
 
-  // ── CSV parsing ──
-  function handleFile(file: File) {
-    setParsing(true); setResult(null); setImportSummary(null); setPreviewAll([]);
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = e.target?.result as string;
-      try {
-        const lines = text.split(/\r?\n/).filter(l => l.trim());
-        const sep = text.includes('\t') ? '\t' : ',';
-        const headers = lines[0].split(sep).map(h => h.replace(/['"]/g, '').toLowerCase().trim());
-        const all: ParsedProduct[] = [];
-        for (let i = 1; i < lines.length; i++) {
-          const values = lines[i].split(sep).map(v => v.replace(/^["']|["']$/g, '').trim());
-          const p = parseRow(headers, values);
-          if (p && p.description) all.push(p);
-        }
-        setPreviewAll(all);
-        setParsing(false);
-        analyzeImport(all);
-      } catch (err) {
-        setResult({ success: false, message: `Parse error: ${err}` });
-        setParsing(false);
-      }
-    };
-    reader.readAsText(file);
-  }
-
-  async function analyzeImport(rows: ParsedProduct[]) {
-    if (!rows.length) return;
-    setAnalyzing(true);
-    try {
-      const res = await adminFetch('/api/products', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'preview', products: rows }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setImportSummary(data.summary);
-        // Default mode: if there are duplicates, default to skipping them
-        if (data.summary.strong_duplicates + data.summary.weak_duplicates > 0) {
-          setImportMode('skip_duplicates');
-        } else {
-          setImportMode('add_anyway');
-        }
-      }
-    } finally {
-      setAnalyzing(false);
-    }
-  }
-
-  const onDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault(); setIsDragging(false);
-    const file = e.dataTransfer.files[0];
-    if (file) handleFile(file);
-  }, []);
-
-  async function uploadProducts() {
-    if (!previewAll.length) return;
-    setUploading(true);
-    try {
-      const res = await adminFetch('/api/products', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ products: previewAll, mode: importMode }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const parts: string[] = [];
-        if (data.inserted) parts.push(`${data.inserted} added`);
-        if (data.updated) parts.push(`${data.updated} updated`);
-        if (data.skipped) parts.push(`${data.skipped} skipped`);
-        setResult({ success: true, message: `Import complete — ${parts.join(', ') || 'no changes'}.` });
-        setPreviewAll([]); setImportSummary(null);
-        setTab('catalog'); fetchProducts('', 1, category, status);
-      } else {
-        const err = await res.json();
-        setResult({ success: false, message: err.error || 'Import failed' });
-      }
-    } finally { setUploading(false); }
-  }
-
   // ── Duplicates review tab ──
   const fetchDuplicates = useCallback(async () => {
     setDupLoading(true);
@@ -862,7 +756,7 @@ export default function AdminProductsPage() {
       {/* Tabs */}
       <div className="flex gap-1 bg-white border border-gray-200 rounded-xl p-1 mb-6 w-fit">
         {[{ key: 'catalog', label: 'Browse & Edit', icon: Package },
-          { key: 'import', label: 'Import CSV', icon: Upload },
+          { key: 'import', label: 'Import File', icon: Upload },
           { key: 'duplicates', label: 'Duplicates', icon: Layers }].map(({ key, label, icon: Icon }) => (
           <button key={key} onClick={() => setTab(key as any)}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
@@ -958,7 +852,7 @@ export default function AdminProductsPage() {
                         onChange={e => toggleSelectAll(e.target.checked)}
                         className="w-4 h-4 rounded border-gray-300" />
                     </th>
-                    {['Image', 'Category', 'Sub-Category', 'Description', 'Pack Size', 'UOM', 'Price', 'Actions'].map(h => (
+                    {['Image', 'Category', 'Sub-Category', 'Description', 'Pack Size', 'UOM', 'Price', 'Stock', 'Actions'].map(h => (
                       <th key={h} className="px-3 py-3 text-xs font-bold text-brand-sky uppercase tracking-wide whitespace-nowrap">
                         {h}
                       </th>
@@ -1005,170 +899,9 @@ export default function AdminProductsPage() {
         </div>
       )}
 
-      {/* ── IMPORT TAB ── */}
+      {/* ── IMPORT TAB — 4-step wizard (CSV / TSV / XLSX / XLS) ── */}
       {tab === 'import' && (
-        <div className="space-y-6">
-          {/* Drop zone */}
-          <div
-            onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
-            onDragLeave={() => setIsDragging(false)}
-            onDrop={onDrop}
-            className={`border-2 border-dashed rounded-xl p-12 text-center transition-colors ${
-              isDragging ? 'border-brand-river bg-blue-50' : 'border-gray-300 bg-white'}`}>
-            <Upload className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-            <h3 className="font-display text-lg font-bold text-brand-navy mb-2">
-              Drop your CSV/TSV file here
-            </h3>
-            <p className="text-gray-400 text-sm mb-4">Supports .csv and .tsv files. Headers auto-detected.</p>
-            <label className="btn-outline cursor-pointer inline-block">
-              Browse File
-              <input type="file" accept=".csv,.tsv,.txt" className="hidden"
-                onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])} />
-            </label>
-            <p className="text-xs text-gray-300 mt-4">
-              Expected columns: category, sub_category, upc, description, pkg_size, uom, price
-            </p>
-          </div>
-
-          {/* Status messages */}
-          {parsing && (
-            <div className="flex items-center gap-3 p-4 bg-blue-50 rounded-lg">
-              <Loader2 className="w-5 h-5 text-brand-river animate-spin" />
-              <p className="text-sm text-brand-river">Parsing file…</p>
-            </div>
-          )}
-          {analyzing && (
-            <div className="flex items-center gap-3 p-4 bg-blue-50 rounded-lg">
-              <Loader2 className="w-5 h-5 text-brand-river animate-spin" />
-              <p className="text-sm text-brand-river">Checking for duplicates…</p>
-            </div>
-          )}
-          {result && (
-            <div className={`flex items-center gap-3 p-4 rounded-lg ${
-              result.success ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
-              {result.success
-                ? <CheckCircle2 className="w-5 h-5 text-green-500" />
-                : <AlertCircle className="w-5 h-5 text-red-500" />}
-              <p className={`text-sm font-medium ${result.success ? 'text-green-700' : 'text-red-700'}`}>
-                {result.message}
-              </p>
-            </div>
-          )}
-
-          {/* Import summary + duplicate handling */}
-          {importSummary && !analyzing && (
-            <div className="card-base overflow-hidden">
-              <div className="px-6 py-4 border-b border-gray-100">
-                <h2 className="font-display text-lg font-bold text-brand-navy">
-                  Import Summary — {importSummary.total.toLocaleString()} rows detected
-                </h2>
-              </div>
-              <div className="p-6 grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="bg-green-50 rounded-lg p-4">
-                  <p className="text-2xl font-bold text-green-600">{importSummary.new_items.toLocaleString()}</p>
-                  <p className="text-xs text-green-700 mt-1">New items will be added</p>
-                </div>
-                <div className="bg-amber-50 rounded-lg p-4">
-                  <p className="text-2xl font-bold text-amber-600">{importSummary.strong_duplicates.toLocaleString()}</p>
-                  <p className="text-xs text-amber-700 mt-1">Potential duplicates (UPC + Price match)</p>
-                </div>
-                <div className="bg-orange-50 rounded-lg p-4">
-                  <p className="text-2xl font-bold text-orange-600">{importSummary.weak_duplicates.toLocaleString()}</p>
-                  <p className="text-xs text-orange-700 mt-1">Items with matching name/pack/price but different UPC</p>
-                </div>
-              </div>
-
-              {(importSummary.strong_duplicates + importSummary.weak_duplicates > 0) && (
-                <div className="px-6 pb-2">
-                  <p className="text-sm font-semibold text-brand-navy mb-2">How should duplicates be handled?</p>
-                  <div className="space-y-2">
-                    <label className="flex items-start gap-2 cursor-pointer">
-                      <input type="radio" name="importMode" className="mt-1"
-                        checked={importMode === 'skip_duplicates'}
-                        onChange={() => setImportMode('skip_duplicates')} />
-                      <span className="text-sm text-gray-600">
-                        <span className="font-medium text-brand-navy">Skip all duplicates</span> — only add the {importSummary.new_items.toLocaleString()} new items
-                      </span>
-                    </label>
-                    <label className="flex items-start gap-2 cursor-pointer">
-                      <input type="radio" name="importMode" className="mt-1"
-                        checked={importMode === 'update_duplicates'}
-                        onChange={() => setImportMode('update_duplicates')} />
-                      <span className="text-sm text-gray-600">
-                        <span className="font-medium text-brand-navy">Update existing items</span> — refresh matched items with the new file&apos;s data (e.g. price changes), and add the new items
-                      </span>
-                    </label>
-                    <label className="flex items-start gap-2 cursor-pointer">
-                      <input type="radio" name="importMode" className="mt-1"
-                        checked={importMode === 'add_anyway'}
-                        onChange={() => setImportMode('add_anyway')} />
-                      <span className="text-sm text-gray-600">
-                        <span className="font-medium text-brand-navy">Add anyway</span> — import everything as new items, even possible duplicates (you can review and merge later in the Duplicates tab)
-                      </span>
-                    </label>
-                  </div>
-                </div>
-              )}
-
-              <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between">
-                <p className="text-gray-400 text-xs">Nothing has been saved yet — review the summary above before importing.</p>
-                <button onClick={uploadProducts} disabled={uploading}
-                  className="btn-gold text-sm flex items-center gap-2">
-                  {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-                  {uploading ? 'Importing…' : 'Confirm Import'}
-                </button>
-              </div>
-
-              {/* Preview rows */}
-              <div className="overflow-x-auto border-t border-gray-100">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-gray-50 text-left">
-                      {['Category', 'Description', 'Pack Size', 'UOM', 'Price'].map(h => (
-                        <th key={h} className="px-3 py-2 text-xs font-bold text-gray-500 uppercase tracking-wide">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {previewAll.slice(0, 20).map((p, i) => (
-                      <tr key={i} className={i % 2 === 0 ? '' : 'bg-gray-50'}>
-                        <td className="px-3 py-2 text-xs text-brand-river">{p.category}</td>
-                        <td className="px-3 py-2 font-medium text-brand-navy max-w-xs truncate">{p.description}</td>
-                        <td className="px-3 py-2 text-xs text-gray-500">{p.pkg_size || '—'}</td>
-                        <td className="px-3 py-2 text-xs text-gray-500">{p.uom || '—'}</td>
-                        <td className="px-3 py-2 font-bold text-brand-navy">
-                          {p.price > 0 ? `$${p.price.toFixed(2)}` : '—'}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <p className="text-gray-400 text-xs px-3 py-2">Showing first 20 of {previewAll.length.toLocaleString()} rows</p>
-              </div>
-            </div>
-          )}
-
-          {/* Format guide */}
-          <div className="card-base p-6">
-            <h3 className="font-display text-base font-bold text-brand-navy mb-3">CSV Format Guide</h3>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              {[
-                { field: 'category', aliases: 'category, cat, department' },
-                { field: 'sub_category', aliases: 'sub_category, subcategory' },
-                { field: 'upc', aliases: 'upc, barcode' },
-                { field: 'description', aliases: 'description, item description, name' },
-                { field: 'pkg_size', aliases: 'pkg_size, pack size, size' },
-                { field: 'uom', aliases: 'uom, unit, unit of measure' },
-                { field: 'price', aliases: 'price, unit price, cost' },
-              ].map(({ field, aliases }) => (
-                <div key={field} className="bg-gray-50 rounded-lg p-3">
-                  <p className="font-mono text-xs font-bold text-brand-steel mb-1">{field}</p>
-                  <p className="text-xs text-gray-400">{aliases}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+        <ImportWizard onComplete={() => { setTab('catalog'); fetchProducts('', 1, category, status); }} />
       )}
 
       {/* ── DUPLICATES TAB ── */}

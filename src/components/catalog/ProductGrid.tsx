@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { Product } from '@/types';
 import { formatCurrency } from '@/lib/utils';
 import { addToCart } from '@/lib/cart';
-import { Plus, Minus, ShoppingCart, Package, Check, Star } from 'lucide-react';
+import { Plus, Minus, ShoppingCart, Package, Check, Star, X, Scale, Tag } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useToast } from '@/hooks/use-toast';
@@ -23,6 +23,7 @@ interface ProductGridProps {
 export function ProductGrid({ products, totalCount, page, totalPages, search, category }: ProductGridProps) {
   const { user } = useAuth();
   const [favIds, setFavIds] = useState<Set<string>>(new Set());
+  const [detailProduct, setDetailProduct] = useState<Product | null>(null);
 
   useEffect(() => {
     if (!user) { setFavIds(new Set()); return; }
@@ -59,9 +60,15 @@ export function ProductGrid({ products, totalCount, page, totalPages, search, ca
         {products.map(product => (
           <ProductCard key={product.id} product={product}
             isLoggedIn={!!user}
-            isFavorite={favIds.has(product.id)} />
+            isFavorite={favIds.has(product.id)}
+            onOpenDetail={() => setDetailProduct(product)} />
         ))}
       </div>
+
+      {/* Product detail modal */}
+      {detailProduct && (
+        <ProductDetailModal product={detailProduct} onClose={() => setDetailProduct(null)} />
+      )}
 
       {/* Pagination */}
       {totalPages > 1 && (
@@ -114,10 +121,13 @@ function PaginationLink({ href, label }: { href: string; label: string }) {
   );
 }
 
-function ProductCard({ product, isLoggedIn, isFavorite }: { product: Product; isLoggedIn: boolean; isFavorite: boolean }) {
+function ProductCard({ product, isLoggedIn, isFavorite, onOpenDetail }: {
+  product: Product; isLoggedIn: boolean; isFavorite: boolean; onOpenDetail: () => void;
+}) {
   const [qty, setQty] = useState(1);
   const [justAdded, setJustAdded] = useState(false);
   const { toast } = useToast();
+  const byWeight = !!product.billed_by_weight;
 
   const handleAdd = useCallback(() => {
     addToCart({
@@ -128,6 +138,7 @@ function ProductCard({ product, isLoggedIn, isFavorite }: { product: Product; is
       uom: product.uom,
       price: product.price,
       quantity: qty,
+      billed_by_weight: !!product.billed_by_weight,
     });
     setJustAdded(true);
     toast({
@@ -164,54 +175,66 @@ function ProductCard({ product, isLoggedIn, isFavorite }: { product: Product; is
       >
         <Star className={`w-4 h-4 ${isFavorite ? 'fill-brand-orange' : ''}`} />
       </button>
-      {/* Product image or category color band */}
-      {product.image_url ? (
-        <div className="relative w-full aspect-square bg-gray-50 overflow-hidden">
-          <Image
-            src={product.image_url}
-            alt={product.description}
-            fill
-            className="object-contain p-2"
-            unoptimized
-          />
-          <div className={`absolute bottom-0 left-0 right-0 h-0.5 ${getCategoryColor(product.category)}`} />
-        </div>
-      ) : (
-        <div className={`h-1.5 w-full ${getCategoryColor(product.category)}`} />
-      )}
+      {/* Product image or category color band — click opens detail modal */}
+      <button type="button" onClick={onOpenDetail} className="block w-full text-left cursor-pointer" aria-label={`View details for ${product.description}`}>
+        {product.image_url ? (
+          <div className="relative w-full aspect-square bg-gray-50 overflow-hidden">
+            <Image
+              src={product.image_url}
+              alt={product.description}
+              fill
+              className="object-contain p-2"
+              unoptimized
+            />
+            <div className={`absolute bottom-0 left-0 right-0 h-0.5 ${getCategoryColor(product.category)}`} />
+          </div>
+        ) : (
+          <div className={`h-1.5 w-full ${getCategoryColor(product.category)}`} />
+        )}
+      </button>
 
       <div className="p-3 flex flex-col gap-2 flex-1">
-        {/* Category label — show main category only, not internal Sinclair sub-category */}
-        <span className="text-[10px] font-bold text-brand-river uppercase tracking-wide leading-none truncate">
-          {product.category}
-        </span>
+        {/* Clickable info area — opens detail modal */}
+        <button type="button" onClick={onOpenDetail} className="text-left flex flex-col gap-2 cursor-pointer">
+          {/* Category label — show main category only, not internal Sinclair sub-category */}
+          <span className="text-[10px] font-bold text-brand-river uppercase tracking-wide leading-none truncate">
+            {product.category}
+          </span>
 
-        {/* Product name */}
-        <h3 className="font-body font-semibold text-brand-navy text-sm leading-tight line-clamp-2 min-h-[2.5rem]">
-          {product.description}
-        </h3>
+          {/* Product name */}
+          <h3 className="font-body font-semibold text-brand-navy text-sm leading-tight line-clamp-2 min-h-[2.5rem]">
+            {product.description}
+          </h3>
 
-        {/* Customer-facing description */}
-        {product.details && (
-          <p className="text-[11px] text-gray-500 leading-snug line-clamp-3 -mt-1">
-            {product.details}
-          </p>
-        )}
+          {/* Customer-facing description */}
+          {product.details && (
+            <p className="text-[11px] text-gray-500 leading-snug line-clamp-3 -mt-1">
+              {product.details}
+            </p>
+          )}
 
-        {/* Pack size */}
-        {product.pkg_size && (
-          <p className="text-[11px] text-gray-400 -mt-1">
-            {product.pkg_size}{product.uom ? ` / ${product.uom}` : ''}
-          </p>
-        )}
+          {/* Pack size */}
+          {product.pkg_size && (
+            <p className="text-[11px] text-gray-400 -mt-1">
+              {product.pkg_size}{product.uom ? ` / ${product.uom}` : ''}
+            </p>
+          )}
+        </button>
 
         {/* Price + controls */}
         <div className="border-t border-gray-100 pt-2 mt-auto">
+          {byWeight && (
+            <p className="flex items-center gap-1 text-[10px] font-semibold text-amber-700 mb-1">
+              <Scale className="w-3 h-3" /> Sold by weight — billed at actual weight
+            </p>
+          )}
           <div className="flex items-center justify-between gap-1 mb-2">
             <span className="text-base font-bold text-brand-navy font-body">
-              {formatCurrency(product.price)}
+              {formatCurrency(product.price)}{byWeight && <span className="text-[10px] font-semibold text-gray-400"> /lb</span>}
             </span>
             {/* Qty stepper */}
+            <div className="flex items-center gap-1.5">
+            {byWeight && <span className="text-[10px] font-bold text-gray-400 uppercase">How many?</span>}
             <div className="flex items-center border border-gray-200 rounded overflow-hidden">
               <button
                 onClick={() => setQty(q => Math.max(1, q - 1))}
@@ -243,7 +266,13 @@ function ProductCard({ product, isLoggedIn, isFavorite }: { product: Product; is
                 <Plus className="w-2.5 h-2.5" />
               </button>
             </div>
+            </div>
           </div>
+          {byWeight && qty > 0 && (
+            <p className="text-[10px] text-gray-400 mb-1.5 -mt-1">
+              ~{formatCurrency(product.price * qty)} est. — final price by actual weight
+            </p>
+          )}
 
           {/* Add to cart button — full width */}
           <button
@@ -260,6 +289,121 @@ function ProductCard({ product, isLoggedIn, isFavorite }: { product: Product; is
             ) : (
               <><ShoppingCart className="w-3 h-3" /> Add to Cart</>
             )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Product detail modal ─────────────────────────────────────
+function ProductDetailModal({ product, onClose }: { product: Product; onClose: () => void }) {
+  const [qty, setQty] = useState(1);
+  const [justAdded, setJustAdded] = useState(false);
+  const { toast } = useToast();
+  const byWeight = !!product.billed_by_weight;
+
+  function handleAdd() {
+    addToCart({
+      product_id: product.id,
+      description: product.description,
+      category: product.category,
+      pkg_size: product.pkg_size,
+      uom: product.uom,
+      price: product.price,
+      quantity: qty,
+      billed_by_weight: byWeight,
+    });
+    setJustAdded(true);
+    toast({ title: 'Added to cart', description: `${qty}× ${product.description}`, variant: 'success', duration: 2000 });
+    setTimeout(() => { setJustAdded(false); }, 1500);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 py-8" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto animate-fade-in"
+        onClick={e => e.stopPropagation()}>
+        {/* Image */}
+        <div className="relative">
+          {product.image_url ? (
+            <div className="relative w-full aspect-square bg-gray-50">
+              <Image src={product.image_url} alt={product.description} fill className="object-contain p-4" unoptimized />
+            </div>
+          ) : (
+            <div className={`h-2 w-full ${getCategoryColor(product.category)} rounded-t-xl`} />
+          )}
+          <button onClick={onClose} aria-label="Close"
+            className="absolute top-3 right-3 w-8 h-8 bg-white/90 border border-gray-200 rounded-full flex items-center justify-center text-gray-500 hover:text-brand-navy shadow-sm">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-3">
+          <div>
+            <p className="text-[11px] font-bold text-brand-river uppercase tracking-wide">{product.category}</p>
+            <h2 className="font-display text-lg font-bold text-brand-navy leading-snug mt-0.5">{product.description}</h2>
+          </div>
+
+          {product.details && (
+            <p className="text-sm text-gray-600 leading-relaxed">{product.details}</p>
+          )}
+
+          <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-gray-500">
+            {product.pkg_size && <span><strong className="text-gray-600">Pack:</strong> {product.pkg_size}</span>}
+            {product.uom && <span><strong className="text-gray-600">Unit:</strong> {product.uom}</span>}
+          </div>
+
+          {product.tags && product.tags.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {product.tags.map(tag => (
+                <span key={tag} className="inline-flex items-center gap-1 text-[10px] font-semibold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
+                  <Tag className="w-2.5 h-2.5" /> {tag}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {byWeight && (
+            <p className="flex items-center gap-1.5 text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              <Scale className="w-3.5 h-3.5 shrink-0" />
+              Sold by weight — you&apos;ll be billed for the actual weight packed.
+            </p>
+          )}
+
+          <div className="flex items-center justify-between border-t border-gray-100 pt-3">
+            <span className="text-xl font-bold text-brand-navy">
+              {formatCurrency(product.price)}{byWeight && <span className="text-xs font-semibold text-gray-400"> /lb</span>}
+            </span>
+            <div className="flex items-center gap-2">
+              {byWeight && <span className="text-[10px] font-bold text-gray-400 uppercase">How many?</span>}
+              <div className="flex items-center border border-gray-200 rounded overflow-hidden">
+                <button onClick={() => setQty(q => Math.max(1, q - 1))} aria-label="Decrease quantity"
+                  className="w-8 h-8 flex items-center justify-center text-gray-400 hover:bg-gray-100"><Minus className="w-3 h-3" /></button>
+                <input type="text" inputMode="numeric" pattern="[0-9]*" value={qty} aria-label="Quantity"
+                  onChange={e => {
+                    const val = e.target.value.replace(/[^0-9]/g, '');
+                    setQty(val === '' ? 0 : Math.min(999, parseInt(val, 10)));
+                  }}
+                  onBlur={() => { if (!qty || qty < 1) setQty(1); }}
+                  onFocus={e => e.target.select()}
+                  className="w-10 text-center text-sm font-bold text-brand-navy bg-transparent border-0 focus:outline-none" />
+                <button onClick={() => setQty(q => Math.min(999, q + 1))} aria-label="Increase quantity"
+                  className="w-8 h-8 flex items-center justify-center text-gray-400 hover:bg-gray-100"><Plus className="w-3 h-3" /></button>
+              </div>
+            </div>
+          </div>
+
+          {byWeight && qty > 0 && (
+            <p className="text-xs text-gray-400 -mt-1">
+              ~{formatCurrency(product.price * qty)} est. — final price by actual weight
+            </p>
+          )}
+
+          <button onClick={handleAdd} disabled={justAdded}
+            className={`w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold transition-all ${
+              justAdded ? 'bg-green-500 text-white' : 'bg-brand-green text-white hover:bg-brand-gmed active:scale-[0.98]'
+            }`}>
+            {justAdded ? <><Check className="w-4 h-4" /> Added!</> : <><ShoppingCart className="w-4 h-4" /> Add to Cart</>}
           </button>
         </div>
       </div>

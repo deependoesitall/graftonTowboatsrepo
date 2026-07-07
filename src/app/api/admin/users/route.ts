@@ -1,7 +1,9 @@
 // src/app/api/admin/users/route.ts
-// User management — available to owners and managers.
-// Owners can do everything. Managers can create/edit staff-level users only
-// (they cannot create or edit owners or other managers).
+// User management — OWNER ONLY.
+// Managers previously had limited access here; per the confirmed Sinclair
+// manager scope (orders, products, own password only) user management is now
+// restricted to owners entirely. Managers change their own password via
+// /api/admin/me/password.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
@@ -11,11 +13,8 @@ import { requireAdmin } from '@/lib/admin-auth-server';
 const SELECTABLE_FIELDS = 'id, username, role, display_name, is_active, last_login, created_at, permissions';
 
 export async function GET(req: NextRequest) {
-  const session = requireAdmin(req, { area: 'settings' });
+  const session = requireAdmin(req, { ownerOnly: true });
   if (session instanceof NextResponse) return session;
-  if (session.role !== 'owner' && session.role !== 'manager') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  }
 
   const supabase = createServiceClient();
   const { data, error } = await supabase
@@ -27,28 +26,19 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = requireAdmin(req, { area: 'settings' });
+  const session = requireAdmin(req, { ownerOnly: true });
   if (session instanceof NextResponse) return session;
-  if (session.role !== 'owner' && session.role !== 'manager') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  }
 
   const { username, password, role, display_name, permissions } = await req.json();
   if (!username || !password) {
     return NextResponse.json({ error: 'Username and password required' }, { status: 400 });
   }
 
-  // Managers can only create staff-level users
-  const targetRole = role || 'staff';
-  if (session.role === 'manager' && targetRole !== 'staff') {
-    return NextResponse.json({ error: 'Managers can only create staff accounts' }, { status: 403 });
-  }
-
   const supabase = createServiceClient();
   const { data, error } = await supabase.from('admin_users').insert({
     username: username.toLowerCase().trim(),
     password_hash: await hashPassword(password),
-    role: targetRole,
+    role: role || 'staff',
     display_name: display_name || username,
     permissions: Array.isArray(permissions) ? permissions : [],
   }).select(SELECTABLE_FIELDS).single();
@@ -58,30 +48,11 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const session = requireAdmin(req, { area: 'settings' });
+  const session = requireAdmin(req, { ownerOnly: true });
   if (session instanceof NextResponse) return session;
-  if (session.role !== 'owner' && session.role !== 'manager') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  }
 
   const { id, password, ...updates } = await req.json();
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
-
-  // Managers can only edit staff-level users
-  if (session.role === 'manager') {
-    const supabase = createServiceClient();
-    const { data: target } = await supabase
-      .from('admin_users')
-      .select('role')
-      .eq('id', id)
-      .single();
-    if (!target || target.role !== 'staff') {
-      return NextResponse.json({ error: 'Managers can only edit staff accounts' }, { status: 403 });
-    }
-    if (updates.role && updates.role !== 'staff') {
-      return NextResponse.json({ error: 'Managers cannot change role above staff' }, { status: 403 });
-    }
-  }
 
   if (password) (updates as Record<string, unknown>).password_hash = await hashPassword(password);
 
@@ -98,27 +69,11 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const session = requireAdmin(req, { area: 'settings' });
+  const session = requireAdmin(req, { ownerOnly: true });
   if (session instanceof NextResponse) return session;
-  if (session.role !== 'owner' && session.role !== 'manager') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  }
 
   const { id } = await req.json();
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
-
-  // Managers can only delete staff-level users
-  if (session.role === 'manager') {
-    const supabase = createServiceClient();
-    const { data: target } = await supabase
-      .from('admin_users')
-      .select('role')
-      .eq('id', id)
-      .single();
-    if (!target || target.role !== 'staff') {
-      return NextResponse.json({ error: 'Managers can only delete staff accounts' }, { status: 403 });
-    }
-  }
 
   const supabase = createServiceClient();
   await supabase.from('admin_users').delete().eq('id', id);
