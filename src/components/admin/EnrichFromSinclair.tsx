@@ -15,6 +15,14 @@ const APP_KEY = 'sinclair';
 const STORE_ID = '4297';
 const PAGE_SIZE = 100;
 const IMAGE_BASE = 'https://images.freshop.ncrcloud.com';
+// NCR Freshop returns error_code 429 (as HTTP 400) after ~50 req/min.
+// Verified live: 3 parallel pages + 600ms gaps still trips the limit around
+// page 8; one request every ~1.3s completes all ~124 pages reliably.
+const REQUEST_DELAY_MS = 1300;
+const COOLDOWN_SECS = 90;
+const MAX_COOLDOWNS = 15;
+const CHECKPOINT_KEY = 'freshop_enrich_checkpoint_v1';
+const CHECKPOINT_EVERY = 10;
 
 interface FreshopProduct {
   upc?: string;
@@ -73,10 +81,54 @@ function imageFrom(p: FreshopProduct): string | null {
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-// NCR's API enforces a per-minute request quota: after ~60 rapid requests it
-// returns 400 for EVERYTHING until the window resets. So: one attempt per
-// page (plus one quick retry for network blips) — quota handling happens in
-// the outer loop with a cooldown, not by hammering retries.
+interface EnrichCheckpoint {
+  version: 1;
+  total: number;
+  pages: number;
+  donePages: number[];
+  products: FreshopProduct[];
+  savedAt: number;
+}
+
+function loadCheckpoint(): EnrichCheckpoint | null {
+  try {
+    const raw = sessionStorage.getItem(CHECKPOINT_KEY);
+    if (!raw) return null;
+    const cp = JSON.parse(raw) as EnrichCheckpoint;
+    if (cp.version !== 1 || !Array.isArray(cp.donePages) || !Array.isArray(cp.products)) return null;
+    // Expire after 2 hours — the catalog won't change that fast.
+    if (Date.now() - cp.savedAt > 2 * 60 * 60 * 1000) {
+      sessionStorage.removeItem(CHECKPOINT_KEY);
+      return null;
+    }
+    return cp;
+  } catch {
+    return null;
+  }
+}
+
+function saveCheckpoint(cp: EnrichCheckpoint) {
+  try {
+    sessionStorage.setItem(CHECKPOINT_KEY, JSON.stringify(cp));
+  } catch { /* quota exceeded — non-fatal */ }
+}
+
+function clearCheckpoint() {
+  sessionStorage.removeItem(CHECKPOINT_KEY);
+}
+
+function indexFromProducts(products: FreshopProduct[]): Map<string, FreshopProduct> {
+  const index = new Map<string, FreshopProduct>();
+  for (const item of products) {
+    for (const key of freshopKeys(item)) {
+      if (!index.has(key)) index.set(key, item);
+    }
+  }
+  return index;
+}
+
+// One attempt per page (plus one quick retry for network blips). Quota
+// handling happens in the outer loop with a cooldown — never hammer retries.
 async function fetchFreshopPage(skip: number): Promise<FreshopProduct[] | null> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -87,7 +139,7 @@ async function fetchFreshopPage(skip: number): Promise<FreshopProduct[] | null> 
         const data = await res.json();
         if (Array.isArray(data?.items)) return data.items as FreshopProduct[];
       }
-      return null; // 400/429 → quota hit; let the outer loop cool down
+      return null; // 400 w/ error_code 429 → quota hit; outer loop cools down
     } catch { await sleep(400); }
   }
   return null;
@@ -133,45 +185,76 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
       const total: number = head?.total ?? 0;
       if (!total) throw new Error("Couldn't reach Sinclair's product catalog.");
       const pages = Math.ceil(total / PAGE_SIZE);
-      setProgress({ done: 0, total: pages, label: `Downloading Sinclair's catalog…` });
 
-      const index = new Map<string, FreshopProduct>();
-      let indexed = 0, donePages = 0, cooldowns = 0;
-      const queue = Array.from({ length: pages }, (_, i) => i);
+      // Resume a partial download if the last run was interrupted by rate limits.
+      const saved = loadCheckpoint();
+      const doneSet = new Set<number>(saved?.pages === pages ? saved.donePages : []);
+      const collected: FreshopProduct[] = saved?.pages === pages ? [...saved.products] : [];
+      let indexed = collected.length;
+      let donePages = doneSet.size;
+      let cooldowns = 0;
+      const queue = Array.from({ length: pages }, (_, i) => i).filter(i => !doneSet.has(i));
+
+      setProgress({
+        done: donePages,
+        total: pages,
+        label: donePages > 0
+          ? `Resuming Sinclair's catalog (${donePages} of ${pages} pages already downloaded)…`
+          : `Downloading Sinclair's catalog…`,
+      });
 
       while (queue.length) {
         if (cancelRef.current) return;
-        const batch = queue.splice(0, 3);
-        const results = await Promise.all(batch.map(p => fetchFreshopPage(p * PAGE_SIZE)));
-        const failed: number[] = [];
-        results.forEach((items, i) => {
-          if (items === null) { failed.push(batch[i]); return; }
-          donePages++;
-          indexed += items.length;
-          for (const item of items) {
-            for (const key of freshopKeys(item)) {
-              if (!index.has(key)) index.set(key, item);
-            }
-          }
-        });
-        setProgress({ done: donePages, total: pages, label: `Downloading Sinclair's catalog…` });
+        const page = queue.shift()!;
+        const items = await fetchFreshopPage(page * PAGE_SIZE);
 
-        if (failed.length) {
-          // Quota wall — put the pages back and wait out the window
-          queue.unshift(...failed);
+        if (items === null) {
+          queue.unshift(page);
           cooldowns++;
-          if (cooldowns > 10) {
-            throw new Error(`Sinclair's API kept rate-limiting after ${donePages} of ${pages} pages. Try again later.`);
+          if (cooldowns > MAX_COOLDOWNS) {
+            saveCheckpoint({
+              version: 1, total, pages,
+              donePages: Array.from(doneSet),
+              products: collected,
+              savedAt: Date.now(),
+            });
+            throw new Error(
+              `Sinclair's API kept rate-limiting after ${donePages} of ${pages} pages. ` +
+              `Progress was saved — click Enrich again to resume where it left off.`
+            );
           }
-          for (let s = 65; s > 0; s--) {
+          for (let s = COOLDOWN_SECS; s > 0; s--) {
             if (cancelRef.current) return;
-            setProgress({ done: donePages, total: pages, label: `Sinclair's API limit reached — resuming in ${s}s…` });
+            setProgress({
+              done: donePages,
+              total: pages,
+              label: `Sinclair's API limit reached — resuming in ${s}s…`,
+            });
             await sleep(1000);
           }
-        } else {
-          await sleep(600); // stay under the per-minute quota (~90 req/min)
+          continue;
         }
+
+        doneSet.add(page);
+        donePages++;
+        indexed += items.length;
+        collected.push(...items);
+        setProgress({ done: donePages, total: pages, label: `Downloading Sinclair's catalog…` });
+
+        if (donePages % CHECKPOINT_EVERY === 0) {
+          saveCheckpoint({
+            version: 1, total, pages,
+            donePages: Array.from(doneSet),
+            products: collected,
+            savedAt: Date.now(),
+          });
+        }
+
+        await sleep(REQUEST_DELAY_MS);
       }
+
+      clearCheckpoint();
+      const index = indexFromProducts(collected);
       if (indexed < total * 0.95) {
         throw new Error(`Only ${indexed.toLocaleString()} of ${total.toLocaleString()} Sinclair products downloaded. Try again in a few minutes.`);
       }
@@ -283,7 +366,7 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
                 </div>
                 <p className="text-xs text-gray-400">
                   {phase === 'scanning'
-                    ? `${progress.done} of ${progress.total} pages · takes 2–4 minutes (Sinclair's API is rate-limited) · keep this tab open`
+                    ? `${progress.done} of ${progress.total} pages · ~3 min (Sinclair's API allows ~50 requests/min) · keep this tab open`
                     : `${progress.done.toLocaleString()} of ${progress.total.toLocaleString()} products saved`}
                 </p>
               </div>
