@@ -5,25 +5,31 @@
 // Resolution order:
 //   1. Manual override — admin_settings.weekly_ad_url (set by the Sinclair
 //      manager in Settings → Sinclair's). Use when auto-detection breaks.
-//   2. Auto-detect — scrape Sinclair's weekly-ad page for the current
-//      circular PDF (hosted on circulars.freshop.*), so the ad updates
-//      itself every week with zero maintenance.
+//   2. Auto-detect — Sinclair's site runs on Freshop, whose public circulars
+//      API returns the current ad's PDF key with no auth required:
+//        GET https://api.freshop.ncrcloud.com/1/circulars?app_key=sinclair&store_id=4297
+//        → items[0].pdf_s3_key → https://circulars.freshop.ncrcloud.com/{key}
+//      (Verified against live network traffic on shop.sinclairsfoods.com/weekly-ad.)
 import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
-const SINCLAIR_AD_PAGES = [
-  'https://shop.sinclairsfoods.com/weekly-ad',
-  'https://sinclairs-foods.freshop.ncrvoyix.com/weekly-ad',
-];
+const FRESHOP_APP_KEY = 'sinclair';
+const FRESHOP_STORE_IDS = ['4297', '4294']; // primary, fallback
+const CIRCULARS_CDN = 'https://circulars.freshop.ncrcloud.com';
 
-// Matches e.g. https://circulars.freshop.ncrcloud.com/3928824785307450440-bd59….pdf
-const CIRCULAR_PDF_RE = /https:\/\/circulars\.freshop\.[a-z0-9.-]+\/[^"'\s\\<>]+\.pdf/i;
+interface FreshopCircular {
+  id: string;
+  pdf_s3_key?: string;
+  visible_start_date?: string;
+  visible_finish_date?: string;
+  sequence?: number;
+  name?: string;
+}
 
-// Cache the discovered PDF URL for an hour so we don't hit Sinclair's site
-// on every page view. (Module-level cache — fine for a single lambda; worst
-// case a cold start just re-scrapes.)
+// Cache the discovered PDF URL for an hour so we don't hit Freshop's API on
+// every page view. Module-level cache — worst case a cold start re-fetches.
 let cachedPdfUrl: string | null = null;
 let cachedAt = 0;
 const CACHE_MS = 60 * 60 * 1000;
@@ -31,22 +37,32 @@ const CACHE_MS = 60 * 60 * 1000;
 async function discoverAdPdfUrl(): Promise<string | null> {
   if (cachedPdfUrl && Date.now() - cachedAt < CACHE_MS) return cachedPdfUrl;
 
-  for (const page of SINCLAIR_AD_PAGES) {
+  for (const storeId of FRESHOP_STORE_IDS) {
     try {
-      const res = await fetch(page, {
-        cache: 'no-store',
-        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; GraftonTowboatServices/1.0)' },
-      });
+      const res = await fetch(
+        `https://api.freshop.ncrcloud.com/1/circulars?app_key=${FRESHOP_APP_KEY}&store_id=${storeId}`,
+        { cache: 'no-store', headers: { Accept: 'application/json' } }
+      );
       if (!res.ok) continue;
-      const html = await res.text();
-      const match = html.match(CIRCULAR_PDF_RE);
-      if (match) {
-        cachedPdfUrl = match[0];
+      const data = await res.json();
+      const items: FreshopCircular[] = data?.items || [];
+      if (!items.length) continue;
+
+      // Prefer the circular currently visible; fall back to the first item.
+      const now = Date.now();
+      const current = items.find(c =>
+        c.pdf_s3_key &&
+        (!c.visible_start_date || new Date(c.visible_start_date).getTime() <= now) &&
+        (!c.visible_finish_date || new Date(c.visible_finish_date).getTime() >= now)
+      ) || items.find(c => c.pdf_s3_key);
+
+      if (current?.pdf_s3_key) {
+        cachedPdfUrl = `${CIRCULARS_CDN}/${current.pdf_s3_key}`;
         cachedAt = Date.now();
         return cachedPdfUrl;
       }
     } catch {
-      // try the next source
+      // try the next store id
     }
   }
   return null;
@@ -58,7 +74,7 @@ export async function GET() {
   const { data } = await supabase.from('admin_settings').select('weekly_ad_url').single();
   const override = (data?.weekly_ad_url || '').trim();
 
-  // 2. Auto-detect from Sinclair's site when no override is set
+  // 2. Auto-detect via the Freshop circulars API when no override is set
   const url = /^https?:\/\//i.test(override) ? override : await discoverAdPdfUrl();
 
   if (!url) {
@@ -71,7 +87,7 @@ export async function GET() {
   try {
     const upstream = await fetch(url, { cache: 'no-store' });
     if (!upstream.ok) {
-      // Discovered URL may be stale — bust the cache so next request re-scrapes
+      // Discovered URL may be stale — bust the cache so next request re-detects
       cachedPdfUrl = null;
       return NextResponse.json({ error: `Ad source returned ${upstream.status}` }, { status: 502 });
     }
