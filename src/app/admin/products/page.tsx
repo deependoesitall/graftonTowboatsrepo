@@ -12,6 +12,7 @@ import { Product } from '@/types';
 import { useRouter } from 'next/navigation';
 import { fetchAdminSession, getAdminRole, canAccess, adminFetch } from '@/lib/admin-auth';
 import { ImportWizard } from '@/components/admin/ImportWizard';
+import { EnrichFromSinclair } from '@/components/admin/EnrichFromSinclair';
 
 
 // -- Shared image upload cell
@@ -744,6 +745,7 @@ export default function AdminProductsPage() {
           <p className="text-gray-400 text-sm">{total.toLocaleString()} products total</p>
         </div>
         <div className="flex gap-2">
+          <EnrichFromSinclair onDone={() => fetchProducts()} />
           <button onClick={exportCatalog} className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5">
             <Download className="w-4 h-4" /> Export CSV
           </button>

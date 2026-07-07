@@ -70,7 +70,7 @@ export default async function CouponsPage() {
                       </p>
                       {c.brand && <p className="text-xs font-semibold text-brand-navy truncate">{c.brand}</p>}
                       {c.description && (
-                        <p className="text-[11px] text-gray-500 leading-snug line-clamp-3 mt-0.5">{c.description}</p>
+                        <p className="text-[11px] text-gray-500 leading-snug mt-0.5">{c.description}</p>
                       )}
                       {c.finish_date && (
                         <p className="text-[10px] text-gray-400 mt-auto pt-1.5">

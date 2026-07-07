@@ -1,7 +1,8 @@
 // src/app/catalog/page.tsx
 import { Suspense } from 'react';
 import Link from 'next/link';
-import { Newspaper, BadgePercent } from 'lucide-react';
+import { Newspaper } from 'lucide-react';
+import { CouponStrip } from '@/components/catalog/CouponStrip';
 import { createClient } from '@/lib/supabase/server';
 import { ProductGrid } from '@/components/catalog/ProductGrid';
 import { CategoryFilter } from '@/components/catalog/CategoryFilter';
@@ -103,40 +104,9 @@ export default async function CatalogPage({ searchParams }: PageProps) {
               <span className="text-sm font-bold">View Sinclair&apos;s Weekly Ad</span>
               <span className="text-xs text-white/60 hidden sm:inline">— this week&apos;s specials, right here on the ordering site</span>
             </Link>
-            {/* Sinclair's digital coupons — auto-pulled, horizontal scroll */}
+            {/* Sinclair's digital coupons — auto-pulled; cards open full details */}
             {sinclairCoupons.length > 0 && (
-              <div className="bg-white border border-gray-200 rounded-xl px-4 py-3">
-                <div className="flex items-baseline justify-between gap-2 mb-2 flex-wrap">
-                  <p className="flex items-center gap-1.5 text-xs font-bold text-brand-navy uppercase tracking-wide">
-                    <BadgePercent className="w-3.5 h-3.5 text-brand-orange" /> Sinclair&apos;s Digital Coupons
-                    <span className="font-normal normal-case text-gray-400">— top picks</span>
-                  </p>
-                  <Link href="/coupons" className="text-xs font-bold text-brand-river hover:underline whitespace-nowrap">
-                    View all {couponData.total.toLocaleString()} coupons →
-                  </Link>
-                </div>
-                <div className="flex gap-2.5 overflow-x-auto pb-1 -mx-1 px-1 snap-x">
-                  {sinclairCoupons.map(c => (
-                    <div key={c.id}
-                      className="shrink-0 w-40 snap-start border border-gray-100 rounded-lg p-2.5 bg-gray-50/50">
-                      {c.cover_image_url && (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={c.cover_image_url} alt={c.brand || c.name}
-                          loading="lazy" decoding="async"
-                          className="w-full h-16 object-contain mb-1.5 mix-blend-multiply" />
-                      )}
-                      <p className="text-xs font-bold text-brand-orange leading-tight">{c.offer_value ? `${c.offer_value} off` : c.name}</p>
-                      {c.brand && <p className="text-[10px] font-semibold text-brand-navy truncate">{c.brand}</p>}
-                      {c.description && <p className="text-[10px] text-gray-500 leading-snug line-clamp-2">{c.description}</p>}
-                      {c.finish_date && (
-                        <p className="text-[9px] text-gray-400 mt-1">
-                          thru {new Date(c.finish_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' })}
-                        </p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <CouponStrip coupons={sinclairCoupons} total={couponData.total} />
             )}
 
             {coupons && coupons.length > 0 && (
