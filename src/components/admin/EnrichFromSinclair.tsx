@@ -16,6 +16,7 @@ interface EnrichSummary {
   details_to_set: number;
   weight_flags_to_set: number;
   sinclair_products_indexed: number;
+  unmatched_sample?: string[];
   applied?: number;
 }
 
@@ -96,7 +97,7 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
               <div className="text-center py-8">
                 <Loader2 className="w-8 h-8 animate-spin text-brand-river mx-auto mb-3" />
                 <p className="text-sm text-gray-500">Matching your catalog against Sinclair&apos;s website by UPC…</p>
-                <p className="text-xs text-gray-400 mt-1">Scanning ~12,000 Sinclair products — takes a few seconds.</p>
+                <p className="text-xs text-gray-400 mt-1">Downloading ~12,400 Sinclair products — can take up to a minute.</p>
               </div>
             )}
 
@@ -105,9 +106,15 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
                 <p className="text-sm text-gray-600 mb-3">
                   Matched <strong className="text-brand-navy">{summary.matched.toLocaleString()}</strong> of
                   your {summary.our_products.toLocaleString()} products by UPC
-                  {summary.without_upc > 0 && <span className="text-gray-400"> ({summary.without_upc} have no UPC and were skipped)</span>}.
+                  {summary.without_upc > 0 && <span className="text-gray-400"> ({summary.without_upc} have no UPC and were skipped)</span>},
+                  checked against {summary.sinclair_products_indexed.toLocaleString()} Sinclair products.
                   Nothing has been changed yet.
                 </p>
+                {summary.unmatched_sample && summary.unmatched_sample.length > 0 && (
+                  <p className="text-[11px] text-gray-400 mb-3 break-all">
+                    Sample unmatched UPCs: {summary.unmatched_sample.join(', ')}
+                  </p>
+                )}
                 <div className="space-y-2 mb-4">
                   <div className="flex items-center gap-2 text-sm bg-green-50 rounded-lg px-3 py-2">
                     <ImagePlus className="w-4 h-4 text-green-600 shrink-0" />

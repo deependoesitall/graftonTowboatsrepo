@@ -22,13 +22,57 @@ interface PageProps {
   }>;
 }
 
-// ── Sinclair's digital coupons — auto-pulled (see src/lib/sinclair-coupons) ──
-async function fetchCouponPreview() {
-  const { items, total } = await fetchSinclairCoupons(60);
-  return {
-    total,
-    preview: items.sort((a, b) => b.popularity - a.popularity).slice(0, 12),
-  };
+// ── Promos (coupons strip + manager coupons) ────────────────────────────
+// Rendered inside <Suspense> so the product grid never waits on Sinclair's
+// coupon API — the strip streams in after the page paints.
+async function PromoSections() {
+  const supabase = await createClient();
+  const [{ data: settings }, { data: coupons }] = await Promise.all([
+    supabase.from('admin_settings').select('show_digital_coupons').single(),
+    supabase.from('coupons')
+      .select('id, name, description, discount_type, discount_value, discount_text, applies_to, category, expires_at')
+      .order('created_at', { ascending: false })
+      .limit(6),
+  ]);
+
+  let sinclairCoupons: Awaited<ReturnType<typeof fetchSinclairCoupons>>['items'] = [];
+  let couponTotal = 0;
+  if (settings?.show_digital_coupons ?? true) {
+    const { items, total } = await fetchSinclairCoupons(30);
+    sinclairCoupons = items.sort((a, b) => b.popularity - a.popularity).slice(0, 12);
+    couponTotal = total;
+  }
+
+  return (
+    <>
+      {sinclairCoupons.length > 0 && (
+        <CouponStrip coupons={sinclairCoupons} total={couponTotal} />
+      )}
+      {coupons && coupons.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+          <p className="flex items-center gap-1.5 text-xs font-bold text-amber-800 uppercase tracking-wide mb-1.5">
+            <BadgePercent className="w-3.5 h-3.5" /> Current Coupons — applied by Sinclair&apos;s when your order is shopped
+          </p>
+          <ul className="space-y-1">
+            {coupons.map((c: { id: string; name: string; description: string | null; discount_type: string; discount_value: number | null; discount_text: string | null; applies_to: string; category: string | null; expires_at: string | null }) => (
+              <li key={c.id} className="text-xs text-amber-900">
+                <span className="font-bold">{c.name}</span>
+                {' — '}
+                <span className="font-semibold text-brand-orange">
+                  {c.discount_type === 'amount' ? `$${Number(c.discount_value || 0).toFixed(2)} off`
+                    : c.discount_type === 'percent' ? `${Number(c.discount_value || 0)}% off`
+                    : (c.discount_text || 'special deal')}
+                </span>
+                {c.applies_to === 'category' && c.category && <span> on {c.category}</span>}
+                {c.description && <span className="text-amber-700"> · {c.description}</span>}
+                {c.expires_at && <span className="text-amber-600/70"> · through {new Date(c.expires_at + 'T00:00:00').toLocaleDateString()}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </>
+  );
 }
 
 export default async function CatalogPage({ searchParams }: PageProps) {
@@ -61,20 +105,10 @@ export default async function CatalogPage({ searchParams }: PageProps) {
     query = query.eq('category', category);
   }
 
-  const [{ data: products, count }, { data: catCounts }, { data: coupons }, couponData] = await Promise.all([
+  const [{ data: products, count }, { data: catCounts }] = await Promise.all([
     query,
     supabase.rpc('get_category_counts'),
-    // Display-only coupons — RLS exposes only active, unexpired ones
-    supabase.from('coupons')
-      .select('id, name, description, discount_type, discount_value, discount_text, applies_to, category, expires_at')
-      .order('created_at', { ascending: false })
-      .limit(6),
-    // Auto-pulled from Sinclair's digital coupons (cached 15 min) —
-    // only when the Sinclair manager has the toggle on
-    supabase.from('admin_settings').select('show_digital_coupons').single()
-      .then(({ data: s }) => (s?.show_digital_coupons ?? true) ? fetchCouponPreview() : { total: 0, preview: [] }),
   ]);
-  const sinclairCoupons = couponData.preview;
 
   const totalPages = Math.ceil((count || 0) / perPage);
 
@@ -104,34 +138,10 @@ export default async function CatalogPage({ searchParams }: PageProps) {
               <span className="text-sm font-bold">View Sinclair&apos;s Weekly Ad</span>
               <span className="text-xs text-white/60 hidden sm:inline">— this week&apos;s specials, right here on the ordering site</span>
             </Link>
-            {/* Sinclair's digital coupons — auto-pulled; cards open full details */}
-            {sinclairCoupons.length > 0 && (
-              <CouponStrip coupons={sinclairCoupons} total={couponData.total} />
-            )}
-
-            {coupons && coupons.length > 0 && (
-              <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
-                <p className="flex items-center gap-1.5 text-xs font-bold text-amber-800 uppercase tracking-wide mb-1.5">
-                  <BadgePercent className="w-3.5 h-3.5" /> Current Coupons — applied by Sinclair&apos;s when your order is shopped
-                </p>
-                <ul className="space-y-1">
-                  {coupons.map((c: { id: string; name: string; description: string | null; discount_type: string; discount_value: number | null; discount_text: string | null; applies_to: string; category: string | null; expires_at: string | null }) => (
-                    <li key={c.id} className="text-xs text-amber-900">
-                      <span className="font-bold">{c.name}</span>
-                      {' — '}
-                      <span className="font-semibold text-brand-orange">
-                        {c.discount_type === 'amount' ? `$${Number(c.discount_value || 0).toFixed(2)} off`
-                          : c.discount_type === 'percent' ? `${Number(c.discount_value || 0)}% off`
-                          : (c.discount_text || 'special deal')}
-                      </span>
-                      {c.applies_to === 'category' && c.category && <span> on {c.category}</span>}
-                      {c.description && <span className="text-amber-700"> · {c.description}</span>}
-                      {c.expires_at && <span className="text-amber-600/70"> · through {new Date(c.expires_at + 'T00:00:00').toLocaleDateString()}</span>}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+            {/* Coupons stream in after the products — never block the page */}
+            <Suspense fallback={null}>
+              <PromoSections />
+            </Suspense>
           </div>
 
           <SearchBar initialSearch={search} />

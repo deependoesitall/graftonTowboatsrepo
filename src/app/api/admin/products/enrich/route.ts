@@ -69,10 +69,32 @@ let freshopCache: Map<string, FreshopProduct> | null = null;
 let freshopCacheAt = 0;
 const CACHE_MS = 10 * 60 * 1000;
 
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+/** Fetch one catalog page with retries + backoff (NCR rate-limits bursts). */
+async function fetchPage(skip: number): Promise<FreshopProduct[] | null> {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const res = await fetch(
+        `https://api.freshop.ncrcloud.com/1/products?app_key=${APP_KEY}&store_id=${STORE_ID}&limit=${PAGE_SIZE}&skip=${skip}&sort=name&name_sort=asc`,
+        { cache: 'no-store', headers: { Accept: 'application/json' } }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data?.items)) return data.items as FreshopProduct[];
+      }
+    } catch { /* retry */ }
+    await sleep(400 * (attempt + 1));
+  }
+  return null;
+}
+
+/** Count of products actually indexed on the last build (for the summary). */
+let lastIndexedCount = 0;
+
 async function buildFreshopIndex(): Promise<Map<string, FreshopProduct>> {
   if (freshopCache && Date.now() - freshopCacheAt < CACHE_MS) return freshopCache;
 
-  // Total first, then fetch pages in parallel batches of 10
   const head = await fetch(
     `https://api.freshop.ncrcloud.com/1/products?app_key=${APP_KEY}&store_id=${STORE_ID}&limit=1`,
     { cache: 'no-store' }
@@ -82,28 +104,40 @@ async function buildFreshopIndex(): Promise<Map<string, FreshopProduct>> {
 
   const pages = Math.ceil(total / PAGE_SIZE);
   const index = new Map<string, FreshopProduct>();
+  let indexed = 0;
+  let failedPages = 0;
 
-  for (let batchStart = 0; batchStart < pages; batchStart += 10) {
+  // Modest parallelism (4 at a time) with a breather between batches —
+  // a 125-request burst gets rate-limited and silently starves the index.
+  for (let batchStart = 0; batchStart < pages; batchStart += 4) {
     const batch = [];
-    for (let p = batchStart; p < Math.min(batchStart + 10, pages); p++) {
-      batch.push(
-        fetch(
-          `https://api.freshop.ncrcloud.com/1/products?app_key=${APP_KEY}&store_id=${STORE_ID}&limit=${PAGE_SIZE}&skip=${p * PAGE_SIZE}&sort=name&name_sort=asc`,
-          { cache: 'no-store' }
-        ).then(r => r.ok ? r.json() : null).catch(() => null)
-      );
+    for (let p = batchStart; p < Math.min(batchStart + 4, pages); p++) {
+      batch.push(fetchPage(p * PAGE_SIZE));
     }
     const results = await Promise.all(batch);
-    for (const data of results) {
-      for (const item of (data?.items || []) as FreshopProduct[]) {
+    for (const items of results) {
+      if (items === null) { failedPages++; continue; }
+      indexed += items.length;
+      for (const item of items) {
         for (const key of freshopKeys(item)) {
-          // First occurrence wins; identical products may repeat across pages
           if (!index.has(key)) index.set(key, item);
         }
       }
     }
+    if (batchStart + 4 < pages) await sleep(150);
   }
 
+  // A partial index produces misleading "no match" results — fail loudly
+  // instead of quietly under-matching.
+  if (indexed < total * 0.95) {
+    freshopCache = null;
+    throw new Error(
+      `Only ${indexed.toLocaleString()} of ${total.toLocaleString()} Sinclair products could be fetched ` +
+      `(${failedPages} pages failed after retries). Their API may be rate-limiting — wait a minute and try again.`
+    );
+  }
+
+  lastIndexedCount = indexed;
   freshopCache = index;
   freshopCacheAt = Date.now();
   return index;
@@ -188,6 +222,18 @@ export async function POST(req: NextRequest) {
     if (Object.keys(fields).length) updates.push({ id: product.id, fields });
   }
 
+  // Sample of unmatched UPCs — surfaces format problems at a glance
+  const unmatchedSample: string[] = [];
+  if (matched < ours.length - noUpc) {
+    for (const product of ours) {
+      if (unmatchedSample.length >= 8) break;
+      if (!product.upc || !norm(product.upc)) continue;
+      if (!ourKeys(product.upc).some(k => index.has(k))) {
+        unmatchedSample.push(String(product.upc));
+      }
+    }
+  }
+
   const summary = {
     our_products: ours.length,
     without_upc: noUpc,
@@ -196,7 +242,8 @@ export async function POST(req: NextRequest) {
     images_to_set: imagesToSet,
     details_to_set: detailsToSet,
     weight_flags_to_set: weightFlags,
-    sinclair_products_indexed: index.size,
+    sinclair_products_indexed: lastIndexedCount,
+    unmatched_sample: unmatchedSample,
   };
 
   if (mode === 'preview') {
