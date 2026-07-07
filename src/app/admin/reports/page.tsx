@@ -58,9 +58,11 @@ interface BillingItem {
   line_total: number;
   shopping_status: 'pending' | 'shopped' | 'out_of_stock';
   actual_total: number | null;
+  actual_weight: number | null;
   is_substitution: boolean;
   substitutes_item_id: string | null;
   item_type: 'grocery' | 'service';
+  service_type: string | null;
 }
 interface BillingOrder {
   id: string;
@@ -68,6 +70,8 @@ interface BillingOrder {
   company_name: string;
   contact_name: string;
   phone: string;
+  po_number: string | null;
+  vessel_name: string | null;
   subtotal: number;
   status: string;
   created_at: string;
@@ -161,6 +165,167 @@ function billingCsv(orders: BillingOrder[]): string {
     ].map(csvEscape).join(',');
   });
   return header + rows.join('\n') + '\n';
+}
+
+// ─── Branded billing statement (print-ready HTML, one page per company) ───
+const GREEN = '#1E3D1E', LIME = '#D9E84A', ORANGE = '#E8640A';
+
+function esc(s: unknown): string {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function money(n: number): string {
+  return `$${Number(n).toFixed(2)}`;
+}
+
+function statementHtml(companies: [string, BillingOrder[]][], monthLabel: string): string {
+  const generated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+
+  const companyBlocks = companies.map(([company, orders], ci) => {
+    const first = orders[0];
+    const estTotal = orders.reduce((s, o) => s + Number(o.subtotal), 0);
+
+    const orderRows = orders.map(o => {
+      const grocery = o.items.filter(i => i.item_type !== 'service');
+      const services = o.items.filter(i => i.item_type === 'service');
+      const oos = new Map(grocery.filter(i => i.shopping_status === 'out_of_stock').map(i => [i.id, i.description]));
+      const delivered = grocery.filter(i => i.shopping_status !== 'out_of_stock');
+      const orderedQty = grocery.filter(i => !i.is_substitution).reduce((s, i) => s + i.quantity, 0);
+      const deliveredQty = delivered.reduce((s, i) => s + i.quantity, 0);
+      const subs = delivered.filter(i => i.is_substitution)
+        .map(i => `${esc(i.description)} <span style="color:${ORANGE};">(sub for ${esc(i.substitutes_item_id ? oos.get(i.substitutes_item_id) || 'original item' : 'original item')})</span>`);
+      const weightItems = delivered.filter(i => i.actual_weight)
+        .map(i => `${esc(i.description)} — ${i.actual_weight} lb actual (${money(i.actual_total ?? i.line_total)})`);
+      const svcList = services.map(i => esc(i.description));
+      const cod = o.extended_info?.personal_cod_notes;
+
+      const notes: string[] = [];
+      if (subs.length) notes.push(`<strong>Substitutions:</strong> ${subs.join('; ')}`);
+      if (weightItems.length) notes.push(`<strong>Weighed items:</strong> ${weightItems.join('; ')}`);
+      if (svcList.length) notes.push(`<strong>Additional services (confirm charges):</strong> ${svcList.join('; ')}`);
+      if (cod) notes.push(`<strong style="color:#9333ea;">Personal / COD — do NOT invoice:</strong> ${esc(cod)}`);
+
+      return `
+      <tr>
+        <td style="padding:8px 10px;border-bottom:1px solid #eee;">
+          <div style="font-family:monospace;font-weight:800;color:${GREEN};font-size:12px;">${esc(o.order_number)}</div>
+          ${o.vessel_name ? `<div style="font-size:10px;color:#666;">${esc(o.vessel_name)}</div>` : ''}
+          ${o.po_number ? `<div style="font-size:10px;color:#666;">PO #${esc(o.po_number)}</div>` : ''}
+        </td>
+        <td style="padding:8px 10px;border-bottom:1px solid #eee;font-size:11px;color:#555;white-space:nowrap;">
+          ${new Date(o.created_at).toLocaleDateString()}
+          ${o.status !== 'fulfilled' ? `<div style="font-size:9px;font-weight:800;color:#b45309;text-transform:uppercase;">${esc(o.status.replace('_', ' '))}</div>` : ''}
+        </td>
+        <td style="padding:8px 10px;border-bottom:1px solid #eee;font-size:11px;text-align:center;">${orderedQty}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #eee;font-size:11px;text-align:center;">${o.status === 'fulfilled' ? deliveredQty : '—'}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #eee;font-size:12px;font-weight:700;text-align:right;color:${GREEN};">${money(Number(o.subtotal))}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #eee;">
+          <div style="border:1.5px solid #bbb;border-radius:3px;height:22px;width:90px;margin-left:auto;"></div>
+        </td>
+      </tr>
+      ${notes.length ? `<tr><td colspan="6" style="padding:2px 10px 10px 22px;border-bottom:1px solid #eee;font-size:10px;color:#555;line-height:1.6;background:#fafaf5;">${notes.join('<br>')}</td></tr>` : ''}`;
+    }).join('');
+
+    return `
+<div style="${ci > 0 ? 'page-break-before:always;' : ''}max-width:760px;margin:0 auto;padding:8px 0 32px;">
+  <!-- Brand header -->
+  <table width="100%" style="border-collapse:collapse;background:${GREEN};border-radius:6px 6px 0 0;">
+    <tr>
+      <td style="padding:18px 22px;">
+        <div style="font-size:19px;font-weight:900;color:${LIME};text-transform:uppercase;letter-spacing:-0.5px;">Grafton Towboat Services</div>
+        <div style="font-size:9px;font-weight:700;color:${ORANGE};letter-spacing:1px;">GROCERIES, SUPPLIES &amp; CREW CHANGE</div>
+        <div style="font-size:9px;color:#a8c86a;margin-top:5px;line-height:1.6;">
+          25 Dagget Hollow · Grafton, IL 62037 · Mile Marker 219 Mississippi River / Mile Marker 0 Illinois River<br>
+          (618) 556-0290 · GraftonTowboatServices@gmail.com
+        </div>
+      </td>
+      <td style="padding:18px 22px;text-align:right;vertical-align:top;">
+        <div style="font-size:13px;font-weight:900;color:#fff;text-transform:uppercase;letter-spacing:1.5px;">Monthly Billing<br>Statement</div>
+        <div style="font-size:10px;color:#a8c86a;margin-top:5px;">${esc(monthLabel)}<br>Generated ${generated}</div>
+      </td>
+    </tr>
+  </table>
+
+  <!-- Bill to -->
+  <table width="100%" style="border-collapse:collapse;background:#f8fde8;border-left:4px solid ${GREEN};">
+    <tr>
+      <td style="padding:12px 22px;">
+        <div style="font-size:8px;font-weight:800;color:#666;text-transform:uppercase;letter-spacing:1px;">Bill To</div>
+        <div style="font-size:16px;font-weight:900;color:${GREEN};">${esc(company)}</div>
+        <div style="font-size:10px;color:#555;">${esc(first.contact_name)}${first.phone ? ` · ${esc(first.phone)}` : ''}</div>
+      </td>
+      <td style="padding:12px 22px;text-align:right;">
+        <div style="font-size:8px;font-weight:800;color:#666;text-transform:uppercase;letter-spacing:1px;">Orders This Period</div>
+        <div style="font-size:16px;font-weight:900;color:${GREEN};">${orders.length}</div>
+      </td>
+    </tr>
+  </table>
+
+  <!-- Orders table -->
+  <table width="100%" style="border-collapse:collapse;margin-top:14px;">
+    <thead>
+      <tr style="background:${GREEN};">
+        <th style="padding:7px 10px;text-align:left;color:${LIME};font-size:8px;text-transform:uppercase;letter-spacing:0.8px;">Order / Vessel / PO</th>
+        <th style="padding:7px 10px;text-align:left;color:${LIME};font-size:8px;text-transform:uppercase;letter-spacing:0.8px;">Date</th>
+        <th style="padding:7px 10px;text-align:center;color:${LIME};font-size:8px;text-transform:uppercase;letter-spacing:0.8px;">Ordered</th>
+        <th style="padding:7px 10px;text-align:center;color:${LIME};font-size:8px;text-transform:uppercase;letter-spacing:0.8px;">Delivered</th>
+        <th style="padding:7px 10px;text-align:right;color:${LIME};font-size:8px;text-transform:uppercase;letter-spacing:0.8px;">Estimated Total</th>
+        <th style="padding:7px 10px;text-align:right;color:${LIME};font-size:8px;text-transform:uppercase;letter-spacing:0.8px;">Final Total</th>
+      </tr>
+    </thead>
+    <tbody>${orderRows}</tbody>
+  </table>
+
+  <!-- Totals -->
+  <table width="100%" style="border-collapse:collapse;margin-top:14px;">
+    <tr>
+      <td width="55%"></td>
+      <td>
+        <table width="100%" style="border-collapse:collapse;border-top:3px solid ${GREEN};">
+          <tr>
+            <td style="padding:7px 10px;font-size:11px;color:#555;">Estimated Total (${orders.length} order${orders.length === 1 ? '' : 's'})</td>
+            <td style="padding:7px 10px;text-align:right;font-weight:800;font-size:13px;color:${GREEN};">${money(estTotal)}</td>
+          </tr>
+          <tr style="background:${LIME};">
+            <td style="padding:9px 10px;font-size:12px;font-weight:900;color:${GREEN};text-transform:uppercase;">Final Invoice Total</td>
+            <td style="padding:9px 10px;text-align:right;"><div style="border:1.5px solid ${GREEN};border-radius:3px;height:24px;width:110px;margin-left:auto;background:#fff;"></div></td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+
+  <!-- Notes -->
+  <div style="margin-top:14px;border-left:3px solid ${ORANGE};background:#fffbf0;padding:9px 14px;font-size:9px;color:#555;line-height:1.7;">
+    <strong style="color:${ORANGE};">Final Total notes:</strong> estimated totals reflect catalog prices at order time.
+    Enter the final amount after confirming weighed items (billed at actual weight), substitutions,
+    and any additional service or delivery charges. Personal / COD items were paid by the crew on
+    delivery and must not be invoiced.
+  </div>
+
+  <div style="text-align:center;font-size:8px;color:#aaa;border-top:1px solid #eee;margin-top:18px;padding-top:8px;">
+    Grafton Towboat Services · ${esc(monthLabel)} Billing Statement · ${esc(company)} · Generated ${generated}
+  </div>
+</div>`;
+  }).join('');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Billing Statements — ${esc(monthLabel)} — Grafton Towboat Services</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: Arial, Helvetica, sans-serif; color:#222; background:#fff; padding:24px 16px; }
+  @page { size:letter; margin:0.5in; }
+  @media print { .no-print { display:none !important; } body { padding:0; print-color-adjust:exact; -webkit-print-color-adjust:exact; } }
+  .print-btn { position:fixed; top:16px; right:16px; background:${GREEN}; color:${LIME}; border:none; padding:10px 22px; border-radius:24px; font-size:13px; font-weight:800; cursor:pointer; text-transform:uppercase; letter-spacing:1px; box-shadow:0 4px 12px rgba(0,0,0,0.2); z-index:10; }
+</style>
+</head>
+<body>
+<button class="print-btn no-print" onclick="window.print()">&#128424; Print / Save PDF</button>
+${companyBlocks}
+</body>
+</html>`;
 }
 
 function downloadCsv(filename: string, csv: string) {
@@ -335,6 +500,24 @@ function BillingTab() {
     downloadCsv(`billing_${month}_all-companies.csv`, billingCsv(selectedOrders));
   }
 
+  // Branded print-ready statements — one page per company, Final Total boxes
+  // left blank for Mary to fill after confirming weights/services.
+  function openStatements() {
+    const map = new Map<string, BillingOrder[]>();
+    for (const o of selectedOrders) {
+      if (!map.has(o.company_name)) map.set(o.company_name, []);
+      map.get(o.company_name)!.push(o);
+    }
+    const monthLabel = new Date(month + '-01T00:00:00')
+      .toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    const html = statementHtml(
+      Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0])),
+      monthLabel
+    );
+    const blob = new Blob([html], { type: 'text/html' });
+    window.open(URL.createObjectURL(blob), '_blank');
+  }
+
   const selCompanyCount = new Set(selectedOrders.map(o => o.company_name)).size;
 
   return (
@@ -353,9 +536,13 @@ function BillingTab() {
           <span className="text-xs text-gray-400">
             {selected.size} order{selected.size !== 1 ? 's' : ''} · {selCompanyCount} compan{selCompanyCount === 1 ? 'y' : 'ies'} selected
           </span>
-          <button onClick={exportPerCompany} disabled={selected.size === 0}
+          <button onClick={openStatements} disabled={selected.size === 0}
             className="btn-primary text-sm px-4 py-2 flex items-center gap-2 disabled:opacity-50">
-            <Download className="w-4 h-4" /> Export Selected (per company)
+            <FileText className="w-4 h-4" /> Billing Statements (PDF)
+          </button>
+          <button onClick={exportPerCompany} disabled={selected.size === 0}
+            className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5 disabled:opacity-50">
+            <Download className="w-4 h-4" /> CSVs (per company)
           </button>
           <button onClick={exportCombined} disabled={selected.size === 0}
             className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5 disabled:opacity-50">

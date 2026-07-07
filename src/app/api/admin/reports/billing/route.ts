@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
 
   let query = supabase
     .from('orders')
-    .select('id, order_number, company_name, contact_name, phone, subtotal, status, created_at, extended_info, items:order_items(id, description, quantity, unit_price, line_total, shopping_status, actual_total, is_substitution, substitutes_item_id, item_type)')
+    .select('id, order_number, company_name, contact_name, phone, po_number, vessel_name, subtotal, status, created_at, extended_info, items:order_items(id, description, quantity, unit_price, line_total, shopping_status, actual_total, actual_weight, is_substitution, substitutes_item_id, item_type, service_type)')
     .neq('status', 'cancelled')
     .order('company_name', { ascending: true })
     .order('created_at', { ascending: true });
