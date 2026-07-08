@@ -215,7 +215,7 @@ export default function OrderPage() {
   const [services, setServices] = useState<AdditionalServices>({
     parts_pickup:     { enabled: false, pickup_location: '', order_number: '', contact_name: '', contact_phone: '' },
     package_delivery: { enabled: false, description: '', origin: '', contact_name: '', contact_phone: '' },
-    other_pickup:     { enabled: false, url: '', notes: '' },
+    other_pickup:     { enabled: false, items: [{ url: '', notes: '' }] },
   });
   const [vessel, setVessel] = useState<VesselInfo>(getVesselInfo());
   const [showOrderContact, setShowOrderContact] = useState(false);
