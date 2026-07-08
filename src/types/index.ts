@@ -23,6 +23,11 @@ export interface Product {
   created_at?: string;
 }
 
+// Who pays for a cart/order line: the vessel's company account (invoiced
+// monthly) or an individual crew member cash-on-delivery.
+export type PaidBy = 'vessel' | 'cod';
+export type CodPaymentMethod = 'cash' | 'venmo' | 'credit_card';
+
 export interface CartItem {
   product_id: string;
   description: string;
@@ -33,6 +38,12 @@ export interface CartItem {
   quantity: number;
   /** Optional for backwards compatibility with carts saved before this field existed. */
   billed_by_weight?: boolean;
+  /** Product image snapshot — carries through to checkout review & order history. */
+  image_url?: string | null;
+  /** Defaults to 'vessel' for carts saved before the COD rework. */
+  paid_by?: PaidBy;
+  /** Crew member name — required when paid_by === 'cod'. */
+  cod_name?: string;
 }
 
 export interface Cart {
@@ -71,7 +82,12 @@ export interface VesselInfo {
   crew_change_notes: string;
   crew_arriving: string;
   crew_departing: string;
+  /** Legacy free-text COD notes — replaced by per-line paid_by; kept for old saved carts. */
   personal_cod_notes: string;
+  // COD settlement (only relevant when the cart has COD lines)
+  cod_payment_method: CodPaymentMethod | '';
+  cod_preferred_phone: string;
+  cod_contact_time: string;
   notes: string;
   eta: string;
 }
@@ -95,10 +111,14 @@ export interface PackageDelivery {
 
 // "Other" third-party pickup — handled by Sinclair's (lives on the Sinclair's
 // catalog tab, not Additional Services). E.g. a small Walmart online order.
-export interface OtherPickup {
-  enabled: boolean;
+// Supports multiple entries (Jen: no limit needed).
+export interface OtherPickupItem {
   url: string;
   notes: string; // size, color, quantity, etc.
+}
+export interface OtherPickup {
+  enabled: boolean;
+  items: OtherPickupItem[];
 }
 
 export interface AdditionalServices {
@@ -145,6 +165,10 @@ export interface Order {
   } | null;
   notes: string | null;
   eta: string | null;
+  // COD settlement (null when the order has no COD lines)
+  cod_payment_method: CodPaymentMethod | null;
+  cod_preferred_phone: string | null;
+  cod_contact_time: string | null;
   items: OrderItem[];
   subtotal: number;
   status: OrderStatus;
@@ -173,6 +197,9 @@ export interface OrderItem {
   item_type: 'grocery' | 'service';
   service_type: 'parts_pickup' | 'package_delivery' | 'other_pickup' | null;
   service_details: Record<string, string> | null;
+  paid_by: PaidBy;
+  cod_name: string | null;
+  image_url: string | null;
 }
 
 export type OrderStatus = 'new' | 'in_progress' | 'fulfilled' | 'cancelled';

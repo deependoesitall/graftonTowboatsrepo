@@ -15,9 +15,13 @@ export async function GET(req: NextRequest) {
 
   const supabase = createServiceClient();
 
+  // Item-level detail is intentionally rich: Mary Karen cross-references every
+  // line against Sinclair's paperwork before sending an invoice. COD lines are
+  // included in the payload (flagged via paid_by) but excluded from billing
+  // totals/exports client-side — they're settled at delivery, never invoiced.
   let query = supabase
     .from('orders')
-    .select('id, order_number, company_name, contact_name, phone, customer_email, po_number, vessel_name, subtotal, status, created_at, extended_info, items:order_items(id, description, quantity, unit_price, line_total, shopping_status, actual_total, actual_weight, is_substitution, substitutes_item_id, item_type, service_type)')
+    .select('id, order_number, company_name, contact_name, phone, customer_email, po_number, vessel_name, subtotal, status, created_at, extended_info, items:order_items(id, description, category, pkg_size, uom, upc, quantity, unit_price, line_total, shopping_status, actual_total, actual_weight, is_substitution, substitutes_item_id, item_type, service_type, paid_by, cod_name)')
     .neq('status', 'cancelled')
     .order('company_name', { ascending: true })
     .order('created_at', { ascending: true });

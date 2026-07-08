@@ -12,6 +12,7 @@ import {
 import {
   getCart, updateCartItem, removeFromCart, getCartTotal, getCartCount,
   getVesselInfo, saveVesselInfo, getAdditionalServices, clearAdditionalServices,
+  updateCartItemFields, getVesselSubtotal, getCodSubtotal,
 } from '@/lib/cart';
 import { formatCurrency } from '@/lib/utils';
 import { CartItem, VesselInfo, AdditionalServices, VESSEL_TYPES } from '@/types';
@@ -100,8 +101,9 @@ function ReviewRow({ label, value }: { label: string; value?: string | null }) {
 }
 
 // ─── Cart item row (step 1) ────────────────────────────────────
-function CartItemRow({ item, onUpdate, onRemove }: {
+function CartItemRow({ item, onUpdate, onRemove, onPatch, codNameError }: {
   item: CartItem; onUpdate: (qty: number) => void; onRemove: () => void;
+  onPatch: (patch: Partial<CartItem>) => void; codNameError?: boolean;
 }) {
   const [draft, setDraft] = useState(String(item.quantity));
   useEffect(() => { setDraft(String(item.quantity)); }, [item.quantity]);
@@ -114,48 +116,94 @@ function CartItemRow({ item, onUpdate, onRemove }: {
     if (clamped !== item.quantity) onUpdate(clamped);
   }
 
+  const isCod = item.paid_by === 'cod';
+
   return (
-    <div className="p-3 flex items-start gap-3">
-      <div className="flex-1 min-w-0">
-        <p className="text-xs text-brand-river font-semibold mb-0.5">{item.category}</p>
-        <p className="font-body font-semibold text-brand-navy text-sm leading-snug">{item.description}</p>
-        {item.pkg_size && <p className="text-xs text-gray-400 mt-0.5">{item.pkg_size}{item.uom ? ` / ${item.uom}` : ''}</p>}
-        {item.billed_by_weight ? (
-          <p className="text-sm font-bold text-brand-navy mt-1">
-            {formatCurrency(item.price)} /lb &nbsp;&middot;&nbsp;
-            <span className="text-brand-gold">~{formatCurrency(item.price * item.quantity)} est.</span>
-            <span className="block text-[10px] font-normal text-amber-700">Sold by weight — billed at actual weight</span>
-          </p>
-        ) : (
-          <p className="text-sm font-bold text-brand-navy mt-1">
-            {formatCurrency(item.price)} ea. &nbsp;&middot;&nbsp;
-            <span className="text-brand-gold">{formatCurrency(item.price * item.quantity)}</span>
-          </p>
+    <div className="p-3">
+      <div className="flex items-start gap-3">
+        {item.image_url && (
+          <div className="w-14 h-14 shrink-0 bg-gray-50 rounded-lg overflow-hidden border border-gray-100">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={item.image_url} alt={item.description} loading="lazy" decoding="async"
+              className="w-full h-full object-contain p-1" />
+          </div>
         )}
-      </div>
-      <div className="flex flex-col items-end gap-2">
-        <button onClick={onRemove} className="text-gray-300 hover:text-red-400 transition-colors p-1">
-          <Trash2 className="w-4 h-4" />
-        </button>
-        <div className="flex items-center border border-gray-200 rounded overflow-hidden">
-          <button onClick={() => onUpdate(item.quantity - 1)}
-            className="w-7 h-7 flex items-center justify-center text-gray-500 hover:bg-gray-100">
-            <Minus className="w-3 h-3" />
+        <div className="flex-1 min-w-0">
+          <p className="text-xs text-brand-river font-semibold mb-0.5">{item.category}</p>
+          <p className="font-body font-semibold text-brand-navy text-sm leading-snug">{item.description}</p>
+          {item.pkg_size && <p className="text-xs text-gray-400 mt-0.5">{item.pkg_size}{item.uom ? ` / ${item.uom}` : ''}</p>}
+          {item.billed_by_weight ? (
+            <p className="text-sm font-bold text-brand-navy mt-1">
+              {formatCurrency(item.price)} /lb &nbsp;&middot;&nbsp;
+              <span className="text-brand-gold">~{formatCurrency(item.price * item.quantity)} est.</span>
+              <span className="block text-[10px] font-normal text-amber-700">Sold by weight — billed at actual weight</span>
+            </p>
+          ) : (
+            <p className="text-sm font-bold text-brand-navy mt-1">
+              {formatCurrency(item.price)} ea. &nbsp;&middot;&nbsp;
+              <span className="text-brand-gold">{formatCurrency(item.price * item.quantity)}</span>
+            </p>
+          )}
+        </div>
+        <div className="flex flex-col items-end gap-2">
+          <button onClick={onRemove} className="text-gray-300 hover:text-red-400 transition-colors p-1">
+            <Trash2 className="w-4 h-4" />
           </button>
-          <input
-            type="text" inputMode="numeric" pattern="[0-9]*" value={draft}
-            onChange={e => setDraft(e.target.value.replace(/[^0-9]/g, ''))}
-            onBlur={commit}
-            onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-            onFocus={e => e.target.select()}
-            className="w-8 text-center text-sm font-bold text-brand-navy bg-transparent border-0 focus:outline-none"
-          />
-          <button onClick={() => onUpdate(item.quantity + 1)}
-            className="w-7 h-7 flex items-center justify-center text-gray-500 hover:bg-gray-100">
-            <Plus className="w-3 h-3" />
-          </button>
+          <div className="flex items-center border border-gray-200 rounded overflow-hidden">
+            <button onClick={() => onUpdate(item.quantity - 1)}
+              className="w-7 h-7 flex items-center justify-center text-gray-500 hover:bg-gray-100">
+              <Minus className="w-3 h-3" />
+            </button>
+            <input
+              type="text" inputMode="numeric" pattern="[0-9]*" value={draft}
+              onChange={e => setDraft(e.target.value.replace(/[^0-9]/g, ''))}
+              onBlur={commit}
+              onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+              onFocus={e => e.target.select()}
+              className="w-8 text-center text-sm font-bold text-brand-navy bg-transparent border-0 focus:outline-none"
+            />
+            <button onClick={() => onUpdate(item.quantity + 1)}
+              className="w-7 h-7 flex items-center justify-center text-gray-500 hover:bg-gray-100">
+              <Plus className="w-3 h-3" />
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* Paid By — vessel account (invoiced monthly) vs COD (crew member pays at delivery) */}
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Paid by</span>
+        <div className="flex rounded-lg border border-gray-200 overflow-hidden">
+          <button type="button"
+            onClick={() => onPatch({ paid_by: 'vessel', cod_name: '' })}
+            className={`px-3 py-1 text-xs font-bold transition-colors ${
+              !isCod ? 'bg-brand-navy text-white' : 'bg-white text-gray-500 hover:bg-gray-50'
+            }`}>
+            Vessel Account
+          </button>
+          <button type="button"
+            onClick={() => onPatch({ paid_by: 'cod' })}
+            className={`px-3 py-1 text-xs font-bold transition-colors border-l border-gray-200 ${
+              isCod ? 'bg-purple-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'
+            }`}>
+            COD
+          </button>
+        </div>
+        {isCod && (
+          <input
+            type="text"
+            value={item.cod_name || ''}
+            onChange={e => onPatch({ cod_name: e.target.value })}
+            placeholder="Crew member's name *"
+            className={`input-base text-xs py-1 px-2 flex-1 min-w-[140px] max-w-[220px] ${
+              codNameError ? 'border-red-400' : 'border-purple-300'
+            }`}
+          />
+        )}
+      </div>
+      {isCod && codNameError && (
+        <p className="text-[11px] text-red-500 mt-1">Whose COD is this? Add the crew member&apos;s name.</p>
+      )}
     </div>
   );
 }
@@ -254,6 +302,24 @@ export default function OrderPage() {
     const hasItems = items.length > 0;
     const hasSvc = services.parts_pickup.enabled || services.package_delivery.enabled || services.other_pickup?.enabled;
     if (!hasItems && !hasSvc) errs.items = 'Please add groceries or at least one additional service before continuing.';
+
+    const codItems = items.filter(i => i.paid_by === 'cod');
+    if (codItems.length > 0) {
+      // COD-only orders are blocked — CODs ride along with a real delivery.
+      const codOnly = codItems.length === items.length && !hasSvc && vessel.crew_change === 'no';
+      if (codOnly) {
+        errs.items = 'COD items are delivered free alongside a regular order. Add vessel-account groceries, an additional service, or a crew change to continue.';
+      }
+      if (codItems.some(i => !(i.cod_name || '').trim())) {
+        errs.cod_name = 'Add the crew member’s name to each COD item.';
+      }
+      if (!vessel.cod_payment_method) {
+        errs.cod_payment_method = 'Choose how the COD items will be paid (cash, Venmo, or credit card).';
+      }
+      if (vessel.cod_payment_method === 'credit_card' && !vessel.cod_preferred_phone.trim()) {
+        errs.cod_preferred_phone = 'Add the best phone number to call for card payment.';
+      }
+    }
     return errs;
   }
 
@@ -363,8 +429,12 @@ export default function OrderPage() {
     }
   }
 
-  const groceryTotal = getCartTotal(items);
-  const groceryCount = getCartCount(items);
+  const groceryTotal   = getCartTotal(items);
+  const groceryCount   = getCartCount(items);
+  const vesselSubtotal = getVesselSubtotal(items);
+  const codSubtotal    = getCodSubtotal(items);
+  const codItems       = items.filter(i => i.paid_by === 'cod');
+  const hasCod         = codItems.length > 0;
   const activeSvcs = [
     services.parts_pickup.enabled      && 'parts_pickup',
     services.package_delivery.enabled  && 'package_delivery',
@@ -415,9 +485,30 @@ export default function OrderPage() {
                   item={item}
                   onUpdate={qty => { updateCartItem(item.product_id, qty); setItems(getCart()); }}
                   onRemove={() => { removeFromCart(item.product_id); setItems(getCart()); }}
+                  onPatch={patch => {
+                    updateCartItemFields(item.product_id, patch);
+                    setItems(getCart());
+                    if (errors.cod_name || errors.cod_payment_method || errors.items) {
+                      setErrors(e => { const n = { ...e }; delete n.cod_name; return n; });
+                    }
+                  }}
+                  codNameError={!!errors.cod_name && item.paid_by === 'cod' && !(item.cod_name || '').trim()}
                 />
               ))}
-              <div className="p-4 bg-brand-sand/40">
+              <div className="p-4 bg-brand-sand/40 space-y-1.5">
+                {hasCod && (
+                  <>
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-gray-600 font-semibold">Vessel Account subtotal</span>
+                      <span className="font-bold text-brand-navy">{formatCurrency(vesselSubtotal)}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-purple-700 font-semibold">COD subtotal <span className="font-normal text-purple-500">— due on delivery</span></span>
+                      <span className="font-bold text-purple-700">{formatCurrency(codSubtotal)}</span>
+                    </div>
+                    <div className="border-t border-brand-gold/30 pt-1.5" />
+                  </>
+                )}
                 <div className="flex justify-between items-center">
                   <div className="flex items-center gap-2">
                     <span className="font-body font-bold text-brand-navy">Estimated Total</span>
@@ -446,6 +537,48 @@ export default function OrderPage() {
             </div>
           )}
         </section>
+
+        {/* COD payment method — shown only when the cart has COD lines */}
+        {hasCod && (
+          <section className="card-base mb-4 p-5 border-2 border-purple-200">
+            <SectionHead icon={<ClipboardList className="w-4 h-4" />} title="COD Payment — due on delivery"
+              sub={`${codItems.length} item${codItems.length !== 1 ? 's' : ''} · ${formatCurrency(codSubtotal)} — paid by the crew member, separate from the company invoice`} />
+            {errors.cod_payment_method && <p className="text-xs text-red-500 mb-2">{errors.cod_payment_method}</p>}
+            <div className="flex gap-3 mb-3">
+              {([['cash', '💵 Cash'], ['venmo', 'Venmo'], ['credit_card', '💳 Credit Card']] as const).map(([val, lbl]) => (
+                <button key={val} type="button"
+                  onClick={() => { setV('cod_payment_method', val); }}
+                  className={`flex-1 py-2.5 rounded-xl border-2 text-sm font-bold transition-all ${
+                    vessel.cod_payment_method === val
+                      ? 'border-purple-600 bg-purple-600 text-white'
+                      : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                  }`}>{lbl}</button>
+              ))}
+            </div>
+            {vessel.cod_payment_method === 'credit_card' && (
+              <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 space-y-3">
+                <p className="text-xs text-purple-900">
+                  <strong>We&apos;ll call you to collect payment.</strong> Card numbers are never entered on this
+                  site — Sinclair&apos;s (or our team) will call the number below to take payment over the phone.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <Field label="Best Phone Number to Call" required error={errors.cod_preferred_phone}>
+                    <input type="tel" className={`input-base w-full ${errors.cod_preferred_phone ? 'border-red-400' : ''}`}
+                      placeholder="(555) 123-4567"
+                      value={vessel.cod_preferred_phone}
+                      onChange={e => setV('cod_preferred_phone', e.target.value)} />
+                  </Field>
+                  <Field label="Best Time to Call" hint="Crews run 12 on / 12 off — when are you awake?">
+                    <input type="text" className="input-base w-full"
+                      placeholder="e.g. 6 AM – 6 PM"
+                      value={vessel.cod_contact_time}
+                      onChange={e => setV('cod_contact_time', e.target.value)} />
+                  </Field>
+                </div>
+              </div>
+            )}
+          </section>
+        )}
 
         {/* Additional Services */}
         {activeSvcs.length > 0 && (
@@ -483,9 +616,18 @@ export default function OrderPage() {
                 <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
                   <ShoppingCart className="w-4 h-4 text-brand-green mt-0.5 shrink-0" />
                   <div className="flex-1 text-sm">
-                    <p className="font-bold text-brand-navy">Other Third-Party Item <span className="text-[10px] font-normal text-gray-400">(handled by Sinclair&apos;s)</span></p>
-                    {services.other_pickup.url && <p className="text-gray-500 text-xs break-all">{services.other_pickup.url}</p>}
-                    {services.other_pickup.notes && <p className="text-gray-500 text-xs">{services.other_pickup.notes}</p>}
+                    <p className="font-bold text-brand-navy">
+                      Other Third-Party Item{(services.other_pickup.items?.length ?? 0) > 1 ? `s (${services.other_pickup.items.length})` : ''}{' '}
+                      <span className="text-[10px] font-normal text-gray-400">(handled by Sinclair&apos;s)</span>
+                    </p>
+                    {(services.other_pickup.items || []).map((entry, i) => (
+                      (entry.url || entry.notes) ? (
+                        <div key={i} className={i > 0 ? 'mt-1 pt-1 border-t border-gray-100' : ''}>
+                          {entry.url && <p className="text-gray-500 text-xs break-all">{entry.url}</p>}
+                          {entry.notes && <p className="text-gray-500 text-xs">{entry.notes}</p>}
+                        </div>
+                      ) : null
+                    ))}
                   </div>
                   <Link href="/catalog?tab=groceries" className="text-xs text-brand-river hover:underline shrink-0">Edit</Link>
                 </div>
@@ -494,15 +636,14 @@ export default function OrderPage() {
           </section>
         )}
 
-        {/* Personal / COD items */}
-        <section className="card-base mb-6 p-5">
-          <SectionHead icon={<ClipboardList className="w-4 h-4" />} title="Personal / COD Items"
-            sub="Items a crew member is paying for personally (cash on delivery) — kept separate from the company invoice" />
-          <textarea className="input-base resize-none w-full" rows={2}
-            placeholder="Optional — e.g. 1 carton cigarettes for J. Smith, pays cash on delivery"
-            value={vessel.personal_cod_notes}
-            onChange={e => setV('personal_cod_notes', e.target.value)} />
-        </section>
+        {/* Per-line COD hint (replaces the old free-text Personal / COD box) */}
+        {items.length > 0 && !hasCod && (
+          <p className="text-center text-xs text-gray-400 mb-6">
+            Crew member paying for something personally? Set that item&apos;s{' '}
+            <span className="font-bold text-purple-600">Paid by</span> to <span className="font-bold text-purple-600">COD</span> above —
+            it&apos;s kept separate from the company invoice.
+          </p>
+        )}
 
         {activeSvcs.length === 0 && items.length > 0 && (
           <p className="text-center text-xs text-gray-400 mb-6">
@@ -785,16 +926,24 @@ export default function OrderPage() {
             ))}
           </div>
           {vessel.crew_change === 'yes' && (
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="# Crew Members Arriving" required error={errors.crew_arriving}>
-                <input type="number" min="0" className={`input-base w-full ${errors.crew_arriving ? 'border-red-400' : ''}`}
-                  placeholder="0" value={vessel.crew_arriving}
-                  onChange={e => setV('crew_arriving', e.target.value)} />
-              </Field>
-              <Field label="# Crew Members Departing" required error={errors.crew_departing}>
-                <input type="number" min="0" className={`input-base w-full ${errors.crew_departing ? 'border-red-400' : ''}`}
-                  placeholder="0" value={vessel.crew_departing}
-                  onChange={e => setV('crew_departing', e.target.value)} />
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <Field label="# Crew Members Arriving" required error={errors.crew_arriving}>
+                  <input type="number" min="0" className={`input-base w-full ${errors.crew_arriving ? 'border-red-400' : ''}`}
+                    placeholder="0" value={vessel.crew_arriving}
+                    onChange={e => setV('crew_arriving', e.target.value)} />
+                </Field>
+                <Field label="# Crew Members Departing" required error={errors.crew_departing}>
+                  <input type="number" min="0" className={`input-base w-full ${errors.crew_departing ? 'border-red-400' : ''}`}
+                    placeholder="0" value={vessel.crew_departing}
+                    onChange={e => setV('crew_departing', e.target.value)} />
+                </Field>
+              </div>
+              <Field label="Crew Change Notes" hint="Optional — anything that helps us plan (flight times, ride arrangements, etc.)">
+                <textarea className="input-base resize-none w-full" rows={2}
+                  placeholder="e.g. New deckhand lands at 11:40 AM — may run late…"
+                  value={vessel.crew_change_notes}
+                  onChange={e => setV('crew_change_notes', e.target.value)} />
               </Field>
             </div>
           )}
@@ -855,10 +1004,24 @@ export default function OrderPage() {
             </div>
             <div className="divide-y divide-gray-50">
               {items.map(item => (
-                <div key={item.product_id} className="px-4 py-2.5 flex justify-between gap-3 text-sm">
-                  <div>
-                    <span className="font-semibold text-brand-navy">{item.description}</span>
-                    {item.pkg_size && <span className="text-gray-400 text-xs ml-1.5">{item.pkg_size}</span>}
+                <div key={item.product_id} className="px-4 py-2.5 flex items-center justify-between gap-3 text-sm">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    {item.image_url && (
+                      <div className="w-9 h-9 shrink-0 bg-gray-50 rounded border border-gray-100 overflow-hidden">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={item.image_url} alt="" loading="lazy" decoding="async"
+                          className="w-full h-full object-contain p-0.5" />
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <span className="font-semibold text-brand-navy">{item.description}</span>
+                      {item.pkg_size && <span className="text-gray-400 text-xs ml-1.5">{item.pkg_size}</span>}
+                      {item.paid_by === 'cod' && (
+                        <span className="block text-[10px] font-bold uppercase tracking-wide text-purple-700">
+                          COD — {item.cod_name || 'crew member'}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div className="text-right shrink-0">
                     <span className="text-gray-500 text-xs">&times;{item.quantity}</span>
@@ -868,6 +1031,22 @@ export default function OrderPage() {
                   </div>
                 </div>
               ))}
+              {hasCod && (
+                <div className="px-4 py-2.5 space-y-1 text-sm bg-white">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Vessel Account subtotal</span>
+                    <span className="font-bold text-brand-navy">{formatCurrency(vesselSubtotal)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-purple-700">COD subtotal — due on delivery
+                      {vessel.cod_payment_method && (
+                        <span className="text-purple-500"> · {vessel.cod_payment_method === 'credit_card' ? 'credit card (we’ll call)' : vessel.cod_payment_method}</span>
+                      )}
+                    </span>
+                    <span className="font-bold text-purple-700">{formatCurrency(codSubtotal)}</span>
+                  </div>
+                </div>
+              )}
               <div className="px-4 py-3 flex justify-between font-bold bg-brand-sand/30">
                 <span className="text-brand-navy">Estimated Total</span>
                 <span className="text-brand-navy text-lg">{formatCurrency(groceryTotal)}</span>
@@ -907,10 +1086,19 @@ export default function OrderPage() {
             )}
             {services.other_pickup?.enabled && (
               <div className="px-4 py-3">
-                <p className="text-sm font-bold text-brand-navy mb-1">Other Third-Party Item <span className="text-xs font-normal text-gray-400">(handled by Sinclair&apos;s)</span></p>
-                <div className="grid grid-cols-1 gap-1">
-                  {services.other_pickup.url && <ReviewRow label="Item Link" value={services.other_pickup.url} />}
-                  {services.other_pickup.notes && <ReviewRow label="Details" value={services.other_pickup.notes} />}
+                <p className="text-sm font-bold text-brand-navy mb-1">
+                  Other Third-Party Item{(services.other_pickup.items?.length ?? 0) > 1 ? 's' : ''}{' '}
+                  <span className="text-xs font-normal text-gray-400">(handled by Sinclair&apos;s)</span>
+                </p>
+                <div className="grid grid-cols-1 gap-2">
+                  {(services.other_pickup.items || []).map((entry, i) => (
+                    (entry.url || entry.notes) ? (
+                      <div key={i} className="grid grid-cols-1 gap-1">
+                        {entry.url && <ReviewRow label={`Item ${i + 1} Link`} value={entry.url} />}
+                        {entry.notes && <ReviewRow label="Details" value={entry.notes} />}
+                      </div>
+                    ) : null
+                  ))}
                 </div>
               </div>
             )}
@@ -983,9 +1171,14 @@ export default function OrderPage() {
               <div>
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1.5">Crew Change</p>
                 {vessel.crew_change === 'yes' ? (
-                  <div className="grid grid-cols-2 gap-1">
-                    <ReviewRow label="Arriving" value={vessel.crew_arriving} />
-                    <ReviewRow label="Departing" value={vessel.crew_departing} />
+                  <div>
+                    <div className="grid grid-cols-2 gap-1">
+                      <ReviewRow label="Arriving" value={vessel.crew_arriving} />
+                      <ReviewRow label="Departing" value={vessel.crew_departing} />
+                    </div>
+                    {vessel.crew_change_notes && (
+                      <p className="text-sm text-gray-700 mt-1">{vessel.crew_change_notes}</p>
+                    )}
                   </div>
                 ) : (
                   <div>
@@ -997,10 +1190,20 @@ export default function OrderPage() {
                 )}
               </div>
             )}
-            {vessel.personal_cod_notes && (
+            {hasCod && (
               <div>
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1">Personal / COD Items</p>
-                <p className="text-sm text-gray-700 bg-purple-50 border border-purple-200 rounded p-2">{vessel.personal_cod_notes}</p>
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1">COD Payment</p>
+                <div className="text-sm text-gray-700 bg-purple-50 border border-purple-200 rounded p-2">
+                  <p>
+                    {codItems.length} item{codItems.length !== 1 ? 's' : ''} · {formatCurrency(codSubtotal)} due on delivery
+                    {vessel.cod_payment_method && <> — <strong>{vessel.cod_payment_method === 'credit_card' ? 'Credit Card' : vessel.cod_payment_method === 'venmo' ? 'Venmo' : 'Cash'}</strong></>}
+                  </p>
+                  {vessel.cod_payment_method === 'credit_card' && (
+                    <p className="text-xs text-purple-700 mt-0.5">
+                      We&apos;ll call {vessel.cod_preferred_phone || 'you'}{vessel.cod_contact_time ? ` (${vessel.cod_contact_time})` : ''} to collect payment.
+                    </p>
+                  )}
+                </div>
               </div>
             )}
             {vessel.notes && (

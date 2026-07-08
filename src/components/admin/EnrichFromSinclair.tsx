@@ -28,9 +28,9 @@ const POST_COOLDOWN_BUFFER_SECS = 15;
 const MAX_STUCK_COOLDOWNS = 3;
 const CHECKPOINT_KEY = 'freshop_enrich_checkpoint_v1';
 const CHECKPOINT_TTL_MS = 24 * 60 * 60 * 1000;
-// After a rate-limit pause, Sinclair's API often needs several quiet minutes
-// before it accepts requests again — resuming too soon fails on the first try.
-const RESUME_MIN_WAIT_MS = 5 * 60 * 1000;
+// How long to wait between probe attempts when Sinclair's API is still blocking.
+const RESUME_PROBE_WAIT_SECS = 120;
+const RESUME_MAX_PROBES = 15;
 
 interface FreshopProduct {
   upc?: string;
@@ -96,6 +96,8 @@ interface EnrichCheckpoint {
   donePages: number[];
   products: FreshopProduct[];
   savedAt: number;
+  /** Set when Sinclair's API last refused a request — used for resume timing. */
+  rateLimitedAt?: number;
 }
 
 function loadCheckpoint(): EnrichCheckpoint | null {
@@ -135,6 +137,17 @@ function indexFromProducts(products: FreshopProduct[]): Map<string, FreshopProdu
   return index;
 }
 
+async function probeFreshop(): Promise<boolean> {
+  try {
+    const res = await fetch(
+      `https://api.freshop.ncrcloud.com/1/products?app_key=${APP_KEY}&store_id=${STORE_ID}&limit=1`
+    );
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 // One attempt per page (plus one quick retry for network blips). Quota
 // handling happens in the outer loop with a cooldown — never hammer retries.
 async function fetchFreshopPage(skip: number): Promise<FreshopProduct[] | null> {
@@ -155,7 +168,7 @@ async function fetchFreshopPage(skip: number): Promise<FreshopProduct[] | null> 
 
 export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
   const [open, setOpen] = useState(false);
-  const [phase, setPhase] = useState<'idle' | 'scanning' | 'paused' | 'ready' | 'applying' | 'done'>('idle');
+  const [phase, setPhase] = useState<'idle' | 'scanning' | 'waiting' | 'paused' | 'ready' | 'applying' | 'done'>('idle');
   const [progress, setProgress] = useState({ done: 0, total: 0, label: '' });
   const [summary, setSummary] = useState<Summary | null>(null);
   const [overwrite, setOverwrite] = useState(false);
@@ -176,7 +189,9 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
     collected: FreshopProduct[],
     total: number,
     pages: number,
+    opts?: { rateLimited?: boolean; clearRateLimit?: boolean },
   ) {
+    const prev = checkpointRef.current ?? loadCheckpoint();
     const cp: EnrichCheckpoint = {
       version: 1,
       total,
@@ -184,10 +199,61 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
       donePages: Array.from(doneSet),
       products: collected,
       savedAt: Date.now(),
+      rateLimitedAt: opts?.rateLimited
+        ? Date.now()
+        : opts?.clearRateLimit
+          ? undefined
+          : prev?.rateLimitedAt,
     };
     checkpointRef.current = cp;
     saveCheckpoint(cp);
     return cp;
+  }
+
+  function formatWait(secs: number): string {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return m > 0 ? `${m}:${String(s).padStart(2, '0')}` : `${secs}s`;
+  }
+
+  /** On resume, probe Sinclair's API until it answers — avoids instant cooldown loops. */
+  async function waitForFreshopReady(
+    doneSet: Set<number>,
+    collected: FreshopProduct[],
+    total: number,
+    pages: number,
+    donePages: number,
+  ): Promise<boolean> {
+    setPhase('waiting');
+    for (let attempt = 0; attempt < RESUME_MAX_PROBES; attempt++) {
+      if (cancelRef.current) return false;
+
+      setProgress({
+        done: donePages,
+        total: pages,
+        label: attempt === 0
+          ? "Checking if Sinclair's API is ready…"
+          : "Sinclair's API still resting — checking again…",
+      });
+
+      if (await probeFreshop()) {
+        setPhase('scanning');
+        return true;
+      }
+
+      touchCheckpoint(doneSet, collected, total, pages, { rateLimited: true });
+
+      for (let s = RESUME_PROBE_WAIT_SECS; s > 0; s--) {
+        if (cancelRef.current) return false;
+        setProgress({
+          done: donePages,
+          total: pages,
+          label: `Sinclair's API needs a quiet break — checking again in ${formatWait(s)}…`,
+        });
+        await sleep(1000);
+      }
+    }
+    return false;
   }
 
   async function readError(res: Response): Promise<string> {
@@ -204,7 +270,7 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
     donePages: number,
     pagesLeft: number,
   ) {
-    touchCheckpoint(doneSet, collected, total, pages);
+    touchCheckpoint(doneSet, collected, total, pages, { rateLimited: true });
     setProgress({
       done: donePages,
       total: pages,
@@ -238,24 +304,6 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
       // Resume a partial download if the last run was interrupted by rate limits.
       const saved = loadCheckpoint();
 
-      if (saved && Date.now() - saved.savedAt < RESUME_MIN_WAIT_MS) {
-        const waitMs = RESUME_MIN_WAIT_MS - (Date.now() - saved.savedAt);
-        const waitMins = Math.ceil(waitMs / 60000);
-        pauseForResume(
-          new Set(saved.donePages),
-          saved.products,
-          saved.total,
-          saved.pages,
-          saved.donePages.length,
-          saved.pages - saved.donePages.length,
-        );
-        setError(
-          `Sinclair's API needs a quiet break after the last attempt. ` +
-          `Wait about ${waitMins} more minute${waitMins === 1 ? '' : 's'}, then click Resume download.`
-        );
-        return;
-      }
-
       // Sinclair's catalog, page by page with live progress
       let total: number;
       let pages: number;
@@ -263,6 +311,12 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
         total = saved.total;
         pages = saved.pages;
       } else {
+        if (!(await probeFreshop())) {
+          throw new Error(
+            "Sinclair's product catalog isn't reachable right now (API rate limit). " +
+            'Wait a few minutes and try again.'
+          );
+        }
         const head = await fetch(
           `https://api.freshop.ncrcloud.com/1/products?app_key=${APP_KEY}&store_id=${STORE_ID}&limit=1`
         ).then(r => r.json());
@@ -281,6 +335,26 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
       let stuckCooldowns = 0;
       const queue = Array.from({ length: pages }, (_, i) => i).filter(i => !doneSet.has(i));
 
+      checkpointRef.current = saved;
+
+      // Resuming a partial download — wait until Sinclair's API actually answers
+      // before requesting catalog pages (prevents the instant 90s cooldown loop).
+      if (queue.length > 0 && donePages > 0) {
+        setProgress({
+          done: donePages,
+          total: pages,
+          label: `Resuming at ${donePages} of ${pages} pages (${queue.length} left)…`,
+        });
+        const ready = await waitForFreshopReady(doneSet, collected, total, pages, donePages);
+        if (!ready) {
+          pauseForResume(doneSet, collected, total, pages, donePages, queue.length);
+          setError(
+            "Sinclair's API still isn't ready. Progress is saved — wait a few more minutes, then click Resume download."
+          );
+          return;
+        }
+      }
+
       setProgress({
         done: donePages,
         total: pages,
@@ -288,7 +362,6 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
           ? `Resuming Sinclair's catalog (${donePages} of ${pages} pages already downloaded)…`
           : `Downloading Sinclair's catalog…`,
       });
-      touchCheckpoint(doneSet, collected, total, pages);
 
       while (queue.length) {
         if (cancelRef.current) {
@@ -306,7 +379,7 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
           if (stuckPage === page) stuckCooldowns++;
           else { stuckPage = page; stuckCooldowns = 1; }
 
-          touchCheckpoint(doneSet, collected, total, pages);
+          touchCheckpoint(doneSet, collected, total, pages, { rateLimited: true });
 
           if (stuckCooldowns >= MAX_STUCK_COOLDOWNS) {
             pauseForResume(doneSet, collected, total, pages, donePages, queue.length);
@@ -357,7 +430,7 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
             : `Downloading Sinclair's catalog…`,
         });
 
-        touchCheckpoint(doneSet, collected, total, pages);
+        touchCheckpoint(doneSet, collected, total, pages, { clearRateLimit: true });
 
         await sleep(requestDelayMs);
       }
@@ -476,16 +549,21 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
               </div>
             )}
 
-            {(phase === 'scanning' || phase === 'applying') && (
+            {(phase === 'scanning' || phase === 'waiting' || phase === 'applying') && (
               <div className="py-4">
                 <p className="text-sm text-gray-600 mb-2">{progress.label}</p>
                 <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden mb-1.5">
-                  <div className="bg-brand-green h-3 rounded-full transition-all duration-200" style={{ width: `${pct}%` }} />
+                  <div
+                    className={`h-3 rounded-full transition-all duration-200 ${phase === 'waiting' ? 'bg-brand-gold' : 'bg-brand-green'}`}
+                    style={{ width: `${pct}%` }}
+                  />
                 </div>
                 <p className="text-xs text-gray-400">
-                  {phase === 'scanning'
-                    ? `${progress.done} of ${progress.total} pages · you can close anytime — progress is saved and resumes next run`
-                    : `${progress.done.toLocaleString()} of ${progress.total.toLocaleString()} products saved`}
+                  {phase === 'waiting'
+                    ? `${progress.done} of ${progress.total} pages saved · waiting for Sinclair's API — do not close unless you want to pause`
+                    : phase === 'scanning'
+                      ? `${progress.done} of ${progress.total} pages · you can close anytime — progress is saved and resumes next run`
+                      : `${progress.done.toLocaleString()} of ${progress.total.toLocaleString()} products saved`}
                 </p>
               </div>
             )}

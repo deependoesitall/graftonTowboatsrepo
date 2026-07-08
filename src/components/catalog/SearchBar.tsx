@@ -20,7 +20,14 @@ export function SearchBar({ initialSearch }: SearchBarProps) {
   const doSearch = useCallback((term: string) => {
     setIsSearching(true);
     const params = new URLSearchParams(searchParams.toString());
-    if (term) { params.set('search', term); } else { params.delete('search'); }
+    if (term) {
+      params.set('search', term);
+      // Cross-category search (Amazon behavior): typing a search clears any
+      // selected category so results always come from ALL items.
+      params.delete('category');
+    } else {
+      params.delete('search');
+    }
     params.delete('page');
     router.push(`/catalog?${params.toString()}`);
     setTimeout(() => setIsSearching(false), 500);

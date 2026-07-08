@@ -9,10 +9,10 @@ import { OrderDetailModal } from '@/components/admin/OrderDetailModal';
 import { fetchAdminSession, getAdminRole, canEdit, adminFetch, hasAdminPermission } from '@/lib/admin-auth';
 
 const STATUS_CONFIG = {
-  new:         { label: 'New',         bg: 'bg-blue-50',   text: 'text-blue-700',   border: 'border-blue-200',  dot: 'bg-blue-500'   },
-  in_progress: { label: 'In Progress', bg: 'bg-amber-50',  text: 'text-amber-700',  border: 'border-amber-200', dot: 'bg-amber-500'  },
-  fulfilled:   { label: 'Fulfilled',   bg: 'bg-green-50',  text: 'text-green-700',  border: 'border-green-200', dot: 'bg-green-500'  },
-  cancelled:   { label: 'Cancelled',   bg: 'bg-red-50',    text: 'text-red-600',    border: 'border-red-200',   dot: 'bg-red-400'    },
+  new:         { label: 'New',         bg: 'bg-blue-50',   text: 'text-blue-700',   border: 'border-blue-200',  dot: 'bg-blue-500',  edge: 'border-l-blue-500'  },
+  in_progress: { label: 'In Progress', bg: 'bg-amber-50',  text: 'text-amber-700',  border: 'border-amber-200', dot: 'bg-amber-500', edge: 'border-l-amber-500' },
+  fulfilled:   { label: 'Fulfilled',   bg: 'bg-green-50',  text: 'text-green-700',  border: 'border-green-200', dot: 'bg-green-500', edge: 'border-l-green-500' },
+  cancelled:   { label: 'Cancelled',   bg: 'bg-red-50',    text: 'text-red-600',    border: 'border-red-200',   dot: 'bg-red-400',   edge: 'border-l-red-400'   },
 } as const;
 
 function StatusBadge({ status, onClick }: { status: string; onClick?: () => void }) {
@@ -231,8 +231,64 @@ function OrdersContent() {
               <Package className="w-10 h-10 text-gray-200 mx-auto mb-3" />
               <p className="text-gray-400">No orders found</p>
             </div>
-          ) : (
-            <div className="overflow-x-auto">
+          ) : (<>
+            {/* ── MOBILE: order cards — status visible at a glance, no scrolling ── */}
+            <div className="md:hidden divide-y divide-gray-100">
+              {orders.map(order => {
+                const items = Array.isArray(order.items) ? order.items : [];
+                const groceryItems = items.filter(i => i.item_type !== 'service');
+                const groceryCount = groceryItems.reduce((s, i) => s + i.quantity, 0);
+                const itemCount = items.reduce((s, i) => s + i.quantity, 0);
+                const cfg = STATUS_CONFIG[order.status as keyof typeof STATUS_CONFIG] ?? STATUS_CONFIG.new;
+                const nextStatus = NEXT_STATUS[order.status];
+                const isUpdating = updatingId === order.id;
+                const hasCod = items.some(i => i.paid_by === 'cod') || !!order.extended_info?.personal_cod_notes;
+                return (
+                  <div key={order.id}
+                    onClick={() => setSelectedOrder(order)}
+                    className={`p-3.5 border-l-4 ${cfg.edge} active:bg-gray-50 cursor-pointer`}>
+                    {/* Status badge FIRST — the thing Jen couldn't see without scrolling */}
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <StatusBadge status={order.status} />
+                      <span className="text-[11px] text-gray-400 whitespace-nowrap">
+                        {new Date(order.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                      </span>
+                    </div>
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="font-mono text-sm font-bold text-brand-navy">{order.order_number}</span>
+                      {!isSinclair && <span className="text-sm font-bold text-brand-navy">{formatCurrency(order.subtotal)}</span>}
+                    </div>
+                    <p className="text-sm font-semibold text-brand-navy truncate">{order.company_name}</p>
+                    <p className="text-xs text-gray-400">
+                      {order.contact_name} · {isSinclair ? `${groceryCount} grocery items` : `${itemCount} items`}
+                    </p>
+                    <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                      {order.crew_change === 'yes' && (
+                        <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-orange-100 text-brand-orange border border-orange-200">Crew Change</span>
+                      )}
+                      {order.crew_change === 'maybe' && (
+                        <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-300">Crew Change?</span>
+                      )}
+                      {hasCod && (
+                        <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 border border-purple-200">$ COD</span>
+                      )}
+                      {nextStatus && canEditOrders && (
+                        <button
+                          onClick={e => { e.stopPropagation(); advanceStatus(order); }}
+                          disabled={isUpdating}
+                          className="ml-auto flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold bg-brand-steel/10 text-brand-steel disabled:opacity-50">
+                          {isUpdating ? <Loader2 className="w-3 h-3 animate-spin" /> : <ArrowRight className="w-3 h-3" />}
+                          {STATUS_CONFIG[nextStatus]?.label}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* ── DESKTOP: full table ── */}
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="bg-brand-navy">
@@ -251,7 +307,7 @@ function OrdersContent() {
                     const itemCount = items.reduce((s, i) => s + i.quantity, 0);
                     const hasCrewChange = order.crew_change === 'yes';
                     const maybeCrewChange = order.crew_change === 'maybe';
-                    const hasCod = !!order.extended_info?.personal_cod_notes;
+                    const hasCod = items.some(i => i.paid_by === 'cod') || !!order.extended_info?.personal_cod_notes;
                     const hasPartsPickup = items.some(i => i.item_type === 'service' && i.service_type === 'parts_pickup');
                     const hasPkgDelivery = items.some(i => i.item_type === 'service' && i.service_type === 'package_delivery');
                     const hasOtherPickup = items.some(i => i.item_type === 'service' && i.service_type === 'other_pickup');
@@ -370,7 +426,7 @@ function OrdersContent() {
                 </tbody>
               </table>
             </div>
-          )}
+          </>)}
         </div>
 
         {/* Pagination */}

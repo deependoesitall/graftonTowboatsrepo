@@ -63,6 +63,9 @@ const submitSchema = z.object({
     crew_arriving: z.string().optional().default(''),
     crew_departing: z.string().optional().default(''),
     personal_cod_notes: z.string().optional().default(''),
+    cod_payment_method: z.enum(['cash', 'venmo', 'credit_card', '']).optional().default(''),
+    cod_preferred_phone: z.string().optional().default(''),
+    cod_contact_time: z.string().optional().default(''),
     notes: z.string().optional().default(''),
     eta: z.string().optional().default(''),
   }),
@@ -74,6 +77,9 @@ const submitSchema = z.object({
     uom: z.string().nullable().optional(),
     price: z.number(),
     quantity: z.number().int().positive(),
+    image_url: z.string().nullable().optional(),
+    paid_by: z.enum(['vessel', 'cod']).optional().default('vessel'),
+    cod_name: z.string().optional().default(''),
   })).default([]),
   services: z.object({
     parts_pickup: z.object({
@@ -92,6 +98,11 @@ const submitSchema = z.object({
     }).optional(),
     other_pickup: z.object({
       enabled: z.boolean(),
+      // Multi-item form (no limit). Legacy clients may still send url/notes.
+      items: z.array(z.object({
+        url: z.string().optional().default(''),
+        notes: z.string().optional().default(''),
+      })).optional(),
       url: z.string().optional().default(''),
       notes: z.string().optional().default(''),
     }).optional(),
@@ -102,7 +113,23 @@ const submitSchema = z.object({
     || data.services?.package_delivery?.enabled
     || data.services?.other_pickup?.enabled;
   return hasItems || hasSvc;
-}, { message: 'Order must have at least one item or service' });
+}, { message: 'Order must have at least one item or service' })
+// COD-only orders are blocked: Grafton delivers CODs for free as a goodwill
+// service alongside a real delivery (vessel-account groceries, an additional
+// service, or a crew change). There is no standalone COD-only order.
+.refine(data => {
+  const codItems = data.items.filter(i => i.paid_by === 'cod');
+  if (codItems.length === 0 || codItems.length < data.items.length) return true;
+  const hasSvc = data.services?.parts_pickup?.enabled
+    || data.services?.package_delivery?.enabled
+    || data.services?.other_pickup?.enabled;
+  return !!hasSvc || data.vessel.crew_change !== 'no';
+}, { message: 'COD items ride along with a regular delivery — please add vessel-account groceries, an additional service, or a crew change to this order.' })
+// If anything is COD we need to know how it will be paid.
+.refine(data => {
+  const hasCod = data.items.some(i => i.paid_by === 'cod');
+  return !hasCod || !!data.vessel.cod_payment_method;
+}, { message: 'Please choose a payment method (cash, Venmo, or credit card) for the COD items.' });
 
 /**
  * Parse the structured ETA (date picker YYYY-MM-DD + time picker HH:MM) into
@@ -150,7 +177,10 @@ export async function POST(req: NextRequest) {
     }
     const orderNumber = generateOrderNumber();
     const userId = await getUserIdFromToken(req);
+    // Combined estimate (vessel + COD). Billing reports split these out and
+    // exclude COD lines — they're settled at delivery, never invoiced.
     const subtotal = items.reduce((s, i) => s + i.price * i.quantity, 0);
+    const hasCodItems = items.some(i => i.paid_by === 'cod');
 
     const vesselTypeStored = vessel.vessel_type === 'Other'
       ? (vessel.vessel_type_other || 'Other')
@@ -195,6 +225,9 @@ export async function POST(req: NextRequest) {
         crew_arriving: vessel.crew_change === 'yes' && vessel.crew_arriving ? parseInt(vessel.crew_arriving, 10) : null,
         crew_departing: vessel.crew_change === 'yes' && vessel.crew_departing ? parseInt(vessel.crew_departing, 10) : null,
         extended_info: Object.keys(extendedInfo).length > 0 ? extendedInfo : null,
+        cod_payment_method: hasCodItems ? (vessel.cod_payment_method || null) : null,
+        cod_preferred_phone: hasCodItems && vessel.cod_payment_method === 'credit_card' ? (vessel.cod_preferred_phone || null) : null,
+        cod_contact_time: hasCodItems && vessel.cod_payment_method === 'credit_card' ? (vessel.cod_contact_time || null) : null,
         notes: vessel.notes || null,
         eta: vessel.eta || null,
         subtotal,
@@ -213,12 +246,14 @@ export async function POST(req: NextRequest) {
 
     if (items.length > 0) {
       const productIds = items.map(i => i.product_id).filter(Boolean);
-      const { data: products } = await supabase.from('products').select('id, upc, location').in('id', productIds);
+      const { data: products } = await supabase.from('products').select('id, upc, location, image_url').in('id', productIds);
       const upcMap: Record<string, string | null> = {};
       const locationMap: Record<string, string | null> = {};
-      (products || []).forEach((p: { id: string; upc: string | null; location: string | null }) => {
+      const imageMap: Record<string, string | null> = {};
+      (products || []).forEach((p: { id: string; upc: string | null; location: string | null; image_url: string | null }) => {
         upcMap[p.id] = p.upc;
         locationMap[p.id] = p.location;
+        imageMap[p.id] = p.image_url;
       });
 
       items.forEach(item => {
@@ -231,12 +266,15 @@ export async function POST(req: NextRequest) {
           uom: item.uom || null,
           upc: upcMap[item.product_id] ?? null,
           location: locationMap[item.product_id] ?? null,
+          image_url: item.image_url || imageMap[item.product_id] || null,
           unit_price: item.price,
           quantity: item.quantity,
           line_total: item.price * item.quantity,
           item_type: 'grocery',
           service_type: null,
           service_details: null,
+          paid_by: item.paid_by === 'cod' ? 'cod' : 'vessel',
+          cod_name: item.paid_by === 'cod' ? (item.cod_name || null) : null,
         });
       });
     }
@@ -283,19 +321,26 @@ export async function POST(req: NextRequest) {
 
     if (services?.other_pickup?.enabled) {
       const o = services.other_pickup;
-      allOrderItems.push({
-        order_id: order.id,
-        product_id: 'service-other-pickup',
-        description: 'Other Third-Party Item (Sinclair\'s)',
-        category: 'Additional Services',
-        pkg_size: null, uom: null, upc: null,
-        unit_price: 0, quantity: 1, line_total: 0,
-        item_type: 'service',
-        service_type: 'other_pickup',
-        service_details: {
-          url: o.url || '',
-          notes: o.notes || '',
-        },
+      // Multi-item form → one service line per entry; fall back to legacy url/notes.
+      const entries = (o.items && o.items.length > 0 ? o.items : [{ url: o.url || '', notes: o.notes || '' }])
+        .filter(e => (e.url || '').trim() || (e.notes || '').trim());
+      entries.forEach((entry, idx) => {
+        allOrderItems.push({
+          order_id: order.id,
+          product_id: 'service-other-pickup',
+          description: entries.length > 1
+            ? `Other Third-Party Item ${idx + 1} of ${entries.length} (Sinclair's)`
+            : 'Other Third-Party Item (Sinclair\'s)',
+          category: 'Additional Services',
+          pkg_size: null, uom: null, upc: null,
+          unit_price: 0, quantity: 1, line_total: 0,
+          item_type: 'service',
+          service_type: 'other_pickup',
+          service_details: {
+            url: entry.url || '',
+            notes: entry.notes || '',
+          },
+        });
       });
     }
 

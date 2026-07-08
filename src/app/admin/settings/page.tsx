@@ -34,6 +34,7 @@ interface Settings {
   grocery_cutoff_hours: number;
   service_cutoff_hours: number;
   show_digital_coupons: boolean;
+  fleet_cta_enabled: boolean;
 }
 
 interface Coupon {
@@ -97,6 +98,7 @@ export default function AdminSettingsPage() {
     grocery_cutoff_hours: 4,
     service_cutoff_hours: 2,
     show_digital_coupons: true,
+    fleet_cta_enabled: false,
   });
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
@@ -1013,6 +1015,7 @@ export default function AdminSettingsPage() {
         <div className="card-base p-6 space-y-4">
           <h2 className="font-bold text-brand-navy">Feature Toggles</h2>
           {[
+            { key: 'fleet_cta_enabled' as const, label: 'Fleet Pricing Banner', desc: 'Show the B2B fleet-contract banner on the catalog ("sign your whole fleet up for special pricing — call us"). Leave off until the wording is final.' },
             { key: 'repeat_orders_enabled' as const, label: 'Repeat Last Order', desc: 'Let customers quickly re-add all items from their previous order' },
             { key: 'draft_orders_enabled' as const, label: 'Save Draft Orders', desc: 'Allow customers to save and resume orders later' },
             { key: 'tax_enabled' as const, label: 'Enable Tax', desc: 'Apply sales tax to orders based on the rate below' },

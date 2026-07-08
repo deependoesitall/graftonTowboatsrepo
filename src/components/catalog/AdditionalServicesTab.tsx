@@ -1,10 +1,11 @@
 'use client';
 // src/components/catalog/AdditionalServicesTab.tsx
-// Accordion-style additional services with pricing disclaimer,
-// delivery-area wording, and crew change (tri-state) card.
+// Accordion-style additional services with pricing disclaimer and the
+// crew change (tri-state) card. The boat/land delivery info blocks moved
+// to a banner on the catalog page (Demo 2 feedback).
 
 import { useState, useEffect } from 'react';
-import { Package, Wrench, Check, X, ChevronDown, Users, Info, Ship, Truck } from 'lucide-react';
+import { Package, Wrench, Check, X, ChevronDown, Users, Info } from 'lucide-react';
 import { AdditionalServices, VesselInfo } from '@/types';
 import {
   getAdditionalServices, saveAdditionalServices,
@@ -76,34 +77,6 @@ export function AdditionalServicesTab() {
           {DISCLAIMER.split('(618) 556-0290')[0]}
           <a href="tel:6185560290" className="font-bold underline">(618) 556-0290</a>.
         </p>
-      </div>
-
-      {/* Delivery area (informational) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="flex items-start gap-3 bg-white border border-gray-200 rounded-xl p-4">
-          <div className="w-9 h-9 bg-brand-navy/10 rounded-full flex items-center justify-center shrink-0">
-            <Ship className="w-4 h-4 text-brand-navy" />
-          </div>
-          <div>
-            <p className="text-sm font-bold text-brand-navy">By boat</p>
-            <p className="text-xs text-gray-500 leading-relaxed">
-              We deliver directly to your vessel on the river near Grafton — Mile Marker 219 on the
-              Mississippi River, Mile Marker 0 on the Illinois River.
-            </p>
-          </div>
-        </div>
-        <div className="flex items-start gap-3 bg-white border border-gray-200 rounded-xl p-4">
-          <div className="w-9 h-9 bg-brand-orange/10 rounded-full flex items-center justify-center shrink-0">
-            <Truck className="w-4 h-4 text-brand-orange" />
-          </div>
-          <div>
-            <p className="text-sm font-bold text-brand-navy">By land</p>
-            <p className="text-xs text-gray-500 leading-relaxed">
-              Van delivery to terminals, locks, and fleeting areas in the Grafton area — note your
-              exact location at checkout and we&apos;ll confirm.
-            </p>
-          </div>
-        </div>
       </div>
 
       {/* Parts Pickup */}
@@ -226,16 +199,24 @@ export function AdditionalServicesTab() {
           ))}
         </div>
         {vessel.crew_change === 'yes' && (
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="# Crew Arriving">
-              <input type="number" min="0" className="input-base text-sm" placeholder="0"
-                value={vessel.crew_arriving}
-                onChange={e => patchVessel({ crew_arriving: e.target.value })} />
-            </Field>
-            <Field label="# Crew Departing">
-              <input type="number" min="0" className="input-base text-sm" placeholder="0"
-                value={vessel.crew_departing}
-                onChange={e => patchVessel({ crew_departing: e.target.value })} />
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="# Crew Arriving">
+                <input type="number" min="0" className="input-base text-sm" placeholder="0"
+                  value={vessel.crew_arriving}
+                  onChange={e => patchVessel({ crew_arriving: e.target.value })} />
+              </Field>
+              <Field label="# Crew Departing">
+                <input type="number" min="0" className="input-base text-sm" placeholder="0"
+                  value={vessel.crew_departing}
+                  onChange={e => patchVessel({ crew_departing: e.target.value })} />
+              </Field>
+            </div>
+            <Field label="Notes (optional)">
+              <textarea className="input-base text-sm resize-none w-full" rows={2}
+                placeholder="e.g. New deckhand lands at 11:40 AM — may run late…"
+                value={vessel.crew_change_notes}
+                onChange={e => patchVessel({ crew_change_notes: e.target.value })} />
             </Field>
           </div>
         )}

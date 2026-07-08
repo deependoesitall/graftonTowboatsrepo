@@ -117,7 +117,7 @@ function AccountContent() {
   }
 
   function repeatOrder(order: Order) {
-    order.items.forEach(item => {
+    order.items.filter(i => i.item_type !== 'service').forEach(item => {
       addToCart({
         product_id: item.product_id,
         description: item.description,
@@ -126,6 +126,8 @@ function AccountContent() {
         uom: item.uom,
         price: item.unit_price,
         quantity: item.quantity,
+        image_url: item.image_url,
+        paid_by: 'vessel',
       });
     });
     toast({
@@ -140,6 +142,7 @@ function AccountContent() {
     addToCart({
       product_id: p.id, description: p.description, category: p.category,
       pkg_size: p.pkg_size, uom: p.uom, price: p.price, quantity: 1,
+      image_url: p.image_url, paid_by: 'vessel',
     });
     toast({ title: 'Added to cart', description: p.description, variant: 'success', duration: 1500 });
   }
@@ -241,6 +244,23 @@ function AccountContent() {
                     <p className="text-xs text-brand-green/40 mt-0.5">
                       {order.items?.length || 0} line items · <span className="font-bold text-brand-green">{formatCurrency(order.subtotal)}</span>
                     </p>
+                    {/* Product thumbnails — the little dopamine strip */}
+                    {(order.items || []).some(i => i.image_url) && (
+                      <div className="flex items-center gap-1.5 mt-2">
+                        {(order.items || []).filter(i => i.image_url).slice(0, 8).map(i => (
+                          <div key={i.id} className="w-8 h-8 bg-gray-50 border border-gray-100 rounded overflow-hidden shrink-0">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={i.image_url!} alt="" loading="lazy" decoding="async"
+                              className="w-full h-full object-contain p-0.5" />
+                          </div>
+                        ))}
+                        {(order.items || []).filter(i => i.image_url).length > 8 && (
+                          <span className="text-[10px] text-brand-green/40 font-bold">
+                            +{(order.items || []).filter(i => i.image_url).length - 8}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <button onClick={() => repeatOrder(order)}
@@ -283,6 +303,13 @@ function AccountContent() {
                     className="text-brand-orange shrink-0" aria-label="Remove from favorites">
                     <Star className="w-5 h-5 fill-brand-orange" />
                   </button>
+                  {p.image_url && (
+                    <div className="w-11 h-11 bg-gray-50 border border-gray-100 rounded-lg overflow-hidden shrink-0">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={p.image_url} alt="" loading="lazy" decoding="async"
+                        className="w-full h-full object-contain p-0.5" />
+                    </div>
+                  )}
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold text-brand-green text-sm truncate">{p.description}</p>
                     <p className="text-xs text-brand-green/40">

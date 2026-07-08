@@ -14,9 +14,11 @@ export function getCart(): CartItem[] {
     const raw = localStorage.getItem(CART_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) return parsed;
-    if (parsed && Array.isArray(parsed.items)) return parsed.items;
-    return [];
+    const items: CartItem[] = Array.isArray(parsed) ? parsed
+      : parsed && Array.isArray(parsed.items) ? parsed.items
+      : [];
+    // Carts saved before the COD rework have no paid_by — default to vessel.
+    return items.map(i => ({ paid_by: 'vessel', cod_name: '', ...i }));
   } catch { return []; }
 }
 
@@ -45,6 +47,13 @@ export function removeFromCart(product_id: string) {
   saveCart(getCart().filter(i => i.product_id !== product_id));
 }
 
+/** Patch arbitrary fields on a cart line (paid_by, cod_name, …). */
+export function updateCartItemFields(product_id: string, patch: Partial<CartItem>) {
+  const cart = getCart();
+  const idx = cart.findIndex(i => i.product_id === product_id);
+  if (idx >= 0) { cart[idx] = { ...cart[idx], ...patch }; saveCart(cart); }
+}
+
 export function clearCart() {
   if (typeof window === 'undefined') return;
   localStorage.removeItem(CART_KEY);
@@ -53,6 +62,16 @@ export function clearCart() {
 
 export function getCartTotal(items: CartItem[]): number {
   return items.reduce((sum, i) => sum + i.price * i.quantity, 0);
+}
+
+/** Subtotal of lines billed to the vessel's company account. */
+export function getVesselSubtotal(items: CartItem[]): number {
+  return items.filter(i => i.paid_by !== 'cod').reduce((s, i) => s + i.price * i.quantity, 0);
+}
+
+/** Subtotal of COD lines (settled at delivery — never invoiced). */
+export function getCodSubtotal(items: CartItem[]): number {
+  return items.filter(i => i.paid_by === 'cod').reduce((s, i) => s + i.price * i.quantity, 0);
 }
 
 export function getCartCount(items: CartItem[]): number {
@@ -118,8 +137,12 @@ function defaultVesselInfo(): VesselInfo {
     crew_change_notes: '',
     crew_arriving: '',
     crew_departing: '',
-    // Personal / COD items (paid by crew member directly)
+    // Personal / COD items (legacy free-text — replaced by per-line paid_by)
     personal_cod_notes: '',
+    // COD settlement
+    cod_payment_method: '',
+    cod_preferred_phone: '',
+    cod_contact_time: '',
     // Notes
     notes: '',
     // Legacy
@@ -133,7 +156,18 @@ export function getAdditionalServices(): AdditionalServices {
   if (typeof window === 'undefined') return defaultServices();
   try {
     const raw = localStorage.getItem(SERVICES_KEY);
-    return raw ? { ...defaultServices(), ...JSON.parse(raw) } : defaultServices();
+    if (!raw) return defaultServices();
+    const merged = { ...defaultServices(), ...JSON.parse(raw) };
+    // Migrate legacy single-item other_pickup ({url, notes}) → items array
+    const op = merged.other_pickup as unknown as
+      { enabled?: boolean; url?: string; notes?: string; items?: Array<{ url: string; notes: string }> };
+    if (op && !Array.isArray(op.items)) {
+      merged.other_pickup = {
+        enabled: !!op.enabled,
+        items: (op.url || op.notes) ? [{ url: op.url || '', notes: op.notes || '' }] : [{ url: '', notes: '' }],
+      };
+    }
+    return merged;
   } catch { return defaultServices(); }
 }
 
@@ -173,8 +207,7 @@ function defaultServices(): AdditionalServices {
     },
     other_pickup: {
       enabled: false,
-      url: '',
-      notes: '',
+      items: [{ url: '', notes: '' }],
     },
   };
 }

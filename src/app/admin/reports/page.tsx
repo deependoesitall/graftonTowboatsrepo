@@ -53,6 +53,10 @@ interface ReportData {
 interface BillingItem {
   id: string;
   description: string;
+  category: string;
+  pkg_size: string | null;
+  uom: string | null;
+  upc: string | null;
   quantity: number;
   unit_price: number;
   line_total: number;
@@ -63,6 +67,8 @@ interface BillingItem {
   substitutes_item_id: string | null;
   item_type: 'grocery' | 'service';
   service_type: string | null;
+  paid_by: 'vessel' | 'cod';
+  cod_name: string | null;
 }
 interface BillingOrder {
   id: string;
@@ -125,7 +131,41 @@ function getPresetRange(preset: PresetKey, customFrom?: string, customTo?: strin
   }
 }
 
-// ─── CSV helpers (client-side, per-company billing export) ────
+// ─── Billing helpers ──────────────────────────────────────────
+// Bill by company + vessel: Ingram has 15+ boats, each invoiced separately
+// ("Ingram — Jenny Kay", "Ingram — [next boat]"). Falls back to the company
+// name alone when the order has no vessel name.
+function billingGroupLabel(o: BillingOrder): string {
+  return o.vessel_name ? `${o.company_name} — ${o.vessel_name}` : o.company_name;
+}
+
+function groupOrders(orders: BillingOrder[]): [string, BillingOrder[]][] {
+  const map = new Map<string, BillingOrder[]>();
+  for (const o of orders) {
+    const key = billingGroupLabel(o);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(o);
+  }
+  return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+}
+
+// Grocery lines the company actually gets invoiced for — COD lines are
+// settled at delivery and NEVER appear on the monthly invoice.
+function billableItems(o: BillingOrder): BillingItem[] {
+  return o.items.filter(i => i.item_type !== 'service' && i.paid_by !== 'cod');
+}
+function codLines(o: BillingOrder): BillingItem[] {
+  return o.items.filter(i => i.item_type !== 'service' && i.paid_by === 'cod');
+}
+// Invoiceable estimate for an order: delivered vessel-account lines at actual
+// (weighed) totals when available, estimated otherwise.
+function vesselTotal(o: BillingOrder): number {
+  return billableItems(o)
+    .filter(i => i.shopping_status !== 'out_of_stock')
+    .reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0);
+}
+
+// ─── CSV helpers (client-side, per-vessel billing export) ────
 function csvEscape(val: unknown): string {
   const s = String(val ?? '');
   if (s.includes(',') || s.includes('"') || s.includes('\n')) {
@@ -134,41 +174,58 @@ function csvEscape(val: unknown): string {
   return s;
 }
 
+// Item-level export: one row per grocery line so Mary Karen can cross-reference
+// every item, quantity, and estimated-vs-actual price against Sinclair's
+// receipts before an invoice goes out. COD lines are excluded (noted per order).
 function billingCsv(orders: BillingOrder[]): string {
-  const header = 'Order #,Company,Contact,Phone,Billing Email,Vessel,PO #,Date,Items Ordered,Items Delivered (subs noted),Estimated Total,Final Total\n';
-  const rows = orders.map(o => {
-    const grocery = o.items.filter(i => i.item_type !== 'service');
+  const header = [
+    'Bill To (Company — Vessel)', 'Order #', 'Order Date', 'Order Status', 'PO #', 'Contact', 'Billing Email',
+    'Item', 'UPC', 'Category', 'Pack', 'Qty', 'Unit Price', 'Estimated Line Total',
+    'Shopped Status', 'Substitution', 'Actual Weight (lb)', 'Actual Line Total',
+  ].map(csvEscape).join(',') + '\n';
+
+  const rows: string[] = [];
+  for (const o of orders) {
+    const group = billingGroupLabel(o);
+    const grocery = billableItems(o);
+    const cods = codLines(o);
     const services = o.items.filter(i => i.item_type === 'service');
-    const outOfStockMap = new Map(grocery.filter(i => i.shopping_status === 'out_of_stock').map(i => [i.id, i.description]));
+    const outOfStockMap = new Map(
+      o.items.filter(i => i.item_type !== 'service' && i.shopping_status === 'out_of_stock').map(i => [i.id, i.description])
+    );
 
-    const orderedQty = grocery.filter(i => !i.is_substitution).reduce((s, i) => s + i.quantity, 0);
-    const delivered = grocery.filter(i => i.shopping_status !== 'out_of_stock');
-    const deliveredQty = delivered.reduce((s, i) => s + i.quantity, 0);
-    const subs = delivered
-      .filter(i => i.is_substitution)
-      .map(i => `${i.description} (sub for ${i.substitutes_item_id ? outOfStockMap.get(i.substitutes_item_id) || 'original item' : 'original item'})`);
-    const svcNote = services.length > 0 ? `${services.length} additional service${services.length > 1 ? 's' : ''} (billed separately)` : '';
+    for (const i of grocery) {
+      rows.push([
+        group, o.order_number, new Date(o.created_at).toLocaleDateString(), o.status.replace('_', ' '),
+        o.po_number || '', o.contact_name, o.customer_email || '',
+        i.description, i.upc || '', i.category || '', i.pkg_size || '', i.quantity,
+        Number(i.unit_price).toFixed(2), Number(i.line_total).toFixed(2),
+        i.shopping_status.replace('_', ' '),
+        i.is_substitution ? `sub for ${i.substitutes_item_id ? outOfStockMap.get(i.substitutes_item_id) || 'original item' : 'original item'}` : '',
+        i.actual_weight ?? '',
+        i.actual_total != null ? Number(i.actual_total).toFixed(2) : '',
+      ].map(csvEscape).join(','));
+    }
 
-    const orderedCol = [`${orderedQty} items`, svcNote].filter(Boolean).join('; ');
-    const deliveredCol = o.status === 'fulfilled'
-      ? [`${deliveredQty} items`, ...(subs.length ? [`Substitutions: ${subs.join('; ')}`] : [])].join(' — ')
-      : 'Not yet fulfilled';
+    // Per-service note rows (no fixed price — confirmed at fulfillment)
+    for (const s of services) {
+      rows.push([
+        group, o.order_number, new Date(o.created_at).toLocaleDateString(), o.status.replace('_', ' '),
+        o.po_number || '', o.contact_name, o.customer_email || '',
+        `${s.description} — additional service, confirm charge`, '', 'Additional Services', '', 1,
+        '', '', '', '', '', '',
+      ].map(csvEscape).join(','));
+    }
 
-    return [
-      o.order_number,
-      o.company_name,
-      o.contact_name,
-      o.phone,
-      o.customer_email || '',
-      o.vessel_name || '',
-      o.po_number || '',
-      new Date(o.created_at).toLocaleDateString(),
-      orderedCol,
-      deliveredCol,
-      Number(o.subtotal).toFixed(2),
-      '', // Final Total — filled in manually (weight/service items)
-    ].map(csvEscape).join(',');
-  });
+    // Order summary row
+    rows.push([
+      group, o.order_number, new Date(o.created_at).toLocaleDateString(), o.status.replace('_', ' '),
+      o.po_number || '', o.contact_name, o.customer_email || '',
+      `ORDER TOTAL${cods.length ? ` (${cods.length} COD item${cods.length > 1 ? 's' : ''} excluded — settled at delivery)` : ''}`,
+      '', '', '', grocery.reduce((s, i) => s + i.quantity, 0),
+      '', vesselTotal(o).toFixed(2), '', '', '', '',
+    ].map(csvEscape).join(','));
+  }
   return header + rows.join('\n') + '\n';
 }
 
@@ -187,12 +244,12 @@ function statementHtml(companies: [string, BillingOrder[]][], monthLabel: string
 
   const companyBlocks = companies.map(([company, orders], ci) => {
     const first = orders[0];
-    const estTotal = orders.reduce((s, o) => s + Number(o.subtotal), 0);
+    const estTotal = orders.reduce((s, o) => s + vesselTotal(o), 0);
 
     const orderRows = orders.map(o => {
-      const grocery = o.items.filter(i => i.item_type !== 'service');
+      const grocery = billableItems(o);
       const services = o.items.filter(i => i.item_type === 'service');
-      const oos = new Map(grocery.filter(i => i.shopping_status === 'out_of_stock').map(i => [i.id, i.description]));
+      const oos = new Map(o.items.filter(i => i.item_type !== 'service' && i.shopping_status === 'out_of_stock').map(i => [i.id, i.description]));
       const delivered = grocery.filter(i => i.shopping_status !== 'out_of_stock');
       const orderedQty = grocery.filter(i => !i.is_substitution).reduce((s, i) => s + i.quantity, 0);
       const deliveredQty = delivered.reduce((s, i) => s + i.quantity, 0);
@@ -202,11 +259,13 @@ function statementHtml(companies: [string, BillingOrder[]][], monthLabel: string
         .map(i => `${esc(i.description)} — ${i.actual_weight} lb actual (${money(i.actual_total ?? i.line_total)})`);
       const svcList = services.map(i => esc(i.description));
       const cod = o.extended_info?.personal_cod_notes;
+      const codItems = codLines(o);
 
       const notes: string[] = [];
       if (subs.length) notes.push(`<strong>Substitutions:</strong> ${subs.join('; ')}`);
       if (weightItems.length) notes.push(`<strong>Weighed items:</strong> ${weightItems.join('; ')}`);
       if (svcList.length) notes.push(`<strong>Additional services (confirm charges):</strong> ${svcList.join('; ')}`);
+      if (codItems.length) notes.push(`<strong style="color:#9333ea;">COD — settled at delivery, do NOT invoice:</strong> ${codItems.map(i => `${i.quantity}× ${esc(i.description)} (${esc(i.cod_name || 'crew member')})`).join('; ')}`);
       if (cod) notes.push(`<strong style="color:#9333ea;">Personal / COD — do NOT invoice:</strong> ${esc(cod)}`);
 
       return `
@@ -222,7 +281,7 @@ function statementHtml(companies: [string, BillingOrder[]][], monthLabel: string
         </td>
         <td style="padding:8px 10px;border-bottom:1px solid #eee;font-size:11px;text-align:center;">${orderedQty}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #eee;font-size:11px;text-align:center;">${o.status === 'fulfilled' ? deliveredQty : '—'}</td>
-        <td style="padding:8px 10px;border-bottom:1px solid #eee;font-size:12px;font-weight:700;text-align:right;color:${GREEN};">${money(Number(o.subtotal))}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #eee;font-size:12px;font-weight:700;text-align:right;color:${GREEN};">${money(vesselTotal(o))}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #eee;">
           <div style="border:1.5px solid #bbb;border-radius:3px;height:22px;width:90px;margin-left:auto;"></div>
         </td>
@@ -449,16 +508,8 @@ function BillingTab() {
   const fulfilled = orders.filter(o => o.status === 'fulfilled');
   const pending = orders.filter(o => o.status === 'new' || o.status === 'in_progress');
 
-  // Group fulfilled orders by company
-  const byCompany = useMemo(() => {
-    const map = new Map<string, BillingOrder[]>();
-    for (const o of fulfilled) {
-      const key = o.company_name;
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(o);
-    }
-    return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-  }, [fulfilled]);
+  // Group fulfilled orders by company + vessel (Ingram bills per boat)
+  const byCompany = useMemo(() => groupOrders(fulfilled), [fulfilled]);
 
   function toggleOrder(id: string) {
     setSelected(prev => {
@@ -485,45 +536,32 @@ function BillingTab() {
 
   const selectedOrders = orders.filter(o => selected.has(o.id));
 
-  // Export: one CSV per company (sequential downloads), plus combined option
+  // Export: one CSV per company+vessel (sequential downloads), plus combined option
   async function exportPerCompany() {
-    const map = new Map<string, BillingOrder[]>();
-    for (const o of selectedOrders) {
-      if (!map.has(o.company_name)) map.set(o.company_name, []);
-      map.get(o.company_name)!.push(o);
-    }
     let delay = 0;
-    for (const [company, companyOrders] of Array.from(map.entries())) {
-      const filename = `billing_${month}_${slug(company)}.csv`;
-      const csv = billingCsv(companyOrders);
+    for (const [group, groupOrdersList] of groupOrders(selectedOrders)) {
+      const filename = `billing_${month}_${slug(group)}.csv`;
+      const csv = billingCsv(groupOrdersList);
       // Stagger downloads slightly so browsers don't drop them
       setTimeout(() => downloadCsv(filename, csv), delay);
       delay += 350;
     }
   }
   function exportCombined() {
-    downloadCsv(`billing_${month}_all-companies.csv`, billingCsv(selectedOrders));
+    downloadCsv(`billing_${month}_all-vessels.csv`, billingCsv(selectedOrders));
   }
 
-  // Branded print-ready statements — one page per company, Final Total boxes
-  // left blank for Mary to fill after confirming weights/services.
+  // Branded print-ready statements — one page per company+vessel, Final Total
+  // boxes left blank for Mary to fill after confirming weights/services.
   function openStatements() {
-    const map = new Map<string, BillingOrder[]>();
-    for (const o of selectedOrders) {
-      if (!map.has(o.company_name)) map.set(o.company_name, []);
-      map.get(o.company_name)!.push(o);
-    }
     const monthLabel = new Date(month + '-01T00:00:00')
       .toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-    const html = statementHtml(
-      Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0])),
-      monthLabel
-    );
+    const html = statementHtml(groupOrders(selectedOrders), monthLabel);
     const blob = new Blob([html], { type: 'text/html' });
     window.open(URL.createObjectURL(blob), '_blank');
   }
 
-  const selCompanyCount = new Set(selectedOrders.map(o => o.company_name)).size;
+  const selCompanyCount = new Set(selectedOrders.map(o => billingGroupLabel(o))).size;
 
   return (
     <>
@@ -572,7 +610,8 @@ function BillingTab() {
               {byCompany.map(([company, companyOrders]) => {
                 const collapsed = collapsedCompanies.has(company);
                 const allSelected = companyOrders.every(o => selected.has(o.id));
-                const companyTotal = companyOrders.filter(o => selected.has(o.id)).reduce((s, o) => s + Number(o.subtotal), 0);
+                const companyTotal = companyOrders.filter(o => selected.has(o.id)).reduce((s, o) => s + vesselTotal(o), 0);
+                const codCount = companyOrders.reduce((s, o) => s + codLines(o).length, 0);
                 return (
                   <div key={company} className="card-base overflow-hidden">
                     <div className="flex items-center gap-3 px-4 py-3 bg-brand-sand/30 border-b border-gray-100">
@@ -585,6 +624,11 @@ function BillingTab() {
                         {collapsed ? <ChevronRight className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
                         <span className="font-bold text-brand-navy text-sm">{company}</span>
                         <span className="text-xs text-gray-400">{companyOrders.length} fulfilled order{companyOrders.length !== 1 ? 's' : ''}</span>
+                        {codCount > 0 && (
+                          <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 border border-purple-200">
+                            {codCount} COD line{codCount > 1 ? 's' : ''} excluded
+                          </span>
+                        )}
                       </button>
                       <span className="text-sm font-bold text-brand-navy">{formatCurrency(companyTotal)}</span>
                     </div>
@@ -619,9 +663,11 @@ function BillingTab() {
           </div>
 
           <p className="text-xs text-gray-400">
-            The <strong>Final Total</strong> column exports blank on purpose — fill it in after
-            confirming weight-based items and service charges, then attach each company&apos;s CSV to
-            its QuickBooks invoice.
+            Statements and CSVs group by <strong>company + vessel</strong> (e.g. &ldquo;Ingram — Jenny Kay&rdquo;), one
+            invoice per boat. Exports list <strong>every grocery line</strong> — item, qty, estimated vs. actual — so you
+            can cross-reference against Sinclair&apos;s receipts before invoicing. <strong>COD items are excluded</strong>:
+            they&apos;re settled at delivery and never invoiced. The statement&apos;s Final Total box stays blank on purpose —
+            fill it in after confirming weighed items and service charges.
           </p>
         </>
       )}
@@ -654,12 +700,13 @@ function BillingOrderTable({ orders, selected, onToggle, showCompany = false, sh
         </thead>
         <tbody className="divide-y divide-gray-100">
           {orders.map(o => {
-            const grocery = o.items.filter(i => i.item_type !== 'service');
+            const grocery = billableItems(o);
+            const codCount = codLines(o).length;
             const orderedQty = grocery.filter(i => !i.is_substitution).reduce((s, i) => s + i.quantity, 0);
             const delivered = grocery.filter(i => i.shopping_status !== 'out_of_stock');
             const deliveredQty = delivered.reduce((s, i) => s + i.quantity, 0);
             const subCount = delivered.filter(i => i.is_substitution).length;
-            const svcCount = o.items.length - grocery.length;
+            const svcCount = o.items.filter(i => i.item_type === 'service').length;
             return (
               <tr key={o.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => onToggle(o.id)}>
                 <td className="px-4 py-2.5">
@@ -681,7 +728,10 @@ function BillingOrderTable({ orders, selected, onToggle, showCompany = false, sh
                   )}
                 </td>
                 <td className="px-4 py-2.5 text-xs text-gray-400 whitespace-nowrap">{new Date(o.created_at).toLocaleDateString()}</td>
-                <td className="px-4 py-2.5 text-xs">{orderedQty} items{svcCount > 0 && <span className="text-gray-400"> +{svcCount} svc</span>}</td>
+                <td className="px-4 py-2.5 text-xs">
+                  {orderedQty} items{svcCount > 0 && <span className="text-gray-400"> +{svcCount} svc</span>}
+                  {codCount > 0 && <span className="text-purple-600 font-semibold"> +{codCount} COD</span>}
+                </td>
                 <td className="px-4 py-2.5 text-xs">
                   {o.status === 'fulfilled'
                     ? <>{deliveredQty} items{subCount > 0 && <span className="text-brand-orange font-semibold"> ({subCount} sub{subCount > 1 ? 's' : ''})</span>}</>
@@ -694,7 +744,7 @@ function BillingOrderTable({ orders, selected, onToggle, showCompany = false, sh
                     }`}>{o.status.replace('_', ' ')}</span>
                   </td>
                 )}
-                <td className="px-4 py-2.5 text-right font-bold text-brand-navy whitespace-nowrap">{formatCurrency(o.subtotal)}</td>
+                <td className="px-4 py-2.5 text-right font-bold text-brand-navy whitespace-nowrap">{formatCurrency(vesselTotal(o))}</td>
               </tr>
             );
           })}

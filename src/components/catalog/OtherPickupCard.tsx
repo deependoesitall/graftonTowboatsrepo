@@ -2,12 +2,15 @@
 // src/components/catalog/OtherPickupCard.tsx
 // "Other" third-party item request — lives at the bottom of the Sinclair's
 // groceries tab because Sinclair's (not Grafton) handles these pickups.
-// Paste a link to the item + notes (size, color, quantity). No file uploads.
+// Supports MULTIPLE items (Jen: no limit) — each with a link + notes.
+// The category sidebar links here via the #other-pickup anchor.
 
 import { useState, useEffect } from 'react';
-import { Link2, Check, X, ShoppingBag } from 'lucide-react';
-import { AdditionalServices } from '@/types';
+import { Link2, Check, X, ShoppingBag, Plus, Trash2 } from 'lucide-react';
+import { AdditionalServices, OtherPickupItem } from '@/types';
 import { getAdditionalServices, saveAdditionalServices } from '@/lib/cart';
+
+const EMPTY_ENTRY: OtherPickupItem = { url: '', notes: '' };
 
 export function OtherPickupCard() {
   const [services, setServices] = useState<AdditionalServices>(getAdditionalServices());
@@ -22,16 +25,36 @@ export function OtherPickupCard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [services]);
 
-  const other = services.other_pickup ?? { enabled: false, url: '', notes: '' };
+  const other = services.other_pickup ?? { enabled: false, items: [{ ...EMPTY_ENTRY }] };
+  const entries = other.items?.length ? other.items : [{ ...EMPTY_ENTRY }];
 
   function patch(p: Partial<AdditionalServices['other_pickup']>) {
-    setServices(prev => ({ ...prev, other_pickup: { ...(prev.other_pickup ?? { enabled: false, url: '', notes: '' }), ...p } }));
+    setServices(prev => ({
+      ...prev,
+      other_pickup: { enabled: false, items: [{ ...EMPTY_ENTRY }], ...prev.other_pickup, ...p },
+    }));
   }
 
-  const ready = !!(other.url.trim() || other.notes.trim());
+  function patchEntry(idx: number, p: Partial<OtherPickupItem>) {
+    const next = entries.map((e, i) => (i === idx ? { ...e, ...p } : e));
+    patch({ items: next });
+  }
+
+  function addEntry() {
+    patch({ items: [...entries, { ...EMPTY_ENTRY }] });
+  }
+
+  function removeEntry(idx: number) {
+    const next = entries.filter((_, i) => i !== idx);
+    patch({ items: next.length ? next : [{ ...EMPTY_ENTRY }] });
+  }
+
+  const filled = entries.filter(e => e.url.trim() || e.notes.trim());
+  const ready = filled.length > 0;
 
   return (
-    <div className={`card-base overflow-hidden mt-8 ${other.enabled ? 'ring-2 ring-brand-green/40' : ''}`}>
+    <div id="other-pickup"
+      className={`card-base overflow-hidden mt-8 scroll-mt-24 ${other.enabled ? 'ring-2 ring-brand-green/40' : ''}`}>
       <div className="flex items-center gap-4 p-4">
         <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
           other.enabled ? 'bg-brand-green text-white' : 'bg-gray-100 text-gray-400'
@@ -43,40 +66,60 @@ export function OtherPickupCard() {
             Need something we don&apos;t carry?
           </p>
           <p className="text-xs text-gray-400 mt-0.5">
-            Paste a link to an item from another store and Sinclair&apos;s will pick it up with your groceries.
-            Small items only (e.g. a Walmart run).
+            Paste links to items from other stores and Sinclair&apos;s will pick them up with your groceries.
+            Add as many as you need — small items only (e.g. a Walmart run).
           </p>
         </div>
         {other.enabled && (
           <button type="button" onClick={() => patch({ enabled: false })}
             className="flex items-center gap-1 text-xs font-bold text-red-400 hover:text-red-600 px-2.5 py-1.5 rounded-lg hover:bg-red-50 transition-colors shrink-0">
-            <X className="w-3.5 h-3.5" /> Remove
+            <X className="w-3.5 h-3.5" /> Remove All
           </button>
         )}
       </div>
       <div className="border-t border-gray-100 px-4 pb-4 pt-3 space-y-3 bg-gray-50/50">
-        <div>
-          <label className="label-base text-xs">Link to Item</label>
-          <div className="relative">
-            <Link2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input type="url" className="input-base text-sm pl-9 w-full"
-              placeholder="https://www.walmart.com/…"
-              value={other.url}
-              onChange={e => patch({ url: e.target.value })} />
+        {entries.map((entry, idx) => (
+          <div key={idx} className="bg-white border border-gray-200 rounded-lg p-3 space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Item {idx + 1}</p>
+              {entries.length > 1 && (
+                <button type="button" onClick={() => removeEntry(idx)}
+                  className="flex items-center gap-1 text-[11px] font-bold text-red-400 hover:text-red-600"
+                  aria-label={`Remove item ${idx + 1}`}>
+                  <Trash2 className="w-3 h-3" /> Remove
+                </button>
+              )}
+            </div>
+            <div>
+              <label className="label-base text-xs">Link to Item</label>
+              <div className="relative">
+                <Link2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input type="url" className="input-base text-sm pl-9 w-full"
+                  placeholder="https://www.walmart.com/…"
+                  value={entry.url}
+                  onChange={e => patchEntry(idx, { url: e.target.value })} />
+              </div>
+            </div>
+            <div>
+              <label className="label-base text-xs">Details — size, color, quantity</label>
+              <textarea className="input-base text-sm resize-none w-full" rows={2}
+                placeholder="e.g. Men's XL, blue, qty 2"
+                value={entry.notes}
+                onChange={e => patchEntry(idx, { notes: e.target.value })} />
+            </div>
           </div>
-        </div>
-        <div>
-          <label className="label-base text-xs">Details — size, color, quantity</label>
-          <textarea className="input-base text-sm resize-none w-full" rows={2}
-            placeholder="e.g. Men's XL, blue, qty 2"
-            value={other.notes}
-            onChange={e => patch({ notes: e.target.value })} />
-        </div>
+        ))}
+
+        <button type="button" onClick={addEntry}
+          className="flex items-center gap-1.5 text-xs font-bold text-brand-river hover:text-brand-navy transition-colors">
+          <Plus className="w-3.5 h-3.5" /> Add another item
+        </button>
+
         {!other.enabled && (
           ready
             ? <button type="button" onClick={() => patch({ enabled: true })}
                 className="w-full btn-gold py-2.5 flex items-center justify-center gap-2 rounded-lg text-sm font-bold">
-                <Check className="w-4 h-4" /> Add to Order
+                <Check className="w-4 h-4" /> Add {filled.length > 1 ? `${filled.length} Items` : ''} to Order
               </button>
             : <p className="text-xs text-gray-400 text-center pt-1">Add a link or details above to include this with your order.</p>
         )}

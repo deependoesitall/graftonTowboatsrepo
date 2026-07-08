@@ -139,6 +139,8 @@ function ProductCard({ product, isLoggedIn, isFavorite, onOpenDetail }: {
       price: product.price,
       quantity: qty,
       billed_by_weight: !!product.billed_by_weight,
+      image_url: product.image_url,
+      paid_by: 'vessel',
     });
     setJustAdded(true);
     toast({
@@ -313,6 +315,8 @@ function ProductDetailModal({ product, onClose }: { product: Product; onClose: (
       price: product.price,
       quantity: qty,
       billed_by_weight: byWeight,
+      image_url: product.image_url,
+      paid_by: 'vessel',
     });
     setJustAdded(true);
     toast({ title: 'Added to cart', description: `${qty}× ${product.description}`, variant: 'success', duration: 2000 });

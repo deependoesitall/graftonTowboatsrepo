@@ -80,6 +80,17 @@ export default function WeeklyAdPage() {
           </div>
         )}
 
+        {/* Plain-English pricing note (replaces the old "circular" jargon) */}
+        {!loading && (hasPages || pdfFallback) && (
+          <div className="bg-brand-sand/50 border border-brand-gold/30 rounded-xl px-4 py-3 mb-4">
+            <p className="text-xs text-brand-navy leading-relaxed">
+              <span className="font-bold">Good to know:</span> these sale prices run <span className="font-bold">Wednesday through Tuesday</span> each week.
+              Your final invoice reflects the prices in effect when your order was shopped — so if a new sale week
+              starts between ordering and shopping, some prices may change.
+            </p>
+          </div>
+        )}
+
         {/* Fast path: lazy-loaded page images */}
         {!loading && hasPages && (
           <>

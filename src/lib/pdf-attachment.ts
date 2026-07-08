@@ -132,7 +132,29 @@ export async function generateOrderPdfBuffer(order: Order): Promise<Buffer> {
       y += 36;
     }
 
-    // ── PERSONAL / COD ITEMS (driver collects payment) ───────
+    // ── COD ITEMS (per-line paid_by — driver collects payment) ─
+    const codItems = order.items.filter(i => i.item_type !== 'service' && i.paid_by === 'cod');
+    if (codItems.length > 0) {
+      const codTotal = codItems.reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0);
+      const methodLabel = order.cod_payment_method === 'credit_card' ? 'CREDIT CARD — CALL TO COLLECT'
+        : order.cod_payment_method === 'venmo' ? 'VENMO'
+        : order.cod_payment_method === 'cash' ? 'CASH' : '';
+      const lines = codItems.map(i => `${i.quantity}x ${i.description} — ${i.cod_name || 'crew member'}`).join('; ');
+      const detail = [
+        lines,
+        methodLabel && `Payment: ${methodLabel}${order.cod_payment_method === 'credit_card' && order.cod_preferred_phone ? ` (call ${order.cod_preferred_phone}${order.cod_contact_time ? `, best time ${order.cod_contact_time}` : ''})` : ''}`,
+      ].filter(Boolean).join('  ·  ');
+      const blockH = 34;
+      doc.rect(MARGIN, y, CONTENT_W, blockH).fill('#faf5ff');
+      doc.rect(MARGIN, y, 3, blockH).fill('#9333ea');
+      doc.fillColor('#9333ea').fontSize(8).font('Helvetica-Bold')
+         .text(`COD ITEMS — COLLECT $${codTotal.toFixed(2)} ON DELIVERY (NOT INVOICED)`, MARGIN + 8, y + 5, { characterSpacing: 0.5 });
+      doc.fillColor('#444444').fontSize(8).font('Helvetica')
+         .text(detail, MARGIN + 8, y + 16, { width: CONTENT_W - 16 });
+      y += blockH + 6;
+    }
+
+    // ── PERSONAL / COD ITEMS (legacy free-text) ───────────────
     const codNotes = order.extended_info?.personal_cod_notes;
     if (codNotes) {
       doc.rect(MARGIN, y, CONTENT_W, 32).fill('#faf5ff');

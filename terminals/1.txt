@@ -3,6 +3,6 @@ pid: 16356
 cwd: "C:\Users\Deepa\Documents\graftonTowboatsrepo"
 command: "Start-Sleep -Seconds 70; $ok=0; $fail=0; 1..20 | ForEach-Object { $skip = ($_-1)*100; try { $r = Invoke-WebRequest \"https://api.freshop.ncrcloud.com/1/products?app_key=sinclair&store_id=4297&limit=100&skip=$skip\" -UseBasicParsing; if ($r.StatusCode -eq 200) { $ok++ } else { $fail++ } } catch { $fail++ }; Start-Sleep -Milliseconds 1200 }; Write-Output \"ok=$ok fail=$fail\""
 started_at: 2026-07-07T20:09:30.935Z
-running_for_ms: 250004   
+running_for_ms: 5740000  
 ---
 ok=20 fail=0

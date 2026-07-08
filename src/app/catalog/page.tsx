@@ -1,7 +1,7 @@
 // src/app/catalog/page.tsx
 import { Suspense } from 'react';
 import Link from 'next/link';
-import { Newspaper, BadgePercent } from 'lucide-react';
+import { Newspaper, BadgePercent, Ship, Truck, Anchor, Phone } from 'lucide-react';
 import { CouponStrip } from '@/components/catalog/CouponStrip';
 import { createClient } from '@/lib/supabase/server';
 import { ProductGrid } from '@/components/catalog/ProductGrid';
@@ -25,6 +25,21 @@ interface PageProps {
 // ── Promos (coupons strip + manager coupons) ────────────────────────────
 // Rendered inside <Suspense> so the product grid never waits on Sinclair's
 // coupon API — the strip streams in after the page paints.
+// The full /coupons page intentionally stays UNFILTERED (Jen uses it as a
+// conversation piece with Dave about expanding the catalog). This filter only
+// applies to the 12-coupon preview strip: keep coupons out of it when they're
+// clearly for goods we don't carry on the boat catalog (diapers, pet care, …).
+const COUPON_STRIP_BLOCKLIST = [
+  'diaper', 'baby', 'infant', 'toddler', 'pull-ups', 'pullups', 'huggies', 'pampers', 'luvs',
+  'pet ', 'dog ', 'cat ', 'puppy', 'kitten', 'litter', 'purina', 'pedigree', 'friskies', 'iams', 'milk-bone',
+];
+
+function couponFitsCatalog(c: { name: string; description: string | null; brand: string | null; department: string | null }): boolean {
+  const haystack = [c.name, c.description, c.brand, c.department]
+    .filter(Boolean).join(' ').toLowerCase();
+  return !COUPON_STRIP_BLOCKLIST.some(term => haystack.includes(term));
+}
+
 async function PromoSections() {
   const supabase = await createClient();
   const [{ data: settings }, { data: coupons }] = await Promise.all([
@@ -38,8 +53,12 @@ async function PromoSections() {
   let sinclairCoupons: Awaited<ReturnType<typeof fetchSinclairCoupons>>['items'] = [];
   let couponTotal = 0;
   if (settings?.show_digital_coupons ?? true) {
-    const { items, total } = await fetchSinclairCoupons(30);
-    sinclairCoupons = items.sort((a, b) => b.popularity - a.popularity).slice(0, 12);
+    // Over-fetch so the strip still fills 12 slots after filtering
+    const { items, total } = await fetchSinclairCoupons(60);
+    sinclairCoupons = items
+      .filter(couponFitsCatalog)
+      .sort((a, b) => b.popularity - a.popularity)
+      .slice(0, 12);
     couponTotal = total;
   }
 
@@ -105,10 +124,12 @@ export default async function CatalogPage({ searchParams }: PageProps) {
     query = query.eq('category', category);
   }
 
-  const [{ data: products, count }, { data: catCounts }] = await Promise.all([
+  const [{ data: products, count }, { data: catCounts }, { data: pageSettings }] = await Promise.all([
     query,
     supabase.rpc('get_category_counts'),
+    supabase.from('admin_settings').select('fleet_cta_enabled').single(),
   ]);
+  const fleetCtaEnabled = !!pageSettings?.fleet_cta_enabled;
 
   const totalPages = Math.ceil((count || 0) / perPage);
 
@@ -123,6 +144,37 @@ export default async function CatalogPage({ searchParams }: PageProps) {
           Grafton Towboat Services &middot; Groceries, supplies &amp; more
         </p>
       </div>
+
+      {/* Boat / Land delivery reminder — subtle, site-wide catalog banner
+          (replaces the old non-clickable info blocks in Additional Services) */}
+      <div className="mb-4 flex items-center gap-2.5 bg-brand-navy/5 border border-brand-navy/10 rounded-xl px-4 py-2.5 text-xs text-brand-navy">
+        <span className="flex items-center gap-1 font-bold shrink-0">
+          <Ship className="w-3.5 h-3.5" /> Boat
+          <span className="text-gray-400 font-normal px-0.5">·</span>
+          <Truck className="w-3.5 h-3.5" /> Land
+        </span>
+        <span className="text-gray-500">
+          Remember — we deliver by boat <em>and</em> by land. Mile Marker 219 Mississippi River / Mile Marker 0 Illinois River,
+          plus vans to terminals, locks, and fleeting areas near Grafton.
+        </span>
+      </div>
+
+      {/* Fleet pricing CTA (toggleable in Settings → Features; wording is draft copy for Jen) */}
+      {fleetCtaEnabled && (
+        <div className="mb-4 flex flex-wrap items-center gap-3 bg-brand-green text-white rounded-xl px-4 py-3">
+          <Anchor className="w-5 h-5 text-brand-yellow shrink-0" />
+          <div className="flex-1 min-w-[220px]">
+            <p className="text-sm font-bold">Run a fleet? Get fleet pricing.</p>
+            <p className="text-xs text-white/70">
+              Sign your whole fleet up with Grafton Towboat Services and every boat in your company gets special contract pricing.
+            </p>
+          </div>
+          <a href="tel:6185560290"
+            className="flex items-center gap-1.5 bg-brand-yellow text-brand-green text-xs font-bold uppercase tracking-wide px-4 py-2 rounded-full shrink-0 hover:opacity-90 transition-opacity">
+            <Phone className="w-3.5 h-3.5" /> Call (618) 556-0290
+          </a>
+        </div>
+      )}
 
       {/* ── TAB BAR ── */}
       <CatalogTabBar activeTab={tab} />

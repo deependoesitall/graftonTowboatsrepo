@@ -59,6 +59,13 @@ export function OrderDetailModal({
   const subtotal = groceryItems
     .filter(i => i.shopping_status !== 'out_of_stock')
     .reduce((s, i) => s + (i.actual_total ?? i.unit_price * i.quantity), 0);
+  const codItems = groceryItems.filter(i => i.paid_by === 'cod');
+  const codSubtotal = codItems
+    .filter(i => i.shopping_status !== 'out_of_stock')
+    .reduce((s, i) => s + (i.actual_total ?? i.unit_price * i.quantity), 0);
+  const codMethodLabel = order.cod_payment_method === 'credit_card' ? 'Credit Card — call to collect'
+    : order.cod_payment_method === 'venmo' ? 'Venmo'
+    : order.cod_payment_method === 'cash' ? 'Cash' : null;
 
   const ext = order.extended_info;
 
@@ -283,7 +290,33 @@ export function OrderDetailModal({
               </Section>
             )}
 
-            {/* Personal / COD items */}
+            {/* COD items — collected at delivery, NEVER invoiced */}
+            {codItems.length > 0 && (
+              <div className="bg-purple-50 border-2 border-purple-300 rounded-lg p-3">
+                <p className="text-xs font-bold text-purple-700 uppercase tracking-wide mb-2">
+                  $ COD Items — collect {formatCurrency(codSubtotal)} on delivery (not on the company invoice)
+                </p>
+                <div className="space-y-1 mb-2">
+                  {codItems.map(i => (
+                    <p key={i.id} className="text-sm text-purple-900">
+                      <span className="font-bold">{i.quantity}×</span> {i.description}
+                      <span className="text-purple-600"> — {i.cod_name || 'crew member'} · {formatCurrency(i.actual_total ?? i.unit_price * i.quantity)}</span>
+                    </p>
+                  ))}
+                </div>
+                <div className="text-xs text-purple-800 border-t border-purple-200 pt-2 space-y-0.5">
+                  {codMethodLabel && <p><strong>Payment method:</strong> {codMethodLabel}</p>}
+                  {order.cod_payment_method === 'credit_card' && (
+                    <p>
+                      <strong>Call:</strong> {order.cod_preferred_phone || 'no number given'}
+                      {order.cod_contact_time && <> · <strong>Best time:</strong> {order.cod_contact_time}</>}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Legacy free-text Personal / COD notes (orders placed before the rework) */}
             {ext?.personal_cod_notes && (
               <div className="bg-purple-50 border-2 border-purple-300 rounded-lg p-3">
                 <p className="text-xs font-bold text-purple-700 uppercase tracking-wide mb-1">$ Personal / COD Items — collect payment on delivery</p>
@@ -406,6 +439,12 @@ export function OrderDetailModal({
                             {item.is_substitution && (
                               <span className="inline-block text-[9px] font-bold uppercase tracking-wide text-brand-orange bg-brand-orange/10 px-1 py-0.5 rounded mr-1">Sub</span>
                             )}
+                            {item.paid_by === 'cod' && (
+                              <span className="inline-block text-[9px] font-bold uppercase tracking-wide text-purple-700 bg-purple-100 px-1 py-0.5 rounded mr-1"
+                                title={item.cod_name ? `COD — ${item.cod_name}` : 'COD'}>
+                                COD{item.cod_name ? ` · ${item.cod_name}` : ''}
+                              </span>
+                            )}
                             <p className={`font-medium text-brand-navy text-xs inline ${item.shopping_status === 'out_of_stock' ? 'line-through' : ''}`}>
                               {item.description}
                             </p>
@@ -486,6 +525,20 @@ export function OrderDetailModal({
                       ))}
                     </tbody>
                     <tfoot>
+                      {codItems.length > 0 && (
+                        <>
+                          <tr className="bg-white border-t border-gray-200">
+                            <td colSpan={5} className="px-3 py-1.5 text-xs text-gray-500">Vessel Account (invoiced monthly)</td>
+                            <td className="px-3 py-1.5 text-right text-xs font-bold text-brand-navy">{formatCurrency(subtotal - codSubtotal)}</td>
+                            {canEdit && <td />}
+                          </tr>
+                          <tr className="bg-white">
+                            <td colSpan={5} className="px-3 py-1.5 text-xs text-purple-700">COD (collected at delivery)</td>
+                            <td className="px-3 py-1.5 text-right text-xs font-bold text-purple-700">{formatCurrency(codSubtotal)}</td>
+                            {canEdit && <td />}
+                          </tr>
+                        </>
+                      )}
                       <tr className="bg-brand-sand/30 border-t-2 border-brand-gold/30">
                         <td colSpan={canEdit ? 5 : 5} className="px-3 py-2 font-bold text-brand-navy text-sm">
                           TOTAL ({groceryItems.reduce((s, i) => s + i.quantity, 0)} items)

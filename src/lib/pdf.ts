@@ -12,6 +12,11 @@ export function generateOrderHTML(order: Order): string {
 
   const groceryItems = order.items.filter(i => i.item_type !== 'service' && i.shopping_status !== 'out_of_stock');
   const serviceItems = order.items.filter(i => i.item_type === 'service');
+  const codItems     = groceryItems.filter(i => i.paid_by === 'cod');
+  const codSubtotal  = codItems.reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0);
+  const codMethodLabel = order.cod_payment_method === 'credit_card' ? 'Credit Card — call to collect'
+    : order.cod_payment_method === 'venmo' ? 'Venmo'
+    : order.cod_payment_method === 'cash' ? 'Cash' : null;
   const isFulfilled       = order.status === 'fulfilled';
   const itemCount         = groceryItems.reduce((s, i) => s + i.quantity, 0);
   const isCrewChangeOnly  = order.crew_change !== 'no' && groceryItems.length === 0;
@@ -36,13 +41,16 @@ export function generateOrderHTML(order: Order): string {
       const weightLabel = item.actual_weight
         ? `<div style="font-size:9px;color:#555;margin-top:2px;">Actual weight: ${item.actual_weight} lbs</div>`
         : '';
+      const codLabel = item.paid_by === 'cod'
+        ? `<div style="font-size:9px;color:#9333ea;font-weight:700;margin-top:2px;">COD &mdash; ${item.cod_name || 'crew member'} pays on delivery</div>`
+        : '';
       const rowBg    = isSub ? '#fff8ec' : (idx % 2 === 0 ? '#ffffff' : '#f8f9fa');
       const bdrLeft  = isSub ? 'border-left:3px solid #E8640A;' : '';
       return `
       <tr style="background:${rowBg};${bdrLeft}">
         <td style="padding:6px 8px;font-size:10px;color:#888;border-bottom:1px solid #eee;font-family:monospace;">${item.upc || '—'}</td>
         <td style="padding:6px 8px;font-size:11px;color:${isSub ? '#E8640A' : '#555'};font-weight:${isSub ? '700' : 'normal'};border-bottom:1px solid #eee;">
-          ${item.description}${subLabel}${weightLabel}
+          ${item.description}${subLabel}${weightLabel}${codLabel}
         </td>
         <td style="padding:6px 8px;font-size:11px;color:#666;border-bottom:1px solid #eee;text-align:center;">${item.pkg_size || '—'}</td>
         <td style="padding:6px 8px;font-size:11px;color:#666;border-bottom:1px solid #eee;text-align:center;">${item.uom || '—'}</td>
@@ -236,7 +244,24 @@ ${order.crew_change === 'maybe' ? `
   ${order.crew_change_notes ? `<div style="margin-top:6px;font-size:11px;color:#555;"><strong>Customer notes:</strong> ${order.crew_change_notes}</div>` : ''}
 </div>` : ''}
 
-<!-- ===== PERSONAL / COD ITEMS ===== -->
+<!-- ===== COD ITEMS (per-line paid_by) ===== -->
+${codItems.length > 0 ? `
+<div style="border:3px solid #9333ea;padding:14px 20px;background:#faf5ff;border-radius:4px;margin-bottom:16px;">
+  <div style="font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:#9333ea;margin-bottom:6px;">&#36; COD Items &mdash; Collect ${formatCurrency(codSubtotal)} on Delivery</div>
+  <div style="font-size:11px;color:#555;">These items are paid personally by a crew member and are NOT part of the company invoice.</div>
+  <div style="margin-top:6px;font-size:12px;color:#333;">
+    ${codItems.map(i => `<div>${i.quantity}&times; ${i.description} &mdash; <strong>${i.cod_name || 'crew member'}</strong> &middot; ${formatCurrency(i.actual_total ?? i.line_total)}</div>`).join('')}
+  </div>
+  ${codMethodLabel ? `<div style="margin-top:8px;padding-top:8px;border-top:1px solid #e9d5ff;font-size:11px;color:#6b21a8;">
+    <strong>Payment method:</strong> ${codMethodLabel}${
+      order.cod_payment_method === 'credit_card'
+        ? ` &mdash; call ${order.cod_preferred_phone || 'the crew member'}${order.cod_contact_time ? ` (best time: ${order.cod_contact_time})` : ''}`
+        : ''
+    }
+  </div>` : ''}
+</div>` : ''}
+
+<!-- ===== PERSONAL / COD ITEMS (legacy free-text) ===== -->
 ${ext.personal_cod_notes ? `
 <div style="border:3px solid #9333ea;padding:14px 20px;background:#faf5ff;border-radius:4px;margin-bottom:16px;">
   <div style="font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:#9333ea;margin-bottom:6px;">&#36; Personal / COD Items &mdash; Driver: Collect Payment on Delivery</div>

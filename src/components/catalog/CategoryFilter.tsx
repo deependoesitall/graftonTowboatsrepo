@@ -2,6 +2,7 @@
 // src/components/catalog/CategoryFilter.tsx
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import { ShoppingBag } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface CategoryFilterProps {
@@ -83,6 +84,17 @@ export function CategoryFilter({ categories, counts, activeCategory }: CategoryF
             </Link>
           );
         })}
+
+        {/* Anchor to the "Need something we don't carry" form at the page bottom */}
+        <div className="border-t border-brand-green/10 my-2" />
+        <button
+          type="button"
+          onClick={() => document.getElementById('other-pickup')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold uppercase tracking-wide text-brand-orange hover:bg-brand-orange/10 transition-all text-left"
+        >
+          <ShoppingBag className="w-4 h-4 shrink-0" />
+          <span>Need something we don&apos;t carry?</span>
+        </button>
       </nav>
     </div>
   );

@@ -58,6 +58,7 @@ export async function PATCH(req: NextRequest) {
   const ownerOnlyRequested = [
     'business_email', 'order_email_cc', 'tax_rate', 'tax_enabled',
     'draft_orders_enabled', 'repeat_orders_enabled', 'email_debug_enabled',
+    'fleet_cta_enabled',
     'order_email_subject', 'email_header_tagline', 'email_intro_message',
     'email_footer_text', 'email_button_text', 'email_button_url', 'new_password',
   ].some(f => body[f] !== undefined);
@@ -74,6 +75,7 @@ export async function PATCH(req: NextRequest) {
     if (body.draft_orders_enabled !== undefined) updates.draft_orders_enabled = body.draft_orders_enabled;
     if (body.repeat_orders_enabled !== undefined) updates.repeat_orders_enabled = body.repeat_orders_enabled;
     if (body.email_debug_enabled !== undefined) updates.email_debug_enabled = body.email_debug_enabled;
+    if (body.fleet_cta_enabled !== undefined) updates.fleet_cta_enabled = !!body.fleet_cta_enabled;
     if (body.order_email_subject !== undefined) updates.order_email_subject = body.order_email_subject;
     if (body.email_header_tagline !== undefined) updates.email_header_tagline = body.email_header_tagline;
     if (body.email_intro_message !== undefined) updates.email_intro_message = body.email_intro_message;

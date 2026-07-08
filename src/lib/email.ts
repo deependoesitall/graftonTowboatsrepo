@@ -72,10 +72,20 @@ export function buildOrderEmailHtml(
   const itemCount     = groceryItems.reduce((s, i) => s + i.quantity, 0);
   const ext           = order.extended_info || {};
 
+  const codItems = groceryItems.filter(i => i.paid_by === 'cod');
+  const codSubtotal = codItems.reduce((s, i) => s + Number(i.line_total), 0);
+  const codMethodLabel = order.cod_payment_method === 'credit_card' ? 'Credit Card — call to collect'
+    : order.cod_payment_method === 'venmo' ? 'Venmo'
+    : order.cod_payment_method === 'cash' ? 'Cash' : null;
+
   const itemRows = groceryItems.map(item => `
     <tr style="border-bottom:1px solid #f0f0f0;">
       <td style="padding:8px 10px;font-size:11px;color:#888;">${item.upc || '—'}</td>
-      <td style="padding:8px 10px;font-size:13px;color:#1E3D1E;font-weight:600;">${item.description}</td>
+      <td style="padding:8px 10px;font-size:13px;color:#1E3D1E;font-weight:600;">${item.description}${
+        item.paid_by === 'cod'
+          ? `<span style="display:inline-block;margin-left:6px;font-size:9px;font-weight:800;color:#9333ea;background:#faf5ff;border:1px solid #9333ea;border-radius:3px;padding:1px 4px;text-transform:uppercase;">COD${item.cod_name ? ` · ${item.cod_name}` : ''}</span>`
+          : ''
+      }</td>
       <td style="padding:8px 10px;font-size:12px;color:#666;text-align:center;">${item.pkg_size || '—'}</td>
       <td style="padding:8px 10px;font-size:13px;font-weight:800;color:#1E3D1E;text-align:center;">${item.quantity}</td>
       <td style="padding:8px 10px;font-size:12px;text-align:right;">${formatCurrency(item.unit_price)}</td>
@@ -196,6 +206,16 @@ export function buildOrderEmailHtml(
     ${order.notes ? `<div style="background:#fff8ec;border:1px solid #E8640A;padding:10px 14px;border-radius:4px;margin-bottom:20px;">
       <div style="font-size:9px;font-weight:800;color:#E8640A;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Special Instructions</div>
       <div style="font-size:12px;color:#444;">${order.notes}</div>
+    </div>` : ''}
+
+    ${codItems.length > 0 ? `<div style="background:#faf5ff;border:1px solid #9333ea;padding:10px 14px;border-radius:4px;margin-bottom:20px;">
+      <div style="font-size:9px;font-weight:800;color:#9333ea;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">COD Items — collect ${formatCurrency(codSubtotal)} on delivery (not invoiced)</div>
+      ${codItems.map(i => `<div style="font-size:12px;color:#444;">${i.quantity}× ${i.description} — <strong>${i.cod_name || 'crew member'}</strong> · ${formatCurrency(Number(i.line_total))}</div>`).join('')}
+      ${codMethodLabel ? `<div style="font-size:11px;color:#6b21a8;margin-top:4px;"><strong>Payment:</strong> ${codMethodLabel}${
+        order.cod_payment_method === 'credit_card'
+          ? ` — call ${order.cod_preferred_phone || 'the crew member'}${order.cod_contact_time ? ` (best time: ${order.cod_contact_time})` : ''}`
+          : ''
+      }</div>` : ''}
     </div>` : ''}
 
     ${ext.personal_cod_notes ? `<div style="background:#faf5ff;border:1px solid #9333ea;padding:10px 14px;border-radius:4px;margin-bottom:20px;">
