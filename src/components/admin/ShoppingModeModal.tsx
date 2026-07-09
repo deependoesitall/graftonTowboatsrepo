@@ -7,11 +7,12 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   X, Check, PackageX, Scale, Search, ShoppingCart,
   ChevronRight, Loader2, CheckCircle2, AlertTriangle,
-  Clock,
+  Clock, MapPin, List,
 } from 'lucide-react';
 import { Order, OrderItem, Product } from '@/types';
 import { formatCurrency } from '@/lib/utils';
 import { adminFetch } from '@/lib/admin-auth';
+import { groupByWalkingOrder, DEFAULT_ZONE_ORDER, NO_LOCATION_LABEL } from '@/lib/store-layout';
 
 interface ShoppingModeModalProps {
   order: Order;
@@ -148,6 +149,17 @@ export function ShoppingModeModal({ order, onClose, onComplete }: ShoppingModeMo
   const [completeError, setCompleteError] = useState('');
   const [showConfirm, setShowConfirm] = useState(false);
   const [loadingFresh, setLoadingFresh] = useState(true);
+
+  // ── Aisle grouping — Sinclair's item locations sorted into walking order ──
+  // Default view: By Aisle (falls back to By Category when nothing has a location)
+  const [viewMode, setViewMode] = useState<'aisle' | 'category'>('aisle');
+  const [zoneOrder, setZoneOrder] = useState<string[]>(DEFAULT_ZONE_ORDER);
+  useEffect(() => {
+    fetch('/api/order-config')
+      .then(r => r.ok ? r.json() : null)
+      .then(cfg => { if (cfg?.store_zone_order?.length) setZoneOrder(cfg.store_zone_order); })
+      .catch(() => {});
+  }, []);
 
   // On mount: always fetch the latest item state from the DB so that
   // reopening shopping mode after a crash/restart shows real progress,
@@ -353,6 +365,24 @@ export function ShoppingModeModal({ order, onClose, onComplete }: ShoppingModeMo
       return acc;
     }, {} as Record<string, OrderItem[]>);
 
+  // ── Group pending items for shopping ──
+  // By Aisle: store walking order (zones → aisles ascending → no-location last)
+  // By Category: alphabetical product categories (fallback when locations are sparse)
+  const anyLocated = pendingItems.some(i => (i.location || '').trim());
+  const effectiveView = anyLocated ? viewMode : 'category';
+  const pendingGroups = effectiveView === 'aisle'
+    ? groupByWalkingOrder(pendingItems, zoneOrder)
+    : Array.from(
+        pendingItems.reduce((acc, i) => {
+          const key = i.category || 'General';
+          if (!acc.has(key)) acc.set(key, [] as OrderItem[]);
+          acc.get(key)!.push(i);
+          return acc;
+        }, new Map<string, OrderItem[]>()).entries()
+      )
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([label, groupItems]) => ({ key: `cat-${label}`, label, items: groupItems }));
+
   // IDs of substitution items currently flashing saved
   const subSavedFlash = new Set(
     Object.entries(itemUi)
@@ -403,6 +433,39 @@ export function ShoppingModeModal({ order, onClose, onComplete }: ShoppingModeMo
           />
         </div>
 
+        {/* ── VIEW TOGGLE — walk the store in order vs. browse by category ── */}
+        {pendingItems.length > 0 && (
+          <div className="bg-white border-b border-gray-200 px-4 py-2 flex items-center justify-between shrink-0">
+            <div className="flex rounded-lg border border-gray-200 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setViewMode('aisle')}
+                disabled={!anyLocated}
+                title={anyLocated ? 'Group items in store-walking order' : 'No items on this order have a location yet'}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold transition-colors ${
+                  effectiveView === 'aisle' ? 'bg-brand-navy text-white' : 'bg-white text-gray-500 hover:bg-gray-50'
+                } disabled:opacity-40`}
+              >
+                <MapPin className="w-3.5 h-3.5" /> By Aisle
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('category')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold border-l border-gray-200 transition-colors ${
+                  effectiveView === 'category' ? 'bg-brand-navy text-white' : 'bg-white text-gray-500 hover:bg-gray-50'
+                }`}
+              >
+                <List className="w-3.5 h-3.5" /> By Category
+              </button>
+            </div>
+            <p className="text-[11px] text-gray-400">
+              {effectiveView === 'aisle'
+                ? `${pendingGroups.length} stop${pendingGroups.length !== 1 ? 's' : ''} through the store`
+                : `${pendingGroups.length} categor${pendingGroups.length !== 1 ? 'ies' : 'y'}`}
+            </p>
+          </div>
+        )}
+
         {/* ── ITEM LIST ── */}
         <div className="flex-1 overflow-y-auto pb-36 relative">
           {loadingFresh && (
@@ -412,42 +475,72 @@ export function ShoppingModeModal({ order, onClose, onComplete }: ShoppingModeMo
             </div>
           )}
 
-          {/* PENDING SECTION */}
+          {/* PENDING SECTION — grouped in store-walking order (or by category) */}
           {pendingItems.length > 0 && (
-            <div className="px-4 pt-4 space-y-2">
+            <div className="px-4 pt-3">
               <div className="flex items-center gap-2 py-1">
                 <Clock className="w-3.5 h-3.5 text-amber-500" />
                 <span className="text-xs font-bold uppercase tracking-widest text-amber-600">
                   Needs Action ({pendingItems.length})
                 </span>
               </div>
-              {pendingItems.map(item => (
-                <ItemRow
-                  key={item.id}
-                  item={item}
-                  ui={itemUi[item.id] || defaultItemUiState()}
-                  substitutions={subsByParent[item.id] || []}
-                  subSavedIds={subSavedFlash}
-                  onRetry={() => {
-                    setUi(item.id, { saveError: '' });
-                    markShopped(item);
-                  }}
-                  onShopped={() => markShopped(item)}
-                  onOpenWeight={() => setUi(item.id, { uiState: 'weight_entry' })}
-                  onWeightChange={v => setUi(item.id, { weightInput: v })}
-                  onConfirmWeight={() => confirmWeight(item)}
-                  onCancelWeight={() => setUi(item.id, { uiState: 'idle', weightInput: '' })}
-                  onOpenSub={() => setUi(item.id, { uiState: 'sub_search' })}
-                  onSubSearch={q => {
-                    setUi(item.id, { subSearch: q, subSelected: null });
-                    searchProducts(item.id, q);
-                  }}
-                  onSubSelect={p => setUi(item.id, { subSelected: p, subResults: [] })}
-                  onSubQtyChange={v => setUi(item.id, { subQty: v })}
-                  onConfirmSub={() => confirmSubstitution(item)}
-                  onCancelSub={() => setUi(item.id, { uiState: 'idle', subSearch: '', subSelected: null, subResults: [] })}
-                />
-              ))}
+              {pendingGroups.map((group, gi) => {
+                const isNoLocation = group.label === NO_LOCATION_LABEL;
+                return (
+                  <div key={group.key} className="pb-1">
+                    {/* Sticky group header — always know which aisle you're in */}
+                    <div className="sticky top-0 z-[5] -mx-4 px-4 py-1.5 bg-gray-50/95 backdrop-blur-sm">
+                      <div className={`flex items-center gap-2 rounded-lg px-3 py-2 ${
+                        isNoLocation
+                          ? 'bg-gray-100 border border-dashed border-gray-300'
+                          : 'bg-teal-50 border border-teal-200'
+                      }`}>
+                        <MapPin className={`w-4 h-4 shrink-0 ${isNoLocation ? 'text-gray-400' : 'text-teal-600'}`} />
+                        <span className={`text-sm font-bold ${isNoLocation ? 'text-gray-500' : 'text-teal-800'}`}>
+                          {group.label}
+                        </span>
+                        <span className={`text-xs ${isNoLocation ? 'text-gray-400' : 'text-teal-600'}`}>
+                          {group.items.length} item{group.items.length !== 1 ? 's' : ''}
+                        </span>
+                        {effectiveView === 'aisle' && !isNoLocation && (
+                          <span className="ml-auto text-[10px] font-bold uppercase tracking-wide text-teal-500">
+                            Stop {gi + 1} of {pendingGroups.length}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="space-y-2 pt-1.5">
+                      {group.items.map(item => (
+                        <ItemRow
+                          key={item.id}
+                          item={item}
+                          ui={itemUi[item.id] || defaultItemUiState()}
+                          substitutions={subsByParent[item.id] || []}
+                          subSavedIds={subSavedFlash}
+                          onRetry={() => {
+                            setUi(item.id, { saveError: '' });
+                            markShopped(item);
+                          }}
+                          onShopped={() => markShopped(item)}
+                          onOpenWeight={() => setUi(item.id, { uiState: 'weight_entry' })}
+                          onWeightChange={v => setUi(item.id, { weightInput: v })}
+                          onConfirmWeight={() => confirmWeight(item)}
+                          onCancelWeight={() => setUi(item.id, { uiState: 'idle', weightInput: '' })}
+                          onOpenSub={() => setUi(item.id, { uiState: 'sub_search' })}
+                          onSubSearch={q => {
+                            setUi(item.id, { subSearch: q, subSelected: null });
+                            searchProducts(item.id, q);
+                          }}
+                          onSubSelect={p => setUi(item.id, { subSelected: p, subResults: [] })}
+                          onSubQtyChange={v => setUi(item.id, { subQty: v })}
+                          onConfirmSub={() => confirmSubstitution(item)}
+                          onCancelSub={() => setUi(item.id, { uiState: 'idle', subSearch: '', subSelected: null, subResults: [] })}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -633,8 +726,14 @@ function ItemRow({
                 {item.description}
               </p>
               {item.location && (
-                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-teal-700 bg-teal-50 border border-teal-200 rounded px-1.5 py-0.5 mt-0.5 mb-0.5">
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-teal-700 bg-teal-50 border border-teal-200 rounded px-1.5 py-0.5 mt-0.5 mb-0.5 mr-1">
                   📍 {item.location}
+                </span>
+              )}
+              {item.paid_by === 'cod' && (
+                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-purple-700 bg-purple-50 border border-purple-200 rounded px-1.5 py-0.5 mt-0.5 mb-0.5"
+                  title="Crew member pays at delivery — ring up separately, not on the company invoice">
+                  $ COD{item.cod_name ? ` — ${item.cod_name}` : ''} · ring separately
                 </span>
               )}
               <p className="text-xs text-gray-400 mt-0.5">

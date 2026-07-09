@@ -10,9 +10,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { hashPassword, verifyPassword } from '@/lib/password';
 import { requireAdmin } from '@/lib/admin-auth-server';
+import { sanitizeZoneOrder } from '@/lib/store-layout';
 
 // Fields a manager may read and write.
-const MANAGER_FIELDS = ['weekly_ad_url', 'grocery_cutoff_hours', 'service_cutoff_hours', 'show_digital_coupons'] as const;
+const MANAGER_FIELDS = ['weekly_ad_url', 'grocery_cutoff_hours', 'service_cutoff_hours', 'show_digital_coupons', 'store_zone_order'] as const;
 
 export async function GET(req: NextRequest) {
   const session = requireAdmin(req, { area: 'settings' });
@@ -53,6 +54,7 @@ export async function PATCH(req: NextRequest) {
   if (body.grocery_cutoff_hours !== undefined) updates.grocery_cutoff_hours = Math.max(0, Number(body.grocery_cutoff_hours) || 0);
   if (body.service_cutoff_hours !== undefined) updates.service_cutoff_hours = Math.max(0, Number(body.service_cutoff_hours) || 0);
   if (body.show_digital_coupons !== undefined) updates.show_digital_coupons = !!body.show_digital_coupons;
+  if (body.store_zone_order !== undefined) updates.store_zone_order = sanitizeZoneOrder(body.store_zone_order);
 
   // Owner-only fields
   const ownerOnlyRequested = [

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Save, RefreshCw, Eye, EyeOff, Plus, Trash2, UserPlus, ShieldCheck, User, Lock, ScrollText, Search, ArrowRight, ChevronLeft, ChevronRight, MessageSquarePlus, Check, X, Loader2, Send, Wrench } from 'lucide-react';
 import { fetchAdminSession, getAdminRole, canAccess, adminFetch, AdminRole } from '@/lib/admin-auth';
 import { formatDate } from '@/lib/utils';
+import { DEFAULT_ZONE_ORDER, AISLES_TOKEN } from '@/lib/store-layout';
 
 interface AdminUser {
   id: string;
@@ -35,6 +36,7 @@ interface Settings {
   service_cutoff_hours: number;
   show_digital_coupons: boolean;
   fleet_cta_enabled: boolean;
+  store_zone_order: string[];
 }
 
 interface Coupon {
@@ -99,6 +101,7 @@ export default function AdminSettingsPage() {
     service_cutoff_hours: 2,
     show_digital_coupons: true,
     fleet_cta_enabled: false,
+    store_zone_order: [...DEFAULT_ZONE_ORDER],
   });
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
@@ -130,6 +133,17 @@ export default function AdminSettingsPage() {
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
   const [savingNoteId, setSavingNoteId] = useState<string | null>(null);
+
+  // Store layout — add-a-zone input
+  const [newZone, setNewZone] = useState('');
+  function addZone() {
+    const z = newZone.trim();
+    if (!z) return;
+    setSettings(s => s.store_zone_order.some(x => x.toLowerCase() === z.toLowerCase())
+      ? s
+      : { ...s, store_zone_order: [...s.store_zone_order, z] });
+    setNewZone('');
+  }
 
   // Test email
   const [testingEmail, setTestingEmail] = useState(false);
@@ -163,7 +177,10 @@ export default function AdminSettingsPage() {
     const res = await adminFetch('/api/admin/settings');
     if (res.ok) {
       const data = await res.json();
-      setSettings(s => ({ ...s, ...data }));
+      // Keep defaults for anything the server doesn't return yet (e.g. a
+      // column whose migration hasn't been applied returns null).
+      const clean = Object.fromEntries(Object.entries(data).filter(([, v]) => v !== null && v !== undefined));
+      setSettings(s => ({ ...s, ...clean }));
     }
     setLoading(false);
   }
@@ -253,6 +270,7 @@ export default function AdminSettingsPage() {
           grocery_cutoff_hours: settings.grocery_cutoff_hours,
           service_cutoff_hours: settings.service_cutoff_hours,
           show_digital_coupons: settings.show_digital_coupons,
+          store_zone_order: settings.store_zone_order,
         }
       : settings;
     const res = await adminFetch('/api/admin/settings', {
@@ -660,6 +678,73 @@ export default function AdminSettingsPage() {
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ${settings.show_digital_coupons ? 'bg-brand-green' : 'bg-gray-200'}`}>
                 <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.show_digital_coupons ? 'translate-x-6' : 'translate-x-1'}`} />
               </button>
+            </div>
+          </div>
+
+          {/* ── Store Layout — walking order for shopping mode ── */}
+          <div className="card-base p-6 space-y-4">
+            <div>
+              <h2 className="font-bold text-brand-navy">Store Layout — Shopping Walk Order</h2>
+              <p className="text-xs text-gray-400 mt-1 leading-relaxed">
+                Shopping mode groups each order&apos;s items by location (from your website&apos;s item
+                locations, e.g. &ldquo;Aisle 10b&rdquo;) and sorts the groups in the order below — the way a
+                shopper actually walks the store. <strong className="text-brand-navy">&ldquo;{AISLES_TOKEN}&rdquo;</strong> marks
+                where the numbered aisles fall; named departments go before or after it. Drag order with the arrows.
+              </p>
+            </div>
+            <div className="space-y-1.5 max-w-md">
+              {settings.store_zone_order.map((zone, idx) => {
+                const isAisles = zone.toLowerCase() === AISLES_TOKEN.toLowerCase();
+                const move = (from: number, to: number) => {
+                  if (to < 0 || to >= settings.store_zone_order.length) return;
+                  setSettings(s => {
+                    const next = [...s.store_zone_order];
+                    const [z] = next.splice(from, 1);
+                    next.splice(to, 0, z);
+                    return { ...s, store_zone_order: next };
+                  });
+                };
+                return (
+                  <div key={`${zone}-${idx}`}
+                    className={`flex items-center gap-2 rounded-lg border px-3 py-2 ${
+                      isAisles ? 'bg-brand-sand/50 border-brand-gold/40' : 'bg-white border-gray-200'
+                    }`}>
+                    <span className="text-xs text-gray-300 font-mono w-5">{idx + 1}</span>
+                    <span className={`flex-1 text-sm font-semibold ${isAisles ? 'text-brand-navy' : 'text-gray-700'}`}>
+                      {isAisles ? `Aisles 1, 2, 3… (numbered aisles)` : zone}
+                    </span>
+                    <button type="button" onClick={() => move(idx, idx - 1)} disabled={idx === 0}
+                      className="p-1 text-gray-400 hover:text-brand-navy disabled:opacity-20" aria-label={`Move ${zone} up`}>
+                      <ChevronLeft className="w-4 h-4 rotate-90" />
+                    </button>
+                    <button type="button" onClick={() => move(idx, idx + 1)} disabled={idx === settings.store_zone_order.length - 1}
+                      className="p-1 text-gray-400 hover:text-brand-navy disabled:opacity-20" aria-label={`Move ${zone} down`}>
+                      <ChevronRight className="w-4 h-4 rotate-90" />
+                    </button>
+                    {!isAisles && (
+                      <button type="button"
+                        onClick={() => setSettings(s => ({ ...s, store_zone_order: s.store_zone_order.filter((_, i) => i !== idx) }))}
+                        className="p-1 text-gray-300 hover:text-red-500" aria-label={`Remove ${zone}`}>
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+              <div className="flex items-center gap-2 pt-1">
+                <input type="text" className="input-base text-sm flex-1" placeholder="Add a department (e.g. Seafood)"
+                  value={newZone} onChange={e => setNewZone(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') addZone(); }} />
+                <button type="button" onClick={addZone}
+                  className="btn-outline text-xs px-3 py-2 flex items-center gap-1">
+                  <Plus className="w-3.5 h-3.5" /> Add
+                </button>
+                <button type="button"
+                  onClick={() => setSettings(s => ({ ...s, store_zone_order: [...DEFAULT_ZONE_ORDER] }))}
+                  className="text-xs text-gray-400 hover:text-gray-600 underline shrink-0">
+                  Reset
+                </button>
+              </div>
             </div>
           </div>
 
