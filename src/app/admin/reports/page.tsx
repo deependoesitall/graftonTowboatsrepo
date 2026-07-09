@@ -10,7 +10,7 @@ import { useRouter } from 'next/navigation';
 import {
   Lock, RefreshCw, Download, FileText, TrendingUp, ShoppingBag,
   DollarSign, Package, Calendar, Star, Repeat, ChevronDown, ChevronRight,
-  Receipt, BarChart3, CheckSquare, Square,
+  Receipt, BarChart3, CheckSquare, Square, Printer,
 } from 'lucide-react';
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -67,6 +67,7 @@ interface BillingItem {
   substitutes_item_id: string | null;
   item_type: 'grocery' | 'service';
   service_type: string | null;
+  service_details: Record<string, string> | null;
   paid_by: 'vessel' | 'cod';
   cod_name: string | null;
 }
@@ -79,6 +80,10 @@ interface BillingOrder {
   customer_email: string | null;
   po_number: string | null;
   vessel_name: string | null;
+  terminal_name: string | null;
+  delivery_method: 'boat' | 'van' | null;
+  arrival_date: string | null;
+  arrival_time: string | null;
   subtotal: number;
   status: string;
   created_at: string;
@@ -165,72 +170,15 @@ function vesselTotal(o: BillingOrder): number {
     .reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0);
 }
 
-// ─── CSV helpers (client-side, per-vessel billing export) ────
-function csvEscape(val: unknown): string {
-  const s = String(val ?? '');
-  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
-    return `"${s.replace(/"/g, '""')}"`;
-  }
-  return s;
-}
-
-// Item-level export: one row per grocery line so Mary Karen can cross-reference
-// every item, quantity, and estimated-vs-actual price against Sinclair's
-// receipts before an invoice goes out. COD lines are excluded (noted per order).
-function billingCsv(orders: BillingOrder[]): string {
-  const header = [
-    'Bill To (Company — Vessel)', 'Order #', 'Order Date', 'Order Status', 'PO #', 'Contact', 'Billing Email',
-    'Item', 'UPC', 'Category', 'Pack', 'Qty', 'Unit Price', 'Estimated Line Total',
-    'Shopped Status', 'Substitution', 'Actual Weight (lb)', 'Actual Line Total',
-  ].map(csvEscape).join(',') + '\n';
-
-  const rows: string[] = [];
-  for (const o of orders) {
-    const group = billingGroupLabel(o);
-    const grocery = billableItems(o);
-    const cods = codLines(o);
-    const services = o.items.filter(i => i.item_type === 'service');
-    const outOfStockMap = new Map(
-      o.items.filter(i => i.item_type !== 'service' && i.shopping_status === 'out_of_stock').map(i => [i.id, i.description])
-    );
-
-    for (const i of grocery) {
-      rows.push([
-        group, o.order_number, new Date(o.created_at).toLocaleDateString(), o.status.replace('_', ' '),
-        o.po_number || '', o.contact_name, o.customer_email || '',
-        i.description, i.upc || '', i.category || '', i.pkg_size || '', i.quantity,
-        Number(i.unit_price).toFixed(2), Number(i.line_total).toFixed(2),
-        i.shopping_status.replace('_', ' '),
-        i.is_substitution ? `sub for ${i.substitutes_item_id ? outOfStockMap.get(i.substitutes_item_id) || 'original item' : 'original item'}` : '',
-        i.actual_weight ?? '',
-        i.actual_total != null ? Number(i.actual_total).toFixed(2) : '',
-      ].map(csvEscape).join(','));
-    }
-
-    // Per-service note rows (no fixed price — confirmed at fulfillment)
-    for (const s of services) {
-      rows.push([
-        group, o.order_number, new Date(o.created_at).toLocaleDateString(), o.status.replace('_', ' '),
-        o.po_number || '', o.contact_name, o.customer_email || '',
-        `${s.description} — additional service, confirm charge`, '', 'Additional Services', '', 1,
-        '', '', '', '', '', '',
-      ].map(csvEscape).join(','));
-    }
-
-    // Order summary row
-    rows.push([
-      group, o.order_number, new Date(o.created_at).toLocaleDateString(), o.status.replace('_', ' '),
-      o.po_number || '', o.contact_name, o.customer_email || '',
-      `ORDER TOTAL${cods.length ? ` (${cods.length} COD item${cods.length > 1 ? 's' : ''} excluded — settled at delivery)` : ''}`,
-      '', '', '', grocery.reduce((s, i) => s + i.quantity, 0),
-      '', vesselTotal(o).toFixed(2), '', '', '', '',
-    ].map(csvEscape).join(','));
-  }
-  return header + rows.join('\n') + '\n';
-}
-
-// ─── Branded billing statement (print-ready HTML, one page per company) ───
-const GREEN = '#1E3D1E', LIME = '#D9E84A', ORANGE = '#E8640A';
+// ─── Branded MONTHLY BILLING PACKET (print-ready → one PDF) ───────────────
+// One organized document, built for Mary Karen's workflow. Structure:
+//   1. Cover page — month summary + index of every vessel with totals
+//   2. Per vessel: invoice statement page (what gets attached to QuickBooks)
+//   3. Per order:  item-level cross-reference sheet with a verify checkbox on
+//      every line + a "staple Sinclair's receipt here" reconciliation footer
+// Three layers of the same numbers (packet index → statement → line detail)
+// give her multiple ways to cross-check before an invoice goes out.
+const GREEN = '#1E3D1E', LIME = '#D9E84A', ORANGE = '#E8640A', PURPLE = '#9333ea';
 
 function esc(s: unknown): string {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -239,82 +187,230 @@ function money(n: number): string {
   return `$${Number(n).toFixed(2)}`;
 }
 
-function statementHtml(companies: [string, BillingOrder[]][], monthLabel: string): string {
-  const generated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+// Estimated (pre-shopping) total for the billable lines of an order.
+function estimatedVesselTotal(o: BillingOrder): number {
+  return billableItems(o)
+    .filter(i => i.shopping_status !== 'out_of_stock')
+    .reduce((s, i) => s + Number(i.line_total), 0);
+}
 
-  const companyBlocks = companies.map(([company, orders], ci) => {
-    const first = orders[0];
-    const estTotal = orders.reduce((s, o) => s + vesselTotal(o), 0);
-
-    const orderRows = orders.map(o => {
-      const grocery = billableItems(o);
-      const services = o.items.filter(i => i.item_type === 'service');
-      const oos = new Map(o.items.filter(i => i.item_type !== 'service' && i.shopping_status === 'out_of_stock').map(i => [i.id, i.description]));
-      const delivered = grocery.filter(i => i.shopping_status !== 'out_of_stock');
-      const orderedQty = grocery.filter(i => !i.is_substitution).reduce((s, i) => s + i.quantity, 0);
-      const deliveredQty = delivered.reduce((s, i) => s + i.quantity, 0);
-      const subs = delivered.filter(i => i.is_substitution)
-        .map(i => `${esc(i.description)} <span style="color:${ORANGE};">(sub for ${esc(i.substitutes_item_id ? oos.get(i.substitutes_item_id) || 'original item' : 'original item')})</span>`);
-      const weightItems = delivered.filter(i => i.actual_weight)
-        .map(i => `${esc(i.description)} — ${i.actual_weight} lb actual (${money(i.actual_total ?? i.line_total)})`);
-      const svcList = services.map(i => esc(i.description));
-      const cod = o.extended_info?.personal_cod_notes;
-      const codItems = codLines(o);
-
-      const notes: string[] = [];
-      if (subs.length) notes.push(`<strong>Substitutions:</strong> ${subs.join('; ')}`);
-      if (weightItems.length) notes.push(`<strong>Weighed items:</strong> ${weightItems.join('; ')}`);
-      if (svcList.length) notes.push(`<strong>Additional services (confirm charges):</strong> ${svcList.join('; ')}`);
-      if (codItems.length) notes.push(`<strong style="color:#9333ea;">COD — settled at delivery, do NOT invoice:</strong> ${codItems.map(i => `${i.quantity}× ${esc(i.description)} (${esc(i.cod_name || 'crew member')})`).join('; ')}`);
-      if (cod) notes.push(`<strong style="color:#9333ea;">Personal / COD — do NOT invoice:</strong> ${esc(cod)}`);
-
-      return `
-      <tr>
-        <td style="padding:8px 10px;border-bottom:1px solid #eee;">
-          <div style="font-family:monospace;font-weight:800;color:${GREEN};font-size:12px;">${esc(o.order_number)}</div>
-          ${o.vessel_name ? `<div style="font-size:10px;color:#666;">${esc(o.vessel_name)}</div>` : ''}
-          ${o.po_number ? `<div style="font-size:10px;color:#666;">PO #${esc(o.po_number)}</div>` : ''}
-        </td>
-        <td style="padding:8px 10px;border-bottom:1px solid #eee;font-size:11px;color:#555;white-space:nowrap;">
-          ${new Date(o.created_at).toLocaleDateString()}
-          ${o.status !== 'fulfilled' ? `<div style="font-size:9px;font-weight:800;color:#b45309;text-transform:uppercase;">${esc(o.status.replace('_', ' '))}</div>` : ''}
-        </td>
-        <td style="padding:8px 10px;border-bottom:1px solid #eee;font-size:11px;text-align:center;">${orderedQty}</td>
-        <td style="padding:8px 10px;border-bottom:1px solid #eee;font-size:11px;text-align:center;">${o.status === 'fulfilled' ? deliveredQty : '—'}</td>
-        <td style="padding:8px 10px;border-bottom:1px solid #eee;font-size:12px;font-weight:700;text-align:right;color:${GREEN};">${money(vesselTotal(o))}</td>
-        <td style="padding:8px 10px;border-bottom:1px solid #eee;">
-          <div style="border:1.5px solid #bbb;border-radius:3px;height:22px;width:90px;margin-left:auto;"></div>
-        </td>
-      </tr>
-      ${notes.length ? `<tr><td colspan="6" style="padding:2px 10px 10px 22px;border-bottom:1px solid #eee;font-size:10px;color:#555;line-height:1.6;background:#fafaf5;">${notes.join('<br>')}</td></tr>` : ''}`;
-    }).join('');
-
-    return `
-<div style="${ci > 0 ? 'page-break-before:always;' : ''}max-width:760px;margin:0 auto;padding:8px 0 32px;">
-  <!-- Brand header -->
+function brandBar(monthLabel: string, rightLabel: string, generated: string): string {
+  return `
   <table width="100%" style="border-collapse:collapse;background:${GREEN};border-radius:6px 6px 0 0;">
     <tr>
-      <td style="padding:18px 22px;">
-        <div style="font-size:19px;font-weight:900;color:${LIME};text-transform:uppercase;letter-spacing:-0.5px;">Grafton Towboat Services</div>
+      <td style="padding:16px 22px;">
+        <div style="font-size:18px;font-weight:900;color:${LIME};text-transform:uppercase;letter-spacing:-0.5px;">Grafton Towboat Services</div>
         <div style="font-size:9px;font-weight:700;color:${ORANGE};letter-spacing:1px;">GROCERIES, SUPPLIES &amp; CREW CHANGE</div>
-        <div style="font-size:9px;color:#a8c86a;margin-top:5px;line-height:1.6;">
+        <div style="font-size:9px;color:#a8c86a;margin-top:4px;line-height:1.6;">
           25 Dagget Hollow · Grafton, IL 62037 · Mile Marker 219 Mississippi River / Mile Marker 0 Illinois River<br>
           (618) 556-0290 · GraftonTowboatServices@gmail.com
         </div>
       </td>
-      <td style="padding:18px 22px;text-align:right;vertical-align:top;">
-        <div style="font-size:13px;font-weight:900;color:#fff;text-transform:uppercase;letter-spacing:1.5px;">Monthly Billing<br>Statement</div>
+      <td style="padding:16px 22px;text-align:right;vertical-align:top;">
+        <div style="font-size:12px;font-weight:900;color:#fff;text-transform:uppercase;letter-spacing:1.5px;line-height:1.4;">${rightLabel}</div>
         <div style="font-size:10px;color:#a8c86a;margin-top:5px;">${esc(monthLabel)}<br>Generated ${generated}</div>
       </td>
     </tr>
+  </table>`;
+}
+
+// ── Per-order item-level cross-reference sheet ─────────────────
+function orderDetailSheet(o: BillingOrder, groupLabel: string, monthLabel: string, generated: string): string {
+  const grocery = o.items.filter(i => i.item_type !== 'service' && i.paid_by !== 'cod');
+  const services = o.items.filter(i => i.item_type === 'service');
+  const cods = codLines(o);
+  const oosMap = new Map(o.items.filter(i => i.item_type !== 'service' && i.shopping_status === 'out_of_stock').map(i => [i.id, i.description]));
+
+  const est = estimatedVesselTotal(o);
+  const actual = vesselTotal(o);
+  const diff = actual - est;
+  const codTotal = cods.filter(i => i.shopping_status !== 'out_of_stock')
+    .reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0);
+
+  const itemRows = grocery.map((i, idx) => {
+    const oos = i.shopping_status === 'out_of_stock';
+    const isSub = i.is_substitution;
+    const rowBg = oos ? '#f5f5f5' : isSub ? '#fff8ec' : (idx % 2 === 0 ? '#ffffff' : '#fafaf7');
+    const subNote = isSub
+      ? `<div style="font-size:8px;font-weight:800;color:${ORANGE};margin-top:1px;">SUB FOR: ${esc(i.substitutes_item_id ? oosMap.get(i.substitutes_item_id) || 'original item' : 'original item')}</div>` : '';
+    const wtNote = i.actual_weight
+      ? `<div style="font-size:8px;color:#555;margin-top:1px;">weighed: ${i.actual_weight} lb</div>` : '';
+    const oosNote = oos
+      ? `<div style="font-size:8px;font-weight:800;color:#999;margin-top:1px;">OUT OF STOCK — NOT BILLED</div>` : '';
+    const shopped = oos ? '<span style="color:#999;">OOS</span>'
+      : i.shopping_status === 'shopped' ? `<span style="color:${GREEN};font-weight:800;">&#10003;</span>`
+      : '<span style="color:#b45309;">pending</span>';
+    return `
+    <tr style="background:${rowBg};${isSub ? `border-left:3px solid ${ORANGE};` : ''}">
+      <td style="padding:5px 6px;border-bottom:1px solid #eee;text-align:center;"><div style="width:11px;height:11px;border:1.5px solid #999;border-radius:2px;margin:0 auto;"></div></td>
+      <td style="padding:5px 6px;border-bottom:1px solid #eee;font-family:monospace;font-size:9px;color:#888;">${esc(i.upc || '—')}</td>
+      <td style="padding:5px 6px;border-bottom:1px solid #eee;font-size:10px;color:${oos ? '#999' : '#333'};${oos ? 'text-decoration:line-through;' : ''}font-weight:${isSub ? '700' : '400'};">${esc(i.description)}${subNote}${wtNote}${oosNote}</td>
+      <td style="padding:5px 6px;border-bottom:1px solid #eee;font-size:9px;color:#666;text-align:center;">${esc(i.pkg_size || '—')}</td>
+      <td style="padding:5px 6px;border-bottom:1px solid #eee;font-size:11px;font-weight:800;color:${GREEN};text-align:center;">${i.quantity}</td>
+      <td style="padding:5px 6px;border-bottom:1px solid #eee;font-size:10px;text-align:right;">${money(Number(i.unit_price))}</td>
+      <td style="padding:5px 6px;border-bottom:1px solid #eee;font-size:10px;text-align:right;color:#555;">${oos ? '—' : money(Number(i.line_total))}</td>
+      <td style="padding:5px 6px;border-bottom:1px solid #eee;font-size:9px;text-align:center;">${shopped}</td>
+      <td style="padding:5px 6px;border-bottom:1px solid #eee;font-size:11px;font-weight:800;text-align:right;color:${GREEN};">${oos ? '—' : money(Number(i.actual_total ?? i.line_total))}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+<div style="page-break-before:always;max-width:760px;margin:0 auto;padding:8px 0 24px;">
+  <!-- Order header strip -->
+  <table width="100%" style="border-collapse:collapse;background:${GREEN};border-radius:6px 6px 0 0;">
+    <tr>
+      <td style="padding:12px 18px;">
+        <div style="font-size:8px;font-weight:800;color:#a8c86a;text-transform:uppercase;letter-spacing:1px;">Order Detail — Cross-Reference Sheet</div>
+        <div style="font-family:monospace;font-size:17px;font-weight:900;color:${LIME};">${esc(o.order_number)}</div>
+        <div style="font-size:10px;color:#a8c86a;">${esc(groupLabel)}${o.po_number ? ` · PO #${esc(o.po_number)}` : ''}</div>
+      </td>
+      <td style="padding:12px 18px;text-align:right;">
+        <div style="font-size:10px;color:#a8c86a;">Placed ${new Date(o.created_at).toLocaleDateString()}</div>
+        <div style="font-size:10px;font-weight:900;text-transform:uppercase;color:${o.status === 'fulfilled' ? LIME : '#fbbf24'};margin-top:2px;">${esc(o.status.replace('_', ' '))}</div>
+      </td>
+    </tr>
   </table>
+
+  <!-- Delivery reference strip — answers "which delivery was that?" months later -->
+  <table width="100%" style="border-collapse:collapse;background:#f8fde8;border-bottom:1px solid #e5e7d5;">
+    <tr>
+      ${[
+        ['Delivered To', o.terminal_name || '—'],
+        ['Method', o.delivery_method === 'boat' ? '⛵ Boat' : o.delivery_method === 'van' ? '🚐 Van' : '—'],
+        ['Arrival', [o.arrival_date, o.arrival_time].filter(Boolean).join(' · ') || '—'],
+        ['Contact', `${o.contact_name}${o.phone ? ` · ${o.phone}` : ''}`],
+      ].map(([l, v]) => `
+      <td style="padding:7px 14px;">
+        <div style="font-size:7px;font-weight:800;color:#888;text-transform:uppercase;letter-spacing:1px;">${l}</div>
+        <div style="font-size:10px;font-weight:700;color:${GREEN};">${esc(v)}</div>
+      </td>`).join('')}
+    </tr>
+  </table>
+
+  <!-- Item table -->
+  <table width="100%" style="border-collapse:collapse;">
+    <thead>
+      <tr style="background:#2d5a2d;">
+        <th style="padding:6px;color:${LIME};font-size:7px;text-transform:uppercase;letter-spacing:0.6px;width:4%;">&#10003;</th>
+        <th style="padding:6px;text-align:left;color:${LIME};font-size:7px;text-transform:uppercase;letter-spacing:0.6px;width:11%;">Item #</th>
+        <th style="padding:6px;text-align:left;color:${LIME};font-size:7px;text-transform:uppercase;letter-spacing:0.6px;">Item</th>
+        <th style="padding:6px;text-align:center;color:${LIME};font-size:7px;text-transform:uppercase;letter-spacing:0.6px;width:9%;">Pack</th>
+        <th style="padding:6px;text-align:center;color:${LIME};font-size:7px;text-transform:uppercase;letter-spacing:0.6px;width:5%;">Qty</th>
+        <th style="padding:6px;text-align:right;color:${LIME};font-size:7px;text-transform:uppercase;letter-spacing:0.6px;width:9%;">Unit</th>
+        <th style="padding:6px;text-align:right;color:${LIME};font-size:7px;text-transform:uppercase;letter-spacing:0.6px;width:10%;">Estimated</th>
+        <th style="padding:6px;text-align:center;color:${LIME};font-size:7px;text-transform:uppercase;letter-spacing:0.6px;width:8%;">Shopped</th>
+        <th style="padding:6px;text-align:right;color:${LIME};font-size:7px;text-transform:uppercase;letter-spacing:0.6px;width:10%;">Actual</th>
+      </tr>
+    </thead>
+    <tbody>${itemRows}</tbody>
+    <tfoot>
+      <tr style="border-top:2px solid ${GREEN};">
+        <td colspan="6" style="padding:7px 6px;font-size:10px;font-weight:800;color:#555;text-transform:uppercase;">Order totals (${grocery.filter(i => i.shopping_status !== 'out_of_stock').reduce((s, i) => s + i.quantity, 0)} items billed to vessel)</td>
+        <td style="padding:7px 6px;text-align:right;font-size:11px;font-weight:800;color:#555;">${money(est)}</td>
+        <td></td>
+        <td style="padding:7px 6px;text-align:right;font-size:12px;font-weight:900;color:${GREEN};">${money(actual)}</td>
+      </tr>
+      ${Math.abs(diff) >= 0.005 ? `
+      <tr>
+        <td colspan="8" style="padding:3px 6px;font-size:9px;text-align:right;color:${diff > 0 ? ORANGE : GREEN};font-weight:800;">Difference vs. estimate (weights / substitutions):</td>
+        <td style="padding:3px 6px;text-align:right;font-size:10px;font-weight:900;color:${diff > 0 ? ORANGE : GREEN};">${diff > 0 ? '+' : ''}${money(diff)}</td>
+      </tr>` : ''}
+    </tfoot>
+  </table>
+
+  ${cods.length ? `
+  <div style="margin-top:10px;border:2px solid ${PURPLE};background:#faf5ff;border-radius:4px;padding:9px 14px;">
+    <div style="font-size:9px;font-weight:900;color:${PURPLE};text-transform:uppercase;letter-spacing:1px;">COD — settled at delivery · ${money(codTotal)} · DO NOT INVOICE</div>
+    <div style="font-size:9px;color:#555;margin-top:3px;line-height:1.6;">${cods.map(i => `${i.quantity}× ${esc(i.description)} — ${esc(i.cod_name || 'crew member')}`).join(' &nbsp;·&nbsp; ')}</div>
+  </div>` : ''}
+
+  ${services.length ? `
+  <div style="margin-top:8px;border-left:3px solid ${ORANGE};background:#fffbf0;padding:8px 14px;font-size:9px;color:#555;">
+    <strong style="color:${ORANGE};text-transform:uppercase;letter-spacing:0.5px;">Additional services — confirm charge before invoicing</strong>
+    <table width="100%" style="border-collapse:collapse;margin-top:4px;">
+      ${services.map(s => {
+        const d = (s.service_details || {}) as Record<string, string>;
+        const detail = s.service_type === 'parts_pickup'
+          ? [d.pickup_location, d.order_number && `#${d.order_number}`].filter(Boolean).join(' · ')
+          : s.service_type === 'other_pickup'
+          ? [d.url, d.notes].filter(Boolean).join(' · ')
+          : [d.description, d.origin && `from ${d.origin}`].filter(Boolean).join(' · ');
+        return `<tr>
+          <td style="padding:3px 0;font-size:9px;font-weight:700;color:#333;width:28%;">${esc(s.description)}</td>
+          <td style="padding:3px 8px;font-size:9px;color:#777;">${esc(detail || '—')}</td>
+          <td style="padding:3px 0;font-size:9px;color:#777;text-align:right;white-space:nowrap;">charge $ <span style="display:inline-block;border-bottom:1px solid #999;width:64px;"></span></td>
+        </tr>`;
+      }).join('')}
+    </table>
+  </div>` : ''}
+
+  <!-- Sinclair's receipt reconciliation — Mary Karen's attachment step -->
+  <table width="100%" style="border-collapse:collapse;margin-top:10px;border:2px dashed #999;border-radius:4px;">
+    <tr>
+      <td style="padding:10px 14px;">
+        <div style="font-size:9px;font-weight:900;color:#555;text-transform:uppercase;letter-spacing:1px;">&#128206; Attach Sinclair&#39;s register receipt for ${esc(o.order_number)} here</div>
+        <div style="font-size:9px;color:#777;margin-top:4px;line-height:1.8;">
+          Receipt total $__________ &nbsp;should match the <strong>Actual</strong> column total above (${money(actual)}).
+          COD items were rung up separately and are not on the company invoice.<br>
+          Cross-checked line by line &#9744; &nbsp;&nbsp; Entered in QuickBooks &#9744; &nbsp;&nbsp; Initials ________ &nbsp; Date ________
+        </div>
+      </td>
+    </tr>
+  </table>
+
+  <div style="text-align:center;font-size:8px;color:#aaa;border-top:1px solid #eee;margin-top:14px;padding-top:6px;">
+    ${esc(monthLabel)} Billing Packet · ${esc(groupLabel)} · ${esc(o.order_number)} · Generated ${generated}
+  </div>
+</div>`;
+}
+
+// ── Per-vessel invoice statement page ──────────────────────────
+function vesselStatementPage(group: string, orders: BillingOrder[], monthLabel: string, generated: string, sectionNum: number, sectionCount: number): string {
+  const first = orders[0];
+  const estTotal = orders.reduce((s, o) => s + vesselTotal(o), 0);
+
+  const orderRows = orders.map(o => {
+    const grocery = billableItems(o);
+    const delivered = grocery.filter(i => i.shopping_status !== 'out_of_stock');
+    const orderedQty = grocery.filter(i => !i.is_substitution).reduce((s, i) => s + i.quantity, 0);
+    const deliveredQty = delivered.reduce((s, i) => s + i.quantity, 0);
+    const subCount = delivered.filter(i => i.is_substitution).length;
+    const svcCount = o.items.filter(i => i.item_type === 'service').length;
+    const codCount = codLines(o).length;
+    const flags: string[] = [];
+    if (subCount) flags.push(`<span style="color:${ORANGE};font-weight:700;">${subCount} sub${subCount > 1 ? 's' : ''}</span>`);
+    if (svcCount) flags.push(`${svcCount} service${svcCount > 1 ? 's' : ''} — confirm charge`);
+    if (codCount) flags.push(`<span style="color:${PURPLE};font-weight:700;">${codCount} COD excluded</span>`);
+    return `
+    <tr>
+      <td style="padding:8px 10px;border-bottom:1px solid #eee;">
+        <div style="font-family:monospace;font-weight:800;color:${GREEN};font-size:12px;">${esc(o.order_number)}</div>
+        ${o.po_number ? `<div style="font-size:10px;color:#666;">PO #${esc(o.po_number)}</div>` : ''}
+        ${flags.length ? `<div style="font-size:9px;color:#777;margin-top:1px;">${flags.join(' · ')}</div>` : ''}
+      </td>
+      <td style="padding:8px 10px;border-bottom:1px solid #eee;font-size:11px;color:#555;white-space:nowrap;">
+        ${new Date(o.created_at).toLocaleDateString()}
+        ${o.status !== 'fulfilled' ? `<div style="font-size:9px;font-weight:800;color:#b45309;text-transform:uppercase;">${esc(o.status.replace('_', ' '))}</div>` : ''}
+      </td>
+      <td style="padding:8px 10px;border-bottom:1px solid #eee;font-size:11px;text-align:center;">${orderedQty}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #eee;font-size:11px;text-align:center;">${o.status === 'fulfilled' ? deliveredQty : '—'}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #eee;font-size:12px;font-weight:700;text-align:right;color:${GREEN};">${money(vesselTotal(o))}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #eee;">
+        <div style="border:1.5px solid #bbb;border-radius:3px;height:22px;width:90px;margin-left:auto;"></div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  return `
+<div style="page-break-before:always;max-width:760px;margin:0 auto;padding:8px 0 24px;">
+  ${brandBar(monthLabel, `Invoice Statement<br><span style="font-size:9px;font-weight:700;color:#a8c86a;">Vessel ${sectionNum} of ${sectionCount}</span>`, generated)}
 
   <!-- Bill to -->
   <table width="100%" style="border-collapse:collapse;background:#f8fde8;border-left:4px solid ${GREEN};">
     <tr>
       <td style="padding:12px 22px;">
         <div style="font-size:8px;font-weight:800;color:#666;text-transform:uppercase;letter-spacing:1px;">Bill To</div>
-        <div style="font-size:16px;font-weight:900;color:${GREEN};">${esc(company)}</div>
+        <div style="font-size:16px;font-weight:900;color:${GREEN};">${esc(group)}</div>
         <div style="font-size:10px;color:#555;">${esc(first.contact_name)}${first.phone ? ` · ${esc(first.phone)}` : ''}${first.customer_email ? ` · ${esc(first.customer_email)}` : ''}</div>
       </td>
       <td style="padding:12px 22px;text-align:right;">
@@ -328,7 +424,7 @@ function statementHtml(companies: [string, BillingOrder[]][], monthLabel: string
   <table width="100%" style="border-collapse:collapse;margin-top:14px;">
     <thead>
       <tr style="background:${GREEN};">
-        <th style="padding:7px 10px;text-align:left;color:${LIME};font-size:8px;text-transform:uppercase;letter-spacing:0.8px;">Order / Vessel / PO</th>
+        <th style="padding:7px 10px;text-align:left;color:${LIME};font-size:8px;text-transform:uppercase;letter-spacing:0.8px;">Order / PO / Flags</th>
         <th style="padding:7px 10px;text-align:left;color:${LIME};font-size:8px;text-transform:uppercase;letter-spacing:0.8px;">Date</th>
         <th style="padding:7px 10px;text-align:center;color:${LIME};font-size:8px;text-transform:uppercase;letter-spacing:0.8px;">Ordered</th>
         <th style="padding:7px 10px;text-align:center;color:${LIME};font-size:8px;text-transform:uppercase;letter-spacing:0.8px;">Delivered</th>
@@ -360,23 +456,112 @@ function statementHtml(companies: [string, BillingOrder[]][], monthLabel: string
 
   <!-- Notes -->
   <div style="margin-top:14px;border-left:3px solid ${ORANGE};background:#fffbf0;padding:9px 14px;font-size:9px;color:#555;line-height:1.7;">
-    <strong style="color:${ORANGE};">Final Total notes:</strong> estimated totals reflect catalog prices at order time.
-    Enter the final amount after confirming weighed items (billed at actual weight), substitutions,
-    and any additional service or delivery charges. Personal / COD items were paid by the crew on
-    delivery and must not be invoiced.
+    <strong style="color:${ORANGE};">How to finalize:</strong> the order detail sheets that follow list every item with a
+    verify checkbox — tick each line against Sinclair&#39;s register receipt, confirm weighed items and substitutions,
+    add any service or delivery charges, then enter the Final Total above. COD items are already excluded — they were
+    paid by crew members at delivery and never appear on this invoice.
   </div>
 
   <div style="text-align:center;font-size:8px;color:#aaa;border-top:1px solid #eee;margin-top:18px;padding-top:8px;">
-    Grafton Towboat Services · ${esc(monthLabel)} Billing Statement · ${esc(company)} · Generated ${generated}
+    Grafton Towboat Services · ${esc(monthLabel)} Billing Packet · ${esc(group)} · Generated ${generated}
   </div>
 </div>`;
-  }).join('');
+}
+
+// ── Whole packet ───────────────────────────────────────────────
+function billingPacketHtml(groups: [string, BillingOrder[]][], monthLabel: string): string {
+  const generated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  const allOrders = groups.flatMap(([, os]) => os);
+  const packetEst = allOrders.reduce((s, o) => s + vesselTotal(o), 0);
+  const packetItems = allOrders.reduce((s, o) =>
+    s + billableItems(o).filter(i => i.shopping_status !== 'out_of_stock').reduce((q, i) => q + i.quantity, 0), 0);
+  const packetCods = allOrders.reduce((s, o) => s + codLines(o).length, 0);
+
+  const indexRows = groups.map(([label, os], i) => `
+    <tr style="background:${i % 2 === 0 ? '#fff' : '#fafaf7'};">
+      <td style="padding:7px 10px;border-bottom:1px solid #eee;font-size:10px;color:#999;">${i + 1}</td>
+      <td style="padding:7px 10px;border-bottom:1px solid #eee;font-size:11px;font-weight:800;color:${GREEN};">${esc(label)}</td>
+      <td style="padding:7px 10px;border-bottom:1px solid #eee;font-size:11px;text-align:center;">${os.length}</td>
+      <td style="padding:7px 10px;border-bottom:1px solid #eee;font-size:11px;text-align:center;">${os.reduce((s, o) => s + billableItems(o).filter(x => x.shopping_status !== 'out_of_stock').reduce((q, x) => q + x.quantity, 0), 0)}</td>
+      <td style="padding:7px 10px;border-bottom:1px solid #eee;font-size:12px;font-weight:800;text-align:right;color:${GREEN};">${money(os.reduce((s, o) => s + vesselTotal(o), 0))}</td>
+      <td style="padding:7px 10px;border-bottom:1px solid #eee;"><div style="border:1.5px solid #bbb;border-radius:3px;height:20px;width:90px;margin-left:auto;"></div></td>
+    </tr>`).join('');
+
+  const cover = `
+<div style="max-width:760px;margin:0 auto;padding:8px 0 24px;">
+  ${brandBar(monthLabel, 'Monthly<br>Billing Packet', generated)}
+
+  <!-- Packet summary band -->
+  <table width="100%" style="border-collapse:collapse;background:${LIME};">
+    <tr>
+      ${[
+        [`${groups.length}`, groups.length === 1 ? 'Vessel' : 'Vessels'],
+        [`${allOrders.length}`, allOrders.length === 1 ? 'Order' : 'Orders'],
+        [`${packetItems}`, 'Items Billed'],
+        [money(packetEst), 'Estimated Total'],
+      ].map(([v, l]) => `
+      <td style="padding:12px 10px;text-align:center;">
+        <div style="font-size:19px;font-weight:900;color:${GREEN};">${v}</div>
+        <div style="font-size:8px;font-weight:800;color:${GREEN};text-transform:uppercase;letter-spacing:1px;opacity:0.7;">${l}</div>
+      </td>`).join('')}
+    </tr>
+  </table>
+
+  <!-- Index -->
+  <div style="font-size:10px;font-weight:900;color:${GREEN};text-transform:uppercase;letter-spacing:1.5px;margin:18px 0 6px;">Invoice Index — one statement per vessel</div>
+  <table width="100%" style="border-collapse:collapse;">
+    <thead>
+      <tr style="background:${GREEN};">
+        <th style="padding:7px 10px;text-align:left;color:${LIME};font-size:8px;text-transform:uppercase;letter-spacing:0.8px;width:5%;">#</th>
+        <th style="padding:7px 10px;text-align:left;color:${LIME};font-size:8px;text-transform:uppercase;letter-spacing:0.8px;">Bill To (Company — Vessel)</th>
+        <th style="padding:7px 10px;text-align:center;color:${LIME};font-size:8px;text-transform:uppercase;letter-spacing:0.8px;width:10%;">Orders</th>
+        <th style="padding:7px 10px;text-align:center;color:${LIME};font-size:8px;text-transform:uppercase;letter-spacing:0.8px;width:10%;">Items</th>
+        <th style="padding:7px 10px;text-align:right;color:${LIME};font-size:8px;text-transform:uppercase;letter-spacing:0.8px;width:15%;">Estimated</th>
+        <th style="padding:7px 10px;text-align:right;color:${LIME};font-size:8px;text-transform:uppercase;letter-spacing:0.8px;width:15%;">Final</th>
+      </tr>
+    </thead>
+    <tbody>${indexRows}</tbody>
+    <tfoot>
+      <tr style="border-top:3px solid ${GREEN};">
+        <td colspan="4" style="padding:8px 10px;font-size:11px;font-weight:900;color:${GREEN};text-transform:uppercase;">Packet total</td>
+        <td style="padding:8px 10px;text-align:right;font-size:13px;font-weight:900;color:${GREEN};">${money(packetEst)}</td>
+        <td></td>
+      </tr>
+    </tfoot>
+  </table>
+
+  ${packetCods ? `
+  <div style="margin-top:10px;border-left:3px solid ${PURPLE};background:#faf5ff;padding:8px 14px;font-size:9px;color:#555;line-height:1.7;">
+    <strong style="color:${PURPLE};">${packetCods} COD line${packetCods > 1 ? 's' : ''} excluded from this packet</strong> — paid by crew members at
+    delivery (cash / Venmo / card by phone). They appear on the order detail sheets for reference only and must never be invoiced.
+  </div>` : ''}
+
+  <!-- How to use -->
+  <div style="margin-top:14px;border:1px solid #ddd;border-radius:6px;padding:12px 16px;">
+    <div style="font-size:9px;font-weight:900;color:${GREEN};text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">How this packet is organized — three ways to cross-check every number</div>
+    <div style="font-size:9px;color:#555;line-height:1.9;">
+      <strong>1. This index</strong> — every vessel&#39;s estimated total at a glance; fill in the Final column as invoices go out.<br>
+      <strong>2. Invoice statements</strong> — one page per vessel (each starts on a fresh page). This is the page to attach to the QuickBooks invoice.<br>
+      <strong>3. Order detail sheets</strong> — every item on every order with a checkbox, estimated vs. actual price, substitutions and weighed
+      items flagged, and a spot to staple Sinclair&#39;s register receipt. The receipt total should match the sheet&#39;s Actual total.
+    </div>
+  </div>
+
+  <div style="text-align:center;font-size:8px;color:#aaa;border-top:1px solid #eee;margin-top:18px;padding-top:8px;">
+    Grafton Towboat Services · ${esc(monthLabel)} Billing Packet · Generated ${generated}
+  </div>
+</div>`;
+
+  const sections = groups.map(([label, orders], gi) =>
+    vesselStatementPage(label, orders, monthLabel, generated, gi + 1, groups.length)
+    + orders.map(o => orderDetailSheet(o, label, monthLabel, generated)).join('')
+  ).join('');
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Billing Statements — ${esc(monthLabel)} — Grafton Towboat Services</title>
+<title>Billing Packet — ${esc(monthLabel)} — Grafton Towboat Services</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
   body { font-family: Arial, Helvetica, sans-serif; color:#222; background:#fff; padding:24px 16px; }
@@ -386,24 +571,11 @@ function statementHtml(companies: [string, BillingOrder[]][], monthLabel: string
 </style>
 </head>
 <body>
-<button class="print-btn no-print" onclick="window.print()">&#128424; Print / Save PDF</button>
-${companyBlocks}
+<button class="print-btn no-print" onclick="window.print()">&#128424; Save as One PDF</button>
+${cover}
+${sections}
 </body>
 </html>`;
-}
-
-function downloadCsv(filename: string, csv: string) {
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-function slug(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'company';
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -536,27 +708,13 @@ function BillingTab() {
 
   const selectedOrders = orders.filter(o => selected.has(o.id));
 
-  // Export: one CSV per company+vessel (sequential downloads), plus combined option
-  async function exportPerCompany() {
-    let delay = 0;
-    for (const [group, groupOrdersList] of groupOrders(selectedOrders)) {
-      const filename = `billing_${month}_${slug(group)}.csv`;
-      const csv = billingCsv(groupOrdersList);
-      // Stagger downloads slightly so browsers don't drop them
-      setTimeout(() => downloadCsv(filename, csv), delay);
-      delay += 350;
-    }
-  }
-  function exportCombined() {
-    downloadCsv(`billing_${month}_all-vessels.csv`, billingCsv(selectedOrders));
-  }
-
-  // Branded print-ready statements — one page per company+vessel, Final Total
-  // boxes left blank for Mary to fill after confirming weights/services.
-  function openStatements() {
+  // One branded, print-ready Billing Packet: cover + invoice index, then per
+  // vessel an invoice statement followed by item-level cross-reference sheets
+  // (verify checkboxes + "staple Sinclair's receipt here"). Save as ONE PDF.
+  function openPacket(packetOrders: BillingOrder[]) {
     const monthLabel = new Date(month + '-01T00:00:00')
       .toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-    const html = statementHtml(groupOrders(selectedOrders), monthLabel);
+    const html = billingPacketHtml(groupOrders(packetOrders), monthLabel);
     const blob = new Blob([html], { type: 'text/html' });
     window.open(URL.createObjectURL(blob), '_blank');
   }
@@ -577,19 +735,11 @@ function BillingTab() {
         </button>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <span className="text-xs text-gray-400">
-            {selected.size} order{selected.size !== 1 ? 's' : ''} · {selCompanyCount} compan{selCompanyCount === 1 ? 'y' : 'ies'} selected
+            {selected.size} order{selected.size !== 1 ? 's' : ''} · {selCompanyCount} vessel{selCompanyCount === 1 ? '' : 's'} selected
           </span>
-          <button onClick={openStatements} disabled={selected.size === 0}
+          <button onClick={() => openPacket(selectedOrders)} disabled={selected.size === 0}
             className="btn-primary text-sm px-4 py-2 flex items-center gap-2 disabled:opacity-50">
-            <FileText className="w-4 h-4" /> Billing Statements (PDF)
-          </button>
-          <button onClick={exportPerCompany} disabled={selected.size === 0}
-            className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5 disabled:opacity-50">
-            <Download className="w-4 h-4" /> CSVs (per company)
-          </button>
-          <button onClick={exportCombined} disabled={selected.size === 0}
-            className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5 disabled:opacity-50">
-            <FileText className="w-4 h-4" /> All in one CSV
+            <FileText className="w-4 h-4" /> Billing Packet — One PDF
           </button>
         </div>
       </div>
@@ -631,6 +781,12 @@ function BillingTab() {
                         )}
                       </button>
                       <span className="text-sm font-bold text-brand-navy">{formatCurrency(companyTotal)}</span>
+                      <button
+                        onClick={() => openPacket(companyOrders)}
+                        title={`Print billing packet for ${company} only`}
+                        className="p-1.5 text-gray-400 hover:text-brand-navy transition-colors shrink-0">
+                        <Printer className="w-4 h-4" />
+                      </button>
                     </div>
                     {!collapsed && (
                       <BillingOrderTable orders={companyOrders} selected={selected} onToggle={toggleOrder} />
@@ -663,11 +819,12 @@ function BillingTab() {
           </div>
 
           <p className="text-xs text-gray-400">
-            Statements and CSVs group by <strong>company + vessel</strong> (e.g. &ldquo;Ingram — Jenny Kay&rdquo;), one
-            invoice per boat. Exports list <strong>every grocery line</strong> — item, qty, estimated vs. actual — so you
-            can cross-reference against Sinclair&apos;s receipts before invoicing. <strong>COD items are excluded</strong>:
-            they&apos;re settled at delivery and never invoiced. The statement&apos;s Final Total box stays blank on purpose —
-            fill it in after confirming weighed items and service charges.
+            The <strong>Billing Packet</strong> is one branded, print-ready document: a cover page with an invoice index,
+            then for each vessel (&ldquo;Ingram — Jenny Kay&rdquo; style, one invoice per boat) an invoice statement followed by
+            item-level cross-reference sheets — every line has a verify checkbox, estimated vs. actual price, and a spot to
+            staple Sinclair&apos;s register receipt. <strong>COD items are excluded from all totals</strong> (settled at delivery,
+            never invoiced). Final Total boxes stay blank on purpose — fill them in after reconciling. Use the printer icon
+            on any vessel to print just that boat&apos;s packet.
           </p>
         </>
       )}
