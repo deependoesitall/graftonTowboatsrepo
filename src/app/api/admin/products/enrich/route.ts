@@ -4,13 +4,14 @@
 // EnrichFromSinclair.tsx). Doing the download in the browser avoids Vercel's
 // function timeout and NCR's datacenter rate-limiting entirely.
 //
-// This endpoint only validates and writes: a whitelist of cosmetic fields
-// (details, image_url, billed_by_weight) — never price, stock, or existence.
+// This endpoint only validates and writes: a whitelist of cosmetic/shopping
+// fields (details, image_url, billed_by_weight, location, location_seq) —
+// never price, stock, or existence.
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/admin-auth-server';
 
-const ALLOWED_FIELDS = new Set(['details', 'image_url', 'billed_by_weight']);
+const ALLOWED_FIELDS = new Set(['details', 'image_url', 'billed_by_weight', 'location', 'location_seq']);
 const MAX_UPDATES = 3000;
 
 interface UpdateItem {
@@ -46,6 +47,13 @@ export async function POST(req: NextRequest) {
       }
       if (key === 'image_url' && !/^https:\/\/(images|asset)\.freshop\./.test(value as string)) {
         return NextResponse.json({ error: 'image_url must be a Freshop CDN URL' }, { status: 400 });
+      }
+      if (key === 'location' && (typeof value !== 'string' || (value as string).length > 60)) {
+        return NextResponse.json({ error: 'location must be a short string' }, { status: 400 });
+      }
+      if (key === 'location_seq' && value !== null
+          && (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 32767)) {
+        return NextResponse.json({ error: 'location_seq must be a small integer or null' }, { status: 400 });
       }
     }
   }

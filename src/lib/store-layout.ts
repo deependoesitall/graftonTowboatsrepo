@@ -54,12 +54,17 @@ export interface LocationGroup<T> {
 }
 
 /**
- * Group items into store-walking order:
- *   zones listed before "Aisles" → numbered aisles (ascending, letter as
- *   tiebreaker within an aisle) → zones listed after "Aisles" → any zones
- *   not in the configured list (alphabetical) → items with no location last.
+ * Group items into store-walking order.
+ *
+ * Ordering priority:
+ *   1. Sinclair's OWN walkpath sequence (fulfillment_walkpath.sequence from
+ *      Freshop, snapshot as location_seq) — the store's configured walk order.
+ *   2. For groups without a sequence: the manager's zone list — zones listed
+ *      before "Aisles" → numbered aisles ascending (letter as tiebreaker
+ *      within an aisle) → zones after "Aisles" → unlisted zones alphabetical.
+ *   3. Items with no location always last.
  */
-export function groupByWalkingOrder<T extends { location: string | null; description: string }>(
+export function groupByWalkingOrder<T extends { location: string | null; description: string; location_seq?: number | null }>(
   items: T[],
   zoneOrder: string[] = DEFAULT_ZONE_ORDER,
 ): LocationGroup<T>[] {
@@ -111,10 +116,32 @@ export function groupByWalkingOrder<T extends { location: string | null; descrip
   postZones.forEach(takeZone);
   // Zones the manager hasn't listed yet — alphabetical, before the no-location bucket
   Array.from(zoneGroups.keys()).sort((a, b) => a.localeCompare(b)).forEach(takeZone);
+
+  // Re-rank by Sinclair's own walkpath sequence where we have it: sequenced
+  // groups first (in the store's real walk order), then the zone-heuristic
+  // groups in their existing order, no-location always last.
+  const groupSeq = (g: LocationGroup<T>): number | null => {
+    let min: number | null = null;
+    for (const it of g.items) {
+      const s = it.location_seq;
+      if (typeof s === 'number' && isFinite(s) && (min === null || s < min)) min = s;
+    }
+    return min;
+  };
+  const ranked = result
+    .map((g, heuristicIdx) => ({ g, heuristicIdx, seq: groupSeq(g) }))
+    .sort((a, b) => {
+      if (a.seq != null && b.seq != null) return a.seq - b.seq || a.heuristicIdx - b.heuristicIdx;
+      if (a.seq != null) return -1;
+      if (b.seq != null) return 1;
+      return a.heuristicIdx - b.heuristicIdx;
+    })
+    .map(r => r.g);
+
   if (noLocation.length) {
-    result.push({ key: 'no-location', label: NO_LOCATION_LABEL, items: noLocation.sort(byDescription) });
+    ranked.push({ key: 'no-location', label: NO_LOCATION_LABEL, items: noLocation.sort(byDescription) });
   }
-  return result;
+  return ranked;
 }
 
 /** Sanitize a manager-submitted zone order: strings only, trimmed, deduped, "Aisles" token guaranteed. */

@@ -8,7 +8,7 @@
 //   3. Sends only the computed field updates to the server for validation
 //      and saving (details, image_url, billed_by_weight — nothing else).
 import { useState, useRef, useEffect } from 'react';
-import { Sparkles, Loader2, X, CheckCircle2, AlertCircle, ImagePlus, FileText, Scale } from 'lucide-react';
+import { Sparkles, Loader2, X, CheckCircle2, AlertCircle, ImagePlus, FileText, Scale, MapPin } from 'lucide-react';
 import { adminFetch } from '@/lib/admin-auth';
 
 const APP_KEY = 'sinclair';
@@ -40,6 +40,12 @@ interface FreshopProduct {
   size?: string;
   cover_image?: string;
   is_weight_required?: boolean;
+  // Item location + Sinclair's own store walking order (verified live):
+  //   location / shopper_location: "Aisle 9b", "Dairy /", …
+  //   fulfillment_walkpath.sequence: the store's configured walk order
+  location?: string;
+  shopper_location?: string;
+  fulfillment_walkpath?: { name?: string; sequence?: number };
 }
 interface OurProduct {
   id: string;
@@ -47,10 +53,12 @@ interface OurProduct {
   details: string | null;
   image_url: string | null;
   billed_by_weight: boolean;
+  location: string | null;
+  location_seq: number | null;
 }
 interface Summary {
   ours: number; noUpc: number; matched: number;
-  images: number; details: number; weightFlags: number;
+  images: number; details: number; weightFlags: number; locations: number;
   indexed: number; unmatchedSample: string[];
 }
 
@@ -85,6 +93,16 @@ function detailsFrom(p: FreshopProduct): string | null {
 }
 function imageFrom(p: FreshopProduct): string | null {
   return p.cover_image ? `${IMAGE_BASE}/${p.cover_image}_large.png` : null;
+}
+// "Aisle 9b" / "Dairy /" → cleaned label; trailing slashes stripped
+function locationFrom(p: FreshopProduct): string | null {
+  const raw = (p.shopper_location || p.location || p.fulfillment_walkpath?.name || '').trim();
+  const cleaned = raw.replace(/\s*\/+\s*$/, '').trim();
+  return cleaned || null;
+}
+function locationSeqFrom(p: FreshopProduct): number | null {
+  const seq = p.fulfillment_walkpath?.sequence;
+  return typeof seq === 'number' && isFinite(seq) ? seq : null;
 }
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -297,6 +315,8 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
         ours.push(...(products || []).map((p: any) => ({
           id: p.id, upc: p.upc, details: p.details, image_url: p.image_url,
           billed_by_weight: !!p.billed_by_weight,
+          location: p.location ?? null,
+          location_seq: p.location_seq ?? null,
         })));
         if (!products?.length || ours.length >= (total || 0)) break;
       }
@@ -446,7 +466,7 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
 
       // Match + compute updates locally
       const updates: { id: string; fields: Record<string, unknown> }[] = [];
-      let matched = 0, images = 0, details = 0, weightFlags = 0, noUpc = 0;
+      let matched = 0, images = 0, details = 0, weightFlags = 0, locations = 0, noUpc = 0;
       const unmatchedSample: string[] = [];
       for (const product of ours) {
         if (!product.upc || !norm(product.upc)) { noUpc++; continue; }
@@ -463,11 +483,21 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
         if (newDetails && (overwrite || !product.details) && newDetails !== product.details) { fields.details = newDetails; details++; }
         if (newImage && (overwrite || !product.image_url) && newImage !== product.image_url) { fields.image_url = newImage; images++; }
         if (hit.is_weight_required && !product.billed_by_weight) { fields.billed_by_weight = true; weightFlags++; }
+        // Item location + walkpath order: operational data, ALWAYS kept in
+        // sync (stores rearrange aisles) — the overwrite toggle only guards
+        // cosmetic fields.
+        const newLocation = locationFrom(hit);
+        const newSeq = locationSeqFrom(hit);
+        if (newLocation && (newLocation !== product.location || newSeq !== product.location_seq)) {
+          fields.location = newLocation;
+          fields.location_seq = newSeq;
+          locations++;
+        }
         if (Object.keys(fields).length) updates.push({ id: product.id, fields });
       }
 
       updatesRef.current = updates;
-      setSummary({ ours: ours.length, noUpc, matched, images, details, weightFlags, indexed, unmatchedSample });
+      setSummary({ ours: ours.length, noUpc, matched, images, details, weightFlags, locations, indexed, unmatchedSample });
       setPhase('ready');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Scan failed');
@@ -619,6 +649,12 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
                     <FileText className="w-4 h-4 text-blue-600 shrink-0" />
                     <span><strong>{summary.details.toLocaleString()}</strong> customer-friendly descriptions will be added</span>
                   </div>
+                  {summary.locations > 0 && (
+                    <div className="flex items-center gap-2 text-sm bg-teal-50 rounded-lg px-3 py-2">
+                      <MapPin className="w-4 h-4 text-teal-600 shrink-0" />
+                      <span><strong>{summary.locations.toLocaleString()}</strong> aisle locations &amp; walk order updated (for shopping mode)</span>
+                    </div>
+                  )}
                   {summary.weightFlags > 0 && (
                     <div className="flex items-center gap-2 text-sm bg-amber-50 rounded-lg px-3 py-2">
                       <Scale className="w-4 h-4 text-amber-600 shrink-0" />

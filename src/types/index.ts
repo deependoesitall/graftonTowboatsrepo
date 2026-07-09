@@ -13,6 +13,8 @@ export interface Product {
   details: string | null;
   image_url: string | null;
   location: string | null;
+  /** Sinclair's walkpath stop number for this location (from Freshop). */
+  location_seq: number | null;
   pkg_size: string | null;
   uom: string | null;
   price: number;
@@ -186,6 +188,8 @@ export interface OrderItem {
   uom: string | null;
   upc: string | null;
   location: string | null;
+  /** Sinclair's walkpath stop number — snapshot at order time (may be null on old orders). */
+  location_seq: number | null;
   unit_price: number;
   quantity: number;
   line_total: number;

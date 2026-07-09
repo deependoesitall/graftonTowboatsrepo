@@ -490,23 +490,26 @@ export function ShoppingModeModal({ order, onClose, onComplete }: ShoppingModeMo
                   <div key={group.key} className="pb-1">
                     {/* Sticky group header — always know which aisle you're in */}
                     <div className="sticky top-0 z-[5] -mx-4 px-4 py-1.5 bg-gray-50/95 backdrop-blur-sm">
-                      <div className={`flex items-center gap-2 rounded-lg px-3 py-2 ${
+                      <div className={`flex items-center gap-3 rounded-xl px-3 py-2 shadow-sm ${
                         isNoLocation
                           ? 'bg-gray-100 border border-dashed border-gray-300'
-                          : 'bg-teal-50 border border-teal-200'
+                          : 'bg-gradient-to-r from-teal-600 to-teal-500 text-white'
                       }`}>
-                        <MapPin className={`w-4 h-4 shrink-0 ${isNoLocation ? 'text-gray-400' : 'text-teal-600'}`} />
-                        <span className={`text-sm font-bold ${isNoLocation ? 'text-gray-500' : 'text-teal-800'}`}>
+                        {effectiveView === 'aisle' && !isNoLocation ? (
+                          <span className="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center font-display font-bold text-sm shrink-0">
+                            {gi + 1}
+                          </span>
+                        ) : (
+                          <MapPin className={`w-4 h-4 shrink-0 ${isNoLocation ? 'text-gray-400' : 'text-white/80'}`} />
+                        )}
+                        <span className={`text-base font-display font-bold leading-tight ${isNoLocation ? 'text-gray-500 text-sm' : 'text-white'}`}>
                           {group.label}
                         </span>
-                        <span className={`text-xs ${isNoLocation ? 'text-gray-400' : 'text-teal-600'}`}>
+                        <span className={`ml-auto text-xs font-semibold rounded-full px-2 py-0.5 ${
+                          isNoLocation ? 'bg-white text-gray-400' : 'bg-white/20 text-white'
+                        }`}>
                           {group.items.length} item{group.items.length !== 1 ? 's' : ''}
                         </span>
-                        {effectiveView === 'aisle' && !isNoLocation && (
-                          <span className="ml-auto text-[10px] font-bold uppercase tracking-wide text-teal-500">
-                            Stop {gi + 1} of {pendingGroups.length}
-                          </span>
-                        )}
                       </div>
                     </div>
                     <div className="space-y-2 pt-1.5">
@@ -693,7 +696,7 @@ function ItemRow({
   return (
     <div className={`rounded-xl border overflow-hidden transition-all duration-300 ${cardBorder} ${pending ? 'shadow-sm' : ''}`}>
       {/* ── ITEM HEADER ── */}
-      <div className={`px-4 py-3 flex items-start gap-3 transition-colors duration-500 ${cardBg}`}>
+      <div className={`px-3.5 py-3 flex items-start gap-3 transition-colors duration-500 ${cardBg}`}>
         {/* Status dot */}
         <div className={`mt-0.5 w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${
           shopped ? 'bg-green-100' :
@@ -708,9 +711,22 @@ function ItemRow({
           }
         </div>
 
+        {/* Product photo — the fastest way to spot the right item on a shelf */}
+        {item.image_url ? (
+          <div className="w-16 h-16 shrink-0 bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={item.image_url} alt="" loading="lazy" decoding="async"
+              className={`w-full h-full object-contain p-1 ${outOfStock ? 'opacity-40 grayscale' : ''}`} />
+          </div>
+        ) : (
+          <div className="w-16 h-16 shrink-0 bg-gray-50 rounded-xl border border-dashed border-gray-200 flex items-center justify-center">
+            <ShoppingCart className="w-5 h-5 text-gray-200" />
+          </div>
+        )}
+
         {/* Content */}
         <div className="flex-1 min-w-0">
-          <div className="flex items-start justify-between gap-2">
+          <div className="flex items-start justify-between gap-3">
             <div className="flex-1 min-w-0">
               {outOfStock && (
                 <span className="inline-block text-[10px] font-bold uppercase tracking-wide text-red-500 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded mr-1.5 mb-1">
@@ -722,27 +738,30 @@ function ItemRow({
                   ✓ Saved
                 </span>
               )}
-              <p className={`text-sm font-bold leading-snug ${outOfStock ? 'line-through text-gray-400' : 'text-brand-navy'}`}>
+              <p className={`text-[15px] font-bold leading-snug ${outOfStock ? 'line-through text-gray-400' : 'text-brand-navy'}`}>
                 {item.description}
               </p>
-              {item.location && (
-                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-teal-700 bg-teal-50 border border-teal-200 rounded px-1.5 py-0.5 mt-0.5 mb-0.5 mr-1">
-                  📍 {item.location}
-                </span>
-              )}
-              {item.paid_by === 'cod' && (
-                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-purple-700 bg-purple-50 border border-purple-200 rounded px-1.5 py-0.5 mt-0.5 mb-0.5"
-                  title="Crew member pays at delivery — ring up separately, not on the company invoice">
-                  $ COD{item.cod_name ? ` — ${item.cod_name}` : ''} · ring separately
-                </span>
-              )}
-              <p className="text-xs text-gray-400 mt-0.5">
-                {item.upc && <span className="font-mono mr-2">{item.upc}</span>}
-                Qty: <strong>{item.quantity}</strong>
-                {item.pkg_size && <span className="ml-1">· {item.pkg_size}</span>}
-                {weight && (
-                  <span className="ml-1.5 text-brand-orange font-semibold">· By Weight (LB)</span>
+              <div className="flex flex-wrap items-center gap-1 mt-1">
+                {item.location && (
+                  <span className="inline-flex items-center gap-1 text-xs font-bold text-teal-800 bg-teal-50 border border-teal-200 rounded-md px-2 py-0.5">
+                    <MapPin className="w-3 h-3 shrink-0" /> {item.location}
+                  </span>
                 )}
+                {weight && (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-brand-orange bg-orange-50 border border-orange-200 rounded-md px-1.5 py-0.5">
+                    <Scale className="w-3 h-3" /> By Weight
+                  </span>
+                )}
+                {item.paid_by === 'cod' && (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-purple-700 bg-purple-50 border border-purple-200 rounded-md px-1.5 py-0.5"
+                    title="Crew member pays at delivery — ring up separately, not on the company invoice">
+                    $ COD{item.cod_name ? ` — ${item.cod_name}` : ''} · ring separately
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-gray-400 mt-1">
+                {item.upc && <span className="font-mono mr-2">{item.upc}</span>}
+                {item.pkg_size && <span>{item.pkg_size}</span>}
               </p>
               {item.actual_weight != null && (
                 <p className="text-xs text-green-700 font-semibold mt-0.5">
@@ -750,10 +769,20 @@ function ItemRow({
                 </p>
               )}
             </div>
-            <div className="text-right shrink-0">
-              <p className="text-xs text-gray-400">{formatCurrency(item.unit_price)}{weight ? '/lb' : ''}</p>
-              <p className={`text-sm font-bold ${outOfStock ? 'text-gray-300 line-through' : 'text-brand-navy'}`}>
-                {formatCurrency(effectiveTotal)}
+            {/* Quantity — huge on purpose: grabbing the wrong count is the #1 shopping mistake */}
+            <div className="text-right shrink-0 flex flex-col items-end gap-1">
+              <span className={`inline-flex items-baseline rounded-xl px-2.5 py-1.5 font-display font-bold leading-none ${
+                outOfStock ? 'bg-gray-100 text-gray-300 line-through text-lg'
+                : pending ? 'bg-brand-navy text-white text-2xl shadow-sm'
+                : 'bg-green-100 text-green-700 text-lg'
+              }`}>
+                <span className="text-xs font-body opacity-60 mr-0.5">×</span>{item.quantity}
+              </span>
+              <p className="text-[11px] text-gray-400 leading-tight">
+                {formatCurrency(item.unit_price)}{weight ? '/lb' : ''}
+                <span className={`block text-sm font-bold ${outOfStock ? 'text-gray-300 line-through' : 'text-brand-navy'}`}>
+                  {formatCurrency(effectiveTotal)}
+                </span>
               </p>
             </div>
           </div>
@@ -772,29 +801,33 @@ function ItemRow({
             </div>
           )}
 
-          {/* Action buttons — pending, non-sub items only */}
+          {/* Action buttons — pending, non-sub items only. Big targets: shoppers tap with a cart in one hand. */}
           {!item.is_substitution && pending && ui.uiState === 'idle' && (
-            <div className="flex gap-2 mt-3 flex-wrap">
+            <div className="flex gap-2 mt-3">
               <button
                 onClick={onShopped}
                 disabled={ui.saving}
-                className="flex items-center gap-1.5 bg-green-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-green-600 transition-colors disabled:opacity-50"
+                className="flex-[1.4] flex items-center justify-center gap-1.5 bg-green-500 text-white text-sm font-bold py-2.5 rounded-xl hover:bg-green-600 active:scale-[0.98] transition-all shadow-sm disabled:opacity-50"
               >
-                {ui.saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                {ui.saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
                 Shopped
               </button>
               <button
                 onClick={onOpenWeight}
-                className="flex items-center gap-1.5 bg-brand-orange text-white text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-orange-700 transition-colors"
+                className={`flex items-center justify-center gap-1.5 text-sm font-bold py-2.5 rounded-xl active:scale-[0.98] transition-all ${
+                  weight
+                    ? 'flex-[1.4] bg-brand-orange text-white hover:bg-orange-700 shadow-sm'
+                    : 'flex-1 bg-orange-50 text-brand-orange border border-orange-200 hover:bg-orange-100'
+                }`}
               >
-                <Scale className="w-3 h-3" />
-                {weight ? 'Enter Weight' : 'By Weight'}
+                <Scale className="w-4 h-4" />
+                {weight ? 'Weight' : 'By Wt.'}
               </button>
               <button
                 onClick={onOpenSub}
-                className="flex items-center gap-1.5 bg-gray-200 text-gray-700 text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-gray-300 transition-colors"
+                className="flex-1 flex items-center justify-center gap-1.5 bg-white text-gray-500 border border-gray-200 text-sm font-bold py-2.5 rounded-xl hover:bg-gray-50 active:scale-[0.98] transition-all"
               >
-                <PackageX className="w-3 h-3" /> Out of Stock
+                <PackageX className="w-4 h-4" /> O.O.S.
               </button>
             </div>
           )}
