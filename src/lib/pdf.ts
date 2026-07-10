@@ -14,6 +14,15 @@ export function generateOrderHTML(order: Order): string {
   const serviceItems = order.items.filter(i => i.item_type === 'service');
   const codItems     = groceryItems.filter(i => i.paid_by === 'cod');
   const codSubtotal  = codItems.reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0);
+  // CODs separated per crew member — each settles their own total
+  const codByName = Array.from(codItems.reduce((acc, i) => {
+    const name = (i.cod_name || '').trim() || 'Crew member';
+    if (!acc.has(name)) acc.set(name, [] as typeof codItems);
+    acc.get(name)!.push(i);
+    return acc;
+  }, new Map<string, typeof codItems>()).entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  const discounts = order.discounts || [];
+  const discountTotal = Number(order.discount_total) || 0;
   const codMethodLabel = order.cod_payment_method === 'credit_card' ? 'Credit Card — call to collect'
     : order.cod_payment_method === 'venmo' ? 'Venmo'
     : order.cod_payment_method === 'cash' ? 'Cash' : null;
@@ -247,10 +256,16 @@ ${order.crew_change === 'maybe' ? `
 <!-- ===== COD ITEMS (per-line paid_by) ===== -->
 ${codItems.length > 0 ? `
 <div style="border:3px solid #9333ea;padding:14px 20px;background:#faf5ff;border-radius:4px;margin-bottom:16px;">
-  <div style="font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:#9333ea;margin-bottom:6px;">&#36; COD Items &mdash; Collect ${formatCurrency(codSubtotal)} on Delivery</div>
-  <div style="font-size:11px;color:#555;">These items are paid personally by a crew member and are NOT part of the company invoice.</div>
+  <div style="font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:#9333ea;margin-bottom:6px;">&#36; COD Items &mdash; Collect ${formatCurrency(codSubtotal)} on Delivery &middot; Separated by Crew Member</div>
+  <div style="font-size:11px;color:#555;">Each crew member pays their own total personally — NOT part of the company invoice.</div>
   <div style="margin-top:6px;font-size:12px;color:#333;">
-    ${codItems.map(i => `<div>${i.quantity}&times; ${i.description} &mdash; <strong>${i.cod_name || 'crew member'}</strong> &middot; ${formatCurrency(i.actual_total ?? i.line_total)}</div>`).join('')}
+    ${codByName.map(([name, list]) => {
+      const personTotal = list.reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0);
+      return `<div style="margin-bottom:5px;">
+        <div style="font-weight:800;color:#6b21a8;">${name} &mdash; ${formatCurrency(personTotal)}</div>
+        ${list.map(i => `<div style="padding-left:12px;font-size:11px;color:#444;">${i.quantity}&times; ${i.description} &middot; ${formatCurrency(i.actual_total ?? i.line_total)}</div>`).join('')}
+      </div>`;
+    }).join('')}
   </div>
   ${codMethodLabel ? `<div style="margin-top:8px;padding-top:8px;border-top:1px solid #e9d5ff;font-size:11px;color:#6b21a8;">
     <strong>Payment method:</strong> ${codMethodLabel}${
@@ -299,10 +314,18 @@ ${groceryItems.length > 0 ? `
           <td style="padding:6px 8px;font-size:11px;color:#555;">Subtotal (${itemCount} items)</td>
           <td style="padding:6px 8px;text-align:right;font-weight:700;">${formatCurrency(order.subtotal)}</td>
         </tr>
+        ${discounts.map(d => `<tr>
+          <td style="padding:4px 8px;font-size:10px;color:#15803d;font-weight:700;">&#127991; ${d.name}${d.description ? `<div style="font-weight:400;font-size:9px;color:#4d7c5f;">${d.description}</div>` : ''}</td>
+          <td style="padding:4px 8px;text-align:right;font-size:11px;font-weight:800;color:#15803d;">&minus;${formatCurrency(Number(d.amount))}</td>
+        </tr>`).join('')}
         <tr>
           <td style="padding:8px;font-size:14px;font-weight:900;color:#1E3D1E;text-transform:uppercase;">ESTIMATED TOTAL</td>
           <td style="padding:8px;text-align:right;font-size:16px;font-weight:900;color:#1E3D1E;">${formatCurrency(order.subtotal)}</td>
         </tr>
+        ${discountTotal > 0 ? `<tr style="background:#dcfce7;">
+          <td style="padding:7px 8px;font-size:11px;font-weight:900;color:#15803d;text-transform:uppercase;">After est. coupon savings (&minus;${formatCurrency(discountTotal)})</td>
+          <td style="padding:7px 8px;text-align:right;font-size:14px;font-weight:900;color:#15803d;">${formatCurrency(Math.max(0, Number(order.subtotal) - discountTotal))}</td>
+        </tr>` : ''}
       </table>
     </td>
   </tr>

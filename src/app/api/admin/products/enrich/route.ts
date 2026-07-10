@@ -13,7 +13,7 @@ import { requireAdmin } from '@/lib/admin-auth-server';
 
 const ALLOWED_FIELDS = new Set([
   'details', 'image_url', 'billed_by_weight', 'location', 'location_seq', 'price',
-  'quantity_step', 'quantity_label', 'quantity_size_ratio',
+  'quantity_step', 'quantity_label', 'quantity_size_ratio', 'freshop_id',
 ]);
 const MAX_UPDATES = 3000;
 
@@ -69,6 +69,9 @@ export async function POST(req: NextRequest) {
       if (key === 'quantity_label' && value !== null && (typeof value !== 'string' || value.length > 40)) {
         return NextResponse.json({ error: 'quantity_label must be a short string or null' }, { status: 400 });
       }
+      if (key === 'freshop_id' && (typeof value !== 'string' || value.length > 40 || !/^[\w-]+$/.test(value))) {
+        return NextResponse.json({ error: 'freshop_id must be a short id string' }, { status: 400 });
+      }
     }
   }
 
@@ -96,7 +99,7 @@ export async function POST(req: NextRequest) {
       order_id: null,
       order_number: null,
       action: 'catalog_enriched',
-      from_value: "Sinclair's website (Freshop)",
+      from_value: "Sinclair's website",
       to_value: `${body.log.total_applied ?? applied} products updated — ${body.log.images ?? 0} images, ${body.log.details ?? 0} descriptions, ${body.log.weight_flags ?? 0} weight flags`,
       admin_username: session.username,
       admin_display_name: session.display_name,

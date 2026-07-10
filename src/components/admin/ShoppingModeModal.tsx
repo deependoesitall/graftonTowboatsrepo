@@ -518,6 +518,16 @@ export function ShoppingModeModal({ order, onClose, onComplete }: ShoppingModeMo
           />
         </div>
 
+        {/* ── DIGITAL COUPONS on this order — heads-up for the register ── */}
+        {(order.discounts?.length ?? 0) > 0 && (
+          <div className="bg-green-50 border-b border-green-200 px-4 py-2 shrink-0">
+            <p className="text-xs font-bold text-green-800">
+              🏷 {order.discounts!.length} digital coupon{order.discounts!.length !== 1 ? 's' : ''} on this order — est. −{formatCurrency(Number(order.discount_total) || 0)}
+              <span className="font-normal text-green-700"> · applies at the register: {order.discounts!.map(d => d.name).join(', ')}</span>
+            </p>
+          </div>
+        )}
+
         {/* ── VIEW TOGGLE — walk the store in order vs. browse by category ── */}
         {pendingItems.length > 0 && (
           <div className="bg-white border-b border-gray-200 px-4 py-2 flex items-center justify-between shrink-0">

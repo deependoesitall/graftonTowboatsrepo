@@ -240,6 +240,12 @@ export default function OrderPage() {
   const [authOpen, setAuthOpen] = useState(false);
   const [emailHasAccount, setEmailHasAccount] = useState(false);
   const [cutoffs, setCutoffs] = useState({ grocery_cutoff_hours: 4, service_cutoff_hours: 2 });
+  // Digital coupons — same rules Sinclair's own site applies (no clipping).
+  // Preview only; the server recomputes and snapshots at submission.
+  const [deals, setDeals] = useState<Array<{
+    id: string; name: string; description: string | null;
+    amount: number; min_qty: number; redemption_limit: number; product_ids: string[];
+  }>>([]);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
   const { toast } = useToast();
@@ -261,6 +267,12 @@ export default function OrderPage() {
     fetch('/api/order-config')
       .then(r => r.ok ? r.json() : null)
       .then(cfg => { if (cfg) setCutoffs(cfg); })
+      .catch(() => {});
+
+    // Active digital coupons (empty when the manager toggle is off)
+    fetch('/api/active-deals')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.deals) setDeals(d.deals); })
       .catch(() => {});
 
     (async () => {
@@ -449,6 +461,29 @@ export default function OrderPage() {
   const codSubtotal    = getCodSubtotal(items);
   const codItems       = items.filter(i => i.paid_by === 'cod');
   const hasCod         = codItems.length > 0;
+
+  // CODs are separated PER CREW MEMBER — each person settles their own
+  // total at delivery ("that's a Daniel item, that's Janice" — Jen).
+  const codByName: [string, number][] = Array.from(
+    codItems.reduce((acc, i) => {
+      const name = (i.cod_name || '').trim() || 'Crew member';
+      acc.set(name, (acc.get(name) || 0) + i.price * i.quantity);
+      return acc;
+    }, new Map<string, number>()).entries()
+  ).sort((a, b) => a[0].localeCompare(b[0]));
+
+  // Digital coupon preview — vessel-account items only (CODs ring separately)
+  const appliedDeals = deals.flatMap(deal => {
+    const idSet = new Set(deal.product_ids);
+    const qty = items
+      .filter(i => i.paid_by !== 'cod' && idSet.has(i.product_id))
+      .reduce((s, i) => s + i.quantity, 0);
+    if (qty < deal.min_qty) return [];
+    const redemptions = Math.min(deal.redemption_limit, Math.floor(qty / deal.min_qty));
+    if (redemptions < 1) return [];
+    return [{ name: deal.name, description: deal.description, amount: Math.round(deal.amount * redemptions * 100) / 100 }];
+  });
+  const couponSavings = Math.round(appliedDeals.reduce((s, d) => s + d.amount, 0) * 100) / 100;
   const activeSvcs = [
     services.parts_pickup.enabled      && 'parts_pickup',
     services.package_delivery.enabled  && 'package_delivery',
@@ -532,9 +567,30 @@ export default function OrderPage() {
                       <span className="text-gray-600 font-semibold">Vessel Account subtotal</span>
                       <span className="font-bold text-brand-navy">{formatCurrency(vesselSubtotal)}</span>
                     </div>
-                    <div className="flex justify-between items-center text-sm">
-                      <span className="text-purple-700 font-semibold">COD subtotal <span className="font-normal text-purple-500">— due on delivery</span></span>
-                      <span className="font-bold text-purple-700">{formatCurrency(codSubtotal)}</span>
+                    {/* CODs separated per crew member — each settles their own */}
+                    {codByName.map(([name, total]) => (
+                      <div key={name} className="flex justify-between items-center text-sm">
+                        <span className="text-purple-700 font-semibold">COD — {name} <span className="font-normal text-purple-500">· due on delivery</span></span>
+                        <span className="font-bold text-purple-700">{formatCurrency(total)}</span>
+                      </div>
+                    ))}
+                    <div className="border-t border-brand-gold/30 pt-1.5" />
+                  </>
+                )}
+                {/* Digital coupons — applied automatically, same as Sinclair's site */}
+                {appliedDeals.length > 0 && (
+                  <>
+                    {appliedDeals.map((d, i) => (
+                      <div key={i} className="flex justify-between items-center text-sm">
+                        <span className="text-green-700 font-semibold">🏷 {d.name}
+                          {d.description && <span className="block text-[10px] font-normal text-green-600/80 leading-tight max-w-[260px]">{d.description}</span>}
+                        </span>
+                        <span className="font-bold text-green-700 shrink-0">−{formatCurrency(d.amount)}</span>
+                      </div>
+                    ))}
+                    <div className="flex justify-between items-center text-xs text-green-700">
+                      <span className="font-bold">Estimated coupon savings <span className="font-normal text-green-600/70">— confirmed when shopped</span></span>
+                      <span className="font-bold">−{formatCurrency(couponSavings)}</span>
                     </div>
                     <div className="border-t border-brand-gold/30 pt-1.5" />
                   </>
@@ -563,6 +619,12 @@ export default function OrderPage() {
                   </div>
                   <span className="font-display text-2xl font-bold text-brand-navy">{formatCurrency(groceryTotal)}</span>
                 </div>
+                {couponSavings > 0 && (
+                  <div className="flex justify-between items-center pt-0.5">
+                    <span className="text-sm font-bold text-green-700">Estimated total after coupons</span>
+                    <span className="font-display text-lg font-bold text-green-700">{formatCurrency(Math.max(0, groceryTotal - couponSavings))}</span>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -572,7 +634,16 @@ export default function OrderPage() {
         {hasCod && (
           <section className="card-base mb-4 p-5 border-2 border-purple-200">
             <SectionHead icon={<ClipboardList className="w-4 h-4" />} title="COD Payment — due on delivery"
-              sub={`${codItems.length} item${codItems.length !== 1 ? 's' : ''} · ${formatCurrency(codSubtotal)} — paid by the crew member, separate from the company invoice`} />
+              sub={`${formatCurrency(codSubtotal)} total — paid by each crew member personally, separate from the company invoice`} />
+            {/* Per-person breakdown — each crew member settles their own */}
+            <div className="mb-3 bg-purple-50/60 border border-purple-100 rounded-lg divide-y divide-purple-100">
+              {codByName.map(([name, total]) => (
+                <div key={name} className="flex justify-between items-center px-3 py-1.5 text-sm">
+                  <span className="font-semibold text-purple-800">{name}</span>
+                  <span className="font-bold text-purple-800">{formatCurrency(total)}</span>
+                </div>
+              ))}
+            </div>
             {errors.cod_payment_method && <p className="text-xs text-red-500 mb-2">{errors.cod_payment_method}</p>}
             <div className="flex gap-3 mb-3">
               {([['cash', '💵 Cash'], ['venmo', 'Venmo'], ['credit_card', '💳 Credit Card']] as const).map(([val, lbl]) => (
@@ -1067,14 +1138,26 @@ export default function OrderPage() {
                     <span className="text-gray-600">Vessel Account subtotal</span>
                     <span className="font-bold text-brand-navy">{formatCurrency(vesselSubtotal)}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-purple-700">COD subtotal — due on delivery
-                      {vessel.cod_payment_method && (
-                        <span className="text-purple-500"> · {vessel.cod_payment_method === 'credit_card' ? 'credit card (we’ll call)' : vessel.cod_payment_method}</span>
-                      )}
-                    </span>
-                    <span className="font-bold text-purple-700">{formatCurrency(codSubtotal)}</span>
-                  </div>
+                  {codByName.map(([name, total]) => (
+                    <div key={name} className="flex justify-between">
+                      <span className="text-purple-700">COD — {name}
+                        {vessel.cod_payment_method && (
+                          <span className="text-purple-500"> · {vessel.cod_payment_method === 'credit_card' ? 'credit card (we’ll call)' : vessel.cod_payment_method}</span>
+                        )}
+                      </span>
+                      <span className="font-bold text-purple-700">{formatCurrency(total)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {appliedDeals.length > 0 && (
+                <div className="px-4 py-2.5 space-y-1 text-sm bg-white">
+                  {appliedDeals.map((d, i) => (
+                    <div key={i} className="flex justify-between">
+                      <span className="text-green-700">🏷 {d.name}</span>
+                      <span className="font-bold text-green-700">−{formatCurrency(d.amount)}</span>
+                    </div>
+                  ))}
                 </div>
               )}
               <div className="px-4 py-3 flex justify-between items-center font-bold bg-brand-sand/30">
@@ -1101,6 +1184,12 @@ export default function OrderPage() {
                 </span>
                 <span className="text-brand-navy text-lg">{formatCurrency(groceryTotal)}</span>
               </div>
+              {couponSavings > 0 && (
+                <div className="px-4 pb-3 -mt-1 flex justify-between font-bold text-green-700 text-sm bg-brand-sand/30">
+                  <span>After estimated coupon savings</span>
+                  <span>{formatCurrency(Math.max(0, groceryTotal - couponSavings))}</span>
+                </div>
+              )}
             </div>
           </section>
         )}

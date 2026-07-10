@@ -33,6 +33,7 @@ const RESUME_PROBE_WAIT_SECS = 120;
 const RESUME_MAX_PROBES = 15;
 
 interface FreshopProduct {
+  id?: string | number; // Sinclair's internal product id — offers reference it
   upc?: string;
   barcode_upc_a?: string;
   barcode_ean13?: string;
@@ -68,6 +69,7 @@ interface OurProduct {
   quantity_step: number | null;
   quantity_label: string | null;
   quantity_size_ratio: number | null;
+  freshop_id: string | null;
 }
 interface Summary {
   ours: number; noUpc: number; matched: number;
@@ -343,6 +345,7 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
           quantity_step: p.quantity_step ?? null,
           quantity_label: p.quantity_label ?? null,
           quantity_size_ratio: p.quantity_size_ratio ?? null,
+          freshop_id: p.freshop_id ?? null,
         })));
         if (!products?.length || ours.length >= (total || 0)) break;
       }
@@ -535,6 +538,12 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
           fields.quantity_step = newStep;
           fields.quantity_label = newLabel;
           fields.quantity_size_ratio = newRatio;
+        }
+        // Sinclair's internal product id — digital coupons reference products
+        // by this id, so the coupon engine needs it. Always synced.
+        const newFreshopId = hit.id != null ? String(hit.id) : null;
+        if (newFreshopId && newFreshopId !== product.freshop_id) {
+          fields.freshop_id = newFreshopId;
         }
         if (Object.keys(fields).length) updates.push({ id: product.id, fields });
       }

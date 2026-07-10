@@ -136,14 +136,22 @@ function ConfirmContent() {
                   </div>
                 ))}
               </div>
-              <div className="bg-brand-sand/40 px-4 py-3 flex justify-between items-center">
-                <span className="flex items-center gap-2">
-                  <span className="font-bold text-brand-navy">Estimated Total</span>
-                  <EstimatedInfo />
-                </span>
-                <span className="font-display text-lg font-bold text-brand-navy">
-                  {formatCurrency(order.subtotal)}
-                </span>
+              <div className="bg-brand-sand/40 px-4 py-3">
+                <div className="flex justify-between items-center">
+                  <span className="flex items-center gap-2">
+                    <span className="font-bold text-brand-navy">Estimated Total</span>
+                    <EstimatedInfo />
+                  </span>
+                  <span className="font-display text-lg font-bold text-brand-navy">
+                    {formatCurrency(order.subtotal)}
+                  </span>
+                </div>
+                {(Number(order.discount_total) || 0) > 0 && (
+                  <div className="flex justify-between items-center mt-0.5 text-sm font-bold text-green-700">
+                    <span>🏷 After estimated coupon savings (−{formatCurrency(Number(order.discount_total))})</span>
+                    <span>{formatCurrency(Math.max(0, order.subtotal - Number(order.discount_total)))}</span>
+                  </div>
+                )}
               </div>
             </div>
           )}

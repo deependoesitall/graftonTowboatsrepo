@@ -243,6 +243,9 @@ function AccountContent() {
                     </p>
                     <p className="text-xs text-brand-green/40 mt-0.5">
                       {order.items?.length || 0} line items · <span className="font-bold text-brand-green">{formatCurrency(order.subtotal)}</span>
+                      {(Number(order.discount_total) || 0) > 0 && (
+                        <span className="ml-1.5 text-green-600 font-semibold">🏷 −{formatCurrency(Number(order.discount_total))} coupons</span>
+                      )}
                     </p>
                     {/* Product thumbnails — the little dopamine strip */}
                     {(order.items || []).some(i => i.image_url) && (

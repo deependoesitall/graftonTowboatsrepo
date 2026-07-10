@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
   // totals/exports client-side — they're settled at delivery, never invoiced.
   let query = supabase
     .from('orders')
-    .select('id, order_number, company_name, contact_name, phone, customer_email, po_number, vessel_name, terminal_name, delivery_method, arrival_date, arrival_time, subtotal, status, created_at, extended_info, items:order_items(id, description, category, pkg_size, uom, upc, quantity, unit_price, line_total, shopping_status, actual_total, actual_weight, is_substitution, substitutes_item_id, item_type, service_type, service_details, paid_by, cod_name)')
+    .select('id, order_number, company_name, contact_name, phone, customer_email, po_number, vessel_name, terminal_name, delivery_method, arrival_date, arrival_time, subtotal, discount_total, status, created_at, extended_info, items:order_items(id, description, category, pkg_size, uom, upc, quantity, unit_price, line_total, shopping_status, actual_total, actual_weight, is_substitution, substitutes_item_id, item_type, service_type, service_details, paid_by, cod_name), discounts:order_discounts(id, name, description, amount)')
     .neq('status', 'cancelled')
     .order('company_name', { ascending: true })
     .order('created_at', { ascending: true });

@@ -295,15 +295,29 @@ export function OrderDetailModal({
             {codItems.length > 0 && (
               <div className="bg-purple-50 border-2 border-purple-300 rounded-lg p-3">
                 <p className="text-xs font-bold text-purple-700 uppercase tracking-wide mb-2">
-                  $ COD Items — collect {formatCurrency(codSubtotal)} on delivery (not on the company invoice)
+                  $ COD Items — collect {formatCurrency(codSubtotal)} on delivery · separated by crew member (not on the company invoice)
                 </p>
-                <div className="space-y-1 mb-2">
-                  {codItems.map(i => (
-                    <p key={i.id} className="text-sm text-purple-900">
-                      <span className="font-bold">{i.quantity}×</span> {i.description}
-                      <span className="text-purple-600"> — {i.cod_name || 'crew member'} · {formatCurrency(i.actual_total ?? i.unit_price * i.quantity)}</span>
-                    </p>
-                  ))}
+                <div className="space-y-2 mb-2">
+                  {Array.from(codItems.reduce((acc, i) => {
+                    const name = (i.cod_name || '').trim() || 'Crew member';
+                    if (!acc.has(name)) acc.set(name, [] as typeof codItems);
+                    acc.get(name)!.push(i);
+                    return acc;
+                  }, new Map<string, typeof codItems>()).entries())
+                    .sort((a, b) => a[0].localeCompare(b[0]))
+                    .map(([name, list]) => (
+                      <div key={name} className="bg-white/60 rounded-lg px-2.5 py-1.5">
+                        <p className="text-sm font-bold text-purple-800 flex justify-between">
+                          <span>{name}</span>
+                          <span>{formatCurrency(list.reduce((s, i) => s + Number(i.actual_total ?? i.unit_price * i.quantity), 0))}</span>
+                        </p>
+                        {list.map(i => (
+                          <p key={i.id} className="text-xs text-purple-900 pl-2">
+                            {i.quantity}× {i.description} · {formatCurrency(i.actual_total ?? i.unit_price * i.quantity)}
+                          </p>
+                        ))}
+                      </div>
+                    ))}
                 </div>
                 <div className="text-xs text-purple-800 border-t border-purple-200 pt-2 space-y-0.5">
                   {codMethodLabel && <p><strong>Payment method:</strong> {codMethodLabel}</p>}
@@ -313,6 +327,23 @@ export function OrderDetailModal({
                       {order.cod_contact_time && <> · <strong>Best time:</strong> {order.cod_contact_time}</>}
                     </p>
                   )}
+                </div>
+              </div>
+            )}
+
+            {/* Digital coupons applied at checkout — estimates until rung up */}
+            {(order.discounts?.length ?? 0) > 0 && (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                <p className="text-xs font-bold text-green-700 uppercase tracking-wide mb-1.5">
+                  🏷 Digital coupons — est. {formatCurrency(Number(order.discount_total) || 0)} savings (Sinclair&apos;s confirms at the register)
+                </p>
+                <div className="space-y-1">
+                  {order.discounts!.map(d => (
+                    <p key={d.id} className="text-sm text-green-900 flex justify-between gap-3">
+                      <span>{d.name}{d.description && <span className="block text-xs text-green-700/80">{d.description}</span>}</span>
+                      <span className="font-bold shrink-0">−{formatCurrency(Number(d.amount))}</span>
+                    </p>
+                  ))}
                 </div>
               </div>
             )}

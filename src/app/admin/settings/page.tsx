@@ -360,7 +360,9 @@ export default function AdminSettingsPage() {
   }
 
   const allTabs = [
-    { key: 'logs',     label: 'Logs',         ownerOnly: true },
+    // Managers get the log too — server-side scoped to Sinclair-relevant
+    // entries (order shopping / status changes, catalog activity).
+    { key: 'logs',     label: 'Logs',         ownerOnly: false },
     { key: 'general',  label: 'General',      ownerOnly: true },
     { key: 'sinclair', label: "Sinclair's",   ownerOnly: false },
     { key: 'password', label: 'Password',     ownerOnly: false },
@@ -534,14 +536,21 @@ export default function AdminSettingsPage() {
                           </button>
                         </div>
                       ) : log.note ? (
-                        <button
-                          onClick={() => { setEditingNoteId(log.id); setNoteDraft(log.note || ''); }}
-                          className="text-xs text-gray-500 bg-brand-sand/30 hover:bg-brand-sand/50 rounded-lg px-2.5 py-1.5 inline-flex items-start gap-1.5 max-w-full text-left transition-colors"
-                        >
-                          <MessageSquarePlus className="w-3 h-3 mt-0.5 shrink-0 text-brand-river" />
-                          <span className="truncate">{log.note}</span>
-                        </button>
-                      ) : (
+                        sessionRole === 'owner' ? (
+                          <button
+                            onClick={() => { setEditingNoteId(log.id); setNoteDraft(log.note || ''); }}
+                            className="text-xs text-gray-500 bg-brand-sand/30 hover:bg-brand-sand/50 rounded-lg px-2.5 py-1.5 inline-flex items-start gap-1.5 max-w-full text-left transition-colors"
+                          >
+                            <MessageSquarePlus className="w-3 h-3 mt-0.5 shrink-0 text-brand-river" />
+                            <span className="truncate">{log.note}</span>
+                          </button>
+                        ) : (
+                          <span className="text-xs text-gray-500 bg-brand-sand/30 rounded-lg px-2.5 py-1.5 inline-flex items-start gap-1.5 max-w-full">
+                            <MessageSquarePlus className="w-3 h-3 mt-0.5 shrink-0 text-brand-river" />
+                            <span className="truncate">{log.note}</span>
+                          </span>
+                        )
+                      ) : sessionRole === 'owner' ? (
                         <button
                           onClick={() => { setEditingNoteId(log.id); setNoteDraft(''); }}
                           className="text-[11px] text-gray-300 hover:text-brand-river inline-flex items-center gap-1 transition-colors"
@@ -549,7 +558,7 @@ export default function AdminSettingsPage() {
                           <MessageSquarePlus className="w-3 h-3" />
                           Add note
                         </button>
-                      )}
+                      ) : null}
                     </div>
                   </div>
                 ))}

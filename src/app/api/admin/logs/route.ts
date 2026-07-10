@@ -1,11 +1,21 @@
 // src/app/api/admin/logs/route.ts
+//
+// Role scoping:
+//   Owner   — full activity log (everything, including GTS-only business).
+//   Manager — Sinclair-relevant entries only: order shopping / status
+//             changes and catalog activity. GTS-side business (deletions,
+//             billing, etc.) stays out of their view.
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/admin-auth-server';
 
+// Actions a Sinclair manager may see — the store side of the operation.
+const MANAGER_ACTIONS = ['status_change', 'catalog_enriched', 'catalog_import'];
+
 export async function GET(req: NextRequest) {
-  const session = requireAdmin(req, { ownerOnly: true });
+  const session = requireAdmin(req, { area: 'settings' });
   if (session instanceof NextResponse) return session;
+  const isOwner = session.role === 'owner';
 
   const { searchParams } = new URL(req.url);
   const page = parseInt(searchParams.get('page') || '1');
@@ -20,6 +30,11 @@ export async function GET(req: NextRequest) {
     .select('*', { count: 'exact' })
     .order('created_at', { ascending: false })
     .range(offset, offset + perPage - 1);
+
+  // Managers see only the Sinclair-relevant slice
+  if (!isOwner) {
+    query = query.in('action', MANAGER_ACTIONS);
+  }
 
   if (search) {
     const term = search.replace(/[%_]/g, ''); // strip wildcard chars from user input

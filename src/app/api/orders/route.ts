@@ -19,6 +19,7 @@ async function getUserIdFromToken(req: NextRequest): Promise<string | null> {
 }
 
 import { generateOrderNumber } from '@/lib/utils';
+import { fetchActiveDeals, computeDiscounts } from '@/lib/sinclair-offers';
 import { sendOrderReceivedEmail } from '@/lib/email';
 import { Order } from '@/types';
 import { requireAdmin, hasPermission } from '@/lib/admin-auth-server';
@@ -245,19 +246,21 @@ export async function POST(req: NextRequest) {
     }
 
     const allOrderItems: Record<string, unknown>[] = [];
+    const freshopMap: Record<string, string | null> = {};
 
     if (items.length > 0) {
       const productIds = items.map(i => i.product_id).filter(Boolean);
-      const { data: products } = await supabase.from('products').select('id, upc, location, location_seq, image_url').in('id', productIds);
+      const { data: products } = await supabase.from('products').select('id, upc, location, location_seq, image_url, freshop_id').in('id', productIds);
       const upcMap: Record<string, string | null> = {};
       const locationMap: Record<string, string | null> = {};
       const locationSeqMap: Record<string, number | null> = {};
       const imageMap: Record<string, string | null> = {};
-      (products || []).forEach((p: { id: string; upc: string | null; location: string | null; location_seq: number | null; image_url: string | null }) => {
+      (products || []).forEach((p: { id: string; upc: string | null; location: string | null; location_seq: number | null; image_url: string | null; freshop_id?: string | null }) => {
         upcMap[p.id] = p.upc;
         locationMap[p.id] = p.location;
         locationSeqMap[p.id] = p.location_seq;
         imageMap[p.id] = p.image_url;
+        freshopMap[p.id] = p.freshop_id ?? null;
       });
 
       items.forEach(item => {
@@ -353,9 +356,42 @@ export async function POST(req: NextRequest) {
       await supabase.from('order_items').insert(allOrderItems);
     }
 
+    // ── Digital coupons — auto-applied like Sinclair's own site ──
+    // Gated on the Sinclair manager's toggle: off = nothing applied. COD
+    // lines don't qualify (rung separately at the register). Savings are
+    // ESTIMATES until the order is shopped.
+    try {
+      const { data: couponCfg } = await supabase
+        .from('admin_settings')
+        .select('show_digital_coupons')
+        .single();
+      if ((couponCfg?.show_digital_coupons ?? true) && items.length > 0) {
+        const deals = await fetchActiveDeals();
+        const applied = computeDiscounts(
+          items.map(i => ({
+            freshop_id: freshopMap[i.product_id] ?? null,
+            quantity: i.quantity,
+            paid_by: i.paid_by === 'cod' ? 'cod' as const : 'vessel' as const,
+          })),
+          deals,
+        );
+        if (applied.length > 0) {
+          const discountTotal = Math.round(applied.reduce((s, d) => s + d.amount, 0) * 100) / 100;
+          await supabase.from('order_discounts').insert(
+            applied.map(d => ({ order_id: order.id, ...d }))
+          );
+          await supabase.from('orders').update({ discount_total: discountTotal }).eq('id', order.id);
+        }
+      }
+    } catch (err) {
+      // Coupon evaluation must never block an order — worst case the savings
+      // simply show up on the final invoice like before.
+      console.error('Coupon evaluation error:', err);
+    }
+
     const { data: fullOrder } = await supabase
       .from('orders')
-      .select('*, items:order_items(*)')
+      .select('*, items:order_items(*), discounts:order_discounts(*)')
       .eq('id', order.id)
       .single();
 

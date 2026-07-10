@@ -85,10 +85,12 @@ interface BillingOrder {
   arrival_date: string | null;
   arrival_time: string | null;
   subtotal: number;
+  discount_total: number;
   status: string;
   created_at: string;
   extended_info: { personal_cod_notes?: string } | null;
   items: BillingItem[];
+  discounts?: Array<{ id: string; name: string; description: string | null; amount: number }>;
 }
 
 const PRESETS = [
@@ -168,6 +170,10 @@ function vesselTotal(o: BillingOrder): number {
   return billableItems(o)
     .filter(i => i.shopping_status !== 'out_of_stock')
     .reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0);
+}
+// Net of digital-coupon savings — what Sinclair's register should ring.
+function netTotal(o: BillingOrder): number {
+  return Math.max(0, vesselTotal(o) - (Number(o.discount_total) || 0));
 }
 
 // ─── Branded MONTHLY BILLING PACKET (print-ready → one PDF) ───────────────
@@ -324,6 +330,13 @@ function orderDetailSheet(o: BillingOrder, groupLabel: string, monthLabel: strin
     <div style="font-size:9px;color:#555;margin-top:3px;line-height:1.6;">${cods.map(i => `${i.quantity}× ${esc(i.description)} — ${esc(i.cod_name || 'crew member')}`).join(' &nbsp;·&nbsp; ')}</div>
   </div>` : ''}
 
+  ${(o.discounts || []).length ? `
+  <div style="margin-top:8px;border-left:3px solid #15803d;background:#f0fdf4;padding:8px 14px;font-size:9px;color:#555;line-height:1.7;">
+    <strong style="color:#15803d;">&#127991; Digital coupons applied (est. &minus;${money(Number(o.discount_total) || 0)}):</strong>
+    ${(o.discounts || []).map(d => `${esc(d.name)} &minus;${money(Number(d.amount))}${d.description ? ` <span style="color:#888;">(${esc(d.description)})</span>` : ''}`).join(' · ')}
+    — should match the coupon lines on Sinclair&#39;s register receipt.
+  </div>` : ''}
+
   ${services.length ? `
   <div style="margin-top:8px;border-left:3px solid ${ORANGE};background:#fffbf0;padding:8px 14px;font-size:9px;color:#555;">
     <strong style="color:${ORANGE};text-transform:uppercase;letter-spacing:0.5px;">Additional services — confirm charge before invoicing</strong>
@@ -367,7 +380,7 @@ function orderDetailSheet(o: BillingOrder, groupLabel: string, monthLabel: strin
 // ── Per-vessel invoice statement page ──────────────────────────
 function vesselStatementPage(group: string, orders: BillingOrder[], monthLabel: string, generated: string, sectionNum: number, sectionCount: number): string {
   const first = orders[0];
-  const estTotal = orders.reduce((s, o) => s + vesselTotal(o), 0);
+  const estTotal = orders.reduce((s, o) => s + netTotal(o), 0);
 
   const orderRows = orders.map(o => {
     const grocery = billableItems(o);
@@ -381,6 +394,7 @@ function vesselStatementPage(group: string, orders: BillingOrder[], monthLabel: 
     if (subCount) flags.push(`<span style="color:${ORANGE};font-weight:700;">${subCount} sub${subCount > 1 ? 's' : ''}</span>`);
     if (svcCount) flags.push(`${svcCount} service${svcCount > 1 ? 's' : ''} — confirm charge`);
     if (codCount) flags.push(`<span style="color:${PURPLE};font-weight:700;">${codCount} COD excluded</span>`);
+    if ((Number(o.discount_total) || 0) > 0) flags.push(`<span style="color:#15803d;font-weight:700;">&#127991; coupons &minus;${money(Number(o.discount_total))}${(o.discounts || []).length ? ` (${(o.discounts || []).map(d => esc(d.name)).join(', ')})` : ''}</span>`);
     return `
     <tr>
       <td style="padding:8px 10px;border-bottom:1px solid #eee;">
@@ -394,7 +408,7 @@ function vesselStatementPage(group: string, orders: BillingOrder[], monthLabel: 
       </td>
       <td style="padding:8px 10px;border-bottom:1px solid #eee;font-size:11px;text-align:center;">${orderedQty}</td>
       <td style="padding:8px 10px;border-bottom:1px solid #eee;font-size:11px;text-align:center;">${o.status === 'fulfilled' ? deliveredQty : '—'}</td>
-      <td style="padding:8px 10px;border-bottom:1px solid #eee;font-size:12px;font-weight:700;text-align:right;color:${GREEN};">${money(vesselTotal(o))}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #eee;font-size:12px;font-weight:700;text-align:right;color:${GREEN};">${money(netTotal(o))}</td>
       <td style="padding:8px 10px;border-bottom:1px solid #eee;">
         <div style="border:1.5px solid #bbb;border-radius:3px;height:22px;width:90px;margin-left:auto;"></div>
       </td>
@@ -475,7 +489,8 @@ function vesselStatementPage(group: string, orders: BillingOrder[], monthLabel: 
 function billingPacketHtml(groups: [string, BillingOrder[]][], monthLabel: string, includeDetail = false): string {
   const generated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
   const allOrders = groups.flatMap(([, os]) => os);
-  const packetEst = allOrders.reduce((s, o) => s + vesselTotal(o), 0);
+  const packetEst = allOrders.reduce((s, o) => s + netTotal(o), 0);
+  const packetSavings = allOrders.reduce((s, o) => s + (Number(o.discount_total) || 0), 0);
   const packetItems = allOrders.reduce((s, o) =>
     s + billableItems(o).filter(i => i.shopping_status !== 'out_of_stock').reduce((q, i) => q + i.quantity, 0), 0);
   const packetCods = allOrders.reduce((s, o) => s + codLines(o).length, 0);
@@ -486,7 +501,7 @@ function billingPacketHtml(groups: [string, BillingOrder[]][], monthLabel: strin
       <td style="padding:7px 10px;border-bottom:1px solid #eee;font-size:11px;font-weight:800;color:${GREEN};">${esc(label)}</td>
       <td style="padding:7px 10px;border-bottom:1px solid #eee;font-size:11px;text-align:center;">${os.length}</td>
       <td style="padding:7px 10px;border-bottom:1px solid #eee;font-size:11px;text-align:center;">${os.reduce((s, o) => s + billableItems(o).filter(x => x.shopping_status !== 'out_of_stock').reduce((q, x) => q + x.quantity, 0), 0)}</td>
-      <td style="padding:7px 10px;border-bottom:1px solid #eee;font-size:12px;font-weight:800;text-align:right;color:${GREEN};">${money(os.reduce((s, o) => s + vesselTotal(o), 0))}</td>
+      <td style="padding:7px 10px;border-bottom:1px solid #eee;font-size:12px;font-weight:800;text-align:right;color:${GREEN};">${money(os.reduce((s, o) => s + netTotal(o), 0))}</td>
       <td style="padding:7px 10px;border-bottom:1px solid #eee;"><div style="border:1.5px solid #bbb;border-radius:3px;height:20px;width:90px;margin-left:auto;"></div></td>
     </tr>`).join('');
 
@@ -501,6 +516,7 @@ function billingPacketHtml(groups: [string, BillingOrder[]][], monthLabel: strin
         [`${groups.length}`, groups.length === 1 ? 'Vessel' : 'Vessels'],
         [`${allOrders.length}`, allOrders.length === 1 ? 'Order' : 'Orders'],
         [`${packetItems}`, 'Items Billed'],
+        ...(packetSavings > 0 ? [[`−${money(packetSavings)}`, 'Coupon Savings']] : []),
         [money(packetEst), 'Estimated Total'],
       ].map(([v, l]) => `
       <td style="padding:12px 10px;text-align:center;">
@@ -770,7 +786,7 @@ function BillingTab() {
               {byCompany.map(([company, companyOrders]) => {
                 const collapsed = collapsedCompanies.has(company);
                 const allSelected = companyOrders.every(o => selected.has(o.id));
-                const companyTotal = companyOrders.filter(o => selected.has(o.id)).reduce((s, o) => s + vesselTotal(o), 0);
+                const companyTotal = companyOrders.filter(o => selected.has(o.id)).reduce((s, o) => s + netTotal(o), 0);
                 const codCount = companyOrders.reduce((s, o) => s + codLines(o).length, 0);
                 return (
                   <div key={company} className="card-base overflow-hidden">
@@ -911,7 +927,12 @@ function BillingOrderTable({ orders, selected, onToggle, showCompany = false, sh
                     }`}>{o.status.replace('_', ' ')}</span>
                   </td>
                 )}
-                <td className="px-4 py-2.5 text-right font-bold text-brand-navy whitespace-nowrap">{formatCurrency(vesselTotal(o))}</td>
+                <td className="px-4 py-2.5 text-right font-bold text-brand-navy whitespace-nowrap">
+                  {formatCurrency(netTotal(o))}
+                  {(Number(o.discount_total) || 0) > 0 && (
+                    <span className="block text-[10px] font-semibold text-green-600">🏷 −{formatCurrency(Number(o.discount_total))} coupons</span>
+                  )}
+                </td>
               </tr>
             );
           })}

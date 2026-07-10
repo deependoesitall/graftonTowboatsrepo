@@ -180,6 +180,10 @@ export interface Order {
   cod_preferred_phone: string | null;
   cod_contact_time: string | null;
   items: OrderItem[];
+  /** Estimated digital-coupon savings snapshot (0 when none applied). */
+  discount_total: number;
+  /** Per-coupon rundown — present when the API includes it. */
+  discounts?: OrderDiscount[];
   subtotal: number;
   status: OrderStatus;
   created_at: string;
@@ -215,6 +219,17 @@ export interface OrderItem {
 }
 
 export type OrderStatus = 'new' | 'in_progress' | 'fulfilled' | 'cancelled';
+
+/** A digital coupon automatically applied to an order (estimate until rung up). */
+export interface OrderDiscount {
+  id: string;
+  order_id: string;
+  offer_ref: string | null;
+  name: string;
+  description: string | null;
+  amount: number;
+  qualifying_qty: number | null;
+}
 
 export interface AdminSettings {
   id: string;
