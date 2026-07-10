@@ -1,6 +1,6 @@
 // src/app/page.tsx
 import Link from 'next/link';
-import { ShoppingCart, Phone, MapPin, ChevronRight, Package, FileText, Truck } from 'lucide-react';
+import { ShoppingCart, Phone, MapPin, Mail, ChevronRight, Package, FileText, Truck } from 'lucide-react';
 
 export default function HomePage() {
   return (
@@ -71,9 +71,10 @@ export default function HomePage() {
             <Truck className="w-6 h-6 text-brand-yellow" />
           </div>
           <div>
-            <p className="font-bold text-base leading-tight">We deliver directly to your vessel.</p>
+            <p className="font-bold text-base leading-tight">We deliver directly to your vessel — by boat or refrigerated van.</p>
             <p className="text-brand-yellow/80 text-sm mt-0.5 font-body leading-snug">
               Order online · we pack &amp; bring it to your boat at Mile Marker 219 on the Mississippi River, Mile Marker 0 on the Illinois River.
+              Cold &amp; frozen goods ride refrigerated the whole way.
             </p>
           </div>
         </div>
@@ -114,6 +115,7 @@ export default function HomePage() {
             {[
               { icon: Phone, label: '(618) 556-0290', sub: '24/7 Support', href: 'tel:6185560290' },
               { icon: MapPin, label: 'Mile Marker 219 (Mississippi River) · Mile Marker 0 (Illinois River)', sub: 'Grafton, IL 62037', href: null },
+              { icon: Mail, label: 'GraftonTowboatServices@gmail.com', sub: 'Email us anytime', href: 'mailto:GraftonTowboatServices@gmail.com' },
             ].map(({ icon: Icon, label, sub, href }) => (
               <div key={label} className="flex flex-col items-center gap-2">
                 <div className="w-10 h-10 bg-brand-yellow/20 rounded-full flex items-center justify-center mb-1">

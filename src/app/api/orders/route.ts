@@ -76,7 +76,9 @@ const submitSchema = z.object({
     pkg_size: z.string().nullable().optional(),
     uom: z.string().nullable().optional(),
     price: z.number(),
-    quantity: z.number().int().positive(),
+    // Decimal quantities allowed: by-the-pound items order in lb increments
+    // (¼ lb deli salad, 3 lb hamburger). Regular items still send whole counts.
+    quantity: z.number().positive().max(999),
     image_url: z.string().nullable().optional(),
     paid_by: z.enum(['vessel', 'cod']).optional().default('vessel'),
     cod_name: z.string().optional().default(''),

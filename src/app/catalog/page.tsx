@@ -145,17 +145,20 @@ export default async function CatalogPage({ searchParams }: PageProps) {
         </p>
       </div>
 
-      {/* Boat / Land delivery reminder — subtle, site-wide catalog banner
-          (replaces the old non-clickable info blocks in Additional Services) */}
-      <div className="mb-4 flex items-center gap-2.5 bg-brand-navy/5 border border-brand-navy/10 rounded-xl px-4 py-2.5 text-xs text-brand-navy">
+      {/* Boat / Land delivery reminder — refrigerated vans called out (Jen, July 9):
+          crews should know cold & frozen goods ride cold the whole way */}
+      <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1.5 bg-brand-navy/5 border border-brand-navy/10 rounded-xl px-4 py-2.5 text-xs text-brand-navy">
         <span className="flex items-center gap-1 font-bold shrink-0">
           <Ship className="w-3.5 h-3.5" /> Boat
           <span className="text-gray-400 font-normal px-0.5">·</span>
           <Truck className="w-3.5 h-3.5" /> Land
         </span>
+        <span className="inline-flex items-center gap-1 bg-sky-100 text-sky-800 border border-sky-200 font-bold rounded-full px-2.5 py-0.5 shrink-0">
+          ❄ Refrigerated vans
+        </span>
         <span className="text-gray-500">
-          Remember — we deliver by boat <em>and</em> by land. Mile Marker 219 Mississippi River / Mile Marker 0 Illinois River,
-          plus vans to terminals, locks, and fleeting areas near Grafton.
+          We deliver by boat <em>and</em> by land — and our vans are refrigerated, so cold &amp; frozen goods arrive cold.
+          Mile Marker 219 Mississippi River / Mile Marker 0 Illinois River.
         </span>
       </div>
 

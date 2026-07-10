@@ -67,7 +67,7 @@ export function OtherPickupCard() {
           </p>
           <p className="text-xs text-gray-400 mt-0.5">
             Paste links to items from other stores and Sinclair&apos;s will pick them up with your groceries.
-            Add as many as you need — small items only (e.g. a Walmart run).
+            Add as many as you need.
           </p>
         </div>
         {other.enabled && (

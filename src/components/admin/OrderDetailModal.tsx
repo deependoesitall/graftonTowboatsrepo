@@ -90,8 +90,9 @@ export function OrderDetailModal({
 
   // ── Save quantity edit ────────────────────────────────────────────────────
   async function saveQty(item: OrderItem) {
-    const qty = parseInt(editQty);
-    if (!qty || qty < 1) return;
+    // Decimals allowed — by-weight items are quantified in pounds (½ lb, etc.)
+    const qty = parseFloat(editQty);
+    if (!qty || qty <= 0) return;
     setEditSaving(true);
     setItemError('');
     try {
@@ -461,7 +462,8 @@ export function OrderDetailModal({
                               <div className="flex items-center justify-center gap-1">
                                 <input
                                   type="number"
-                                  min="1"
+                                  min="0.25"
+                                  step="0.25"
                                   className="w-14 border border-brand-sky rounded px-1.5 py-0.5 text-center text-xs font-bold focus:outline-none focus:ring-1 focus:ring-brand-sky"
                                   value={editQty}
                                   onChange={e => setEditQty(e.target.value)}

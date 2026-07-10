@@ -456,10 +456,9 @@ function vesselStatementPage(group: string, orders: BillingOrder[], monthLabel: 
 
   <!-- Notes -->
   <div style="margin-top:14px;border-left:3px solid ${ORANGE};background:#fffbf0;padding:9px 14px;font-size:9px;color:#555;line-height:1.7;">
-    <strong style="color:${ORANGE};">How to finalize:</strong> the order detail sheets that follow list every item with a
-    verify checkbox — tick each line against Sinclair&#39;s register receipt, confirm weighed items and substitutions,
-    add any service or delivery charges, then enter the Final Total above. COD items are already excluded — they were
-    paid by crew members at delivery and never appear on this invoice.
+    <strong style="color:${ORANGE};">How to finalize:</strong> confirm weighed items, substitutions, and any service or
+    delivery charges against Sinclair&#39;s receipts, then enter the Final Total above. COD items are already excluded —
+    they were paid by crew members at delivery and never appear on this invoice.
   </div>
 
   <div style="text-align:center;font-size:8px;color:#aaa;border-top:1px solid #eee;margin-top:18px;padding-top:8px;">
@@ -469,7 +468,11 @@ function vesselStatementPage(group: string, orders: BillingOrder[], monthLabel: 
 }
 
 // ── Whole packet ───────────────────────────────────────────────
-function billingPacketHtml(groups: [string, BillingOrder[]][], monthLabel: string): string {
+// Mary Kay thinks in TOTALS ("the date, the boat, the total") — so the default
+// packet is cover + per-vessel statements only. Item-by-item cross-reference
+// sheets are opt-in via includeDetail for the months she wants to reconcile
+// line by line against Sinclair's receipts.
+function billingPacketHtml(groups: [string, BillingOrder[]][], monthLabel: string, includeDetail = false): string {
   const generated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
   const allOrders = groups.flatMap(([, os]) => os);
   const packetEst = allOrders.reduce((s, o) => s + vesselTotal(o), 0);
@@ -541,9 +544,9 @@ function billingPacketHtml(groups: [string, BillingOrder[]][], monthLabel: strin
     <div style="font-size:9px;font-weight:900;color:${GREEN};text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">How this packet is organized — three ways to cross-check every number</div>
     <div style="font-size:9px;color:#555;line-height:1.9;">
       <strong>1. This index</strong> — every vessel&#39;s estimated total at a glance; fill in the Final column as invoices go out.<br>
-      <strong>2. Invoice statements</strong> — one page per vessel (each starts on a fresh page). This is the page to attach to the QuickBooks invoice.<br>
+      <strong>2. Invoice statements</strong> — one page per vessel (each starts on a fresh page). This is the page to attach to the QuickBooks invoice.${includeDetail ? `<br>
       <strong>3. Order detail sheets</strong> — every item on every order with a checkbox, estimated vs. actual price, substitutions and weighed
-      items flagged, and a spot to staple Sinclair&#39;s register receipt. The receipt total should match the sheet&#39;s Actual total.
+      items flagged, and a spot to staple Sinclair&#39;s register receipt. The receipt total should match the sheet&#39;s Actual total.` : ''}
     </div>
   </div>
 
@@ -554,7 +557,7 @@ function billingPacketHtml(groups: [string, BillingOrder[]][], monthLabel: strin
 
   const sections = groups.map(([label, orders], gi) =>
     vesselStatementPage(label, orders, monthLabel, generated, gi + 1, groups.length)
-    + orders.map(o => orderDetailSheet(o, label, monthLabel, generated)).join('')
+    + (includeDetail ? orders.map(o => orderDetailSheet(o, label, monthLabel, generated)).join('') : '')
   ).join('');
 
   return `<!DOCTYPE html>
@@ -651,6 +654,9 @@ function BillingTab() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showPending, setShowPending] = useState(false);
   const [collapsedCompanies, setCollapsedCompanies] = useState<Set<string>>(new Set());
+  // Totals-first by default (Mary Kay: "the date, the boat, the total");
+  // item-by-item cross-reference sheets are opt-in.
+  const [includeDetail, setIncludeDetail] = useState(false);
 
   const range = useMemo(() => {
     const [y, m] = month.split('-').map(Number);
@@ -714,7 +720,7 @@ function BillingTab() {
   function openPacket(packetOrders: BillingOrder[]) {
     const monthLabel = new Date(month + '-01T00:00:00')
       .toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-    const html = billingPacketHtml(groupOrders(packetOrders), monthLabel);
+    const html = billingPacketHtml(groupOrders(packetOrders), monthLabel, includeDetail);
     const blob = new Blob([html], { type: 'text/html' });
     window.open(URL.createObjectURL(blob), '_blank');
   }
@@ -737,6 +743,10 @@ function BillingTab() {
           <span className="text-xs text-gray-400">
             {selected.size} order{selected.size !== 1 ? 's' : ''} · {selCompanyCount} vessel{selCompanyCount === 1 ? '' : 's'} selected
           </span>
+          <label className="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer select-none">
+            <input type="checkbox" checked={includeDetail} onChange={e => setIncludeDetail(e.target.checked)} />
+            Include item-by-item detail sheets
+          </label>
           <button onClick={() => openPacket(selectedOrders)} disabled={selected.size === 0}
             className="btn-primary text-sm px-4 py-2 flex items-center gap-2 disabled:opacity-50">
             <FileText className="w-4 h-4" /> Billing Packet — One PDF

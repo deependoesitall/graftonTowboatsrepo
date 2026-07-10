@@ -9,6 +9,7 @@ import { Order } from '@/types';
 import { SiteHeader } from '@/components/layout/SiteHeader';
 import { CheckCircle2, Download, ShoppingCart, Anchor, Star, History } from 'lucide-react';
 import { ContactPhones } from '@/components/layout/ContactPhones';
+import { EstimatedInfo } from '@/components/ui/EstimatedInfo';
 import { useAuth } from '@/lib/auth-context';
 import { AuthModal } from '@/components/auth/AuthModal';
 import { createClient } from '@/lib/supabase/client';
@@ -135,8 +136,11 @@ function ConfirmContent() {
                   </div>
                 ))}
               </div>
-              <div className="bg-brand-sand/40 px-4 py-3 flex justify-between">
-                <span className="font-bold text-brand-navy">Estimated Total</span>
+              <div className="bg-brand-sand/40 px-4 py-3 flex justify-between items-center">
+                <span className="flex items-center gap-2">
+                  <span className="font-bold text-brand-navy">Estimated Total</span>
+                  <EstimatedInfo />
+                </span>
                 <span className="font-display text-lg font-bold text-brand-navy">
                   {formatCurrency(order.subtotal)}
                 </span>

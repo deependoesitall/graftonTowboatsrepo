@@ -22,23 +22,24 @@ export async function GET(
     return NextResponse.json({ error: 'Order not found' }, { status: 404 });
   }
 
-  // Backfill missing item locations from the CURRENT catalog (display only —
-  // not persisted). Orders placed before the location sync still get aisle
-  // grouping in shopping mode this way.
-  const items = (data.items || []) as Array<{ product_id: string | null; location: string | null; location_seq: number | null }>;
-  const missing = items.filter(i => i.product_id && (!i.location || i.location_seq == null));
+  // Backfill missing item locations AND images from the CURRENT catalog
+  // (display only — not persisted). Orders placed before the location/image
+  // snapshots still get aisle grouping and product photos in shopping mode.
+  const items = (data.items || []) as Array<{ product_id: string | null; location: string | null; location_seq: number | null; image_url: string | null }>;
+  const missing = items.filter(i => i.product_id && (!i.location || i.location_seq == null || !i.image_url));
   if (missing.length > 0) {
     const ids = Array.from(new Set(missing.map(i => i.product_id))) as string[];
     const { data: prods } = await supabase
       .from('products')
-      .select('id, location, location_seq')
+      .select('id, location, location_seq, image_url')
       .in('id', ids);
-    const locMap = new Map((prods || []).map((p: { id: string; location: string | null; location_seq: number | null }) => [p.id, p]));
+    const locMap = new Map((prods || []).map((p: { id: string; location: string | null; location_seq: number | null; image_url: string | null }) => [p.id, p]));
     for (const item of missing) {
       const p = item.product_id ? locMap.get(item.product_id) : undefined;
       if (!p) continue;
       if (!item.location && p.location) item.location = p.location;
       if (item.location_seq == null && p.location_seq != null) item.location_seq = p.location_seq;
+      if (!item.image_url && p.image_url) item.image_url = p.image_url;
     }
   }
 

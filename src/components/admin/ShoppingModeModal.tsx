@@ -6,11 +6,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   X, Check, PackageX, Scale, Search, ShoppingCart,
-  ChevronRight, Loader2, CheckCircle2, AlertTriangle,
-  Clock, MapPin, List,
+  ChevronRight, ChevronLeft, Loader2, CheckCircle2, AlertTriangle,
+  Clock, MapPin, List, Play,
 } from 'lucide-react';
 import { Order, OrderItem, Product } from '@/types';
-import { formatCurrency } from '@/lib/utils';
+import { formatCurrency, formatLb } from '@/lib/utils';
 import { adminFetch } from '@/lib/admin-auth';
 import { groupByWalkingOrder, DEFAULT_ZONE_ORDER, NO_LOCATION_LABEL } from '@/lib/store-layout';
 
@@ -154,6 +154,10 @@ export function ShoppingModeModal({ order, onClose, onComplete }: ShoppingModeMo
   // Default view: By Aisle (falls back to By Category when nothing has a location)
   const [viewMode, setViewMode] = useState<'aisle' | 'category'>('aisle');
   const [zoneOrder, setZoneOrder] = useState<string[]>(DEFAULT_ZONE_ORDER);
+
+  // Focus mode — Spark-style one-item-at-a-time shopping flow
+  const [focusOpen, setFocusOpen] = useState(false);
+  const [focusIdx, setFocusIdx] = useState(0);
   useEffect(() => {
     fetch('/api/order-config')
       .then(r => r.ok ? r.json() : null)
@@ -195,6 +199,53 @@ export function ShoppingModeModal({ order, onClose, onComplete }: ShoppingModeMo
     const timers = flashTimers.current;
     return () => { Object.values(timers).forEach(clearTimeout); };
   }, []);
+
+  // ── LIVE SYNC — multiple people can shop the same order at once ──
+  // Poll every few seconds and merge in other shoppers' progress. Never
+  // overwrite an item someone is actively working on here (open weight/sub
+  // panel or a save in flight), and never resurrect local completed work.
+  const itemUiRef = useRef(itemUi);
+  itemUiRef.current = itemUi;
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        const res = await adminFetch(`/api/orders/${order.id}`);
+        if (!res.ok) return;
+        const fresh = await res.json();
+        const freshItems: OrderItem[] = fresh.items || [];
+        setItems(prev => {
+          const prevById = new Map(prev.map(i => [i.id, i]));
+          let changed = false;
+          const merged = freshItems.map(fi => {
+            const local = prevById.get(fi.id);
+            if (!local) { changed = true; return fi; } // another shopper added a sub
+            const ui = itemUiRef.current[fi.id];
+            const busy = ui && (ui.saving || ui.uiState !== 'idle');
+            // Keep local when we're mid-action, or when we've already processed
+            // it locally and the server still says pending (our save in flight).
+            if (busy || (local.shopping_status !== 'pending' && fi.shopping_status === 'pending')) return local;
+            if (
+              local.shopping_status !== fi.shopping_status ||
+              local.quantity !== fi.quantity ||
+              local.actual_weight !== fi.actual_weight ||
+              local.actual_total !== fi.actual_total
+            ) { changed = true; return fi; }
+            return local;
+          });
+          if (merged.length !== prev.length) changed = true;
+          return changed ? merged : prev;
+        });
+        setItemUi(prev => {
+          const next = { ...prev };
+          let added = false;
+          freshItems.forEach(i => { if (!next[i.id]) { next[i.id] = defaultItemUiState(); added = true; } });
+          return added ? next : prev;
+        });
+      } catch { /* offline blip — try again next tick */ }
+    }, 5000);
+    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order.id]);
 
   const originals = items.filter(i => !i.is_substitution);
   const pending = originals.filter(i => i.shopping_status === 'pending');
@@ -293,7 +344,8 @@ export function ShoppingModeModal({ order, onClose, onComplete }: ShoppingModeMo
   async function confirmSubstitution(item: OrderItem) {
     const ui = itemUi[item.id];
     if (!ui?.subSelected) return;
-    const qty = parseInt(ui.subQty) || 1;
+    // Decimals allowed — by-weight substitutions are in pounds
+    const qty = parseFloat(ui.subQty) || 1;
     setUi(item.id, { saving: true, saveError: '' });
     try {
       const res = await adminFetch(`/api/orders/${order.id}/items/${item.id}`, {
@@ -383,6 +435,13 @@ export function ShoppingModeModal({ order, onClose, onComplete }: ShoppingModeMo
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([label, groupItems]) => ({ key: `cat-${label}`, label, items: groupItems }));
 
+  // Flattened walking-order queue for focus mode (one item at a time)
+  const focusQueue = pendingGroups.flatMap((g, gi) =>
+    g.items.map(item => ({ item, groupLabel: g.label, stop: gi + 1, stops: pendingGroups.length }))
+  );
+  const safeFocusIdx = focusQueue.length ? Math.min(focusIdx, focusQueue.length - 1) : 0;
+  const focusCurrent = focusQueue.length ? focusQueue[safeFocusIdx] : null;
+
   // IDs of substitution items currently flashing saved
   const subSavedFlash = new Set(
     Object.entries(itemUi)
@@ -402,14 +461,16 @@ export function ShoppingModeModal({ order, onClose, onComplete }: ShoppingModeMo
     <>
       <div className="fixed inset-0 z-[70] flex flex-col bg-gray-50">
 
-        {/* ── TOP BAR ── */}
+        {/* ── TOP BAR — boat name front and center (Sinclair's staff know boats, not order numbers) ── */}
         <div className="bg-brand-navy px-4 py-3 flex items-center justify-between shrink-0">
           <div>
-            <p className="text-brand-sky text-xs uppercase tracking-wide">Shopping Mode</p>
-            <h2 className="text-white font-display text-lg font-bold">{order.order_number}</h2>
-            {order.company_name && (
-              <p className="text-brand-sky/70 text-xs">{order.company_name}</p>
-            )}
+            <p className="text-brand-sky text-xs uppercase tracking-wide">Shopping Order</p>
+            <h2 className="text-white font-display text-lg font-bold">
+              {order.vessel_name || order.company_name}
+            </h2>
+            <p className="text-brand-sky/70 text-xs">
+              {order.vessel_name && order.company_name !== order.vessel_name ? `${order.company_name} · ` : ''}{order.order_number}
+            </p>
           </div>
           <div className="flex items-center gap-4">
             <div className="text-right">
@@ -463,6 +524,19 @@ export function ShoppingModeModal({ order, onClose, onComplete }: ShoppingModeMo
                 ? `${pendingGroups.length} stop${pendingGroups.length !== 1 ? 's' : ''} through the store`
                 : `${pendingGroups.length} categor${pendingGroups.length !== 1 ? 'ies' : 'y'}`}
             </p>
+          </div>
+        )}
+
+        {/* ── START SHOPPING — Spark-style one-item-at-a-time flow ── */}
+        {pendingItems.length > 0 && (
+          <div className="bg-white border-b border-gray-200 px-4 pb-3 shrink-0">
+            <button
+              onClick={() => { setFocusIdx(0); setFocusOpen(true); }}
+              className="w-full flex items-center justify-center gap-2 bg-brand-gold text-brand-navy font-display font-bold text-base uppercase tracking-wide py-3.5 rounded-xl shadow-sm hover:brightness-105 active:scale-[0.99] transition-all"
+            >
+              <Play className="w-5 h-5 fill-current" />
+              Start Shopping — One Item at a Time
+            </button>
           </div>
         )}
 
@@ -633,6 +707,285 @@ export function ShoppingModeModal({ order, onClose, onComplete }: ShoppingModeMo
         </div>
       </div>
 
+      {/* ── FOCUS MODE — one item at a time, in walking order ── */}
+      {focusOpen && (
+        <div className="fixed inset-0 z-[75] bg-gray-100 flex flex-col">
+          {!focusCurrent ? (
+            /* Everything handled — celebrate and hand off to Complete */
+            <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6 text-center">
+              <div className="w-20 h-20 rounded-full bg-green-100 flex items-center justify-center">
+                <CheckCircle2 className="w-10 h-10 text-brand-green" />
+              </div>
+              <h3 className="font-display text-2xl font-bold text-brand-navy">Cart&apos;s full — nice work!</h3>
+              <p className="text-sm text-gray-500 max-w-xs">
+                Every item on this order has been shopped, weighed, or substituted.
+              </p>
+              <button
+                onClick={() => { setFocusOpen(false); setShowConfirm(true); }}
+                className="w-full max-w-sm flex items-center justify-center gap-2 bg-brand-green text-white font-display font-bold text-lg uppercase tracking-wide py-4 rounded-2xl shadow-lg hover:bg-brand-gmed active:scale-[0.99] transition-all"
+              >
+                <CheckCircle2 className="w-5 h-5" /> Complete Order
+              </button>
+              <button onClick={() => setFocusOpen(false)} className="text-sm text-gray-400 underline">
+                Back to the list
+              </button>
+            </div>
+          ) : (() => {
+            const { item, groupLabel, stop, stops } = focusCurrent;
+            const fui = itemUi[item.id] || defaultItemUiState();
+            const fWeight = isWeightItem(item);
+            const fPreviewW = parseFloat(fui.weightInput);
+            const fWeightPreview = !isNaN(fPreviewW) && fPreviewW > 0 ? fPreviewW * item.unit_price : null;
+            const noLoc = groupLabel === NO_LOCATION_LABEL;
+            return (
+              <>
+                {/* Top bar */}
+                <div className="bg-brand-navy px-4 py-3 flex items-center justify-between shrink-0">
+                  <button onClick={() => setFocusOpen(false)}
+                    className="flex items-center gap-1.5 text-brand-sky hover:text-white text-sm font-bold transition-colors">
+                    <List className="w-4 h-4" /> List
+                  </button>
+                  <p className="text-white font-display font-bold text-base">
+                    Item {safeFocusIdx + 1} <span className="text-brand-sky font-body font-normal text-sm">of {focusQueue.length} left</span>
+                  </p>
+                  <button onClick={onClose} className="text-brand-sky hover:text-white transition-colors">
+                    <X className="w-6 h-6" />
+                  </button>
+                </div>
+                <div className="h-1.5 bg-brand-navy/20 shrink-0">
+                  <div className="h-full bg-brand-gold transition-all duration-500" style={{ width: `${progressPct}%` }} />
+                </div>
+
+                {/* Location banner — the single most useful thing on the screen */}
+                <div className={`px-4 py-3 flex items-center gap-3 shrink-0 ${
+                  noLoc ? 'bg-gray-200' : 'bg-gradient-to-r from-teal-600 to-teal-500'
+                }`}>
+                  <MapPin className={`w-7 h-7 shrink-0 ${noLoc ? 'text-gray-500' : 'text-white/80'}`} />
+                  <span className={`font-display text-2xl font-bold leading-none ${noLoc ? 'text-gray-600 text-lg' : 'text-white'}`}>
+                    {item.location || groupLabel}
+                  </span>
+                  {!noLoc && (
+                    <span className="ml-auto bg-white/20 text-white text-xs font-bold rounded-full px-3 py-1 shrink-0">
+                      Stop {stop} of {stops}
+                    </span>
+                  )}
+                </div>
+
+                {/* Item card */}
+                <div className="flex-1 overflow-y-auto px-4 py-4">
+                  <div className="bg-white rounded-3xl border border-gray-100 shadow-sm px-5 py-6 flex flex-col items-center text-center">
+                    {item.image_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={item.image_url} alt="" decoding="async"
+                        className="h-48 max-w-full object-contain mb-4" />
+                    ) : (
+                      <div className="h-40 w-40 bg-gray-50 rounded-2xl border border-dashed border-gray-200 flex flex-col items-center justify-center gap-2 mb-4">
+                        <ShoppingCart className="w-8 h-8 text-gray-200" />
+                        <span className="text-[10px] text-gray-300 font-bold uppercase">No photo yet</span>
+                      </div>
+                    )}
+                    <h3 className="font-display text-xl font-bold text-brand-navy leading-snug">{item.description}</h3>
+                    <p className="text-xs text-gray-400 mt-1">
+                      {item.pkg_size && <span className="mr-2">{item.pkg_size}</span>}
+                      {item.upc && <span className="font-mono">{item.upc}</span>}
+                    </p>
+                    <div className="flex flex-wrap items-center justify-center gap-1.5 mt-2">
+                      {fWeight && (
+                        <span className="inline-flex items-center gap-1 text-xs font-bold text-brand-orange bg-orange-50 border border-orange-200 rounded-md px-2 py-0.5">
+                          <Scale className="w-3 h-3" /> Sold by weight
+                        </span>
+                      )}
+                      {item.paid_by === 'cod' && (
+                        <span className="inline-flex items-center gap-1 text-xs font-bold text-purple-700 bg-purple-50 border border-purple-200 rounded-md px-2 py-0.5">
+                          $ COD{item.cod_name ? ` — ${item.cod_name}` : ''} · ring separately
+                        </span>
+                      )}
+                    </div>
+
+                    {/* GRAB — quantity is the thing to get right */}
+                    <div className="mt-4 w-full bg-brand-sand/60 rounded-2xl py-3.5 flex items-baseline justify-center gap-3">
+                      <span className="text-xs font-bold uppercase tracking-widest text-gray-500">{fWeight ? 'Weigh out' : 'Grab'}</span>
+                      <span className="font-display text-6xl font-bold text-brand-navy leading-none">
+                        {fWeight ? formatLb(item.quantity) : item.quantity}
+                      </span>
+                      {!fWeight && <span className="text-sm font-semibold text-gray-500">{item.uom || 'each'}</span>}
+                    </div>
+                    <p className="text-xs text-gray-400 mt-2">
+                      {formatCurrency(item.unit_price)}{fWeight ? '/lb' : ' each'} ·{' '}
+                      <span className="font-bold text-brand-navy">{fWeight ? '~' : ''}{formatCurrency(item.actual_total ?? item.line_total)}{fWeight ? ' est.' : ''}</span>
+                    </p>
+                  </div>
+
+                  {fui.saveError && (
+                    <div className="mt-3 flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5">
+                      <AlertTriangle className="w-4 h-4 text-red-500 shrink-0" />
+                      <p className="text-sm text-red-600 flex-1">{fui.saveError}</p>
+                      <button onClick={() => { setUi(item.id, { saveError: '' }); markShopped(item); }}
+                        className="text-sm font-bold text-red-600 underline shrink-0">Retry</button>
+                    </div>
+                  )}
+
+                  {/* Weight entry */}
+                  {fui.uiState === 'weight_entry' && (
+                    <div className="mt-3 bg-orange-50 border border-orange-200 rounded-2xl px-4 py-4 space-y-3">
+                      <p className="text-sm font-bold text-brand-orange uppercase tracking-wide">Weigh it — enter pounds</p>
+                      <div className="flex items-center gap-3">
+                        <div className="relative flex-1">
+                          <input
+                            type="number" min="0.01" step="0.01" autoFocus
+                            className="input-base pr-12 text-2xl font-bold py-3"
+                            placeholder="0.00"
+                            value={fui.weightInput}
+                            onChange={e => setUi(item.id, { weightInput: e.target.value })}
+                          />
+                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-base font-bold">lbs</span>
+                        </div>
+                        {fWeightPreview !== null && (
+                          <div className="text-right shrink-0">
+                            <p className="text-xs text-gray-500">Total</p>
+                            <p className="text-xl font-bold text-brand-green">{formatCurrency(fWeightPreview)}</p>
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => confirmWeight(item)}
+                          disabled={fui.saving || !parseFloat(fui.weightInput)}
+                          className="flex-1 bg-brand-orange text-white text-base font-bold uppercase tracking-wide py-3.5 rounded-xl hover:bg-orange-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                        >
+                          {fui.saving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Check className="w-5 h-5" />}
+                          Confirm Weight
+                        </button>
+                        <button onClick={() => setUi(item.id, { uiState: 'idle', weightInput: '' })}
+                          className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">Cancel</button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Out of stock → pick a substitute */}
+                  {fui.uiState === 'sub_search' && (
+                    <div className="mt-3 bg-white border border-gray-200 rounded-2xl px-4 py-4 space-y-3">
+                      <p className="text-sm font-bold text-gray-600 uppercase tracking-wide">Out of stock — pick a replacement</p>
+                      {!fui.subSelected ? (
+                        <>
+                          <div className="relative">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                            <input type="text" autoFocus className="input-base pl-9 py-3"
+                              placeholder="Search products…"
+                              value={fui.subSearch}
+                              onChange={e => { setUi(item.id, { subSearch: e.target.value, subSelected: null }); searchProducts(item.id, e.target.value); }} />
+                            {fui.subSearching && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 animate-spin text-gray-400" />}
+                          </div>
+                          {fui.subResults.length > 0 && (
+                            <div className="border border-gray-200 rounded-xl overflow-hidden max-h-56 overflow-y-auto bg-white">
+                              {fui.subResults.map(p => (
+                                <button key={p.id} onClick={() => setUi(item.id, { subSelected: p, subResults: [] })}
+                                  className="w-full text-left px-3 py-2.5 hover:bg-brand-sand/40 border-b border-gray-100 last:border-0 flex items-center justify-between gap-2">
+                                  <div>
+                                    <p className="text-sm font-semibold text-brand-navy">{p.description}</p>
+                                    <p className="text-xs text-gray-400">{p.category}{p.pkg_size && ` · ${p.pkg_size}`}</p>
+                                  </div>
+                                  <p className="text-sm font-bold text-brand-green shrink-0">{formatCurrency(p.price)}</p>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <div className="bg-brand-sand/40 rounded-xl border border-brand-green/30 px-3 py-2.5 flex items-center justify-between">
+                            <div>
+                              <p className="text-sm font-bold text-brand-navy">{fui.subSelected.description}</p>
+                              <p className="text-xs text-gray-400">{formatCurrency(fui.subSelected.price)}/{fui.subSelected.uom || 'EACH'}</p>
+                            </div>
+                            <button onClick={() => setUi(item.id, { subSelected: null, subSearch: '' })}
+                              className="text-gray-400 hover:text-gray-600 text-xs underline ml-2 shrink-0">Change</button>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <label className="text-xs font-bold text-gray-600 shrink-0">Quantity</label>
+                            <input type="number" min="1" className="input-base w-24 text-center font-bold py-2.5"
+                              value={fui.subQty}
+                              onChange={e => setUi(item.id, { subQty: e.target.value })} />
+                            <p className="text-xs text-gray-500">= {formatCurrency(fui.subSelected.price * (parseInt(fui.subQty) || 1))}</p>
+                          </div>
+                        </>
+                      )}
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => confirmSubstitution(item)}
+                          disabled={fui.saving || !fui.subSelected}
+                          className="flex-1 bg-brand-navy text-white text-base font-bold uppercase tracking-wide py-3.5 rounded-xl hover:bg-brand-green transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                        >
+                          {fui.saving ? <Loader2 className="w-5 h-5 animate-spin" /> : <ChevronRight className="w-5 h-5" />}
+                          Confirm Substitution
+                        </button>
+                        <button onClick={() => setUi(item.id, { uiState: 'idle', subSearch: '', subSelected: null, subResults: [] })}
+                          className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">Cancel</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Action bar — full words, one thumb */}
+                {fui.uiState === 'idle' && (
+                  <div className="bg-white border-t border-gray-200 px-4 pt-3 pb-6 space-y-2 shrink-0">
+                    {fWeight ? (
+                      <button
+                        onClick={() => setUi(item.id, { uiState: 'weight_entry' })}
+                        className="w-full flex items-center justify-center gap-2 bg-brand-orange text-white font-display font-bold text-lg uppercase tracking-wide py-4 rounded-2xl shadow-md hover:bg-orange-700 active:scale-[0.99] transition-all"
+                      >
+                        <Scale className="w-5 h-5" /> Enter Weight
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => markShopped(item)}
+                        disabled={fui.saving}
+                        className="w-full flex items-center justify-center gap-2 bg-green-500 text-white font-display font-bold text-lg uppercase tracking-wide py-4 rounded-2xl shadow-md hover:bg-green-600 active:scale-[0.99] transition-all disabled:opacity-50"
+                      >
+                        {fui.saving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Check className="w-5 h-5" />}
+                        Shopped — Got It
+                      </button>
+                    )}
+                    <div className="flex gap-2">
+                      {fWeight && (
+                        <button
+                          onClick={() => markShopped(item)}
+                          disabled={fui.saving}
+                          className="flex-1 flex items-center justify-center gap-1.5 bg-green-50 text-green-700 border border-green-200 text-sm font-bold uppercase tracking-wide py-3 rounded-xl hover:bg-green-100 active:scale-[0.98] transition-all disabled:opacity-50"
+                        >
+                          <Check className="w-4 h-4" /> Shopped
+                        </button>
+                      )}
+                      <button
+                        onClick={() => setUi(item.id, { uiState: 'sub_search' })}
+                        className="flex-1 flex items-center justify-center gap-1.5 bg-red-50 text-red-600 border border-red-200 text-sm font-bold uppercase tracking-wide py-3 rounded-xl hover:bg-red-100 active:scale-[0.98] transition-all"
+                      >
+                        <PackageX className="w-4 h-4" /> Out of Stock
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between pt-1">
+                      <button
+                        onClick={() => setFocusIdx(i => Math.max(0, Math.min(i, focusQueue.length - 1) - 1))}
+                        disabled={safeFocusIdx === 0}
+                        className="flex items-center gap-1 text-sm font-semibold text-gray-400 hover:text-gray-600 disabled:opacity-30 py-1"
+                      >
+                        <ChevronLeft className="w-4 h-4" /> Previous
+                      </button>
+                      <button
+                        onClick={() => setFocusIdx(i => (Math.min(i, focusQueue.length - 1) + 1) % focusQueue.length)}
+                        className="flex items-center gap-1 text-sm font-semibold text-brand-river hover:text-brand-navy py-1"
+                      >
+                        Skip for now <ChevronRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            );
+          })()}
+        </div>
+      )}
+
       {/* ── CONFIRMATION DIALOG ── */}
       {showConfirm && (
         <ConfirmCompleteDialog
@@ -776,7 +1129,9 @@ function ItemRow({
                 : pending ? 'bg-brand-navy text-white text-2xl shadow-sm'
                 : 'bg-green-100 text-green-700 text-lg'
               }`}>
-                <span className="text-xs font-body opacity-60 mr-0.5">×</span>{item.quantity}
+                {weight
+                  ? <>{item.quantity}<span className="text-xs font-body opacity-60 ml-1">lb</span></>
+                  : <><span className="text-xs font-body opacity-60 mr-0.5">×</span>{item.quantity}</>}
               </span>
               <p className="text-[11px] text-gray-400 leading-tight">
                 {formatCurrency(item.unit_price)}{weight ? '/lb' : ''}
@@ -801,34 +1156,47 @@ function ItemRow({
             </div>
           )}
 
-          {/* Action buttons — pending, non-sub items only. Big targets: shoppers tap with a cart in one hand. */}
+          {/* Action buttons — pending, non-sub items only. Full words, big
+              targets: shoppers tap with a cart in one hand. Primary action
+              leads: weighing for by-weight items, Shopped for everything else. */}
           {!item.is_substitution && pending && ui.uiState === 'idle' && (
-            <div className="flex gap-2 mt-3">
-              <button
-                onClick={onShopped}
-                disabled={ui.saving}
-                className="flex-[1.4] flex items-center justify-center gap-1.5 bg-green-500 text-white text-sm font-bold py-2.5 rounded-xl hover:bg-green-600 active:scale-[0.98] transition-all shadow-sm disabled:opacity-50"
-              >
-                {ui.saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                Shopped
-              </button>
-              <button
-                onClick={onOpenWeight}
-                className={`flex items-center justify-center gap-1.5 text-sm font-bold py-2.5 rounded-xl active:scale-[0.98] transition-all ${
-                  weight
-                    ? 'flex-[1.4] bg-brand-orange text-white hover:bg-orange-700 shadow-sm'
-                    : 'flex-1 bg-orange-50 text-brand-orange border border-orange-200 hover:bg-orange-100'
-                }`}
-              >
-                <Scale className="w-4 h-4" />
-                {weight ? 'Weight' : 'By Wt.'}
-              </button>
-              <button
-                onClick={onOpenSub}
-                className="flex-1 flex items-center justify-center gap-1.5 bg-white text-gray-500 border border-gray-200 text-sm font-bold py-2.5 rounded-xl hover:bg-gray-50 active:scale-[0.98] transition-all"
-              >
-                <PackageX className="w-4 h-4" /> O.O.S.
-              </button>
+            <div className="mt-3 space-y-2">
+              {weight ? (
+                <button
+                  onClick={onOpenWeight}
+                  className="w-full flex items-center justify-center gap-2 bg-brand-orange text-white text-sm font-bold uppercase tracking-wide py-3 rounded-xl hover:bg-orange-700 active:scale-[0.98] transition-all shadow-sm"
+                >
+                  <Scale className="w-4 h-4" /> Enter Weight
+                </button>
+              ) : (
+                <button
+                  onClick={onShopped}
+                  disabled={ui.saving}
+                  className="w-full flex items-center justify-center gap-2 bg-green-500 text-white text-sm font-bold uppercase tracking-wide py-3 rounded-xl hover:bg-green-600 active:scale-[0.98] transition-all shadow-sm disabled:opacity-50"
+                >
+                  {ui.saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                  Shopped
+                </button>
+              )}
+              <div className="flex gap-2">
+                {/* Weighing only exists for by-the-pound items */}
+                {weight && (
+                  <button
+                    onClick={onShopped}
+                    disabled={ui.saving}
+                    className="flex-1 flex items-center justify-center gap-1.5 bg-green-50 text-green-700 border border-green-200 text-xs font-bold uppercase tracking-wide py-2.5 rounded-xl hover:bg-green-100 active:scale-[0.98] transition-all disabled:opacity-50"
+                  >
+                    {ui.saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                    Shopped
+                  </button>
+                )}
+                <button
+                  onClick={onOpenSub}
+                  className="flex-1 flex items-center justify-center gap-1.5 bg-red-50 text-red-600 border border-red-200 text-xs font-bold uppercase tracking-wide py-2.5 rounded-xl hover:bg-red-100 active:scale-[0.98] transition-all"
+                >
+                  <PackageX className="w-3.5 h-3.5" /> Out of Stock
+                </button>
+              </div>
             </div>
           )}
 

@@ -46,6 +46,10 @@ interface FreshopProduct {
   location?: string;
   shopper_location?: string;
   fulfillment_walkpath?: { name?: string; sequence?: number };
+  // Prices (verified live): base_price / unit_price are numbers; Sinclair's
+  // updates them nightly and OUR prices must match theirs exactly (Jen).
+  base_price?: number;
+  unit_price?: number;
 }
 interface OurProduct {
   id: string;
@@ -55,10 +59,11 @@ interface OurProduct {
   billed_by_weight: boolean;
   location: string | null;
   location_seq: number | null;
+  price: number;
 }
 interface Summary {
   ours: number; noUpc: number; matched: number;
-  images: number; details: number; weightFlags: number; locations: number;
+  images: number; details: number; weightFlags: number; locations: number; prices: number;
   indexed: number; unmatchedSample: string[];
 }
 
@@ -103,6 +108,11 @@ function locationFrom(p: FreshopProduct): string | null {
 function locationSeqFrom(p: FreshopProduct): number | null {
   const seq = p.fulfillment_walkpath?.sequence;
   return typeof seq === 'number' && isFinite(seq) ? seq : null;
+}
+function priceFrom(p: FreshopProduct): number | null {
+  const raw = p.base_price ?? p.unit_price;
+  if (typeof raw !== 'number' || !isFinite(raw) || raw <= 0) return null;
+  return Math.round(raw * 100) / 100;
 }
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -317,6 +327,7 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
           billed_by_weight: !!p.billed_by_weight,
           location: p.location ?? null,
           location_seq: p.location_seq ?? null,
+          price: Number(p.price) || 0,
         })));
         if (!products?.length || ours.length >= (total || 0)) break;
       }
@@ -466,7 +477,7 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
 
       // Match + compute updates locally
       const updates: { id: string; fields: Record<string, unknown> }[] = [];
-      let matched = 0, images = 0, details = 0, weightFlags = 0, locations = 0, noUpc = 0;
+      let matched = 0, images = 0, details = 0, weightFlags = 0, locations = 0, prices = 0, noUpc = 0;
       const unmatchedSample: string[] = [];
       for (const product of ours) {
         if (!product.upc || !norm(product.upc)) { noUpc++; continue; }
@@ -493,11 +504,18 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
           fields.location_seq = newSeq;
           locations++;
         }
+        // Prices MUST match Sinclair's exactly ("I get the same gallon of milk,
+        // the same price as the boat does" — Jen). Always synced, like location.
+        const newPrice = priceFrom(hit);
+        if (newPrice != null && Math.abs(newPrice - Number(product.price)) >= 0.005) {
+          fields.price = newPrice;
+          prices++;
+        }
         if (Object.keys(fields).length) updates.push({ id: product.id, fields });
       }
 
       updatesRef.current = updates;
-      setSummary({ ours: ours.length, noUpc, matched, images, details, weightFlags, locations, indexed, unmatchedSample });
+      setSummary({ ours: ours.length, noUpc, matched, images, details, weightFlags, locations, prices, indexed, unmatchedSample });
       setPhase('ready');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Scan failed');
@@ -649,6 +667,12 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
                     <FileText className="w-4 h-4 text-blue-600 shrink-0" />
                     <span><strong>{summary.details.toLocaleString()}</strong> customer-friendly descriptions will be added</span>
                   </div>
+                  {summary.prices > 0 && (
+                    <div className="flex items-center gap-2 text-sm bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                      <FileText className="w-4 h-4 text-green-700 shrink-0" />
+                      <span><strong>{summary.prices.toLocaleString()}</strong> prices updated to match Sinclair&apos;s website exactly</span>
+                    </div>
+                  )}
                   {summary.locations > 0 && (
                     <div className="flex items-center gap-2 text-sm bg-teal-50 rounded-lg px-3 py-2">
                       <MapPin className="w-4 h-4 text-teal-600 shrink-0" />

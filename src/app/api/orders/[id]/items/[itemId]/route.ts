@@ -24,7 +24,8 @@ const bodySchema = z.discriminatedUnion('action', [
     action: z.literal('out_of_stock'),
     substitution: z.object({
       product_id: z.string().uuid(),
-      quantity: z.number().int().positive(),
+      // Decimals allowed: by-weight subs are in lb increments
+      quantity: z.number().positive().max(999),
     }),
   }),
   z.object({
@@ -33,7 +34,7 @@ const bodySchema = z.discriminatedUnion('action', [
   }),
   z.object({
     action: z.literal('update_quantity'),
-    quantity: z.number().int().positive(),
+    quantity: z.number().positive().max(999),
   }),
 ]);
 

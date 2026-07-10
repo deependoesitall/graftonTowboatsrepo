@@ -2,7 +2,7 @@
 // src/components/catalog/ProductGrid.tsx
 import { useState, useCallback, useEffect } from 'react';
 import { Product } from '@/types';
-import { formatCurrency } from '@/lib/utils';
+import { formatCurrency, WEIGHT_PRESETS, formatLb } from '@/lib/utils';
 import { addToCart } from '@/lib/cart';
 import { Plus, Minus, ShoppingCart, Package, Check, Star, X, Scale, Tag } from 'lucide-react';
 import Link from 'next/link';
@@ -19,6 +19,7 @@ interface ProductGridProps {
   search: string;
   category: string;
 }
+
 
 export function ProductGrid({ products, totalCount, page, totalPages, search, category }: ProductGridProps) {
   const { user } = useAuth();
@@ -145,7 +146,7 @@ function ProductCard({ product, isLoggedIn, isFavorite, onOpenDetail }: {
     setJustAdded(true);
     toast({
       title: 'Added to cart',
-      description: `${qty}× ${product.description}`,
+      description: `${byWeight ? formatLb(qty) : `${qty}×`} ${product.description}`,
       variant: 'success',
       duration: 2000,
     });
@@ -234,45 +235,61 @@ function ProductCard({ product, isLoggedIn, isFavorite, onOpenDetail }: {
             <span className="text-base font-bold text-brand-navy font-body">
               {formatCurrency(product.price)}{byWeight && <span className="text-[10px] font-semibold text-gray-400"> /lb</span>}
             </span>
-            {/* Qty stepper */}
-            <div className="flex items-center gap-1.5">
-            {byWeight && <span className="text-[10px] font-bold text-gray-400 uppercase">How many?</span>}
-            <div className="flex items-center border border-gray-200 rounded overflow-hidden">
-              <button
-                onClick={() => setQty(q => Math.max(1, q - 1))}
-                className="w-6 h-6 flex items-center justify-center text-gray-400 hover:bg-gray-100 transition-colors"
-                aria-label="Decrease quantity"
-              >
-                <Minus className="w-2.5 h-2.5" />
-              </button>
-              <input
-                type="text"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                value={qty}
-                onChange={(e) => {
-                  const val = e.target.value.replace(/[^0-9]/g, '');
-                  if (val === '') { setQty(0); return; }
-                  setQty(Math.min(999, parseInt(val, 10)));
-                }}
-                onBlur={() => { if (!qty || qty < 1) setQty(1); }}
-                onFocus={(e) => e.target.select()}
-                className="w-8 text-center text-xs font-bold text-brand-navy bg-transparent border-0 focus:outline-none focus:ring-1 focus:ring-brand-steel rounded"
-                aria-label="Quantity"
-              />
-              <button
-                onClick={() => setQty(q => Math.min(999, q + 1))}
-                className="w-6 h-6 flex items-center justify-center text-gray-400 hover:bg-gray-100 transition-colors"
-                aria-label="Increase quantity"
-              >
-                <Plus className="w-2.5 h-2.5" />
-              </button>
-            </div>
-            </div>
+            {/* Qty stepper (count items) — by-weight items pick pounds below */}
+            {!byWeight && (
+              <div className="flex items-center border border-gray-200 rounded overflow-hidden">
+                <button
+                  onClick={() => setQty(q => Math.max(1, Math.floor(q) - 1))}
+                  className="w-6 h-6 flex items-center justify-center text-gray-400 hover:bg-gray-100 transition-colors"
+                  aria-label="Decrease quantity"
+                >
+                  <Minus className="w-2.5 h-2.5" />
+                </button>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={qty}
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/[^0-9]/g, '');
+                    if (val === '') { setQty(0); return; }
+                    setQty(Math.min(999, parseInt(val, 10)));
+                  }}
+                  onBlur={() => { if (!qty || qty < 1) setQty(1); }}
+                  onFocus={(e) => e.target.select()}
+                  className="w-8 text-center text-xs font-bold text-brand-navy bg-transparent border-0 focus:outline-none focus:ring-1 focus:ring-brand-steel rounded"
+                  aria-label="Quantity"
+                />
+                <button
+                  onClick={() => setQty(q => Math.min(999, Math.floor(q) + 1))}
+                  className="w-6 h-6 flex items-center justify-center text-gray-400 hover:bg-gray-100 transition-colors"
+                  aria-label="Increase quantity"
+                >
+                  <Plus className="w-2.5 h-2.5" />
+                </button>
+              </div>
+            )}
           </div>
+          {byWeight && (
+            <div className="mb-2">
+              <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">How much?</p>
+              <div className="grid grid-cols-3 gap-1">
+                {WEIGHT_PRESETS.map(w => (
+                  <button key={w} type="button" onClick={() => setQty(w)}
+                    className={`py-1 rounded text-[11px] font-bold border transition-colors ${
+                      qty === w
+                        ? 'bg-brand-navy text-white border-brand-navy'
+                        : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'
+                    }`}>
+                    {formatLb(w)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {byWeight && qty > 0 && (
             <p className="text-[10px] text-gray-400 mb-1.5 -mt-1">
-              ~{formatCurrency(product.price * qty)} est. — final price by actual weight
+              {formatLb(qty)} · ~{formatCurrency(product.price * qty)} est. — billed at actual weight
             </p>
           )}
 
@@ -319,7 +336,7 @@ function ProductDetailModal({ product, onClose }: { product: Product; onClose: (
       paid_by: 'vessel',
     });
     setJustAdded(true);
-    toast({ title: 'Added to cart', description: `${qty}× ${product.description}`, variant: 'success', duration: 2000 });
+    toast({ title: 'Added to cart', description: `${byWeight ? formatLb(qty) : `${qty}×`} ${product.description}`, variant: 'success', duration: 2000 });
     setTimeout(() => { setJustAdded(false); }, 1500);
   }
 
@@ -378,10 +395,9 @@ function ProductDetailModal({ product, onClose }: { product: Product; onClose: (
             <span className="text-xl font-bold text-brand-navy">
               {formatCurrency(product.price)}{byWeight && <span className="text-xs font-semibold text-gray-400"> /lb</span>}
             </span>
-            <div className="flex items-center gap-2">
-              {byWeight && <span className="text-[10px] font-bold text-gray-400 uppercase">How many?</span>}
+            {!byWeight && (
               <div className="flex items-center border border-gray-200 rounded overflow-hidden">
-                <button onClick={() => setQty(q => Math.max(1, q - 1))} aria-label="Decrease quantity"
+                <button onClick={() => setQty(q => Math.max(1, Math.floor(q) - 1))} aria-label="Decrease quantity"
                   className="w-8 h-8 flex items-center justify-center text-gray-400 hover:bg-gray-100"><Minus className="w-3 h-3" /></button>
                 <input type="text" inputMode="numeric" pattern="[0-9]*" value={qty} aria-label="Quantity"
                   onChange={e => {
@@ -391,15 +407,33 @@ function ProductDetailModal({ product, onClose }: { product: Product; onClose: (
                   onBlur={() => { if (!qty || qty < 1) setQty(1); }}
                   onFocus={e => e.target.select()}
                   className="w-10 text-center text-sm font-bold text-brand-navy bg-transparent border-0 focus:outline-none" />
-                <button onClick={() => setQty(q => Math.min(999, q + 1))} aria-label="Increase quantity"
+                <button onClick={() => setQty(q => Math.min(999, Math.floor(q) + 1))} aria-label="Increase quantity"
                   className="w-8 h-8 flex items-center justify-center text-gray-400 hover:bg-gray-100"><Plus className="w-3 h-3" /></button>
               </div>
-            </div>
+            )}
           </div>
+
+          {byWeight && (
+            <div>
+              <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">How much?</p>
+              <div className="grid grid-cols-3 gap-1.5">
+                {WEIGHT_PRESETS.map(w => (
+                  <button key={w} type="button" onClick={() => setQty(w)}
+                    className={`py-2 rounded-lg text-sm font-bold border transition-colors ${
+                      qty === w
+                        ? 'bg-brand-navy text-white border-brand-navy'
+                        : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'
+                    }`}>
+                    {formatLb(w)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {byWeight && qty > 0 && (
             <p className="text-xs text-gray-400 -mt-1">
-              ~{formatCurrency(product.price * qty)} est. — final price by actual weight
+              {formatLb(qty)} · ~{formatCurrency(product.price * qty)} est. — final price by actual weight
             </p>
           )}
 

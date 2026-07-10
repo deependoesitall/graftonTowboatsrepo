@@ -266,7 +266,6 @@ export default function AdminSettingsPage() {
     // this too, but sending owner-only fields would 403 the whole request.
     const payload = sessionRole === 'manager'
       ? {
-          weekly_ad_url: settings.weekly_ad_url,
           grocery_cutoff_hours: settings.grocery_cutoff_hours,
           service_cutoff_hours: settings.service_cutoff_hours,
           show_digital_coupons: settings.show_digital_coupons,
@@ -612,31 +611,6 @@ export default function AdminSettingsPage() {
       {tab === 'sinclair' && (
         <div className="space-y-6">
           <div className="card-base p-6 space-y-4">
-            <h2 className="font-bold text-brand-navy">Weekly Ad</h2>
-            <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-xs text-green-800">
-              <p className="font-semibold mb-0.5">✓ Automatic</p>
-              The current ad is pulled from shop.sinclairsfoods.com/weekly-ad each week and shown
-              inline on the ordering site — customers never leave the site. Nothing to update here
-              unless auto-detection stops working.
-            </div>
-            <div>
-              <label className="label-base">Manual Override — Weekly Ad PDF URL <span className="text-gray-400 font-normal normal-case">(optional)</span></label>
-              <input type="url" className="input-base" value={settings.weekly_ad_url}
-                onChange={e => setSettings(s => ({ ...s, weekly_ad_url: e.target.value }))}
-                placeholder="Leave blank to auto-pull from Sinclair's website" />
-              <p className="text-xs text-gray-400 mt-1">
-                Only needed if the automatic pull breaks: paste the direct PDF link (right-click the
-                &quot;HERE&quot; print link on Sinclair&apos;s weekly ad page → Copy Link). Clear this field to
-                go back to automatic.
-              </p>
-            </div>
-            <a href="/weekly-ad" target="_blank" rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 text-xs text-brand-river underline">
-              <Eye className="w-3.5 h-3.5" /> Preview how customers see it
-            </a>
-          </div>
-
-          <div className="card-base p-6 space-y-4">
             <h2 className="font-bold text-brand-navy">Order Cutoff Timer</h2>
             <p className="text-xs text-gray-400 -mt-2">
               Blocks new orders placed too close to the vessel&apos;s ETA so there&apos;s time to shop and
@@ -680,6 +654,36 @@ export default function AdminSettingsPage() {
               </button>
             </div>
           </div>
+
+          {/* ── Weekly Ad override — OWNER-ONLY safety valve. Hidden from
+              Sinclair's managers: the ad auto-syncs and seeing an override
+              field only invites "wait, do we have to update this?" ── */}
+          {sessionRole === 'owner' && (
+            <div className="card-base p-6 space-y-4">
+              <h2 className="font-bold text-brand-navy">Weekly Ad <span className="text-xs font-normal text-gray-400">(owner-only safety valve)</span></h2>
+              <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-xs text-green-800">
+                <p className="font-semibold mb-0.5">✓ Automatic</p>
+                The current ad is pulled from shop.sinclairsfoods.com/weekly-ad each week and shown
+                inline on the ordering site — customers never leave the site. Nothing to update here
+                unless auto-detection stops working.
+              </div>
+              <div>
+                <label className="label-base">Manual Override — Weekly Ad PDF URL <span className="text-gray-400 font-normal normal-case">(optional)</span></label>
+                <input type="url" className="input-base" value={settings.weekly_ad_url}
+                  onChange={e => setSettings(s => ({ ...s, weekly_ad_url: e.target.value }))}
+                  placeholder="Leave blank to auto-pull from Sinclair's website" />
+                <p className="text-xs text-gray-400 mt-1">
+                  Only needed if the automatic pull breaks: paste the direct PDF link (right-click the
+                  &quot;HERE&quot; print link on Sinclair&apos;s weekly ad page → Copy Link). Clear this field to
+                  go back to automatic.
+                </p>
+              </div>
+              <a href="/weekly-ad" target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-xs text-brand-river underline">
+                <Eye className="w-3.5 h-3.5" /> Preview how customers see it
+              </a>
+            </div>
+          )}
 
           {/* ── Store Layout — walking order for shopping mode ── */}
           <div className="card-base p-6 space-y-4">

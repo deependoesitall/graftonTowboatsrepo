@@ -11,7 +11,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/admin-auth-server';
 
-const ALLOWED_FIELDS = new Set(['details', 'image_url', 'billed_by_weight', 'location', 'location_seq']);
+const ALLOWED_FIELDS = new Set(['details', 'image_url', 'billed_by_weight', 'location', 'location_seq', 'price']);
 const MAX_UPDATES = 3000;
 
 interface UpdateItem {
@@ -54,6 +54,10 @@ export async function POST(req: NextRequest) {
       if (key === 'location_seq' && value !== null
           && (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 32767)) {
         return NextResponse.json({ error: 'location_seq must be a small integer or null' }, { status: 400 });
+      }
+      if (key === 'price'
+          && (typeof value !== 'number' || !isFinite(value) || value <= 0 || value > 10000)) {
+        return NextResponse.json({ error: 'price must be a positive number' }, { status: 400 });
       }
     }
   }

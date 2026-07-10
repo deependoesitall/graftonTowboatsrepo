@@ -64,6 +64,23 @@ export function normalizeCategory(raw: string): string {
   return 'General';
 }
 
+// ── By-the-pound quantities ───────────────────────────────────
+// By-weight items are ordered in the same preset increments Sinclair's own
+// site offers (¼ lb deli salads … 5 lb hamburger). quantity = pounds requested.
+export const WEIGHT_PRESETS = [0.25, 0.5, 1, 2, 3, 5];
+
+export function formatLb(n: number): string {
+  if (n === 0.25) return '¼ lb';
+  if (n === 0.5) return '½ lb';
+  if (n === 0.75) return '¾ lb';
+  return `${n} lb`;
+}
+
+/** "×3" for counted items, "½ lb" for by-weight items. */
+export function formatQty(quantity: number, byWeight: boolean | undefined | null): string {
+  return byWeight ? formatLb(quantity) : `×${quantity}`;
+}
+
 export const MAIN_CATEGORIES = [
   'Meat & Seafood',
   'Dairy & Eggs',

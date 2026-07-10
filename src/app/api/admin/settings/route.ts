@@ -12,8 +12,10 @@ import { hashPassword, verifyPassword } from '@/lib/password';
 import { requireAdmin } from '@/lib/admin-auth-server';
 import { sanitizeZoneOrder } from '@/lib/store-layout';
 
-// Fields a manager may read and write.
-const MANAGER_FIELDS = ['weekly_ad_url', 'grocery_cutoff_hours', 'service_cutoff_hours', 'show_digital_coupons', 'store_zone_order'] as const;
+// Fields a manager may read and write. (weekly_ad_url moved to owner-only —
+// the ad auto-syncs; the manual override is a safety valve Sinclair's staff
+// shouldn't have to think about.)
+const MANAGER_FIELDS = ['grocery_cutoff_hours', 'service_cutoff_hours', 'show_digital_coupons', 'store_zone_order'] as const;
 
 export async function GET(req: NextRequest) {
   const session = requireAdmin(req, { area: 'settings' });
@@ -50,7 +52,6 @@ export async function PATCH(req: NextRequest) {
   const updates: Record<string, any> = {};
 
   // Manager-editable fields (Sinclair owns these)
-  if (body.weekly_ad_url !== undefined) updates.weekly_ad_url = body.weekly_ad_url;
   if (body.grocery_cutoff_hours !== undefined) updates.grocery_cutoff_hours = Math.max(0, Number(body.grocery_cutoff_hours) || 0);
   if (body.service_cutoff_hours !== undefined) updates.service_cutoff_hours = Math.max(0, Number(body.service_cutoff_hours) || 0);
   if (body.show_digital_coupons !== undefined) updates.show_digital_coupons = !!body.show_digital_coupons;
@@ -58,7 +59,7 @@ export async function PATCH(req: NextRequest) {
 
   // Owner-only fields
   const ownerOnlyRequested = [
-    'business_email', 'order_email_cc', 'tax_rate', 'tax_enabled',
+    'business_email', 'order_email_cc', 'tax_rate', 'tax_enabled', 'weekly_ad_url',
     'draft_orders_enabled', 'repeat_orders_enabled', 'email_debug_enabled',
     'fleet_cta_enabled',
     'order_email_subject', 'email_header_tagline', 'email_intro_message',
@@ -70,6 +71,7 @@ export async function PATCH(req: NextRequest) {
   }
 
   if (isOwner) {
+    if (body.weekly_ad_url !== undefined) updates.weekly_ad_url = body.weekly_ad_url;
     if (body.business_email !== undefined) updates.business_email = body.business_email;
     if (body.order_email_cc !== undefined) updates.order_email_cc = body.order_email_cc;
     if (body.tax_rate !== undefined) updates.tax_rate = body.tax_rate;

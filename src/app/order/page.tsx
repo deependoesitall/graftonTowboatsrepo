@@ -10,11 +10,11 @@ import {
   Ship, MapPin, Users, Wrench, Check, ClipboardList,
 } from 'lucide-react';
 import {
-  getCart, updateCartItem, removeFromCart, getCartTotal, getCartCount,
+  getCart, updateCartItem, removeFromCart, clearCart, getCartTotal, getCartCount,
   getVesselInfo, saveVesselInfo, getAdditionalServices, clearAdditionalServices,
   updateCartItemFields, getVesselSubtotal, getCodSubtotal,
 } from '@/lib/cart';
-import { formatCurrency } from '@/lib/utils';
+import { formatCurrency, formatLb, formatQty, WEIGHT_PRESETS } from '@/lib/utils';
 import { CartItem, VesselInfo, AdditionalServices, VESSEL_TYPES } from '@/types';
 import { SiteHeader } from '@/components/layout/SiteHeader';
 import { ContactPhones } from '@/components/layout/ContactPhones';
@@ -135,7 +135,7 @@ function CartItemRow({ item, onUpdate, onRemove, onPatch, codNameError }: {
           {item.billed_by_weight ? (
             <p className="text-sm font-bold text-brand-navy mt-1">
               {formatCurrency(item.price)} /lb &nbsp;&middot;&nbsp;
-              <span className="text-brand-gold">~{formatCurrency(item.price * item.quantity)} est.</span>
+              <span className="text-brand-gold">{formatLb(item.quantity)} · ~{formatCurrency(item.price * item.quantity)} est.</span>
               <span className="block text-[10px] font-normal text-amber-700">Sold by weight — billed at actual weight</span>
             </p>
           ) : (
@@ -149,24 +149,38 @@ function CartItemRow({ item, onUpdate, onRemove, onPatch, codNameError }: {
           <button onClick={onRemove} className="text-gray-300 hover:text-red-400 transition-colors p-1">
             <Trash2 className="w-4 h-4" />
           </button>
-          <div className="flex items-center border border-gray-200 rounded overflow-hidden">
-            <button onClick={() => onUpdate(item.quantity - 1)}
-              className="w-7 h-7 flex items-center justify-center text-gray-500 hover:bg-gray-100">
-              <Minus className="w-3 h-3" />
-            </button>
-            <input
-              type="text" inputMode="numeric" pattern="[0-9]*" value={draft}
-              onChange={e => setDraft(e.target.value.replace(/[^0-9]/g, ''))}
-              onBlur={commit}
-              onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-              onFocus={e => e.target.select()}
-              className="w-8 text-center text-sm font-bold text-brand-navy bg-transparent border-0 focus:outline-none"
-            />
-            <button onClick={() => onUpdate(item.quantity + 1)}
-              className="w-7 h-7 flex items-center justify-center text-gray-500 hover:bg-gray-100">
-              <Plus className="w-3 h-3" />
-            </button>
-          </div>
+          {item.billed_by_weight ? (
+            /* By-the-pound items pick from the same preset amounts Sinclair's offers */
+            <select
+              value={String(item.quantity)}
+              onChange={e => onUpdate(parseFloat(e.target.value))}
+              className="border border-gray-200 rounded-lg text-sm font-bold text-brand-navy py-1.5 px-2 bg-white"
+              aria-label="Pounds"
+            >
+              {Array.from(new Set([...WEIGHT_PRESETS, item.quantity])).sort((a, b) => a - b).map(w => (
+                <option key={w} value={String(w)}>{formatLb(w)}</option>
+              ))}
+            </select>
+          ) : (
+            <div className="flex items-center border border-gray-200 rounded overflow-hidden">
+              <button onClick={() => onUpdate(item.quantity - 1)}
+                className="w-7 h-7 flex items-center justify-center text-gray-500 hover:bg-gray-100">
+                <Minus className="w-3 h-3" />
+              </button>
+              <input
+                type="text" inputMode="numeric" pattern="[0-9]*" value={draft}
+                onChange={e => setDraft(e.target.value.replace(/[^0-9]/g, ''))}
+                onBlur={commit}
+                onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                onFocus={e => e.target.select()}
+                className="w-8 text-center text-sm font-bold text-brand-navy bg-transparent border-0 focus:outline-none"
+              />
+              <button onClick={() => onUpdate(item.quantity + 1)}
+                className="w-7 h-7 flex items-center justify-center text-gray-500 hover:bg-gray-100">
+                <Plus className="w-3 h-3" />
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -466,7 +480,23 @@ export default function OrderPage() {
             <h2 className="font-display text-lg font-bold text-brand-navy flex items-center gap-2">
               <ShoppingCart className="w-5 h-5 text-brand-gold" /> Sinclair&apos;s Groceries
             </h2>
-            {items.length > 0 && <span className="text-sm text-gray-400">{groceryCount} item{groceryCount !== 1 ? 's' : ''}</span>}
+            {items.length > 0 && (
+              <span className="flex items-center gap-3">
+                <span className="text-sm text-gray-400">{items.length} item{items.length !== 1 ? 's' : ''}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (window.confirm(`Clear your whole cart? This removes all ${items.length} item${items.length !== 1 ? 's' : ''}.`)) {
+                      clearCart();
+                      setItems(getCart());
+                    }
+                  }}
+                  className="flex items-center gap-1 text-xs font-bold text-red-400 hover:text-red-600 transition-colors"
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> Clear Cart
+                </button>
+              </span>
+            )}
           </div>
 
           {items.length === 0 ? (
@@ -1024,7 +1054,7 @@ export default function OrderPage() {
                     </div>
                   </div>
                   <div className="text-right shrink-0">
-                    <span className="text-gray-500 text-xs">&times;{item.quantity}</span>
+                    <span className="text-gray-500 text-xs">{formatQty(item.quantity, item.billed_by_weight)}</span>
                     <span className="font-bold text-brand-navy ml-2">
                       {item.billed_by_weight ? '~' : ''}{formatCurrency(item.price * item.quantity)}{item.billed_by_weight ? ' est.' : ''}
                     </span>
@@ -1047,8 +1077,28 @@ export default function OrderPage() {
                   </div>
                 </div>
               )}
-              <div className="px-4 py-3 flex justify-between font-bold bg-brand-sand/30">
-                <span className="text-brand-navy">Estimated Total</span>
+              <div className="px-4 py-3 flex justify-between items-center font-bold bg-brand-sand/30">
+                <span className="flex items-center gap-2">
+                  <span className="text-brand-navy">Estimated Total</span>
+                  <span className="relative" ref={tooltipRef}>
+                    <button type="button" onClick={() => setTooltipOpen(o => !o)}
+                      className="flex items-center gap-1 text-xs font-normal text-brand-river hover:text-brand-navy focus:outline-none">
+                      <HelpCircle className="w-3.5 h-3.5" />
+                      <span className="underline underline-offset-2">Why estimated?</span>
+                    </button>
+                    {tooltipOpen && (
+                      <span className="absolute bottom-full left-0 mb-2 z-30 w-80 bg-white border border-gray-200 rounded-lg shadow-xl p-4 block font-normal">
+                        <span className="flex justify-between gap-2 mb-2">
+                          <span className="font-bold text-gray-800 text-sm">Why is my total estimated?</span>
+                          <button type="button" onClick={() => setTooltipOpen(false)} className="text-gray-400 hover:text-gray-600">
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </span>
+                        <span className="text-xs text-gray-600 leading-relaxed block">{ESTIMATED_EXPLANATION}</span>
+                      </span>
+                    )}
+                  </span>
+                </span>
                 <span className="text-brand-navy text-lg">{formatCurrency(groceryTotal)}</span>
               </div>
             </div>

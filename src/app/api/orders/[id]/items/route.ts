@@ -9,7 +9,8 @@ import { recalcSubtotal } from '@/lib/recalc-subtotal';
 
 const addItemSchema = z.object({
   product_id: z.string().uuid(),
-  quantity: z.number().int().positive(),
+  // Decimals allowed: by-weight items are ordered in lb increments
+  quantity: z.number().positive().max(999),
 });
 
 export async function POST(
