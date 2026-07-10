@@ -15,6 +15,12 @@ export interface Product {
   location: string | null;
   /** Sinclair's walkpath stop number for this location (from Freshop). */
   location_seq: number | null;
+  /** Quantity increment from Sinclair's site — 0.25 for deli by-lb items, 1 for counted. */
+  quantity_step: number | null;
+  /** What you're counting ("bananas", "Ears") — from Sinclair's site. */
+  quantity_label: string | null;
+  /** Approx lb per unit for count-but-billed-by-weight items (bananas ≈ 0.4). */
+  quantity_size_ratio: number | null;
   pkg_size: string | null;
   uom: string | null;
   price: number;
@@ -42,6 +48,8 @@ export interface CartItem {
   billed_by_weight?: boolean;
   /** Product image snapshot — carries through to checkout review & order history. */
   image_url?: string | null;
+  /** Quantity increment from Sinclair's site — <1 means the cart edits in lb presets. */
+  quantity_step?: number | null;
   /** Defaults to 'vessel' for carts saved before the COD rework. */
   paid_by?: PaidBy;
   /** Crew member name — required when paid_by === 'cod'. */

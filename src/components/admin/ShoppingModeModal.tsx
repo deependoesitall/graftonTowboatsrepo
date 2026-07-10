@@ -282,6 +282,30 @@ export function ShoppingModeModal({ order, onClose, onComplete }: ShoppingModeMo
     setItems(prev => [...prev, newItem]);
   }
 
+  // ── RESET (undo a fat-fingered Shopped / Out of Stock) ─────────────────────
+
+  async function resetItem(item: OrderItem) {
+    const hasSubs = items.some(i => i.substitutes_item_id === item.id);
+    if (hasSubs && !confirm('Undo this out-of-stock mark? The substitution added for it will be removed too.')) return;
+    setUi(item.id, { saving: true, saveError: '' });
+    try {
+      const res = await adminFetch(`/api/orders/${order.id}/items/${item.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reset' }),
+      });
+      if (!res.ok) throw new Error('Undo failed — tap to retry');
+      const { item: updated } = await res.json();
+      setItems(prev => prev
+        .filter(i => i.substitutes_item_id !== item.id)
+        .map(i => (i.id === updated.id ? updated : i)));
+    } catch (e) {
+      setUi(item.id, { saveError: e instanceof Error ? e.message : 'Undo failed — tap to retry' });
+    } finally {
+      setUi(item.id, { saving: false });
+    }
+  }
+
   // ── SHOPPED ────────────────────────────────────────────────────────────────
 
   async function markShopped(item: OrderItem) {
@@ -594,6 +618,7 @@ export function ShoppingModeModal({ order, onClose, onComplete }: ShoppingModeMo
                           ui={itemUi[item.id] || defaultItemUiState()}
                           substitutions={subsByParent[item.id] || []}
                           subSavedIds={subSavedFlash}
+                          onReset={() => resetItem(item)}
                           onRetry={() => {
                             setUi(item.id, { saveError: '' });
                             markShopped(item);
@@ -637,6 +662,7 @@ export function ShoppingModeModal({ order, onClose, onComplete }: ShoppingModeMo
                   ui={itemUi[item.id] || defaultItemUiState()}
                   substitutions={subsByParent[item.id] || []}
                   subSavedIds={subSavedFlash}
+                  onReset={() => resetItem(item)}
                   onRetry={() => {
                     setUi(item.id, { saveError: '' });
                     markShopped(item);
@@ -1007,6 +1033,7 @@ interface ItemRowProps {
   ui: ItemUiState;
   substitutions: OrderItem[]; // subs that replaced this item
   subSavedIds: Set<string>; // which sub IDs are flashing saved
+  onReset: () => void;  // undo a shopped / out-of-stock mark
   onRetry: () => void;  // retry last failed save
   onShopped: () => void;
   onOpenWeight: () => void;
@@ -1023,7 +1050,7 @@ interface ItemRowProps {
 
 function ItemRow({
   item, ui, substitutions, subSavedIds,
-  onRetry, onShopped, onOpenWeight, onWeightChange, onConfirmWeight, onCancelWeight,
+  onReset, onRetry, onShopped, onOpenWeight, onWeightChange, onConfirmWeight, onCancelWeight,
   onOpenSub, onSubSearch, onSubSelect, onSubQtyChange, onConfirmSub, onCancelSub,
 }: ItemRowProps) {
   const shopped = item.shopping_status === 'shopped';
@@ -1198,6 +1225,18 @@ function ItemRow({
                 </button>
               </div>
             </div>
+          )}
+
+          {/* Undo a mistake — mark it back to pending, then choose again */}
+          {!item.is_substitution && !pending && (
+            <button
+              onClick={onReset}
+              disabled={ui.saving}
+              className="mt-2 flex items-center gap-1 text-xs font-bold text-gray-400 hover:text-brand-navy transition-colors disabled:opacity-40"
+            >
+              {ui.saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <PackageX className="w-3 h-3 rotate-45" />}
+              {outOfStock ? 'Undo — it’s actually in stock' : 'Undo / change'}
+            </button>
           )}
 
           {/* Substitution children — shown inline under their parent */}

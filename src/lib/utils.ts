@@ -65,9 +65,20 @@ export function normalizeCategory(raw: string): string {
 }
 
 // ── By-the-pound quantities ───────────────────────────────────
-// By-weight items are ordered in the same preset increments Sinclair's own
-// site offers (¼ lb deli salads … 5 lb hamburger). quantity = pounds requested.
+// Sinclair's own site drives this: products carry quantity_step (0.25 for
+// deli by-lb items, 1 for counted things like produce). ONLY fractional-step
+// items get the lb preset dropdown; everything else counts whole units.
 export const WEIGHT_PRESETS = [0.25, 0.5, 1, 2, 3, 5];
+
+/** Preset lb amounts derived from a product's own quantity_step (0.25 → ¼, ½, ¾, 1, 1.5, 2). */
+export function lbStepsFor(step: number): number[] {
+  return [1, 2, 3, 4, 6, 8].map(m => Math.round(m * step * 100) / 100);
+}
+
+/** True when a product orders in fractional-lb increments (deli scale items). */
+export function usesLbSteps(quantityStep: number | null | undefined): boolean {
+  return typeof quantityStep === 'number' && quantityStep > 0 && quantityStep < 1;
+}
 
 export function formatLb(n: number): string {
   if (n === 0.25) return '¼ lb';
@@ -76,9 +87,14 @@ export function formatLb(n: number): string {
   return `${n} lb`;
 }
 
-/** "×3" for counted items, "½ lb" for by-weight items. */
-export function formatQty(quantity: number, byWeight: boolean | undefined | null): string {
-  return byWeight ? formatLb(quantity) : `×${quantity}`;
+/** Show a quantity as pounds when it's clearly a pounds quantity (LB unit or fractional). */
+export function isPoundQty(uom: string | null | undefined, quantity: number): boolean {
+  return (uom || '').toUpperCase() === 'LB' || quantity % 1 !== 0;
+}
+
+/** "×3" for counted items, "½ lb" for pound quantities. */
+export function formatQty(quantity: number, asPounds: boolean | undefined | null): string {
+  return asPounds ? formatLb(quantity) : `×${quantity}`;
 }
 
 export const MAIN_CATEGORIES = [

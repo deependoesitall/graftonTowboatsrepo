@@ -36,6 +36,9 @@ const bodySchema = z.discriminatedUnion('action', [
     action: z.literal('update_quantity'),
     quantity: z.number().positive().max(999),
   }),
+  // Undo a shopped / out-of-stock mark (fat-finger fix): back to pending,
+  // clears weight, and removes any substitution children.
+  z.object({ action: z.literal('reset') }),
 ]);
 
 /** If the order is still 'new', advance it to 'in_progress' (first item action). */
@@ -177,6 +180,31 @@ export async function PATCH(
       .single();
 
     return NextResponse.json({ item: originalUpdated, substitution: subItem });
+  }
+
+  // ── RESET (undo shopped / out-of-stock) ───────────────────────────────────
+  if (action === 'reset') {
+    // Remove substitution children first — they only exist because of the
+    // out-of-stock mark we're undoing.
+    const { error: subDelErr } = await supabase
+      .from('order_items')
+      .delete()
+      .eq('order_id', orderId)
+      .eq('substitutes_item_id', itemId);
+    if (subDelErr) return NextResponse.json({ error: subDelErr.message }, { status: 500 });
+
+    const { data: updated, error } = await supabase
+      .from('order_items')
+      .update({ shopping_status: 'pending', actual_weight: null, actual_total: null })
+      .eq('id', itemId)
+      .select()
+      .single();
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    await recalcSubtotal(supabase, orderId);
+
+    return NextResponse.json({ item: updated });
   }
 
   // ── UPDATE QUANTITY ───────────────────────────────────────────────────────

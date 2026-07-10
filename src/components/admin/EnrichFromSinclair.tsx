@@ -50,6 +50,11 @@ interface FreshopProduct {
   // updates them nightly and OUR prices must match theirs exactly (Jen).
   base_price?: number;
   unit_price?: number;
+  // Quantity rules (verified live): deli by-lb items have fractional steps;
+  // bananas count by unit with an approx-lb ratio.
+  quantity_step?: number;
+  quantity_label?: string;
+  quantity_size_ratio?: number;
 }
 interface OurProduct {
   id: string;
@@ -60,6 +65,9 @@ interface OurProduct {
   location: string | null;
   location_seq: number | null;
   price: number;
+  quantity_step: number | null;
+  quantity_label: string | null;
+  quantity_size_ratio: number | null;
 }
 interface Summary {
   ours: number; noUpc: number; matched: number;
@@ -89,10 +97,14 @@ function ourKeys(upc: string): string[] {
   if (n.length >= 5) keys.push(n.slice(0, -1));
   return keys;
 }
+// Freshop sometimes puts junk like "1.0000 zzz" in size fields — strip it.
+function stripZzz(s: string): string {
+  return s.replace(/\s*\(?\d+(\.\d+)?\s*zzz\)?/gi, '').trim();
+}
 function detailsFrom(p: FreshopProduct): string | null {
-  const name = (p.name || '').trim();
+  const name = stripZzz((p.name || '').trim());
   if (!name) return null;
-  const size = (p.size || '').trim();
+  const size = stripZzz((p.size || '').trim());
   if (size && !name.toLowerCase().includes(size.toLowerCase())) return `${name} (${size})`;
   return name;
 }
@@ -328,6 +340,9 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
           location: p.location ?? null,
           location_seq: p.location_seq ?? null,
           price: Number(p.price) || 0,
+          quantity_step: p.quantity_step ?? null,
+          quantity_label: p.quantity_label ?? null,
+          quantity_size_ratio: p.quantity_size_ratio ?? null,
         })));
         if (!products?.length || ours.length >= (total || 0)) break;
       }
@@ -510,6 +525,16 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
         if (newPrice != null && Math.abs(newPrice - Number(product.price)) >= 0.005) {
           fields.price = newPrice;
           prices++;
+        }
+        // Quantity rules — how Sinclair's own site sells the item (fractional
+        // lb steps for deli, counted units for produce). Always synced.
+        const newStep = typeof hit.quantity_step === 'number' && isFinite(hit.quantity_step) && hit.quantity_step > 0 ? hit.quantity_step : null;
+        const newLabel = stripZzz((hit.quantity_label || '').trim()) || null;
+        const newRatio = typeof hit.quantity_size_ratio === 'number' && isFinite(hit.quantity_size_ratio) && hit.quantity_size_ratio > 0 ? hit.quantity_size_ratio : null;
+        if (newStep !== product.quantity_step || newLabel !== product.quantity_label || newRatio !== product.quantity_size_ratio) {
+          fields.quantity_step = newStep;
+          fields.quantity_label = newLabel;
+          fields.quantity_size_ratio = newRatio;
         }
         if (Object.keys(fields).length) updates.push({ id: product.id, fields });
       }

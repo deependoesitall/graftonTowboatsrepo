@@ -11,7 +11,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/admin-auth-server';
 
-const ALLOWED_FIELDS = new Set(['details', 'image_url', 'billed_by_weight', 'location', 'location_seq', 'price']);
+const ALLOWED_FIELDS = new Set([
+  'details', 'image_url', 'billed_by_weight', 'location', 'location_seq', 'price',
+  'quantity_step', 'quantity_label', 'quantity_size_ratio',
+]);
 const MAX_UPDATES = 3000;
 
 interface UpdateItem {
@@ -58,6 +61,13 @@ export async function POST(req: NextRequest) {
       if (key === 'price'
           && (typeof value !== 'number' || !isFinite(value) || value <= 0 || value > 10000)) {
         return NextResponse.json({ error: 'price must be a positive number' }, { status: 400 });
+      }
+      if ((key === 'quantity_step' || key === 'quantity_size_ratio') && value !== null
+          && (typeof value !== 'number' || !isFinite(value) || value <= 0 || value > 999)) {
+        return NextResponse.json({ error: `${key} must be a positive number or null` }, { status: 400 });
+      }
+      if (key === 'quantity_label' && value !== null && (typeof value !== 'string' || value.length > 40)) {
+        return NextResponse.json({ error: 'quantity_label must be a short string or null' }, { status: 400 });
       }
     }
   }

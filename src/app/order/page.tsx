@@ -14,7 +14,7 @@ import {
   getVesselInfo, saveVesselInfo, getAdditionalServices, clearAdditionalServices,
   updateCartItemFields, getVesselSubtotal, getCodSubtotal,
 } from '@/lib/cart';
-import { formatCurrency, formatLb, formatQty, WEIGHT_PRESETS } from '@/lib/utils';
+import { formatCurrency, formatLb, formatQty, isPoundQty, lbStepsFor, usesLbSteps } from '@/lib/utils';
 import { CartItem, VesselInfo, AdditionalServices, VESSEL_TYPES } from '@/types';
 import { SiteHeader } from '@/components/layout/SiteHeader';
 import { ContactPhones } from '@/components/layout/ContactPhones';
@@ -134,8 +134,8 @@ function CartItemRow({ item, onUpdate, onRemove, onPatch, codNameError }: {
           {item.pkg_size && <p className="text-xs text-gray-400 mt-0.5">{item.pkg_size}{item.uom ? ` / ${item.uom}` : ''}</p>}
           {item.billed_by_weight ? (
             <p className="text-sm font-bold text-brand-navy mt-1">
-              {formatCurrency(item.price)} /lb &nbsp;&middot;&nbsp;
-              <span className="text-brand-gold">{formatLb(item.quantity)} · ~{formatCurrency(item.price * item.quantity)} est.</span>
+              {formatCurrency(item.price)}{isPoundQty(item.uom, item.quantity) ? ' /lb' : ' ea.'} &nbsp;&middot;&nbsp;
+              <span className="text-brand-gold">{formatQty(item.quantity, isPoundQty(item.uom, item.quantity))} · ~{formatCurrency(item.price * item.quantity)} est.</span>
               <span className="block text-[10px] font-normal text-amber-700">Sold by weight — billed at actual weight</span>
             </p>
           ) : (
@@ -149,15 +149,15 @@ function CartItemRow({ item, onUpdate, onRemove, onPatch, codNameError }: {
           <button onClick={onRemove} className="text-gray-300 hover:text-red-400 transition-colors p-1">
             <Trash2 className="w-4 h-4" />
           </button>
-          {item.billed_by_weight ? (
-            /* By-the-pound items pick from the same preset amounts Sinclair's offers */
+          {usesLbSteps(item.quantity_step) ? (
+            /* Deli scale items pick from the same preset amounts Sinclair's offers */
             <select
               value={String(item.quantity)}
               onChange={e => onUpdate(parseFloat(e.target.value))}
               className="border border-gray-200 rounded-lg text-sm font-bold text-brand-navy py-1.5 px-2 bg-white"
               aria-label="Pounds"
             >
-              {Array.from(new Set([...WEIGHT_PRESETS, item.quantity])).sort((a, b) => a - b).map(w => (
+              {Array.from(new Set([...lbStepsFor(item.quantity_step!), item.quantity])).sort((a, b) => a - b).map(w => (
                 <option key={w} value={String(w)}>{formatLb(w)}</option>
               ))}
             </select>
@@ -1054,7 +1054,7 @@ export default function OrderPage() {
                     </div>
                   </div>
                   <div className="text-right shrink-0">
-                    <span className="text-gray-500 text-xs">{formatQty(item.quantity, item.billed_by_weight)}</span>
+                    <span className="text-gray-500 text-xs">{formatQty(item.quantity, isPoundQty(item.uom, item.quantity))}</span>
                     <span className="font-bold text-brand-navy ml-2">
                       {item.billed_by_weight ? '~' : ''}{formatCurrency(item.price * item.quantity)}{item.billed_by_weight ? ' est.' : ''}
                     </span>

@@ -2,7 +2,7 @@
 // src/components/catalog/ProductGrid.tsx
 import { useState, useCallback, useEffect } from 'react';
 import { Product } from '@/types';
-import { formatCurrency, WEIGHT_PRESETS, formatLb } from '@/lib/utils';
+import { formatCurrency, formatLb, lbStepsFor, usesLbSteps } from '@/lib/utils';
 import { addToCart } from '@/lib/cart';
 import { Plus, Minus, ShoppingCart, Package, Check, Star, X, Scale, Tag } from 'lucide-react';
 import Link from 'next/link';
@@ -129,6 +129,10 @@ function ProductCard({ product, isLoggedIn, isFavorite, onOpenDetail }: {
   const [justAdded, setJustAdded] = useState(false);
   const { toast } = useToast();
   const byWeight = !!product.billed_by_weight;
+  // lb dropdown ONLY for items Sinclair's own site sells in fractional-lb
+  // steps (deli scale items). Produce counts whole units even when billed
+  // by weight — bananas are "3 bananas", not "3 lb".
+  const lbSteps = usesLbSteps(product.quantity_step) ? lbStepsFor(product.quantity_step!) : null;
 
   const handleAdd = useCallback(() => {
     addToCart({
@@ -140,13 +144,14 @@ function ProductCard({ product, isLoggedIn, isFavorite, onOpenDetail }: {
       price: product.price,
       quantity: qty,
       billed_by_weight: !!product.billed_by_weight,
+      quantity_step: product.quantity_step,
       image_url: product.image_url,
       paid_by: 'vessel',
     });
     setJustAdded(true);
     toast({
       title: 'Added to cart',
-      description: `${byWeight ? formatLb(qty) : `${qty}×`} ${product.description}`,
+      description: `${lbSteps ? formatLb(qty) : `${qty}×`} ${product.description}`,
       variant: 'success',
       duration: 2000,
     });
@@ -235,8 +240,8 @@ function ProductCard({ product, isLoggedIn, isFavorite, onOpenDetail }: {
             <span className="text-base font-bold text-brand-navy font-body">
               {formatCurrency(product.price)}{byWeight && <span className="text-[10px] font-semibold text-gray-400"> /lb</span>}
             </span>
-            {/* Qty stepper (count items) — by-weight items pick pounds below */}
-            {!byWeight && (
+            {/* Qty stepper (count items) — fractional-lb items pick pounds below */}
+            {!lbSteps && (
               <div className="flex items-center border border-gray-200 rounded overflow-hidden">
                 <button
                   onClick={() => setQty(q => Math.max(1, Math.floor(q) - 1))}
@@ -270,11 +275,11 @@ function ProductCard({ product, isLoggedIn, isFavorite, onOpenDetail }: {
               </div>
             )}
           </div>
-          {byWeight && (
+          {lbSteps && (
             <div className="mb-2">
               <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">How much?</p>
               <div className="grid grid-cols-3 gap-1">
-                {WEIGHT_PRESETS.map(w => (
+                {lbSteps.map(w => (
                   <button key={w} type="button" onClick={() => setQty(w)}
                     className={`py-1 rounded text-[11px] font-bold border transition-colors ${
                       qty === w
@@ -287,9 +292,14 @@ function ProductCard({ product, isLoggedIn, isFavorite, onOpenDetail }: {
               </div>
             </div>
           )}
-          {byWeight && qty > 0 && (
+          {lbSteps && qty > 0 && (
             <p className="text-[10px] text-gray-400 mb-1.5 -mt-1">
               {formatLb(qty)} · ~{formatCurrency(product.price * qty)} est. — billed at actual weight
+            </p>
+          )}
+          {!lbSteps && byWeight && product.quantity_size_ratio && (
+            <p className="text-[10px] text-gray-400 mb-1.5 -mt-1">
+              ≈{product.quantity_size_ratio} lb each · billed at actual weight
             </p>
           )}
 
@@ -321,6 +331,7 @@ function ProductDetailModal({ product, onClose }: { product: Product; onClose: (
   const [justAdded, setJustAdded] = useState(false);
   const { toast } = useToast();
   const byWeight = !!product.billed_by_weight;
+  const lbSteps = usesLbSteps(product.quantity_step) ? lbStepsFor(product.quantity_step!) : null;
 
   function handleAdd() {
     addToCart({
@@ -332,11 +343,12 @@ function ProductDetailModal({ product, onClose }: { product: Product; onClose: (
       price: product.price,
       quantity: qty,
       billed_by_weight: byWeight,
+      quantity_step: product.quantity_step,
       image_url: product.image_url,
       paid_by: 'vessel',
     });
     setJustAdded(true);
-    toast({ title: 'Added to cart', description: `${byWeight ? formatLb(qty) : `${qty}×`} ${product.description}`, variant: 'success', duration: 2000 });
+    toast({ title: 'Added to cart', description: `${lbSteps ? formatLb(qty) : `${qty}×`} ${product.description}`, variant: 'success', duration: 2000 });
     setTimeout(() => { setJustAdded(false); }, 1500);
   }
 
@@ -395,7 +407,7 @@ function ProductDetailModal({ product, onClose }: { product: Product; onClose: (
             <span className="text-xl font-bold text-brand-navy">
               {formatCurrency(product.price)}{byWeight && <span className="text-xs font-semibold text-gray-400"> /lb</span>}
             </span>
-            {!byWeight && (
+            {!lbSteps && (
               <div className="flex items-center border border-gray-200 rounded overflow-hidden">
                 <button onClick={() => setQty(q => Math.max(1, Math.floor(q) - 1))} aria-label="Decrease quantity"
                   className="w-8 h-8 flex items-center justify-center text-gray-400 hover:bg-gray-100"><Minus className="w-3 h-3" /></button>
@@ -413,11 +425,11 @@ function ProductDetailModal({ product, onClose }: { product: Product; onClose: (
             )}
           </div>
 
-          {byWeight && (
+          {lbSteps && (
             <div>
               <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">How much?</p>
               <div className="grid grid-cols-3 gap-1.5">
-                {WEIGHT_PRESETS.map(w => (
+                {lbSteps.map(w => (
                   <button key={w} type="button" onClick={() => setQty(w)}
                     className={`py-2 rounded-lg text-sm font-bold border transition-colors ${
                       qty === w
@@ -431,9 +443,14 @@ function ProductDetailModal({ product, onClose }: { product: Product; onClose: (
             </div>
           )}
 
-          {byWeight && qty > 0 && (
+          {lbSteps && qty > 0 && (
             <p className="text-xs text-gray-400 -mt-1">
               {formatLb(qty)} · ~{formatCurrency(product.price * qty)} est. — final price by actual weight
+            </p>
+          )}
+          {!lbSteps && byWeight && product.quantity_size_ratio && (
+            <p className="text-xs text-gray-400 -mt-1">
+              ≈{product.quantity_size_ratio} lb each · billed at actual weight
             </p>
           )}
 
