@@ -6,13 +6,15 @@ import Link from 'next/link';
 import { ArrowLeft, BadgePercent, TicketX } from 'lucide-react';
 import { SiteHeader } from '@/components/layout/SiteHeader';
 import { fetchSinclairCoupons, SinclairCoupon } from '@/lib/sinclair-coupons';
-import { createClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/server';
 
 export const revalidate = 900;
 
 export default async function CouponsPage() {
-  // Respect the Sinclair manager's toggle
-  const supabase = await createClient();
+  // Respect the Sinclair manager's toggle. SERVICE client, not anon —
+  // admin_settings is RLS-locked to the service role, so the anon read
+  // returned null and `?? true` kept coupons visible with the toggle off.
+  const supabase = createServiceClient();
   const { data: s } = await supabase.from('admin_settings').select('show_digital_coupons').single();
   const enabled = s?.show_digital_coupons ?? true;
 

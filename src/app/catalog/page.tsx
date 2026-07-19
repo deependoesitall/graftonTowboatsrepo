@@ -3,7 +3,7 @@ import { Suspense } from 'react';
 import Link from 'next/link';
 import { Newspaper, BadgePercent, Ship, Truck, Anchor, Phone } from 'lucide-react';
 import { CouponStrip } from '@/components/catalog/CouponStrip';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 import { ProductGrid } from '@/components/catalog/ProductGrid';
 import { CategoryFilter } from '@/components/catalog/CategoryFilter';
 import { SearchBar } from '@/components/catalog/SearchBar';
@@ -41,7 +41,11 @@ function couponFitsCatalog(c: { name: string; description: string | null; brand:
 }
 
 async function PromoSections() {
-  const supabase = await createClient();
+  // SERVICE client, not anon: admin_settings (and coupons) are RLS-locked to
+  // the service role. The anon read silently returned null and `?? true`
+  // turned "couldn't read the toggle" into "coupons ON" — the July 19 bug
+  // where switching coupons off did nothing on the catalog.
+  const supabase = createServiceClient();
   const [{ data: settings }, { data: coupons }] = await Promise.all([
     supabase.from('admin_settings').select('show_digital_coupons').single(),
     supabase.from('coupons')
@@ -132,7 +136,9 @@ export default async function CatalogPage({ searchParams }: PageProps) {
   const [{ data: products, count }, { data: catCounts }, { data: pageSettings }] = await Promise.all([
     query,
     supabase.rpc('get_category_counts'),
-    supabase.from('admin_settings').select('fleet_cta_enabled').single(),
+    // admin_settings is RLS-locked to the service role — the anon client read
+    // null here, which meant the fleet CTA toggle silently never worked.
+    createServiceClient().from('admin_settings').select('fleet_cta_enabled').single(),
   ]);
   const fleetCtaEnabled = !!pageSettings?.fleet_cta_enabled;
 
