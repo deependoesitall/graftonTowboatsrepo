@@ -49,9 +49,17 @@ function OrdersContent() {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
-  const canEditOrders = canEdit(typeof window !== 'undefined' ? getAdminRole() : null, 'orders');
-  const isOwner = (typeof window !== 'undefined' ? getAdminRole() : null) === 'owner';
-  const isSinclair = typeof window !== 'undefined' ? hasAdminPermission('sinclair') : false;
+  // Role-gated UI is resolved AFTER mount — reading localStorage during render
+  // makes the client's first paint differ from the server HTML (hydration #418).
+  const [roleFlags, setRoleFlags] = useState({ canEditOrders: false, isOwner: false, isSinclair: false });
+  useEffect(() => {
+    setRoleFlags({
+      canEditOrders: canEdit(getAdminRole(), 'orders'),
+      isOwner: getAdminRole() === 'owner',
+      isSinclair: hasAdminPermission('sinclair'),
+    });
+  }, []);
+  const { canEditOrders, isOwner, isSinclair } = roleFlags;
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Auth guard — verify the session cookie with the server
@@ -88,7 +96,7 @@ function OrdersContent() {
       setStatusCounts(data.status_counts || {});
     }
     setLoading(false);
-  }, [page, search, statusFilter]);
+  }, [page, search, statusFilter, isSinclair]);
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
 

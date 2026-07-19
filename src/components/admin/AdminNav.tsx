@@ -20,14 +20,11 @@ const ROLE_LABELS: Record<AdminRole, string> = { owner: 'Owner', manager: 'Manag
 
 export function AdminNav() {
   const path = usePathname();
-  const [role, setRole] = useState<AdminRole | null>(() => {
-    if (typeof window === 'undefined') return null;
-    return getAdminRole();
-  });
-  const [name, setName] = useState<string>(() => {
-    if (typeof window === 'undefined') return '';
-    return getAdminName();
-  });
+  // Start empty on BOTH server and client, then fill in after mount — reading
+  // localStorage in the useState initializer made the client's first render
+  // differ from the server's HTML (React hydration error #418 on every admin page).
+  const [role, setRole] = useState<AdminRole | null>(null);
+  const [name, setName] = useState<string>('');
 
   useEffect(() => {
     setRole(getAdminRole());

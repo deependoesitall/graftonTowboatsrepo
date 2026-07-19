@@ -10,7 +10,7 @@ import Image from 'next/image';
 import { formatCurrency, MAIN_CATEGORIES } from '@/lib/utils';
 import { Product } from '@/types';
 import { useRouter } from 'next/navigation';
-import { fetchAdminSession, getAdminRole, canAccess, adminFetch } from '@/lib/admin-auth';
+import { fetchAdminSession, canAccess, adminFetch } from '@/lib/admin-auth';
 import { ImportWizard } from '@/components/admin/ImportWizard';
 import { EnrichFromSinclair } from '@/components/admin/EnrichFromSinclair';
 
@@ -18,41 +18,115 @@ import { EnrichFromSinclair } from '@/components/admin/EnrichFromSinclair';
 // -- Apply the paper order form's layout (form_section/subsection/seq) to the catalog.
 // Barges shop the form top-to-bottom — this stamps that exact sequence onto products.
 function ApplyFormLayoutButton({ onDone }: { onDone: () => void }) {
+  const [open, setOpen] = useState(false);
   const [running, setRunning] = useState(false);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState<null | {
+    form_rows: number; matched: number;
+    matched_by: { upc: number; desc_pkg: number; desc: number };
+    unmatched_count: number;
+    unmatched: Array<{ seq: number; description: string; pkg_size: string | null; upc: string | null }>;
+  }>(null);
+
   async function run() {
-    if (!confirm(
-      'Apply the paper order-form layout to the catalog?\n\n' +
-      'This stamps every matched product with its order-form position (section, subsection, sequence) ' +
-      'so barges see items in the exact order of the paper form. Safe to re-run.'
-    )) return;
-    setRunning(true);
+    setRunning(true); setError('');
     try {
       const res = await adminFetch('/api/admin/apply-form-layout', { method: 'POST' });
       const r = await res.json();
       if (!res.ok) throw new Error(r?.error || 'Apply failed');
-      console.log('Order-form layout — unmatched rows:', r.unmatched);
-      alert(
-        `Order-form layout applied.\n\n` +
-        `Form rows: ${r.form_rows}\n` +
-        `Matched: ${r.matched} (UPC ${r.matched_by.upc} · desc+pack ${r.matched_by.desc_pkg} · desc ${r.matched_by.desc})\n` +
-        `Unmatched: ${r.unmatched_count} — first few:\n` +
-        (r.unmatched || []).slice(0, 8).map((u: { description: string; pkg_size: string | null }) => `  · ${u.description}${u.pkg_size ? ` (${u.pkg_size})` : ''}`).join('\n') +
-        (r.unmatched_count > 8 ? `\n  …full list in the browser console.` : '')
-      );
+      setResult(r);
       onDone();
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Apply failed');
+      setError(e instanceof Error ? e.message : 'Apply failed');
     } finally {
       setRunning(false);
     }
   }
+
   return (
-    <button onClick={run} disabled={running}
-      className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5 disabled:opacity-50"
-      title="Stamp the paper order form's section/sequence onto matched products">
-      {running ? <Loader2 className="w-4 h-4 animate-spin" /> : <ListOrdered className="w-4 h-4" />}
-      Apply Order-Form Layout
-    </button>
+    <div className="relative">
+      <button onClick={() => { setOpen(o => !o); setError(''); }}
+        className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5"
+        title="Stamp the paper order form's section/sequence onto matched products">
+        <ListOrdered className="w-4 h-4" /> Apply Order-Form Layout
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-2 z-40 w-[380px] bg-white border border-gray-200 rounded-xl shadow-2xl p-4">
+          <div className="flex items-start justify-between gap-3 mb-2">
+            <p className="font-bold text-brand-navy text-sm">Order-Form Layout</p>
+            <button onClick={() => { setOpen(false); setResult(null); setError(''); }}
+              className="text-gray-400 hover:text-gray-600"><X className="w-4 h-4" /></button>
+          </div>
+
+          {!result && (
+            <>
+              <p className="text-xs text-gray-500 leading-relaxed mb-3">
+                Stamps every matched product with its position on the paper order form
+                (section · subsection · sequence) so barges see items in the exact order
+                of the form. Safe to re-run any time the catalog changes.
+              </p>
+              {error && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1.5 mb-2">{error}</p>}
+              <button onClick={run} disabled={running}
+                className="w-full flex items-center justify-center gap-1.5 bg-brand-navy text-white text-xs font-bold uppercase tracking-wide px-4 py-2.5 rounded-lg hover:bg-brand-steel transition-colors disabled:opacity-60">
+                {running ? <><Loader2 className="w-4 h-4 animate-spin" /> Matching catalog…</> : 'Apply Layout Now'}
+              </button>
+              <p className="text-[10px] text-gray-400 mt-2">
+                Also runs automatically after every nightly catalog sync.
+              </p>
+            </>
+          )}
+
+          {result && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-brand-green text-sm font-bold">
+                <CheckCircle2 className="w-4 h-4" /> Layout applied
+              </div>
+              <div className="grid grid-cols-3 gap-1.5 text-center">
+                <div className="bg-gray-50 rounded-lg py-1.5">
+                  <p className="text-base font-bold text-brand-navy">{result.form_rows}</p>
+                  <p className="text-[10px] text-gray-400 uppercase">Form rows</p>
+                </div>
+                <div className="bg-green-50 rounded-lg py-1.5">
+                  <p className="text-base font-bold text-green-700">{result.matched}</p>
+                  <p className="text-[10px] text-gray-400 uppercase">Matched</p>
+                </div>
+                <div className={`rounded-lg py-1.5 ${result.unmatched_count ? 'bg-amber-50' : 'bg-gray-50'}`}>
+                  <p className={`text-base font-bold ${result.unmatched_count ? 'text-amber-700' : 'text-gray-400'}`}>{result.unmatched_count}</p>
+                  <p className="text-[10px] text-gray-400 uppercase">Unmatched</p>
+                </div>
+              </div>
+              <p className="text-[10px] text-gray-400">
+                Matched by: UPC {result.matched_by.upc} · description + pack {result.matched_by.desc_pkg} · description {result.matched_by.desc}
+              </p>
+              {result.unmatched_count > 0 && (
+                <div className="border border-amber-200 bg-amber-50/60 rounded-lg max-h-44 overflow-y-auto divide-y divide-amber-100">
+                  {result.unmatched.map(u => (
+                    <div key={u.seq} className="px-2.5 py-1.5">
+                      <p className="text-[11px] font-semibold text-amber-900">{u.description}</p>
+                      <p className="text-[10px] text-amber-700/70">
+                        form row #{u.seq}{u.pkg_size ? ` · ${u.pkg_size}` : ''}{u.upc ? ` · UPC ${u.upc}` : ' · no UPC on form'}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {result.unmatched_count > 0 && (
+                <p className="text-[10px] text-gray-400 leading-relaxed">
+                  Usually duplicate form rows sharing one UPC (Blue Bell flavors, Coffeemate) or
+                  UPC-less items with names that differ from the catalog. Edit those products&apos;
+                  names/UPCs to match the form, then re-apply.
+                </p>
+              )}
+              <button onClick={run} disabled={running}
+                className="w-full text-xs font-bold text-brand-river hover:text-brand-navy py-1.5">
+                {running ? 'Re-running…' : 'Run again'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -573,7 +647,6 @@ export default function AdminProductsPage() {
   const [dupFilter, setDupFilter] = useState<'all' | 'upc' | 'name_pack' | 'upc_conflict'>('all');
 
   const [denied, setDenied] = useState(false);
-  const role = typeof window !== 'undefined' ? getAdminRole() : null;
 
   // Auth guard — verify the session cookie with the server
   useEffect(() => {

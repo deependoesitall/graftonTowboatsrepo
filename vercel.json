@@ -10,6 +10,15 @@
     },
     "src/app/api/orders/route.ts": {
       "maxDuration": 30
+    },
+    "src/app/api/cron/catalog-sync/route.ts": {
+      "maxDuration": 60
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/catalog-sync",
+      "schedule": "5 5 * * *"
+    }
+  ]
 }

@@ -1,0 +1,30 @@
+# Nightly catalog sync — chunk driver.
+#
+# NCR/Freshop rate-limits datacenter IPs, so the sync endpoint processes only a
+# few catalog pages per call and checkpoints in the database. Vercel's cron
+# kicks the first chunk at 12:05am Central; this workflow keeps poking the
+# endpoint every 15 minutes through the night until the run reports "done"
+# (already-done invocations are instant no-ops).
+#
+# Setup (one time): add repo secret CRON_SECRET with the same value as the
+# CRON_SECRET environment variable in Vercel.
+
+name: Nightly catalog sync
+
+on:
+  schedule:
+    # Every 15 min, 05:00–08:45 UTC (≈ midnight–4am Central) — plenty of
+    # chunks to cover ~125 catalog pages at 8 pages per invocation.
+    - cron: '*/15 5-8 * * *'
+  workflow_dispatch: {}   # manual "Run workflow" button for testing
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger sync chunk
+        run: |
+          curl -sS -X POST "https://grafton-towboatsrepo.vercel.app/api/cron/catalog-sync" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            --max-time 90 \
+            -w "\nHTTP %{http_code}\n"
