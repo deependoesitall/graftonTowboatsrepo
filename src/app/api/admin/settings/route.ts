@@ -15,7 +15,7 @@ import { sanitizeZoneOrder } from '@/lib/store-layout';
 // Fields a manager may read and write. (weekly_ad_url moved to owner-only —
 // the ad auto-syncs; the manual override is a safety valve Sinclair's staff
 // shouldn't have to think about.)
-const MANAGER_FIELDS = ['grocery_cutoff_hours', 'service_cutoff_hours', 'show_digital_coupons', 'store_zone_order'] as const;
+const MANAGER_FIELDS = ['grocery_cutoff_hours', 'service_cutoff_hours', 'show_digital_coupons', 'store_zone_order', 'cod_fee_enabled', 'cod_fee_percent'] as const;
 
 export async function GET(req: NextRequest) {
   const session = requireAdmin(req, { area: 'settings' });
@@ -56,6 +56,8 @@ export async function PATCH(req: NextRequest) {
   if (body.service_cutoff_hours !== undefined) updates.service_cutoff_hours = Math.max(0, Number(body.service_cutoff_hours) || 0);
   if (body.show_digital_coupons !== undefined) updates.show_digital_coupons = !!body.show_digital_coupons;
   if (body.store_zone_order !== undefined) updates.store_zone_order = sanitizeZoneOrder(body.store_zone_order);
+  if (body.cod_fee_enabled !== undefined) updates.cod_fee_enabled = !!body.cod_fee_enabled;
+  if (body.cod_fee_percent !== undefined) updates.cod_fee_percent = Math.min(100, Math.max(0, Number(body.cod_fee_percent) || 0));
 
   // Owner-only fields
   const ownerOnlyRequested = [

@@ -74,6 +74,9 @@ export function buildOrderEmailHtml(
 
   const codItems = groceryItems.filter(i => i.paid_by === 'cod');
   const codSubtotal = codItems.reduce((s, i) => s + Number(i.line_total), 0);
+  // Deck lines — company-billed but listed separately from the grocery allowance
+  const deckItems = groceryItems.filter(i => i.paid_by === 'deck');
+  const deckSubtotal = deckItems.reduce((s, i) => s + Number(i.line_total), 0);
   // CODs grouped PER CREW MEMBER — each settles their own total at delivery
   const codByName = Array.from(codItems.reduce((acc, i) => {
     const name = (i.cod_name || '').trim() || 'Crew member';
@@ -83,9 +86,11 @@ export function buildOrderEmailHtml(
   }, new Map<string, typeof codItems>()).entries()).sort((a, b) => a[0].localeCompare(b[0]));
   const discounts = order.discounts || [];
   const discountTotal = Number(order.discount_total) || 0;
-  const codMethodLabel = order.cod_payment_method === 'credit_card' ? 'Credit Card — call to collect'
-    : order.cod_payment_method === 'venmo' ? 'Venmo'
+  const codMethodLabel = order.cod_payment_method === 'credit_card' ? 'Credit Card — we’ll call to collect'
+    : order.cod_payment_method === 'venmo' ? 'Venmo — we’ll send a payment request'
+    : order.cod_payment_method === 'cashapp' ? 'Cash App — we’ll send a payment request'
     : order.cod_payment_method === 'cash' ? 'Cash' : null;
+  const codFeePct = Number(order.cod_fee_percent ?? 5);
 
   const itemRows = groceryItems.map(item => `
     <tr style="border-bottom:1px solid #f0f0f0;">
@@ -93,6 +98,8 @@ export function buildOrderEmailHtml(
       <td style="padding:8px 10px;font-size:13px;color:#1E3D1E;font-weight:600;">${item.description}${
         item.paid_by === 'cod'
           ? `<span style="display:inline-block;margin-left:6px;font-size:9px;font-weight:800;color:#9333ea;background:#faf5ff;border:1px solid #9333ea;border-radius:3px;padding:1px 4px;text-transform:uppercase;">COD${item.cod_name ? ` · ${item.cod_name}` : ''}</span>`
+          : item.paid_by === 'deck'
+          ? `<span style="display:inline-block;margin-left:6px;font-size:9px;font-weight:800;color:#0f766e;background:#f0fdfa;border:1px solid #0f766e;border-radius:3px;padding:1px 4px;text-transform:uppercase;">DECK</span>`
           : ''
       }</td>
       <td style="padding:8px 10px;font-size:12px;color:#666;text-align:center;">${item.pkg_size || '—'}</td>
@@ -218,17 +225,19 @@ export function buildOrderEmailHtml(
     </div>` : ''}
 
     ${codItems.length > 0 ? `<div style="background:#faf5ff;border:1px solid #9333ea;padding:10px 14px;border-radius:4px;margin-bottom:20px;">
-      <div style="font-size:9px;font-weight:800;color:#9333ea;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">COD Items — collect ${formatCurrency(codSubtotal)} on delivery (not invoiced) · separated by crew member</div>
+      <div style="font-size:9px;font-weight:800;color:#9333ea;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">COD Items — ${formatCurrency(codSubtotal * (1 + codFeePct / 100))}${codFeePct > 0 ? ` incl. ${codFeePct}% handling fee` : ''} (not invoiced) · paid personally, separated by crew member</div>
       ${codByName.map(([name, list]) => {
         const personTotal = list.reduce((s, i) => s + Number(i.line_total), 0);
         return `<div style="margin-bottom:6px;">
-          <div style="font-size:12px;font-weight:800;color:#6b21a8;">${name} — ${formatCurrency(personTotal)}</div>
+          <div style="font-size:12px;font-weight:800;color:#6b21a8;">${name} — ${formatCurrency(personTotal * (1 + codFeePct / 100))}${codFeePct > 0 ? ' <span style="font-weight:400;color:#9d7bd8;">incl. fee</span>' : ''}</div>
           ${list.map(i => `<div style="font-size:11px;color:#444;padding-left:10px;">${i.quantity}× ${i.description} · ${formatCurrency(Number(i.line_total))}</div>`).join('')}
         </div>`;
       }).join('')}
       ${codMethodLabel ? `<div style="font-size:11px;color:#6b21a8;margin-top:4px;border-top:1px solid #e9d5ff;padding-top:4px;"><strong>Payment:</strong> ${codMethodLabel}${
         order.cod_payment_method === 'credit_card'
-          ? ` — call ${order.cod_preferred_phone || 'the crew member'}${order.cod_contact_time ? ` (best time: ${order.cod_contact_time})` : ''}`
+          ? ` — we’ll call ${order.cod_preferred_phone || 'the crew member'}${order.cod_contact_time ? ` (around ${order.cod_contact_time})` : ''}`
+          : (order.cod_payment_method === 'venmo' || order.cod_payment_method === 'cashapp')
+          ? ` to <strong>${order.cod_payment_handle || 'the account on file'}</strong> for the exact final amount once the order is shopped. Please don’t send payment ahead of time.`
           : ''
       }</div>` : ''}
     </div>` : ''}
@@ -260,6 +269,10 @@ export function buildOrderEmailHtml(
           <td colspan="5" style="padding:6px 10px;font-size:11px;font-weight:700;color:#15803d;">🏷 ${d.name}${d.description ? ` <span style="font-weight:400;color:#4d7c5f;">— ${d.description}</span>` : ''}</td>
           <td style="padding:6px 10px;text-align:right;font-size:12px;font-weight:800;color:#15803d;">−${formatCurrency(Number(d.amount))}</td>
         </tr>`).join('')}
+        ${deckItems.length > 0 ? `<tr style="background:#f0fdfa;">
+          <td colspan="5" style="padding:6px 10px;font-size:11px;font-weight:700;color:#0f766e;">Deck subtotal — company-billed, listed separately (not part of the grocery allowance)</td>
+          <td style="padding:6px 10px;text-align:right;font-size:12px;font-weight:800;color:#0f766e;">${formatCurrency(deckSubtotal)}</td>
+        </tr>` : ''}
         <tr style="background:#D9E84A;">
           <td colspan="5" style="padding:10px;font-size:14px;font-weight:900;color:#1E3D1E;text-transform:uppercase;">ESTIMATED TOTAL</td>
           <td style="padding:10px;text-align:right;font-size:16px;font-weight:900;color:#1E3D1E;">${formatCurrency(order.subtotal)}</td>
@@ -356,8 +369,11 @@ export async function sendOrderReceivedEmail(
     throw new Error(businessResult.error.message || JSON.stringify(businessResult.error));
   }
 
-  // 2) Customer confirmation email (only if we have their email)
-  if (order.customer_email) {
+  // 2) Customer confirmation email — goes to the VESSEL email first (the boat
+  // places and tracks the order); billing email is only the fallback. The home
+  // office gets the monthly bill, not per-order noise (July 10 demo decision).
+  const confirmTo = order.vessel_email || order.customer_email;
+  if (confirmTo) {
     const customerHtml = buildOrderEmailHtml(order, {
       tagline:    'Order Confirmation',
       intro:      `Thank you for your order, ${order.contact_name}! We've received it and will begin preparing your delivery. A copy of your order is attached to this email.`,
@@ -367,7 +383,7 @@ export async function sendOrderReceivedEmail(
     });
     const customerResult = await getResend().emails.send({
       from:        fromEmail,
-      to:          [order.customer_email],
+      to:          [confirmTo],
       replyTo:     toEmail,
       subject:     `✅ Order Confirmed — ${order.order_number} — Grafton Towboat Services`,
       html:        customerHtml,
@@ -414,8 +430,10 @@ export async function sendOrderShoppedEmail(
     footerText: 'Grafton Towboat Services · Grafton, IL 62037 · (618) 556-0290 · GraftonTowboatServices@gmail.com',
   });
 
-  const recipients = order.customer_email ? [order.customer_email] : [toEmail];
-  const cc = order.customer_email
+  // Vessel email first — the boat tracks the order, not the home office.
+  const shoppedTo = order.vessel_email || order.customer_email;
+  const recipients = shoppedTo ? [shoppedTo] : [toEmail];
+  const cc = shoppedTo
     ? [toEmail, ...ccList].filter(Boolean)
     : ccList;
 

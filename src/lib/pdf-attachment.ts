@@ -135,20 +135,23 @@ export async function generateOrderPdfBuffer(order: Order): Promise<Buffer> {
     // ── COD ITEMS (per-line paid_by — driver collects payment) ─
     const codItems = order.items.filter(i => i.item_type !== 'service' && i.paid_by === 'cod');
     if (codItems.length > 0) {
-      const codTotal = codItems.reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0);
+      const codBase = codItems.reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0);
+      const codFeePct = Number(order.cod_fee_percent ?? 5);
+      const codTotal = codBase * (1 + codFeePct / 100);
       const methodLabel = order.cod_payment_method === 'credit_card' ? 'CREDIT CARD — CALL TO COLLECT'
-        : order.cod_payment_method === 'venmo' ? 'VENMO'
-        : order.cod_payment_method === 'cash' ? 'CASH' : '';
+        : order.cod_payment_method === 'venmo' ? `VENMO — REQUEST TO ${order.cod_payment_handle || 'ACCOUNT ON FILE'}`
+        : order.cod_payment_method === 'cashapp' ? `CASH APP — REQUEST TO ${order.cod_payment_handle || 'ACCOUNT ON FILE'}`
+        : order.cod_payment_method === 'cash' ? 'CASH (LEGACY)' : '';
       const lines = codItems.map(i => `${i.quantity}x ${i.description} — ${i.cod_name || 'crew member'}`).join('; ');
       const detail = [
         lines,
-        methodLabel && `Payment: ${methodLabel}${order.cod_payment_method === 'credit_card' && order.cod_preferred_phone ? ` (call ${order.cod_preferred_phone}${order.cod_contact_time ? `, best time ${order.cod_contact_time}` : ''})` : ''}`,
+        methodLabel && `Payment: ${methodLabel}${order.cod_payment_method === 'credit_card' && order.cod_preferred_phone ? ` (call ${order.cod_preferred_phone}${order.cod_contact_time ? `, around ${order.cod_contact_time}` : ''})` : ''}`,
       ].filter(Boolean).join('  ·  ');
       const blockH = 34;
       doc.rect(MARGIN, y, CONTENT_W, blockH).fill('#faf5ff');
       doc.rect(MARGIN, y, 3, blockH).fill('#9333ea');
       doc.fillColor('#9333ea').fontSize(8).font('Helvetica-Bold')
-         .text(`COD ITEMS — COLLECT $${codTotal.toFixed(2)} ON DELIVERY (NOT INVOICED)`, MARGIN + 8, y + 5, { characterSpacing: 0.5 });
+         .text(`COD ITEMS — COLLECT $${codTotal.toFixed(2)}${codFeePct > 0 ? ` INCL. ${codFeePct}% FEE` : ''} (NOT INVOICED)`, MARGIN + 8, y + 5, { characterSpacing: 0.5 });
       doc.fillColor('#444444').fontSize(8).font('Helvetica')
          .text(detail, MARGIN + 8, y + 16, { width: CONTENT_W - 16 });
       y += blockH + 6;

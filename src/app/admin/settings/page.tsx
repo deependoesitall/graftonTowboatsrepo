@@ -35,6 +35,8 @@ interface Settings {
   grocery_cutoff_hours: number;
   service_cutoff_hours: number;
   show_digital_coupons: boolean;
+  cod_fee_enabled: boolean;
+  cod_fee_percent: number;
   fleet_cta_enabled: boolean;
   store_zone_order: string[];
 }
@@ -100,6 +102,8 @@ export default function AdminSettingsPage() {
     grocery_cutoff_hours: 4,
     service_cutoff_hours: 2,
     show_digital_coupons: true,
+    cod_fee_enabled: true,
+    cod_fee_percent: 5,
     fleet_cta_enabled: false,
     store_zone_order: [...DEFAULT_ZONE_ORDER],
   });
@@ -270,6 +274,8 @@ export default function AdminSettingsPage() {
           service_cutoff_hours: settings.service_cutoff_hours,
           show_digital_coupons: settings.show_digital_coupons,
           store_zone_order: settings.store_zone_order,
+          cod_fee_enabled: settings.cod_fee_enabled,
+          cod_fee_percent: settings.cod_fee_percent,
         }
       : settings;
     const res = await adminFetch('/api/admin/settings', {
@@ -662,6 +668,38 @@ export default function AdminSettingsPage() {
                 <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.show_digital_coupons ? 'translate-x-6' : 'translate-x-1'}`} />
               </button>
             </div>
+          </div>
+
+          {/* ── COD handling fee — toggleable + configurable percent.
+              Offsets Venmo / Cash App / credit-card processing on CODs.
+              Snapshot at order time; toggling off only affects NEW orders. ── */}
+          <div className="card-base p-6 space-y-3">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="font-bold text-brand-navy">COD Handling Fee</h2>
+                <p className="text-xs text-gray-400 mt-1 leading-relaxed">
+                  Adds a percentage on top of each COD total to cover Venmo, Cash App, and
+                  credit-card processing. Shown to the crew member at checkout and included in the
+                  amount you request. Turning this off removes the fee from <strong className="text-brand-navy">new</strong> orders
+                  only — orders already placed keep the fee they were quoted, and you can still
+                  adjust the fee on any single order from its order details.
+                </p>
+              </div>
+              <button
+                onClick={() => setSettings(s => ({ ...s, cod_fee_enabled: !s.cod_fee_enabled }))}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ${settings.cod_fee_enabled ? 'bg-brand-green' : 'bg-gray-200'}`}>
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.cod_fee_enabled ? 'translate-x-6' : 'translate-x-1'}`} />
+              </button>
+            </div>
+            {settings.cod_fee_enabled && (
+              <div className="flex items-center gap-3 pt-1">
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wide">Fee percent</label>
+                <input type="number" min="0" max="100" step="0.5" className="input-base w-24 text-center font-bold"
+                  value={settings.cod_fee_percent}
+                  onChange={e => setSettings(s => ({ ...s, cod_fee_percent: Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)) }))} />
+                <span className="text-sm text-gray-500">% — default is 5</span>
+              </div>
+            )}
           </div>
 
           {/* ── Weekly Ad override — OWNER-ONLY safety valve. Hidden from

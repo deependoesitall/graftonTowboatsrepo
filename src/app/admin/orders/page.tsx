@@ -2,7 +2,8 @@
 // src/app/admin/orders/page.tsx
 import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, Download, Eye, Loader2, RefreshCw, Package, ArrowRight, Trash2, Users, Wrench } from 'lucide-react';
+import { Search, Download, Eye, Loader2, RefreshCw, Package, ArrowRight, Trash2, Users, Wrench, Printer } from 'lucide-react';
+import { openPickSheet } from '@/lib/pick-sheet';
 import { formatCurrency, formatDate, ORDER_STATUSES } from '@/lib/utils';
 import { Order, OrderStatus } from '@/types';
 import { OrderDetailModal } from '@/components/admin/OrderDetailModal';
@@ -105,6 +106,25 @@ function OrdersContent() {
     // Update selected order if open
     if (selectedOrder?.id === order.id) {
       setSelectedOrder(prev => prev ? { ...prev, status: next } : null);
+    }
+  }
+
+  // Barcode pick sheet straight from the list. Printing a NEW order prompts
+  // to lock it In Progress first (declinable — Dave prints future orders early).
+  async function printPickSheet(order: Order) {
+    if (canEditOrders && order.status === 'new') {
+      const lock = confirm(
+        'Mark this order as IN PROGRESS before printing?\n\n' +
+        'In Progress locks the order — the customer can no longer add or change items.\n\n' +
+        'OK — mark In Progress, then print\n' +
+        'Cancel — just print (customer can still make changes until it goes In Progress)'
+      );
+      if (lock) await updateStatus(order.id, 'in_progress');
+    }
+    try {
+      await openPickSheet(order.id);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Could not open the pick sheet');
     }
   }
 
@@ -398,6 +418,13 @@ function OrdersContent() {
                               title="View Details"
                             >
                               <Eye className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => printPickSheet(order)}
+                              className="p-1.5 text-gray-400 hover:text-brand-river transition-colors"
+                              title="Print Pick Sheet (barcodes)"
+                            >
+                              <Printer className="w-4 h-4" />
                             </button>
                             <button
                               onClick={() => downloadOrderPdf(order.id, order.order_number)}

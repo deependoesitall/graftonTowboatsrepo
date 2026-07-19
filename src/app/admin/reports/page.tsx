@@ -68,7 +68,7 @@ interface BillingItem {
   item_type: 'grocery' | 'service';
   service_type: string | null;
   service_details: Record<string, string> | null;
-  paid_by: 'vessel' | 'cod';
+  paid_by: 'vessel' | 'deck' | 'cod';
   cod_name: string | null;
 }
 interface BillingOrder {
@@ -164,6 +164,16 @@ function billableItems(o: BillingOrder): BillingItem[] {
 function codLines(o: BillingOrder): BillingItem[] {
   return o.items.filter(i => i.item_type !== 'service' && i.paid_by === 'cod');
 }
+// Deck lines — company-billed but invoiced SEPARATELY from the grocery
+// allowance (Dave: "grocery goes against the boat allowance, deck does not").
+function deckLines(o: BillingOrder): BillingItem[] {
+  return o.items.filter(i => i.item_type !== 'service' && i.paid_by === 'deck');
+}
+function deckTotal(o: BillingOrder): number {
+  return deckLines(o)
+    .filter(i => i.shopping_status !== 'out_of_stock')
+    .reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0);
+}
 // Invoiceable estimate for an order: delivered vessel-account lines at actual
 // (weighed) totals when available, estimated otherwise.
 function vesselTotal(o: BillingOrder): number {
@@ -243,6 +253,8 @@ function orderDetailSheet(o: BillingOrder, groupLabel: string, monthLabel: strin
       ? `<div style="font-size:8px;color:#555;margin-top:1px;">weighed: ${i.actual_weight} lb</div>` : '';
     const oosNote = oos
       ? `<div style="font-size:8px;font-weight:800;color:#999;margin-top:1px;">OUT OF STOCK — NOT BILLED</div>` : '';
+    const deckNote = i.paid_by === 'deck'
+      ? `<div style="font-size:8px;font-weight:800;color:#0f766e;margin-top:1px;">DECK — invoice separately (not grocery allowance)</div>` : '';
     const shopped = oos ? '<span style="color:#999;">OOS</span>'
       : i.shopping_status === 'shopped' ? `<span style="color:${GREEN};font-weight:800;">&#10003;</span>`
       : '<span style="color:#b45309;">pending</span>';
@@ -250,7 +262,7 @@ function orderDetailSheet(o: BillingOrder, groupLabel: string, monthLabel: strin
     <tr style="background:${rowBg};${isSub ? `border-left:3px solid ${ORANGE};` : ''}">
       <td style="padding:5px 6px;border-bottom:1px solid #eee;text-align:center;"><div style="width:11px;height:11px;border:1.5px solid #999;border-radius:2px;margin:0 auto;"></div></td>
       <td style="padding:5px 6px;border-bottom:1px solid #eee;font-family:monospace;font-size:9px;color:#888;">${esc(i.upc || '—')}</td>
-      <td style="padding:5px 6px;border-bottom:1px solid #eee;font-size:10px;color:${oos ? '#999' : '#333'};${oos ? 'text-decoration:line-through;' : ''}font-weight:${isSub ? '700' : '400'};">${esc(i.description)}${subNote}${wtNote}${oosNote}</td>
+      <td style="padding:5px 6px;border-bottom:1px solid #eee;font-size:10px;color:${oos ? '#999' : '#333'};${oos ? 'text-decoration:line-through;' : ''}font-weight:${isSub ? '700' : '400'};">${esc(i.description)}${subNote}${wtNote}${oosNote}${deckNote}</td>
       <td style="padding:5px 6px;border-bottom:1px solid #eee;font-size:9px;color:#666;text-align:center;">${esc(i.pkg_size || '—')}</td>
       <td style="padding:5px 6px;border-bottom:1px solid #eee;font-size:11px;font-weight:800;color:${GREEN};text-align:center;">${i.quantity}</td>
       <td style="padding:5px 6px;border-bottom:1px solid #eee;font-size:10px;text-align:right;">${money(Number(i.unit_price))}</td>
@@ -316,6 +328,11 @@ function orderDetailSheet(o: BillingOrder, groupLabel: string, monthLabel: strin
         <td></td>
         <td style="padding:7px 6px;text-align:right;font-size:12px;font-weight:900;color:${GREEN};">${money(actual)}</td>
       </tr>
+      ${deckTotal(o) > 0 ? `
+      <tr>
+        <td colspan="8" style="padding:3px 6px;font-size:9px;text-align:right;color:#0f766e;font-weight:800;">of which DECK — invoice as its own line (not grocery allowance):</td>
+        <td style="padding:3px 6px;text-align:right;font-size:10px;font-weight:900;color:#0f766e;">${money(deckTotal(o))}</td>
+      </tr>` : ''}
       ${Math.abs(diff) >= 0.005 ? `
       <tr>
         <td colspan="8" style="padding:3px 6px;font-size:9px;text-align:right;color:${diff > 0 ? ORANGE : GREEN};font-weight:800;">Difference vs. estimate (weights / substitutions):</td>
@@ -381,6 +398,9 @@ function orderDetailSheet(o: BillingOrder, groupLabel: string, monthLabel: strin
 function vesselStatementPage(group: string, orders: BillingOrder[], monthLabel: string, generated: string, sectionNum: number, sectionCount: number): string {
   const first = orders[0];
   const estTotal = orders.reduce((s, o) => s + netTotal(o), 0);
+  // Deck portion — company-billed but invoiced as its OWN line, never mixed
+  // into the boat's grocery allowance.
+  const deckSum = orders.reduce((s, o) => s + deckTotal(o), 0);
 
   const orderRows = orders.map(o => {
     const grocery = billableItems(o);
@@ -390,8 +410,10 @@ function vesselStatementPage(group: string, orders: BillingOrder[], monthLabel: 
     const subCount = delivered.filter(i => i.is_substitution).length;
     const svcCount = o.items.filter(i => i.item_type === 'service').length;
     const codCount = codLines(o).length;
+    const orderDeck = deckTotal(o);
     const flags: string[] = [];
     if (subCount) flags.push(`<span style="color:${ORANGE};font-weight:700;">${subCount} sub${subCount > 1 ? 's' : ''}</span>`);
+    if (orderDeck > 0) flags.push(`<span style="color:#0f766e;font-weight:700;">deck ${money(orderDeck)} — separate line</span>`);
     if (svcCount) flags.push(`${svcCount} service${svcCount > 1 ? 's' : ''} — confirm charge`);
     if (codCount) flags.push(`<span style="color:${PURPLE};font-weight:700;">${codCount} COD excluded</span>`);
     if ((Number(o.discount_total) || 0) > 0) flags.push(`<span style="color:#15803d;font-weight:700;">&#127991; coupons &minus;${money(Number(o.discount_total))}${(o.discounts || []).length ? ` (${(o.discounts || []).map(d => esc(d.name)).join(', ')})` : ''}</span>`);
@@ -459,6 +481,10 @@ function vesselStatementPage(group: string, orders: BillingOrder[], monthLabel: 
             <td style="padding:7px 10px;font-size:11px;color:#555;">Estimated Total (${orders.length} order${orders.length === 1 ? '' : 's'})</td>
             <td style="padding:7px 10px;text-align:right;font-weight:800;font-size:13px;color:${GREEN};">${money(estTotal)}</td>
           </tr>
+          ${deckSum > 0 ? `<tr>
+            <td style="padding:5px 10px;font-size:10px;color:#0f766e;font-weight:700;">of which Deck — invoice as its own line (grocery ${money(estTotal - deckSum)} / deck ${money(deckSum)})</td>
+            <td style="padding:5px 10px;text-align:right;font-weight:800;font-size:11px;color:#0f766e;">${money(deckSum)}</td>
+          </tr>` : ''}
           <tr style="background:${LIME};">
             <td style="padding:9px 10px;font-size:12px;font-weight:900;color:${GREEN};text-transform:uppercase;">Final Invoice Total</td>
             <td style="padding:9px 10px;text-align:right;"><div style="border:1.5px solid ${GREEN};border-radius:3px;height:24px;width:110px;margin-left:auto;background:#fff;"></div></td>
@@ -472,7 +498,8 @@ function vesselStatementPage(group: string, orders: BillingOrder[], monthLabel: 
   <div style="margin-top:14px;border-left:3px solid ${ORANGE};background:#fffbf0;padding:9px 14px;font-size:9px;color:#555;line-height:1.7;">
     <strong style="color:${ORANGE};">How to finalize:</strong> confirm weighed items, substitutions, and any service or
     delivery charges against Sinclair&#39;s receipts, then enter the Final Total above. COD items are already excluded —
-    they were paid by crew members at delivery and never appear on this invoice.
+    they were paid personally by crew members and never appear on this invoice. Deck items ARE included in the total but
+    must be listed as their own line on the invoice — they don&#39;t count against the boat&#39;s grocery allowance.
   </div>
 
   <div style="text-align:center;font-size:8px;color:#aaa;border-top:1px solid #eee;margin-top:18px;padding-top:8px;">
@@ -551,8 +578,8 @@ function billingPacketHtml(groups: [string, BillingOrder[]][], monthLabel: strin
 
   ${packetCods ? `
   <div style="margin-top:10px;border-left:3px solid ${PURPLE};background:#faf5ff;padding:8px 14px;font-size:9px;color:#555;line-height:1.7;">
-    <strong style="color:${PURPLE};">${packetCods} COD line${packetCods > 1 ? 's' : ''} excluded from this packet</strong> — paid by crew members at
-    delivery (cash / Venmo / card by phone). They appear on the order detail sheets for reference only and must never be invoiced.
+    <strong style="color:${PURPLE};">${packetCods} COD line${packetCods > 1 ? 's' : ''} excluded from this packet</strong> — paid personally by crew members
+    (Venmo / Cash App payment request, or card by phone). They appear on the order detail sheets for reference only and must never be invoiced.
   </div>` : ''}
 
   <!-- How to use -->

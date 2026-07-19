@@ -12,7 +12,7 @@ import {
 import {
   getCart, updateCartItem, removeFromCart, clearCart, getCartTotal, getCartCount,
   getVesselInfo, saveVesselInfo, getAdditionalServices, clearAdditionalServices,
-  updateCartItemFields, getVesselSubtotal, getCodSubtotal,
+  updateCartItemFields, getVesselSubtotal, getCodSubtotal, getDeckSubtotal,
 } from '@/lib/cart';
 import { formatCurrency, formatLb, formatQty, isPoundQty, lbStepsFor, usesLbSteps } from '@/lib/utils';
 import { CartItem, VesselInfo, AdditionalServices, VESSEL_TYPES } from '@/types';
@@ -184,16 +184,28 @@ function CartItemRow({ item, onUpdate, onRemove, onPatch, codNameError }: {
         </div>
       </div>
 
-      {/* Paid By — vessel account (invoiced monthly) vs COD (crew member pays at delivery) */}
+      {/* Paid By — Grocery (vessel account / boat allowance) vs Deck (company-billed,
+          listed separately, not part of the grocery allowance) vs COD (crew member
+          pays personally). Deck tab = Dave's ask: "some vessels have a separate
+          grocery from deck order… both get charged to the company but needs to be
+          listed separate." */}
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Paid by</span>
         <div className="flex rounded-lg border border-gray-200 overflow-hidden">
           <button type="button"
             onClick={() => onPatch({ paid_by: 'vessel', cod_name: '' })}
             className={`px-3 py-1 text-xs font-bold transition-colors ${
-              !isCod ? 'bg-brand-navy text-white' : 'bg-white text-gray-500 hover:bg-gray-50'
+              item.paid_by !== 'cod' && item.paid_by !== 'deck' ? 'bg-brand-navy text-white' : 'bg-white text-gray-500 hover:bg-gray-50'
             }`}>
-            Vessel Account
+            Grocery
+          </button>
+          <button type="button"
+            onClick={() => onPatch({ paid_by: 'deck', cod_name: '' })}
+            title="Deck supplies — billed to the company on its own line, separate from the grocery allowance"
+            className={`px-3 py-1 text-xs font-bold transition-colors border-l border-gray-200 ${
+              item.paid_by === 'deck' ? 'bg-teal-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'
+            }`}>
+            Deck
           </button>
           <button type="button"
             onClick={() => onPatch({ paid_by: 'cod' })}
@@ -240,6 +252,8 @@ export default function OrderPage() {
   const [authOpen, setAuthOpen] = useState(false);
   const [emailHasAccount, setEmailHasAccount] = useState(false);
   const [cutoffs, setCutoffs] = useState({ grocery_cutoff_hours: 4, service_cutoff_hours: 2 });
+  // Effective COD handling fee % (0 when the feature is toggled off in admin)
+  const [codFeePct, setCodFeePct] = useState(5);
   // Digital coupons — same rules Sinclair's own site applies (no clipping).
   // Preview only; the server recomputes and snapshots at submission.
   const [deals, setDeals] = useState<Array<{
@@ -266,7 +280,10 @@ export default function OrderPage() {
     // Order cutoff buffers (manager-configured)
     fetch('/api/order-config')
       .then(r => r.ok ? r.json() : null)
-      .then(cfg => { if (cfg) setCutoffs(cfg); })
+      .then(cfg => {
+        if (cfg) setCutoffs(cfg);
+        if (cfg?.cod_fee_percent !== undefined) setCodFeePct(Number(cfg.cod_fee_percent) || 0);
+      })
       .catch(() => {});
 
     // Active digital coupons (empty when the manager toggle is off)
@@ -340,7 +357,13 @@ export default function OrderPage() {
         errs.cod_name = 'Add the crew member’s name to each COD item.';
       }
       if (!vessel.cod_payment_method) {
-        errs.cod_payment_method = 'Choose how the COD items will be paid (cash, Venmo, or credit card).';
+        errs.cod_payment_method = 'Choose how the COD items will be paid (Venmo, Cash App, or credit card).';
+      }
+      if ((vessel.cod_payment_method === 'venmo' || vessel.cod_payment_method === 'cashapp')
+        && !vessel.cod_payment_handle.trim()) {
+        errs.cod_payment_handle = vessel.cod_payment_method === 'venmo'
+          ? 'Add your Venmo username so we can send the payment request.'
+          : 'Add your Cash App $cashtag so we can send the payment request.';
       }
       if (vessel.cod_payment_method === 'credit_card' && !vessel.cod_preferred_phone.trim()) {
         errs.cod_preferred_phone = 'Add the best phone number to call for card payment.';
@@ -362,8 +385,11 @@ export default function OrderPage() {
     if (!vessel.company_name.trim())   errs.company_name    = 'Company name is required';
     if (!vessel.contact_name.trim())   errs.contact_name    = 'Billing contact name is required';
     if (!vessel.phone.trim())          errs.phone           = 'Billing phone is required';
-    if (!vessel.email.trim())          errs.email           = 'Billing email is required';
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(vessel.email.trim())) errs.email = 'Please enter a valid email address';
+    // FLIPPED (July 10 demo): vessel email required — order emails go to the
+    // boat. Billing email optional — the home office only wants the monthly bill.
+    if (vessel.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(vessel.email.trim())) errs.email = 'Please enter a valid email address';
+    if (!vessel.vessel_email.trim())   errs.vessel_email    = 'Vessel email is required — order updates go to the boat';
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(vessel.vessel_email.trim())) errs.vessel_email = 'Please enter a valid email address';
     if (!vessel.vessel_name.trim())    errs.vessel_name     = 'Vessel name is required';
     if (!vessel.vessel_type)           errs.vessel_type     = 'Vessel type is required';
     if (vessel.vessel_type === 'Other' && !vessel.vessel_type_other.trim()) errs.vessel_type_other = 'Please specify vessel type';
@@ -458,9 +484,12 @@ export default function OrderPage() {
   const groceryTotal   = getCartTotal(items);
   const groceryCount   = getCartCount(items);
   const vesselSubtotal = getVesselSubtotal(items);
+  const deckSubtotal   = getDeckSubtotal(items);
   const codSubtotal    = getCodSubtotal(items);
   const codItems       = items.filter(i => i.paid_by === 'cod');
+  const deckItems      = items.filter(i => i.paid_by === 'deck');
   const hasCod         = codItems.length > 0;
+  const hasDeck        = deckItems.length > 0;
 
   // CODs are separated PER CREW MEMBER — each person settles their own
   // total at delivery ("that's a Daniel item, that's Janice" — Jen).
@@ -561,16 +590,22 @@ export default function OrderPage() {
                 />
               ))}
               <div className="p-4 bg-brand-sand/40 space-y-1.5">
-                {hasCod && (
+                {(hasCod || hasDeck) && (
                   <>
                     <div className="flex justify-between items-center text-sm">
-                      <span className="text-gray-600 font-semibold">Vessel Account subtotal</span>
+                      <span className="text-gray-600 font-semibold">Grocery subtotal (boat allowance)</span>
                       <span className="font-bold text-brand-navy">{formatCurrency(vesselSubtotal)}</span>
                     </div>
+                    {hasDeck && (
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-teal-700 font-semibold">Deck subtotal <span className="font-normal text-teal-600">· company-billed, listed separately</span></span>
+                        <span className="font-bold text-teal-700">{formatCurrency(deckSubtotal)}</span>
+                      </div>
+                    )}
                     {/* CODs separated per crew member — each settles their own */}
                     {codByName.map(([name, total]) => (
                       <div key={name} className="flex justify-between items-center text-sm">
-                        <span className="text-purple-700 font-semibold">COD — {name} <span className="font-normal text-purple-500">· due on delivery</span></span>
+                        <span className="text-purple-700 font-semibold">COD — {name} <span className="font-normal text-purple-500">· paid personally, not on the company invoice</span></span>
                         <span className="font-bold text-purple-700">{formatCurrency(total)}</span>
                       </div>
                     ))}
@@ -633,8 +668,8 @@ export default function OrderPage() {
         {/* COD payment method — shown only when the cart has COD lines */}
         {hasCod && (
           <section className="card-base mb-4 p-5 border-2 border-purple-200">
-            <SectionHead icon={<ClipboardList className="w-4 h-4" />} title="COD Payment — due on delivery"
-              sub={`${formatCurrency(codSubtotal)} total — paid by each crew member personally, separate from the company invoice`} />
+            <SectionHead icon={<ClipboardList className="w-4 h-4" />} title="COD Payment"
+              sub={`${formatCurrency(codSubtotal)} — paid by each crew member personally, separate from the company invoice`} />
             {/* Per-person breakdown — each crew member settles their own */}
             <div className="mb-3 bg-purple-50/60 border border-purple-100 rounded-lg divide-y divide-purple-100">
               {codByName.map(([name, total]) => (
@@ -643,10 +678,22 @@ export default function OrderPage() {
                   <span className="font-bold text-purple-800">{formatCurrency(total)}</span>
                 </div>
               ))}
+              {codFeePct > 0 && (
+                <>
+                  <div className="flex justify-between items-center px-3 py-1.5 text-xs">
+                    <span className="text-purple-600">{codFeePct}% handling fee (covers payment processing)</span>
+                    <span className="font-bold text-purple-600">{formatCurrency(codSubtotal * codFeePct / 100)}</span>
+                  </div>
+                  <div className="flex justify-between items-center px-3 py-1.5 text-sm bg-purple-100/60">
+                    <span className="font-bold text-purple-900">COD total with fee</span>
+                    <span className="font-bold text-purple-900">{formatCurrency(codSubtotal * (1 + codFeePct / 100))}</span>
+                  </div>
+                </>
+              )}
             </div>
             {errors.cod_payment_method && <p className="text-xs text-red-500 mb-2">{errors.cod_payment_method}</p>}
             <div className="flex gap-3 mb-3">
-              {([['cash', '💵 Cash'], ['venmo', 'Venmo'], ['credit_card', '💳 Credit Card']] as const).map(([val, lbl]) => (
+              {([['venmo', 'Venmo'], ['cashapp', '💲 Cash App'], ['credit_card', '💳 Credit Card']] as const).map(([val, lbl]) => (
                 <button key={val} type="button"
                   onClick={() => { setV('cod_payment_method', val); }}
                   className={`flex-1 py-2.5 rounded-xl border-2 text-sm font-bold transition-all ${
@@ -656,6 +703,24 @@ export default function OrderPage() {
                   }`}>{lbl}</button>
               ))}
             </div>
+            {(vessel.cod_payment_method === 'venmo' || vessel.cod_payment_method === 'cashapp') && (
+              <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 space-y-3">
+                <p className="text-xs text-purple-900">
+                  <strong>We&apos;ll send you a payment request.</strong> Enter your own{' '}
+                  {vessel.cod_payment_method === 'venmo' ? 'Venmo username' : 'Cash App $cashtag'} below —
+                  after your order is shopped, you&apos;ll get a request for the exact final amount.
+                  Please don&apos;t send payment ahead of time.
+                </p>
+                <Field
+                  label={vessel.cod_payment_method === 'venmo' ? 'Your Venmo Username' : 'Your Cash App $Cashtag'}
+                  required error={errors.cod_payment_handle}>
+                  <input type="text" className={`input-base w-full ${errors.cod_payment_handle ? 'border-red-400' : ''}`}
+                    placeholder={vessel.cod_payment_method === 'venmo' ? '@your-venmo' : '$yourcashtag'}
+                    value={vessel.cod_payment_handle}
+                    onChange={e => setV('cod_payment_handle', e.target.value)} />
+                </Field>
+              </div>
+            )}
             {vessel.cod_payment_method === 'credit_card' && (
               <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 space-y-3">
                 <p className="text-xs text-purple-900">
@@ -810,9 +875,10 @@ export default function OrderPage() {
                 placeholder="(555) 123-4567" value={vessel.phone}
                 onChange={e => setV('phone', e.target.value)} />
             </Field>
-            <Field label="Billing Email" required error={errors.email} col2>
+            <Field label="Billing Email" error={errors.email} col2
+              hint="Optional — the home office gets the monthly bill, not every order">
               <input type="email" className={`input-base w-full ${errors.email ? 'border-red-400' : ''}`}
-                placeholder="billing@example.com" value={vessel.email}
+                placeholder="billing@example.com (optional)" value={vessel.email}
                 onChange={e => { setV('email', e.target.value); setEmailHasAccount(false); }}
                 onBlur={e => checkEmailAccount(e.target.value)} autoComplete="email" />
               {emailHasAccount && !isLoggedIn && (
@@ -863,8 +929,10 @@ export default function OrderPage() {
                 placeholder="(555) 123-4567" value={vessel.captain_phone}
                 onChange={e => setV('captain_phone', e.target.value)} />
             </Field>
-            <Field label="Vessel Email Address">
-              <input type="email" className="input-base w-full" placeholder="Optional"
+            <Field label="Vessel Email Address" required error={errors.vessel_email}
+              hint="Order confirmations and updates go here — to the boat">
+              <input type="email" className={`input-base w-full ${errors.vessel_email ? 'border-red-400' : ''}`}
+                placeholder="vessel@example.com"
                 value={vessel.vessel_email} onChange={e => setV('vessel_email', e.target.value)} />
             </Field>
           </div>
@@ -1122,6 +1190,11 @@ export default function OrderPage() {
                           COD — {item.cod_name || 'crew member'}
                         </span>
                       )}
+                      {item.paid_by === 'deck' && (
+                        <span className="block text-[10px] font-bold uppercase tracking-wide text-teal-700">
+                          Deck — billed separately
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="text-right shrink-0">
@@ -1132,17 +1205,28 @@ export default function OrderPage() {
                   </div>
                 </div>
               ))}
-              {hasCod && (
+              {(hasCod || hasDeck) && (
                 <div className="px-4 py-2.5 space-y-1 text-sm bg-white">
                   <div className="flex justify-between">
-                    <span className="text-gray-600">Vessel Account subtotal</span>
+                    <span className="text-gray-600">Grocery subtotal (boat allowance)</span>
                     <span className="font-bold text-brand-navy">{formatCurrency(vesselSubtotal)}</span>
                   </div>
+                  {hasDeck && (
+                    <div className="flex justify-between">
+                      <span className="text-teal-700">Deck subtotal <span className="text-teal-600">· company-billed, listed separately</span></span>
+                      <span className="font-bold text-teal-700">{formatCurrency(deckSubtotal)}</span>
+                    </div>
+                  )}
                   {codByName.map(([name, total]) => (
                     <div key={name} className="flex justify-between">
                       <span className="text-purple-700">COD — {name}
                         {vessel.cod_payment_method && (
-                          <span className="text-purple-500"> · {vessel.cod_payment_method === 'credit_card' ? 'credit card (we’ll call)' : vessel.cod_payment_method}</span>
+                          <span className="text-purple-500"> · {
+                            vessel.cod_payment_method === 'credit_card' ? 'credit card (we’ll call)'
+                            : vessel.cod_payment_method === 'cashapp' ? 'Cash App (we’ll send a request)'
+                            : vessel.cod_payment_method === 'venmo' ? 'Venmo (we’ll send a request)'
+                            : vessel.cod_payment_method
+                          }</span>
                         )}
                       </span>
                       <span className="font-bold text-purple-700">{formatCurrency(total)}</span>
@@ -1258,7 +1342,7 @@ export default function OrderPage() {
                 {vessel.po_number && <ReviewRow label="PO #" value={vessel.po_number} />}
                 <ReviewRow label="Billing Contact" value={vessel.contact_name} />
                 <ReviewRow label="Billing Phone" value={vessel.phone} />
-                <ReviewRow label="Billing Email" value={vessel.email} />
+                {vessel.email && <ReviewRow label="Billing Email" value={vessel.email} />}
               </div>
             </div>
             <div>
@@ -1334,12 +1418,22 @@ export default function OrderPage() {
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1">COD Payment</p>
                 <div className="text-sm text-gray-700 bg-purple-50 border border-purple-200 rounded p-2">
                   <p>
-                    {codItems.length} item{codItems.length !== 1 ? 's' : ''} · {formatCurrency(codSubtotal)} due on delivery
-                    {vessel.cod_payment_method && <> — <strong>{vessel.cod_payment_method === 'credit_card' ? 'Credit Card' : vessel.cod_payment_method === 'venmo' ? 'Venmo' : 'Cash'}</strong></>}
+                    {codItems.length} item{codItems.length !== 1 ? 's' : ''} · {formatCurrency(codSubtotal * (1 + codFeePct / 100))}{codFeePct > 0 ? ` incl. ${codFeePct}% handling fee` : ''} — paid personally, not on the company invoice
+                    {vessel.cod_payment_method && <> — <strong>{
+                      vessel.cod_payment_method === 'credit_card' ? 'Credit Card'
+                      : vessel.cod_payment_method === 'cashapp' ? 'Cash App'
+                      : vessel.cod_payment_method === 'venmo' ? 'Venmo' : 'Cash'
+                    }</strong></>}
                   </p>
+                  {(vessel.cod_payment_method === 'venmo' || vessel.cod_payment_method === 'cashapp') && (
+                    <p className="text-xs text-purple-700 mt-0.5">
+                      We&apos;ll send a payment request to <strong>{vessel.cod_payment_handle || 'your account'}</strong> once
+                      the order is shopped. Please don&apos;t send payment ahead of time.
+                    </p>
+                  )}
                   {vessel.cod_payment_method === 'credit_card' && (
                     <p className="text-xs text-purple-700 mt-0.5">
-                      We&apos;ll call {vessel.cod_preferred_phone || 'you'}{vessel.cod_contact_time ? ` (${vessel.cod_contact_time})` : ''} to collect payment.
+                      We&apos;ll call {vessel.cod_preferred_phone || 'you'}{vessel.cod_contact_time ? ` (around ${vessel.cod_contact_time})` : ''} to collect payment.
                     </p>
                   )}
                 </div>

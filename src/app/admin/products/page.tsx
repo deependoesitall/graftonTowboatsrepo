@@ -5,7 +5,7 @@ import { Upload, Package, AlertCircle, CheckCircle2, Loader2,
          Search, Pencil, Check, X, ToggleLeft, ToggleRight,
          ChevronLeft, ChevronRight, RefreshCw, Plus, Lock,
          Download, Trash2, Layers, PackageX, PackageCheck, Filter,
-         ImagePlus, Tag } from 'lucide-react';
+         ImagePlus, Tag, ListOrdered } from 'lucide-react';
 import Image from 'next/image';
 import { formatCurrency, MAIN_CATEGORIES } from '@/lib/utils';
 import { Product } from '@/types';
@@ -14,6 +14,47 @@ import { fetchAdminSession, getAdminRole, canAccess, adminFetch } from '@/lib/ad
 import { ImportWizard } from '@/components/admin/ImportWizard';
 import { EnrichFromSinclair } from '@/components/admin/EnrichFromSinclair';
 
+
+// -- Apply the paper order form's layout (form_section/subsection/seq) to the catalog.
+// Barges shop the form top-to-bottom — this stamps that exact sequence onto products.
+function ApplyFormLayoutButton({ onDone }: { onDone: () => void }) {
+  const [running, setRunning] = useState(false);
+  async function run() {
+    if (!confirm(
+      'Apply the paper order-form layout to the catalog?\n\n' +
+      'This stamps every matched product with its order-form position (section, subsection, sequence) ' +
+      'so barges see items in the exact order of the paper form. Safe to re-run.'
+    )) return;
+    setRunning(true);
+    try {
+      const res = await adminFetch('/api/admin/apply-form-layout', { method: 'POST' });
+      const r = await res.json();
+      if (!res.ok) throw new Error(r?.error || 'Apply failed');
+      console.log('Order-form layout — unmatched rows:', r.unmatched);
+      alert(
+        `Order-form layout applied.\n\n` +
+        `Form rows: ${r.form_rows}\n` +
+        `Matched: ${r.matched} (UPC ${r.matched_by.upc} · desc+pack ${r.matched_by.desc_pkg} · desc ${r.matched_by.desc})\n` +
+        `Unmatched: ${r.unmatched_count} — first few:\n` +
+        (r.unmatched || []).slice(0, 8).map((u: { description: string; pkg_size: string | null }) => `  · ${u.description}${u.pkg_size ? ` (${u.pkg_size})` : ''}`).join('\n') +
+        (r.unmatched_count > 8 ? `\n  …full list in the browser console.` : '')
+      );
+      onDone();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Apply failed');
+    } finally {
+      setRunning(false);
+    }
+  }
+  return (
+    <button onClick={run} disabled={running}
+      className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5 disabled:opacity-50"
+      title="Stamp the paper order form's section/sequence onto matched products">
+      {running ? <Loader2 className="w-4 h-4 animate-spin" /> : <ListOrdered className="w-4 h-4" />}
+      Apply Order-Form Layout
+    </button>
+  );
+}
 
 // -- Shared image upload cell
 function ProductImageCell({ productId, imageUrl, onUploaded }: {
@@ -745,6 +786,7 @@ export default function AdminProductsPage() {
           <p className="text-gray-400 text-sm">{total.toLocaleString()} products total</p>
         </div>
         <div className="flex gap-2">
+          <ApplyFormLayoutButton onDone={() => fetchProducts()} />
           <EnrichFromSinclair onDone={() => fetchProducts()} />
           <button onClick={exportCatalog} className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5">
             <Download className="w-4 h-4" /> Export CSV

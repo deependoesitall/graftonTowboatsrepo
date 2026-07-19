@@ -64,12 +64,17 @@ export function getCartTotal(items: CartItem[]): number {
   return items.reduce((sum, i) => sum + i.price * i.quantity, 0);
 }
 
-/** Subtotal of lines billed to the vessel's company account. */
+/** Subtotal of GROCERY lines billed to the vessel's company account (counts against the boat's grocery allowance). */
 export function getVesselSubtotal(items: CartItem[]): number {
-  return items.filter(i => i.paid_by !== 'cod').reduce((s, i) => s + i.price * i.quantity, 0);
+  return items.filter(i => i.paid_by !== 'cod' && i.paid_by !== 'deck').reduce((s, i) => s + i.price * i.quantity, 0);
 }
 
-/** Subtotal of COD lines (settled at delivery — never invoiced). */
+/** Subtotal of DECK lines — company-billed but listed separately (not part of the grocery allowance). */
+export function getDeckSubtotal(items: CartItem[]): number {
+  return items.filter(i => i.paid_by === 'deck').reduce((s, i) => s + i.price * i.quantity, 0);
+}
+
+/** Subtotal of COD lines (settled personally by crew members — never invoiced). */
 export function getCodSubtotal(items: CartItem[]): number {
   return items.filter(i => i.paid_by === 'cod').reduce((s, i) => s + i.price * i.quantity, 0);
 }
@@ -90,6 +95,8 @@ export function getVesselInfo(): VesselInfo {
     if (typeof parsed.crew_change === 'boolean') {
       parsed.crew_change = parsed.crew_change ? 'yes' : 'no';
     }
+    // 'cash' is no longer a selectable COD method — force a fresh choice
+    if (parsed.cod_payment_method === 'cash') parsed.cod_payment_method = '';
     return { ...defaultVesselInfo(), ...parsed };
   } catch { return defaultVesselInfo(); }
 }
@@ -141,6 +148,7 @@ function defaultVesselInfo(): VesselInfo {
     personal_cod_notes: '',
     // COD settlement
     cod_payment_method: '',
+    cod_payment_handle: '',
     cod_preferred_phone: '',
     cod_contact_time: '',
     // Notes

@@ -14,6 +14,9 @@ export function generateOrderHTML(order: Order): string {
   const serviceItems = order.items.filter(i => i.item_type === 'service');
   const codItems     = groceryItems.filter(i => i.paid_by === 'cod');
   const codSubtotal  = codItems.reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0);
+  // Deck lines — company-billed but listed separately from the grocery allowance
+  const deckItems    = groceryItems.filter(i => i.paid_by === 'deck');
+  const deckSubtotal = deckItems.reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0);
   // CODs separated per crew member — each settles their own total
   const codByName = Array.from(codItems.reduce((acc, i) => {
     const name = (i.cod_name || '').trim() || 'Crew member';
@@ -24,8 +27,10 @@ export function generateOrderHTML(order: Order): string {
   const discounts = order.discounts || [];
   const discountTotal = Number(order.discount_total) || 0;
   const codMethodLabel = order.cod_payment_method === 'credit_card' ? 'Credit Card — call to collect'
-    : order.cod_payment_method === 'venmo' ? 'Venmo'
-    : order.cod_payment_method === 'cash' ? 'Cash' : null;
+    : order.cod_payment_method === 'venmo' ? 'Venmo — send a payment request'
+    : order.cod_payment_method === 'cashapp' ? 'Cash App — send a payment request'
+    : order.cod_payment_method === 'cash' ? 'Cash (legacy)' : null;
+  const codFeePct = Number(order.cod_fee_percent ?? 5);
   const isFulfilled       = order.status === 'fulfilled';
   const itemCount         = groceryItems.reduce((s, i) => s + i.quantity, 0);
   const isCrewChangeOnly  = order.crew_change !== 'no' && groceryItems.length === 0;
@@ -51,7 +56,9 @@ export function generateOrderHTML(order: Order): string {
         ? `<div style="font-size:9px;color:#555;margin-top:2px;">Actual weight: ${item.actual_weight} lbs</div>`
         : '';
       const codLabel = item.paid_by === 'cod'
-        ? `<div style="font-size:9px;color:#9333ea;font-weight:700;margin-top:2px;">COD &mdash; ${item.cod_name || 'crew member'} pays on delivery</div>`
+        ? `<div style="font-size:9px;color:#9333ea;font-weight:700;margin-top:2px;">COD &mdash; ${item.cod_name || 'crew member'} pays personally (not invoiced)</div>`
+        : item.paid_by === 'deck'
+        ? `<div style="font-size:9px;color:#0f766e;font-weight:700;margin-top:2px;">DECK &mdash; company-billed, listed separately (not grocery allowance)</div>`
         : '';
       const rowBg    = isSub ? '#fff8ec' : (idx % 2 === 0 ? '#ffffff' : '#f8f9fa');
       const bdrLeft  = isSub ? 'border-left:3px solid #E8640A;' : '';
@@ -256,13 +263,13 @@ ${order.crew_change === 'maybe' ? `
 <!-- ===== COD ITEMS (per-line paid_by) ===== -->
 ${codItems.length > 0 ? `
 <div style="border:3px solid #9333ea;padding:14px 20px;background:#faf5ff;border-radius:4px;margin-bottom:16px;">
-  <div style="font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:#9333ea;margin-bottom:6px;">&#36; COD Items &mdash; Collect ${formatCurrency(codSubtotal)} on Delivery &middot; Separated by Crew Member</div>
-  <div style="font-size:11px;color:#555;">Each crew member pays their own total personally — NOT part of the company invoice.</div>
+  <div style="font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:#9333ea;margin-bottom:6px;">&#36; COD Items &mdash; Collect ${formatCurrency(codSubtotal * (1 + codFeePct / 100))}${codFeePct > 0 ? ` incl. ${codFeePct}% Fee` : ''} &middot; Separated by Crew Member</div>
+  <div style="font-size:11px;color:#555;">Each crew member pays their own total personally — NOT part of the company invoice.${codFeePct > 0 ? ` The ${codFeePct}% handling fee covers payment processing.` : ''}</div>
   <div style="margin-top:6px;font-size:12px;color:#333;">
     ${codByName.map(([name, list]) => {
       const personTotal = list.reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0);
       return `<div style="margin-bottom:5px;">
-        <div style="font-weight:800;color:#6b21a8;">${name} &mdash; ${formatCurrency(personTotal)}</div>
+        <div style="font-weight:800;color:#6b21a8;">${name} &mdash; ${formatCurrency(personTotal * (1 + codFeePct / 100))}${codFeePct > 0 ? ' <span style="font-weight:400;">incl. fee</span>' : ''}</div>
         ${list.map(i => `<div style="padding-left:12px;font-size:11px;color:#444;">${i.quantity}&times; ${i.description} &middot; ${formatCurrency(i.actual_total ?? i.line_total)}</div>`).join('')}
       </div>`;
     }).join('')}
@@ -270,7 +277,9 @@ ${codItems.length > 0 ? `
   ${codMethodLabel ? `<div style="margin-top:8px;padding-top:8px;border-top:1px solid #e9d5ff;font-size:11px;color:#6b21a8;">
     <strong>Payment method:</strong> ${codMethodLabel}${
       order.cod_payment_method === 'credit_card'
-        ? ` &mdash; call ${order.cod_preferred_phone || 'the crew member'}${order.cod_contact_time ? ` (best time: ${order.cod_contact_time})` : ''}`
+        ? ` &mdash; call ${order.cod_preferred_phone || 'the crew member'}${order.cod_contact_time ? ` (around ${order.cod_contact_time})` : ''}`
+        : (order.cod_payment_method === 'venmo' || order.cod_payment_method === 'cashapp')
+        ? ` &mdash; request the exact final amount to <strong>${order.cod_payment_handle || 'the account on file'}</strong>. Never accept an inbound send.`
         : ''
     }
   </div>` : ''}
@@ -318,6 +327,10 @@ ${groceryItems.length > 0 ? `
           <td style="padding:4px 8px;font-size:10px;color:#15803d;font-weight:700;">&#127991; ${d.name}${d.description ? `<div style="font-weight:400;font-size:9px;color:#4d7c5f;">${d.description}</div>` : ''}</td>
           <td style="padding:4px 8px;text-align:right;font-size:11px;font-weight:800;color:#15803d;">&minus;${formatCurrency(Number(d.amount))}</td>
         </tr>`).join('')}
+        ${deckItems.length > 0 ? `<tr>
+          <td style="padding:5px 8px;font-size:10px;color:#0f766e;font-weight:700;">Deck subtotal &mdash; invoiced separately (not grocery allowance)</td>
+          <td style="padding:5px 8px;text-align:right;font-size:11px;font-weight:800;color:#0f766e;">${formatCurrency(deckSubtotal)}</td>
+        </tr>` : ''}
         <tr>
           <td style="padding:8px;font-size:14px;font-weight:900;color:#1E3D1E;text-transform:uppercase;">ESTIMATED TOTAL</td>
           <td style="padding:8px;text-align:right;font-size:16px;font-weight:900;color:#1E3D1E;">${formatCurrency(order.subtotal)}</td>

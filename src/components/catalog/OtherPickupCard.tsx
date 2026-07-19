@@ -63,11 +63,11 @@ export function OtherPickupCard() {
         </div>
         <div className="flex-1 min-w-0">
           <p className={`font-display font-bold text-sm ${other.enabled ? 'text-brand-green' : 'text-brand-navy'}`}>
-            Need something we don&apos;t carry?
+            Didn&apos;t find what you were looking for? No problem — we&apos;ll get it.
           </p>
           <p className="text-xs text-gray-400 mt-0.5">
-            Paste links to items from other stores and Sinclair&apos;s will pick them up with your groceries.
-            Add as many as you need.
+            Paste links to items from other stores (Walmart, anywhere) and they&apos;ll come with your
+            groceries. Add as many as you need — these aren&apos;t included in your estimated total.
           </p>
         </div>
         {other.enabled && (

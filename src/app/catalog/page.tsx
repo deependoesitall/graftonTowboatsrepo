@@ -105,11 +105,16 @@ export default async function CatalogPage({ searchParams }: PageProps) {
 
   const supabase = await createClient();
 
+  // PAPER ORDER FORM SEQUENCE (July 10 demo — "it is very key that the barges
+  // see the order as they see it on paper now"): form items sort by their
+  // position on the paper form, top to bottom; anything not on the form
+  // (future full-store items) sorts after, alphabetically.
   let query = supabase
     .from('products')
     .select('*', { count: 'exact' })
     .eq('is_active', true)
     .eq('is_available', true)
+    .order('form_seq', { ascending: true, nullsFirst: false })
     .order('category', { ascending: true })
     .order('description', { ascending: true })
     .range(offset, offset + perPage - 1);

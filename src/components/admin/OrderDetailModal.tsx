@@ -11,6 +11,7 @@ import { Order, OrderItem, OrderStatus, Product } from '@/types';
 import { formatCurrency, formatDate, ORDER_STATUSES } from '@/lib/utils';
 import { ShoppingModeModal } from '@/components/admin/ShoppingModeModal';
 import { adminFetch } from '@/lib/admin-auth';
+import { openPickSheet } from '@/lib/pick-sheet';
 
 interface OrderDetailModalProps {
   order: Order;
@@ -31,6 +32,30 @@ export function OrderDetailModal({
 }: OrderDetailModalProps) {
   const [shoppingMode, setShoppingMode] = useState(false);
   const [markingFulfilled, setMarkingFulfilled] = useState(false);
+  const [printingSheet, setPrintingSheet] = useState(false);
+
+  // Barcode pick sheet — Freshop-style printout with scannable UPC-A codes.
+  // Printing a NEW order prompts to lock it (Dave: "if I print it, it needs to
+  // be in progress" — but he also prints future orders early, so it's a choice).
+  async function handlePrintPickSheet() {
+    if (canEdit && order.status === 'new') {
+      const lock = confirm(
+        'Mark this order as IN PROGRESS before printing?\n\n' +
+        'In Progress locks the order — the customer can no longer add or change items.\n\n' +
+        'OK — mark In Progress, then print\n' +
+        'Cancel — just print (customer can still make changes until it goes In Progress)'
+      );
+      if (lock) onStatusChange('in_progress');
+    }
+    setPrintingSheet(true);
+    try {
+      await openPickSheet(order.id);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Could not open the pick sheet');
+    } finally {
+      setPrintingSheet(false);
+    }
+  }
 
   // ── Local item state (so edits reflect immediately without closing modal) ──
   const [localItems, setLocalItems] = useState<OrderItem[]>(order.items);
@@ -63,9 +88,34 @@ export function OrderDetailModal({
   const codSubtotal = codItems
     .filter(i => i.shopping_status !== 'out_of_stock')
     .reduce((s, i) => s + (i.actual_total ?? i.unit_price * i.quantity), 0);
+  // Deck lines — company-billed but listed separately from the grocery allowance
+  const deckItems = groceryItems.filter(i => i.paid_by === 'deck');
+  const deckSubtotal = deckItems
+    .filter(i => i.shopping_status !== 'out_of_stock')
+    .reduce((s, i) => s + (i.actual_total ?? i.unit_price * i.quantity), 0);
   const codMethodLabel = order.cod_payment_method === 'credit_card' ? 'Credit Card — call to collect'
-    : order.cod_payment_method === 'venmo' ? 'Venmo'
-    : order.cod_payment_method === 'cash' ? 'Cash' : null;
+    : order.cod_payment_method === 'venmo' ? 'Venmo — send a payment request'
+    : order.cod_payment_method === 'cashapp' ? 'Cash App — send a payment request'
+    : order.cod_payment_method === 'cash' ? 'Cash (legacy)' : null;
+
+  // COD handling fee — defaults to 5%, editable per order (big-ticket externals
+  // may warrant more or less; Dave: "default 5%, but we can edit it ourselves").
+  const [feePct, setFeePct] = useState<string>(String(order.cod_fee_percent ?? 5));
+  const [savingFee, setSavingFee] = useState(false);
+  const feeNum = Math.max(0, parseFloat(feePct) || 0);
+  async function saveFee() {
+    setSavingFee(true);
+    try {
+      await adminFetch(`/api/orders/${order.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cod_fee_percent: feeNum }),
+      });
+      onRefresh();
+    } finally {
+      setSavingFee(false);
+    }
+  }
 
   const ext = order.extended_info;
 
@@ -181,6 +231,11 @@ export function OrderDetailModal({
               <h2 className="text-white font-display text-xl font-bold">{order.order_number}</h2>
             </div>
             <div className="flex items-center gap-3">
+              <button onClick={handlePrintPickSheet} disabled={printingSheet}
+                className="text-brand-gold hover:text-brand-amber transition-colors disabled:opacity-50"
+                title="Print Pick Sheet (barcodes)">
+                {printingSheet ? <Loader2 className="w-5 h-5 animate-spin" /> : <Printer className="w-5 h-5" />}
+              </button>
               <button onClick={onDownloadPdf} className="text-brand-gold hover:text-brand-amber transition-colors" title="View PDF">
                 <Eye className="w-5 h-5" />
               </button>
@@ -295,7 +350,7 @@ export function OrderDetailModal({
             {codItems.length > 0 && (
               <div className="bg-purple-50 border-2 border-purple-300 rounded-lg p-3">
                 <p className="text-xs font-bold text-purple-700 uppercase tracking-wide mb-2">
-                  $ COD Items — collect {formatCurrency(codSubtotal)} on delivery · separated by crew member (not on the company invoice)
+                  $ COD Items — collect {formatCurrency(codSubtotal * (1 + feeNum / 100))}{feeNum > 0 ? ` incl. ${feeNum}% fee` : ''} · separated by crew member (not on the company invoice)
                 </p>
                 <div className="space-y-2 mb-2">
                   {Array.from(codItems.reduce((acc, i) => {
@@ -309,7 +364,10 @@ export function OrderDetailModal({
                       <div key={name} className="bg-white/60 rounded-lg px-2.5 py-1.5">
                         <p className="text-sm font-bold text-purple-800 flex justify-between">
                           <span>{name}</span>
-                          <span>{formatCurrency(list.reduce((s, i) => s + Number(i.actual_total ?? i.unit_price * i.quantity), 0))}</span>
+                          <span>
+                            {formatCurrency(list.reduce((s, i) => s + Number(i.actual_total ?? i.unit_price * i.quantity), 0) * (1 + feeNum / 100))}
+                            {feeNum > 0 && <span className="font-normal text-purple-500 text-xs"> incl. fee</span>}
+                          </span>
                         </p>
                         {list.map(i => (
                           <p key={i.id} className="text-xs text-purple-900 pl-2">
@@ -319,14 +377,44 @@ export function OrderDetailModal({
                       </div>
                     ))}
                 </div>
-                <div className="text-xs text-purple-800 border-t border-purple-200 pt-2 space-y-0.5">
+                <div className="text-xs text-purple-800 border-t border-purple-200 pt-2 space-y-1">
                   {codMethodLabel && <p><strong>Payment method:</strong> {codMethodLabel}</p>}
+                  {(order.cod_payment_method === 'venmo' || order.cod_payment_method === 'cashapp') && (
+                    <p>
+                      <strong>Send request to:</strong>{' '}
+                      <span className="font-mono font-bold">{order.cod_payment_handle || 'no handle given — call them'}</span>
+                      {' '}· never accept an inbound send — request the exact final amount
+                    </p>
+                  )}
                   {order.cod_payment_method === 'credit_card' && (
                     <p>
                       <strong>Call:</strong> {order.cod_preferred_phone || 'no number given'}
-                      {order.cod_contact_time && <> · <strong>Best time:</strong> {order.cod_contact_time}</>}
+                      {order.cod_contact_time && <> · <strong>Best time (around):</strong> {order.cod_contact_time}</>}
                     </p>
                   )}
+                  <p className="flex items-center gap-2">
+                    <strong>Handling fee:</strong>
+                    {canEdit ? (
+                      <>
+                        <input
+                          type="number" min="0" max="100" step="0.5"
+                          className="w-16 border border-purple-300 rounded px-1.5 py-0.5 text-center font-bold bg-white"
+                          value={feePct}
+                          onChange={e => setFeePct(e.target.value)}
+                        />
+                        <span>%</span>
+                        {feeNum !== Number(order.cod_fee_percent ?? 5) && (
+                          <button onClick={saveFee} disabled={savingFee}
+                            className="text-[10px] font-bold uppercase bg-purple-600 text-white px-2 py-0.5 rounded hover:bg-purple-700 disabled:opacity-50">
+                            {savingFee ? 'Saving…' : 'Save'}
+                          </button>
+                        )}
+                      </>
+                    ) : (
+                      <span>{feeNum}%</span>
+                    )}
+                    <span>= {formatCurrency(codSubtotal * feeNum / 100)} on {formatCurrency(codSubtotal)}</span>
+                  </p>
                 </div>
               </div>
             )}
@@ -376,9 +464,9 @@ export function OrderDetailModal({
                       <option key={s.value} value={s.value}>{s.label}</option>
                     ))}
                   </select>
-                  {order.status !== 'fulfilled' && order.customer_email && (
+                  {order.status !== 'fulfilled' && (order.vessel_email || order.customer_email) && (
                     <span className="text-xs text-gray-400">
-                      Setting to <strong>Fulfilled</strong> sends the Order Shopped email to {order.customer_email}
+                      Setting to <strong>Fulfilled</strong> sends the Order Shopped email to {order.vessel_email || order.customer_email}
                     </span>
                   )}
                 </div>
@@ -477,6 +565,12 @@ export function OrderDetailModal({
                                 COD{item.cod_name ? ` · ${item.cod_name}` : ''}
                               </span>
                             )}
+                            {item.paid_by === 'deck' && (
+                              <span className="inline-block text-[9px] font-bold uppercase tracking-wide text-teal-700 bg-teal-100 px-1 py-0.5 rounded mr-1"
+                                title="Deck order — company-billed, listed separately from the grocery allowance">
+                                DECK
+                              </span>
+                            )}
                             <p className={`font-medium text-brand-navy text-xs inline ${item.shopping_status === 'out_of_stock' ? 'line-through' : ''}`}>
                               {item.description}
                             </p>
@@ -558,18 +652,27 @@ export function OrderDetailModal({
                       ))}
                     </tbody>
                     <tfoot>
-                      {codItems.length > 0 && (
+                      {(codItems.length > 0 || deckItems.length > 0) && (
                         <>
                           <tr className="bg-white border-t border-gray-200">
-                            <td colSpan={5} className="px-3 py-1.5 text-xs text-gray-500">Vessel Account (invoiced monthly)</td>
-                            <td className="px-3 py-1.5 text-right text-xs font-bold text-brand-navy">{formatCurrency(subtotal - codSubtotal)}</td>
+                            <td colSpan={5} className="px-3 py-1.5 text-xs text-gray-500">Grocery — boat allowance (invoiced monthly)</td>
+                            <td className="px-3 py-1.5 text-right text-xs font-bold text-brand-navy">{formatCurrency(subtotal - codSubtotal - deckSubtotal)}</td>
                             {canEdit && <td />}
                           </tr>
-                          <tr className="bg-white">
-                            <td colSpan={5} className="px-3 py-1.5 text-xs text-purple-700">COD (collected at delivery)</td>
-                            <td className="px-3 py-1.5 text-right text-xs font-bold text-purple-700">{formatCurrency(codSubtotal)}</td>
-                            {canEdit && <td />}
-                          </tr>
+                          {deckItems.length > 0 && (
+                            <tr className="bg-white">
+                              <td colSpan={5} className="px-3 py-1.5 text-xs text-teal-700">Deck — invoiced separately (not grocery allowance)</td>
+                              <td className="px-3 py-1.5 text-right text-xs font-bold text-teal-700">{formatCurrency(deckSubtotal)}</td>
+                              {canEdit && <td />}
+                            </tr>
+                          )}
+                          {codItems.length > 0 && (
+                            <tr className="bg-white">
+                              <td colSpan={5} className="px-3 py-1.5 text-xs text-purple-700">COD (paid personally — never invoiced)</td>
+                              <td className="px-3 py-1.5 text-right text-xs font-bold text-purple-700">{formatCurrency(codSubtotal)}</td>
+                              {canEdit && <td />}
+                            </tr>
+                          )}
                         </>
                       )}
                       <tr className="bg-brand-sand/30 border-t-2 border-brand-gold/30">

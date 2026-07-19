@@ -18,6 +18,9 @@ export async function GET(req: NextRequest) {
   let query = supabase
     .from('products')
     .select('*', { count: 'exact' })
+    // Paper order-form sequence first (barges shop the form top to bottom);
+    // items not on the form sort after, alphabetically.
+    .order('form_seq', { ascending: true, nullsFirst: false })
     .order('category')
     .order('description')
     .range(offset, offset + perPage - 1);

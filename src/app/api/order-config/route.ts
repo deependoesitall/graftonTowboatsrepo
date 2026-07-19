@@ -12,12 +12,18 @@ export async function GET() {
   const supabase = createServiceClient();
   const { data } = await supabase
     .from('admin_settings')
-    .select('grocery_cutoff_hours, service_cutoff_hours, store_zone_order')
+    .select('grocery_cutoff_hours, service_cutoff_hours, store_zone_order, cod_fee_enabled, cod_fee_percent')
     .single();
+
+  // Effective COD fee — 0 when the feature is toggled off. Checkout only
+  // needs the effective number, never the raw toggle.
+  const codFeeEnabled = data?.cod_fee_enabled ?? true;
+  const codFeePercent = codFeeEnabled ? Number(data?.cod_fee_percent ?? 5) : 0;
 
   return NextResponse.json({
     grocery_cutoff_hours: Number(data?.grocery_cutoff_hours ?? 4),
     service_cutoff_hours: Number(data?.service_cutoff_hours ?? 2),
     store_zone_order: data?.store_zone_order ? sanitizeZoneOrder(data.store_zone_order) : DEFAULT_ZONE_ORDER,
+    cod_fee_percent: codFeePercent,
   });
 }

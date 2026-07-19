@@ -32,14 +32,22 @@ const submitSchema = z.object({
     company_name: z.string().min(1),
     contact_name: z.string().min(1),
     phone: z.string().min(1),
-    email: z.string().min(1).refine(v => EMAIL_RE.test(v.trim()), 'Invalid email address'),
+    // FLIPPED July 19 (Sinclair's demo): the VESSEL email is required — order
+    // emails go to the boat, not the home office ("Ingram home office isn't
+    // gonna want to see every time they place an order — they want the bill at
+    // the end"). Billing email is now optional.
+    email: z.string().optional().default('')
+      .refine(v => !v.trim() || EMAIL_RE.test(v.trim()), 'Invalid billing email address'),
     po_number: z.string().optional().default(''),
     vessel_name: z.string().optional().default(''),
     vessel_type: z.string().optional().default(''),
     vessel_type_other: z.string().optional().default(''),
     captain_name: z.string().optional().default(''),
     captain_phone: z.string().optional().default(''),
-    vessel_email: z.string().optional().default(''),
+    // Required by the UI; server also accepts legacy carts that only carry a
+    // billing email (object-level refine below guarantees at least one email).
+    vessel_email: z.string().optional().default('')
+      .refine(v => !v.trim() || EMAIL_RE.test(v.trim()), 'Invalid vessel email address'),
     order_contact_name: z.string().optional().default(''),
     order_contact_title: z.string().optional().default(''),
     order_contact_phone: z.string().optional().default(''),
@@ -64,7 +72,10 @@ const submitSchema = z.object({
     crew_arriving: z.string().optional().default(''),
     crew_departing: z.string().optional().default(''),
     personal_cod_notes: z.string().optional().default(''),
-    cod_payment_method: z.enum(['cash', 'venmo', 'credit_card', '']).optional().default(''),
+    // 'cash' accepted for legacy saved carts only — no longer selectable in the UI
+    cod_payment_method: z.enum(['cash', 'venmo', 'cashapp', 'credit_card', '']).optional().default(''),
+    // Crew member's own @venmo / $cashtag — Sinclair's/GTS sends a payment REQUEST to it
+    cod_payment_handle: z.string().max(80).optional().default(''),
     cod_preferred_phone: z.string().optional().default(''),
     cod_contact_time: z.string().optional().default(''),
     notes: z.string().optional().default(''),
@@ -81,7 +92,8 @@ const submitSchema = z.object({
     // (¼ lb deli salad, 3 lb hamburger). Regular items still send whole counts.
     quantity: z.number().positive().max(999),
     image_url: z.string().nullable().optional(),
-    paid_by: z.enum(['vessel', 'cod']).optional().default('vessel'),
+    // deck = company-billed but listed separately (not part of the grocery allowance)
+    paid_by: z.enum(['vessel', 'deck', 'cod']).optional().default('vessel'),
     cod_name: z.string().optional().default(''),
   })).default([]),
   services: z.object({
@@ -132,7 +144,18 @@ const submitSchema = z.object({
 .refine(data => {
   const hasCod = data.items.some(i => i.paid_by === 'cod');
   return !hasCod || !!data.vessel.cod_payment_method;
-}, { message: 'Please choose a payment method (cash, Venmo, or credit card) for the COD items.' });
+}, { message: 'Please choose a payment method (Venmo, Cash App, or credit card) for the COD items.' })
+// Venmo / Cash App need the crew member's own handle so we can send the request.
+.refine(data => {
+  const hasCod = data.items.some(i => i.paid_by === 'cod');
+  const m = data.vessel.cod_payment_method;
+  if (!hasCod || (m !== 'venmo' && m !== 'cashapp')) return true;
+  return !!data.vessel.cod_payment_handle?.trim();
+}, { message: 'Please add your Venmo username or Cash App $cashtag so we can send the payment request.' })
+// We need SOME email to send the order confirmation to — vessel email is the
+// primary (required in the UI); billing email alone still passes for legacy carts.
+.refine(data => !!data.vessel.vessel_email?.trim() || !!data.vessel.email?.trim(),
+  { message: 'Please add the vessel email address so we can send the order confirmation.' });
 
 /**
  * Parse the structured ETA (date picker YYYY-MM-DD + time picker HH:MM) into
@@ -185,6 +208,20 @@ export async function POST(req: NextRequest) {
     const subtotal = items.reduce((s, i) => s + i.price * i.quantity, 0);
     const hasCodItems = items.some(i => i.paid_by === 'cod');
 
+    // COD handling fee — toggleable feature. Snapshot the effective percent
+    // at order time (0 when disabled) so later setting changes don't rewrite
+    // existing orders. Admin can still override per order afterward.
+    let codFeePercent = 0;
+    if (hasCodItems) {
+      const { data: feeCfg } = await supabase
+        .from('admin_settings')
+        .select('cod_fee_enabled, cod_fee_percent')
+        .single();
+      codFeePercent = (feeCfg?.cod_fee_enabled ?? true)
+        ? Number(feeCfg?.cod_fee_percent ?? 5)
+        : 0;
+    }
+
     const vesselTypeStored = vessel.vessel_type === 'Other'
       ? (vessel.vessel_type_other || 'Other')
       : (vessel.vessel_type || null);
@@ -210,7 +247,7 @@ export async function POST(req: NextRequest) {
         company_name: vessel.company_name,
         contact_name: vessel.contact_name,
         phone: vessel.phone,
-        customer_email: vessel.email.trim().toLowerCase(),
+        customer_email: vessel.email.trim() ? vessel.email.trim().toLowerCase() : null,
         po_number: vessel.po_number || null,
         vessel_name: vessel.vessel_name || null,
         vessel_type: vesselTypeStored,
@@ -229,8 +266,12 @@ export async function POST(req: NextRequest) {
         crew_departing: vessel.crew_change === 'yes' && vessel.crew_departing ? parseInt(vessel.crew_departing, 10) : null,
         extended_info: Object.keys(extendedInfo).length > 0 ? extendedInfo : null,
         cod_payment_method: hasCodItems ? (vessel.cod_payment_method || null) : null,
+        cod_payment_handle: hasCodItems && (vessel.cod_payment_method === 'venmo' || vessel.cod_payment_method === 'cashapp')
+          ? (vessel.cod_payment_handle?.trim() || null) : null,
         cod_preferred_phone: hasCodItems && vessel.cod_payment_method === 'credit_card' ? (vessel.cod_preferred_phone || null) : null,
         cod_contact_time: hasCodItems && vessel.cod_payment_method === 'credit_card' ? (vessel.cod_contact_time || null) : null,
+        // COD handling fee snapshot (0 = feature toggled off) — admin-editable per order
+        cod_fee_percent: hasCodItems ? codFeePercent : null,
         notes: vessel.notes || null,
         eta: vessel.eta || null,
         subtotal,
@@ -281,7 +322,7 @@ export async function POST(req: NextRequest) {
           item_type: 'grocery',
           service_type: null,
           service_details: null,
-          paid_by: item.paid_by === 'cod' ? 'cod' : 'vessel',
+          paid_by: item.paid_by === 'cod' ? 'cod' : item.paid_by === 'deck' ? 'deck' : 'vessel',
           cod_name: item.paid_by === 'cod' ? (item.cod_name || null) : null,
         });
       });

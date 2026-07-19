@@ -1,6 +1,6 @@
 'use client';
 // src/components/catalog/ProductGrid.tsx
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, type ReactNode } from 'react';
 import { Product } from '@/types';
 import { formatCurrency, formatLb, lbStepsFor, usesLbSteps } from '@/lib/utils';
 import { addToCart } from '@/lib/cart';
@@ -56,14 +56,49 @@ export function ProductGrid({ products, totalCount, page, totalPages, search, ca
         <p className="text-xs text-gray-400">Page {page} of {totalPages || 1}</p>
       </div>
 
-      {/* Grid — 2 cols mobile, 3 tablet, 4 desktop */}
+      {/* Grid — 2 cols mobile, 3 tablet, 4 desktop.
+          Products arrive in PAPER ORDER-FORM sequence; when consecutive items
+          share a form subsection (Beef, Pork, Condiments, …) we render the
+          form's own row label as a full-width header — the electronic version
+          of the paper form's section lines. */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
-        {products.map(product => (
-          <ProductCard key={product.id} product={product}
-            isLoggedIn={!!user}
-            isFavorite={favIds.has(product.id)}
-            onOpenDetail={() => setDetailProduct(product)} />
-        ))}
+        {(() => {
+          const out: ReactNode[] = [];
+          let lastHeader: string | null = null;
+          for (const product of products) {
+            if (product.form_subsection && product.form_subsection !== lastHeader) {
+              lastHeader = product.form_subsection;
+              out.push(
+                <div key={`hdr-${product.id}`}
+                  className="col-span-2 sm:col-span-3 lg:col-span-4 flex items-center gap-2 mt-2 first:mt-0">
+                  <span className="text-[11px] font-bold uppercase tracking-widest text-brand-navy bg-brand-sand/60 border border-brand-gold/30 rounded px-2 py-0.5">
+                    {product.form_subsection}
+                  </span>
+                  <span className="flex-1 border-t border-brand-gold/20" />
+                </div>
+              );
+            } else if (!product.form_subsection && product.form_seq == null && lastHeader !== null && lastHeader !== '__offform__') {
+              // Transition from order-form items to off-form (full store) items
+              lastHeader = '__offform__';
+              out.push(
+                <div key={`hdr-off-${product.id}`}
+                  className="col-span-2 sm:col-span-3 lg:col-span-4 flex items-center gap-2 mt-2">
+                  <span className="text-[11px] font-bold uppercase tracking-widest text-gray-400 bg-gray-50 border border-gray-200 rounded px-2 py-0.5">
+                    More from the store
+                  </span>
+                  <span className="flex-1 border-t border-gray-200" />
+                </div>
+              );
+            }
+            out.push(
+              <ProductCard key={product.id} product={product}
+                isLoggedIn={!!user}
+                isFavorite={favIds.has(product.id)}
+                onOpenDetail={() => setDetailProduct(product)} />
+            );
+          }
+          return out;
+        })()}
       </div>
 
       {/* Product detail modal */}

@@ -31,8 +31,10 @@ const SAMPLE_ORDER: Order = {
   crew_departing: null,
   extended_info: null,
   cod_payment_method: null,
+  cod_payment_handle: null,
   cod_preferred_phone: null,
   cod_contact_time: null,
+  cod_fee_percent: null,
   discount_total: 0,
   items: [
     { id: '1', order_id: 'sample', product_id: 'p1', description: 'Bologna Salad', category: 'Bakery & Deli', pkg_size: 'PER LB', uom: null, upc: '023456789012', location: null, location_seq: null, unit_price: 6.29, quantity: 2, line_total: 12.58, shopping_status: 'pending', actual_weight: null, actual_total: null, is_substitution: false, substitutes_item_id: null, item_type: 'grocery', service_type: null, service_details: null, paid_by: 'vessel', cod_name: null, image_url: null },

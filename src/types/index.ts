@@ -28,13 +28,25 @@ export interface Product {
   is_active: boolean;
   is_available: boolean;
   billed_by_weight: boolean;
+  /** Paper order form placement — barges shop the form top to bottom. */
+  form_section: string | null;    // Meat / Dairy / Produce / Grocery / Cold Deli / Bakery
+  form_subsection: string | null; // Beef / Pork / Poultry / Condiments / … (Jen's subcategories)
+  form_seq: number | null;        // global position on the form; NULL = not on the order form
   created_at?: string;
 }
 
-// Who pays for a cart/order line: the vessel's company account (invoiced
-// monthly) or an individual crew member cash-on-delivery.
-export type PaidBy = 'vessel' | 'cod';
-export type CodPaymentMethod = 'cash' | 'venmo' | 'credit_card';
+// Who pays for a cart/order line:
+//   vessel — grocery, billed to the company, counts against the boat's grocery allowance
+//   deck   — deck supplies (paper towels, cleaning…), billed to the company but
+//            listed SEPARATELY — does NOT count against the grocery allowance
+//            (Dave's July 19 text: "grocery goes against the boat allowance, deck does not")
+//   cod    — an individual crew member pays personally (never invoiced)
+export type PaidBy = 'vessel' | 'deck' | 'cod';
+// COD settlement: Venmo / Cash App = the crew member enters THEIR handle and
+// Sinclair's/GTS sends a payment REQUEST (never inbound sends — July 10 demo).
+// Credit card = we call them. 'cash' is legacy only (no longer selectable —
+// Dave: "cash is never going to be an option").
+export type CodPaymentMethod = 'venmo' | 'cashapp' | 'credit_card' | 'cash';
 
 export interface CartItem {
   product_id: string;
@@ -96,6 +108,8 @@ export interface VesselInfo {
   personal_cod_notes: string;
   // COD settlement (only relevant when the cart has COD lines)
   cod_payment_method: CodPaymentMethod | '';
+  /** Crew member's own @venmo username or $cashtag — we send a payment request to it. */
+  cod_payment_handle: string;
   cod_preferred_phone: string;
   cod_contact_time: string;
   notes: string;
@@ -177,8 +191,12 @@ export interface Order {
   eta: string | null;
   // COD settlement (null when the order has no COD lines)
   cod_payment_method: CodPaymentMethod | null;
+  /** Crew member's @venmo / $cashtag — Sinclair's/GTS sends a payment request to it. */
+  cod_payment_handle: string | null;
   cod_preferred_phone: string | null;
   cod_contact_time: string | null;
+  /** COD handling fee % (default 5 — offsets Venmo/Cash App/card fees). Admin-editable per order. */
+  cod_fee_percent: number | null;
   items: OrderItem[];
   /** Estimated digital-coupon savings snapshot (0 when none applied). */
   discount_total: number;
