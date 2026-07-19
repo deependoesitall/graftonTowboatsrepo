@@ -30,7 +30,10 @@ function isWeighable(i: OrderItem): boolean {
 function itemCard(i: OrderItem): string {
   const weighable = isWeighable(i);
   const qtyLabel = formatQty(i.quantity, isPoundQty(i.uom, i.quantity));
-  const svg = weighable ? null : upcASvg(i.upc, { moduleWidth: 2, height: 44 });
+  // Sized for first-scan reliability: at print resolution this yields bars
+  // ~0.4mm wide × ~12mm tall — comfortably above UPC-A scanner minimums, so
+  // even a toner-tired office printer produces gun-readable codes.
+  const svg = weighable ? null : upcASvg(i.upc, { moduleWidth: 2, height: 56 });
   const scanTimes = !weighable && svg && Number.isInteger(i.quantity) && i.quantity > 0
     ? `Scan ${i.quantity} time${i.quantity === 1 ? '' : 's'}` : '';
   const cod = i.paid_by === 'cod';
@@ -145,7 +148,7 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
   .sub-tag { color: #c2410c; font-weight: bold; font-size: 9px; }
 
   .bc { display: flex; align-items: center; gap: 8px; }
-  .bc svg { height: 34px; width: auto; }
+  .bc svg { height: 46px; width: auto; }
   .scan { font-size: 9.5px; font-weight: bold; color: #333; }
   .wgt-note { font-size: 9.5px; font-weight: bold; color: #b45309; }
   .wgt-line { font-size: 10px; margin-top: 3px; color: #333; }

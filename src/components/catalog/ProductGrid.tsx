@@ -18,10 +18,12 @@ interface ProductGridProps {
   totalPages: number;
   search: string;
   category: string;
+  /** True when browsing the full store (?store=all) — kept across pagination. */
+  storeAll?: boolean;
 }
 
 
-export function ProductGrid({ products, totalCount, page, totalPages, search, category }: ProductGridProps) {
+export function ProductGrid({ products, totalCount, page, totalPages, search, category, storeAll }: ProductGridProps) {
   const { user } = useAuth();
   const [favIds, setFavIds] = useState<Set<string>>(new Set());
   const [detailProduct, setDetailProduct] = useState<Product | null>(null);
@@ -110,7 +112,7 @@ export function ProductGrid({ products, totalCount, page, totalPages, search, ca
       {totalPages > 1 && (
         <div className="flex justify-center items-center gap-2 mt-10 pb-4">
           {page > 1 && (
-            <PaginationLink href={buildUrl(search, category, page - 1)} label="← Prev" />
+            <PaginationLink href={buildUrl(search, category, page - 1, storeAll)} label="← Prev" />
           )}
           <div className="flex items-center gap-1">
             {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
@@ -118,7 +120,7 @@ export function ProductGrid({ products, totalCount, page, totalPages, search, ca
               return (
                 <Link
                   key={p}
-                  href={buildUrl(search, category, p)}
+                  href={buildUrl(search, category, p, storeAll)}
                   className={`w-8 h-8 flex items-center justify-center rounded text-xs font-bold transition-colors ${
                     p === page ? 'bg-brand-steel text-white' : 'text-gray-500 hover:bg-gray-100'
                   }`}
@@ -129,7 +131,7 @@ export function ProductGrid({ products, totalCount, page, totalPages, search, ca
             })}
           </div>
           {page < totalPages && (
-            <PaginationLink href={buildUrl(search, category, page + 1)} label="Next →" />
+            <PaginationLink href={buildUrl(search, category, page + 1, storeAll)} label="Next →" />
           )}
         </div>
       )}
@@ -137,11 +139,12 @@ export function ProductGrid({ products, totalCount, page, totalPages, search, ca
   );
 }
 
-function buildUrl(search: string, category: string, page: number) {
+function buildUrl(search: string, category: string, page: number, storeAll?: boolean) {
   const params = new URLSearchParams();
   if (search) params.set('search', search);
   if (category && category !== 'All') params.set('category', category);
   if (page > 1) params.set('page', String(page));
+  if (storeAll) params.set('store', 'all');   // preserve full-store browsing across pagination
   const qs = params.toString();
   return `/catalog${qs ? `?${qs}` : ''}`;
 }

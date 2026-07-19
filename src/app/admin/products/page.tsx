@@ -631,6 +631,8 @@ export default function AdminProductsPage() {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');
   const [status, setStatus] = useState('');
+  // Barge order form vs full-store filter (Jen's notes) — '' = both
+  const [storeFilter, setStoreFilter] = useState('');
   const [page, setPage] = useState(1);
   const searchRef = useRef<ReturnType<typeof setTimeout>>();
   const perPage = 50;
@@ -662,6 +664,7 @@ export default function AdminProductsPage() {
     const params = new URLSearchParams({ search: q, page: String(p), per_page: '50' });
     if (cat) params.set('category', cat);
     if (st) params.set('status', st);
+    if (storeFilter) params.set('store', storeFilter);
     const res = await adminFetch(`/api/products?${params}`);
     if (res.ok) {
       const data = await res.json();
@@ -669,9 +672,9 @@ export default function AdminProductsPage() {
       setTotal(data.total || 0);
     }
     setLoading(false);
-  }, [search, page, category, status]);
+  }, [search, page, category, status, storeFilter]);
 
-  useEffect(() => { fetchProducts(); }, [page, category, status]);
+  useEffect(() => { fetchProducts(); }, [page, category, status, storeFilter]);
 
   useEffect(() => {
     clearTimeout(searchRef.current);
@@ -904,6 +907,13 @@ export default function AdminProductsPage() {
               <select value={status} onChange={e => { setStatus(e.target.value); setPage(1); }}
                 className="input-base text-sm py-2">
                 {STATUS_FILTERS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+              </select>
+              <select value={storeFilter} onChange={e => { setStoreFilter(e.target.value); setPage(1); }}
+                className="input-base text-sm py-2"
+                title="Barge order form items vs the full-store import">
+                <option value="">Barge + Store</option>
+                <option value="barge">Barge Order Form</option>
+                <option value="store">Full Store Only</option>
               </select>
             </div>
           </div>

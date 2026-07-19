@@ -36,6 +36,13 @@ export async function GET(req: NextRequest) {
   }
   if (category && category !== 'All') query = query.eq('category', category);
 
+  // Barge order form vs full-store filter (Jen's notes): 'barge' = curated
+  // catalog only, 'store' = full-store imports only, absent = everything
+  // (admin browsing + substitution search draw from the whole store).
+  const store = searchParams.get('store') || '';
+  if (store === 'barge') query = query.eq('store_only', false);
+  else if (store === 'store') query = query.eq('store_only', true);
+
   if (isAdmin) {
     if (status === 'active') query = query.eq('is_active', true);
     else if (status === 'inactive') query = query.eq('is_active', false);

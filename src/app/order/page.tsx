@@ -665,6 +665,26 @@ export default function OrderPage() {
           )}
         </section>
 
+        {/* "Shop the rest of the store" — Dave's tab-at-the-end idea (July 10):
+            after they've run down the order form, open the WHOLE store before
+            they submit. ("Can I shop the rest? … they'll write in spices and
+            different things — if they can look at our entire store, they can
+            see the spices we have.") */}
+        {items.length > 0 && (
+          <Link href="/catalog?store=all"
+            className="mb-4 flex items-center gap-3 border-2 border-dashed border-teal-300 bg-teal-50/60 hover:bg-teal-50 rounded-xl px-4 py-3.5 transition-colors group">
+            <span className="w-9 h-9 rounded-lg bg-teal-600 text-white flex items-center justify-center font-bold shrink-0">+</span>
+            <span className="flex-1">
+              <span className="block text-sm font-bold text-teal-800">Need anything else? Shop the rest of the store</span>
+              <span className="block text-xs text-teal-700/70">
+                Sinclair&apos;s carries way more than the order form — spices, shampoo, snacks, you name it.
+                Your cart comes with you.
+              </span>
+            </span>
+            <span className="text-teal-600 font-bold group-hover:translate-x-0.5 transition-transform">&rarr;</span>
+          </Link>
+        )}
+
         {/* COD payment method — shown only when the cart has COD lines */}
         {hasCod && (
           <section className="card-base mb-4 p-5 border-2 border-purple-200">

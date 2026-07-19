@@ -13,9 +13,11 @@ name: Nightly catalog sync
 
 on:
   schedule:
-    # Every 15 min, 05:00–08:45 UTC (≈ midnight–4am Central) — plenty of
-    # chunks to cover ~125 catalog pages at 8 pages per invocation.
-    - cron: '*/15 5-8 * * *'
+    # Every 15 min, 05:00–09:45 UTC (≈ midnight–5am Central) — ~20 chunks at
+    # 12 pages each covers the ~208 storefront pages. The very first sweep
+    # (full-store import, ~19k inserts) may take two nights; the checkpoint
+    # carries over automatically.
+    - cron: '*/15 5-9 * * *'
   workflow_dispatch: {}   # manual "Run workflow" button for testing
 
 jobs:

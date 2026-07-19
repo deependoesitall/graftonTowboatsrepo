@@ -20,23 +20,26 @@ import { getAdminSession } from '@/lib/admin-auth-server';
 import { applyFormLayout } from '@/lib/form-layout-apply';
 import {
   fetchFreshopPage, fetchFreshopTotal, freshopKeys, ourKeys, computeFields,
+  buildStoreProduct, norm,
   FRESHOP_PAGE_SIZE, type FreshopProduct, type SyncableProduct, type SyncStats,
 } from '@/lib/freshop-sync';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-const PAGES_PER_RUN = 8;            // small chunks keep us under NCR's rate limits
-const PAGE_DELAY_MS = 1500;         // same pacing as the manual enrich
+const PAGES_PER_RUN = 12;           // small chunks keep us under NCR's rate limits (~208 storefront pages total)
+const PAGE_DELAY_MS = 1200;         // gentle pacing, same spirit as the manual enrich
 const TIME_BUDGET_MS = 40_000;      // leave headroom under maxDuration
 
 interface SyncState {
-  day?: string;                     // sync session date (America/Chicago)
+  day?: string;                     // date the current sync session STARTED (America/Chicago)
   total?: number;
   pages?: number;
   donePages?: number[];
   stats?: SyncStats;
   applied?: number;
+  /** New store items inserted this session (full-store import). */
+  inserted?: number;
   completedAt?: string;
   lastError?: string;
 }
@@ -67,11 +70,16 @@ async function handle(req: NextRequest) {
   const { data: row } = await supabase.from('catalog_sync_state').select('state').eq('id', 1).single();
   let state: SyncState = (row?.state as SyncState) || {};
 
-  // New night → fresh session. Same night + already completed → no-op.
-  if (state.day !== today) {
-    state = { day: today, donePages: [], stats: emptyStats(), applied: 0 };
-  } else if (state.completedAt) {
-    return NextResponse.json({ status: 'done', day: today, completedAt: state.completedAt, stats: state.stats });
+  // Session logic: an UNFINISHED session continues across days (the very first
+  // full-store sweep can span multiple nights). A COMPLETED session starts
+  // fresh on the next new day; completed-today invocations are no-ops.
+  if (state.completedAt) {
+    if (state.day === today) {
+      return NextResponse.json({ status: 'done', day: today, completedAt: state.completedAt, stats: state.stats, inserted: state.inserted || 0 });
+    }
+    state = { day: today, donePages: [], stats: emptyStats(), applied: 0, inserted: 0 };
+  } else if (!state.day) {
+    state = { day: today, donePages: [], stats: emptyStats(), applied: 0, inserted: 0 };
   }
 
   // ── Discover catalog size once per session ──
@@ -98,6 +106,11 @@ async function handle(req: NextRequest) {
     if (!data || data.length < 1000) break;
   }
 
+  // Every UPC key we already carry (or insert this run) — prevents duplicate
+  // imports when the same UPC appears on multiple Freshop rows.
+  const knownUpcKeys = new Set<string>();
+  for (const p of ours) for (const k of ourKeys(p.upc || '')) knownUpcKeys.add(k);
+
   // ── Fetch a chunk of pages ──
   const doneSet = new Set(state.donePages || []);
   const queue = Array.from({ length: state.pages }, (_, i) => i).filter(i => !doneSet.has(i));
@@ -116,12 +129,14 @@ async function handle(req: NextRequest) {
     for (const item of items) {
       for (const key of freshopKeys(item)) if (!index.has(key)) index.set(key, item);
     }
+    const usedFreshopIds = new Set<string>();
     const updates: Array<{ id: string; fields: Record<string, unknown> }> = [];
     for (const product of ours) {
       if (!product.upc) continue;
       let hit: FreshopProduct | undefined;
       for (const key of ourKeys(product.upc)) { hit = index.get(key); if (hit) break; }
       if (!hit) continue;
+      if (hit.id != null) usedFreshopIds.add(String(hit.id));
       stats.matched++;
       const fields = computeFields(product, hit, stats);
       if (fields) {
@@ -138,6 +153,31 @@ async function handle(req: NextRequest) {
         return NextResponse.json({ error: state.lastError }, { status: 500 });
       }
       state.applied = (state.applied || 0) + updates.length;
+    }
+
+    // ── FULL-STORE IMPORT: page items that matched nothing in our catalog
+    // become new store_only products (alcohol + unsellable rows excluded).
+    const inserts: Record<string, unknown>[] = [];
+    for (const item of items) {
+      if (item.id != null && usedFreshopIds.has(String(item.id))) continue;
+      const upcKey = norm(item.upc || item.barcode_upc_a);
+      if (upcKey && knownUpcKeys.has(upcKey)) continue;      // already carried / inserted
+      const row = buildStoreProduct(item);
+      if (!row) continue;                                     // alcohol / no price / no name
+      inserts.push(row);
+      if (upcKey) {
+        knownUpcKeys.add(upcKey);
+        if (upcKey.length >= 5) knownUpcKeys.add(upcKey.slice(0, -1));
+      }
+    }
+    if (inserts.length) {
+      const { error: insErr } = await supabase.from('products').insert(inserts);
+      if (insErr) {
+        state.lastError = `store import insert: ${insErr.message}`;
+        await saveState(supabase, state);
+        return NextResponse.json({ error: state.lastError }, { status: 500 });
+      }
+      state.inserted = (state.inserted || 0) + inserts.length;
     }
 
     doneSet.add(pageIdx);
@@ -160,7 +200,7 @@ async function handle(req: NextRequest) {
         order_number: null,
         action: 'catalog_enriched',
         from_value: "Sinclair's website",
-        to_value: `${state.applied || 0} products updated — ${stats.prices} prices, ${stats.locations} locations, ${stats.images} images, ${stats.weightFlags} weight flags · order-form layout re-applied (${layout.matched} matched / ${layout.unmatched_count} unmatched)`,
+        to_value: `${state.applied || 0} products updated — ${stats.prices} prices, ${stats.locations} locations, ${stats.images} images, ${stats.weightFlags} weight flags · ${state.inserted || 0} new store items imported · order-form layout re-applied (${layout.matched} matched / ${layout.unmatched_count} unmatched)`,
         admin_username: 'system',
         admin_display_name: 'Nightly Auto-Sync',
         admin_role: 'owner',
@@ -175,10 +215,11 @@ async function handle(req: NextRequest) {
 
   return NextResponse.json({
     status: finished ? 'done' : rateLimited ? 'rate-limited' : 'in-progress',
-    day: today,
+    session_started: state.day,
     pages_done: state.donePages.length,
     pages_total: state.pages,
     applied_so_far: state.applied || 0,
+    store_items_imported: state.inserted || 0,
     stats,
   });
 }

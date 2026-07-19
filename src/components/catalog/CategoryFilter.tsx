@@ -29,11 +29,13 @@ const CATEGORY_ICONS: Record<string, string> = {
 export function CategoryFilter({ categories, counts, activeCategory }: CategoryFilterProps) {
   const searchParams = useSearchParams();
   const search = searchParams.get('search') || '';
+  const storeAll = searchParams.get('store') === 'all';
 
   function buildHref(cat: string) {
     const params = new URLSearchParams();
     if (search) params.set('search', search);
     if (cat && cat !== 'All') params.set('category', cat);
+    if (storeAll) params.set('store', 'all');   // stay in full-store mode while switching categories
     const qs = params.toString();
     return `/catalog${qs ? `?${qs}` : ''}`;
   }

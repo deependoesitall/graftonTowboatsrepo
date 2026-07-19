@@ -32,6 +32,8 @@ export interface Product {
   form_section: string | null;    // Meat / Dairy / Produce / Grocery / Cold Deli / Bakery
   form_subsection: string | null; // Beef / Pork / Poultry / Condiments / … (Jen's subcategories)
   form_seq: number | null;        // global position on the form; NULL = not on the order form
+  /** TRUE = full-store import (hidden from default browse; reachable via "browse the whole store" flows). */
+  store_only: boolean;
   created_at?: string;
 }
 

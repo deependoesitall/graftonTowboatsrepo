@@ -19,6 +19,8 @@ interface PageProps {
     category?: string;
     page?: string;
     tab?: string;
+    /** 'all' = include full-store items (the "browse everything Sinclair's carries" flows) */
+    store?: string;
   }>;
 }
 
@@ -104,6 +106,10 @@ export default async function CatalogPage({ searchParams }: PageProps) {
   const category = params.category || '';
   const page     = Math.max(1, parseInt(params.page || '1'));
   const tab      = params.tab === 'services' ? 'services' : 'groceries';
+  // FULL-STORE BROWSING (Round 8 P1-3): the barge order form is the default
+  // view; ?store=all opens the whole Sinclair's catalog ("Don't see it?
+  // Browse everything Sinclair's carries").
+  const storeAll = params.store === 'all';
   const perPage  = 60;
   const offset   = (page - 1) * perPage;
 
@@ -112,7 +118,7 @@ export default async function CatalogPage({ searchParams }: PageProps) {
   // PAPER ORDER FORM SEQUENCE (July 10 demo — "it is very key that the barges
   // see the order as they see it on paper now"): form items sort by their
   // position on the paper form, top to bottom; anything not on the form
-  // (future full-store items) sorts after, alphabetically.
+  // (curated extras, then full-store items) sorts after, alphabetically.
   let query = supabase
     .from('products')
     .select('*', { count: 'exact' })
@@ -122,6 +128,8 @@ export default async function CatalogPage({ searchParams }: PageProps) {
     .order('category', { ascending: true })
     .order('description', { ascending: true })
     .range(offset, offset + perPage - 1);
+
+  if (!storeAll) query = query.eq('store_only', false);
 
   if (search) {
     // search_text is a stored generated column: lower(description || ' ' || category || ' ' || tags).
@@ -133,14 +141,47 @@ export default async function CatalogPage({ searchParams }: PageProps) {
     query = query.eq('category', category);
   }
 
-  const [{ data: products, count }, { data: catCounts }, { data: pageSettings }] = await Promise.all([
+  // Teaser: when browsing the barge view, count how many MORE matches exist
+  // in the full store (shown as "N more in the full store — browse them").
+  let storeCountQuery = null;
+  if (!storeAll) {
+    let scq = supabase
+      .from('products')
+      .select('id', { count: 'exact', head: true })
+      .eq('is_active', true)
+      .eq('is_available', true)
+      .eq('store_only', true);
+    if (search) scq = scq.ilike('search_text', `%${search}%`);
+    if (category && category !== 'All') scq = scq.eq('category', category);
+    storeCountQuery = scq;
+  }
+
+  const [{ data: products, count }, { data: catCounts }, { data: pageSettings }, storeCountRes] = await Promise.all([
     query,
     supabase.rpc('get_category_counts'),
     // admin_settings is RLS-locked to the service role — the anon client read
     // null here, which meant the fleet CTA toggle silently never worked.
     createServiceClient().from('admin_settings').select('fleet_cta_enabled').single(),
+    storeCountQuery ?? Promise.resolve(null),
   ]);
   const fleetCtaEnabled = !!pageSettings?.fleet_cta_enabled;
+  const storeMatchCount = storeCountRes && 'count' in storeCountRes ? (storeCountRes.count || 0) : 0;
+
+  // Helper to rebuild the current URL with store=all (keeps search/category)
+  const storeAllHref = (() => {
+    const p = new URLSearchParams();
+    if (search) p.set('search', search);
+    if (category) p.set('category', category);
+    p.set('store', 'all');
+    return `/catalog?${p.toString()}`;
+  })();
+  const bargeHref = (() => {
+    const p = new URLSearchParams();
+    if (search) p.set('search', search);
+    if (category) p.set('category', category);
+    const qs = p.toString();
+    return `/catalog${qs ? `?${qs}` : ''}`;
+  })();
 
   const totalPages = Math.ceil((count || 0) / perPage);
 
@@ -210,6 +251,22 @@ export default async function CatalogPage({ searchParams }: PageProps) {
             </Suspense>
           </div>
 
+          {/* Full-store mode banner — the barge form is home base */}
+          {storeAll && (
+            <div className="mb-4 flex flex-wrap items-center gap-3 bg-teal-600 text-white rounded-xl px-4 py-3">
+              <div className="flex-1 min-w-[220px]">
+                <p className="text-sm font-bold">You&apos;re browsing the full Sinclair&apos;s store</p>
+                <p className="text-xs text-white/75">
+                  Everything Sinclair&apos;s carries — beyond the barge order form. Add anything to your order like normal.
+                </p>
+              </div>
+              <Link href={bargeHref}
+                className="bg-white text-teal-700 text-xs font-bold uppercase tracking-wide px-4 py-2 rounded-full shrink-0 hover:bg-teal-50 transition-colors">
+                &larr; Back to the order form
+              </Link>
+            </div>
+          )}
+
           <SearchBar initialSearch={search} />
           <div className="flex flex-col md:flex-row gap-5 mt-5">
             <aside className="w-full md:w-52 shrink-0">
@@ -228,8 +285,31 @@ export default async function CatalogPage({ searchParams }: PageProps) {
                   totalPages={totalPages}
                   search={search}
                   category={category}
+                  storeAll={storeAll}
                 />
               </Suspense>
+              {/* Full-store expander — "Don't see it? We carry way more than the
+                  order form." Scoped to the active category/search so cooks are
+                  never dumped into all 20,000 items at once (Dave's ask). */}
+              {!storeAll && storeMatchCount > 0 && (
+                <Link href={storeAllHref}
+                  className="mt-5 flex items-center gap-3 border-2 border-dashed border-teal-300 bg-teal-50/60 hover:bg-teal-50 rounded-xl px-4 py-3.5 transition-colors group">
+                  <span className="w-9 h-9 rounded-lg bg-teal-600 text-white flex items-center justify-center font-bold shrink-0">+</span>
+                  <span className="flex-1">
+                    <span className="block text-sm font-bold text-teal-800">
+                      {search
+                        ? `${storeMatchCount.toLocaleString()} more match${storeMatchCount === 1 ? '' : 'es'} for “${search}” in the full store`
+                        : category && category !== 'All'
+                        ? `Don't see it? Browse all ${storeMatchCount.toLocaleString()} ${category} items Sinclair's carries`
+                        : `Shop the rest of the store — ${storeMatchCount.toLocaleString()} more items Sinclair's carries`}
+                    </span>
+                    <span className="block text-xs text-teal-700/70">
+                      The order form is just the everyday list — the whole store is available.
+                    </span>
+                  </span>
+                  <span className="text-teal-600 font-bold group-hover:translate-x-0.5 transition-transform">&rarr;</span>
+                </Link>
+              )}
               {/* "Other" third-party item — Sinclair-handled pickup */}
               <OtherPickupCard />
             </div>

@@ -15,6 +15,13 @@ export const FRESHOP_STORE_ID = '4297';
 export const FRESHOP_PAGE_SIZE = 100;
 const IMAGE_BASE = 'https://images.freshop.ncrcloud.com';
 
+// Freshop's catalog ballooned to ~71,600 rows (the AWG warehouse superset).
+// The BROWSABLE store is the storefront department tree — ~20,700 items
+// (probed live July 19, 2026). Scoping every catalog request to this root
+// keeps the nightly sweep at ~208 pages instead of ~717 and keeps warehouse
+// junk out of the import.
+export const FRESHOP_STOREFRONT_ROOT = '21585437';
+
 export interface FreshopProduct {
   id?: string | number;
   upc?: string;
@@ -32,6 +39,10 @@ export interface FreshopProduct {
   quantity_step?: number;
   quantity_label?: string;
   quantity_size_ratio?: number;
+  /** e.g. "https://shop.sinclairsfoods.com/shop/produce/fresh_fruit/.../p/12413" — dept path drives category + alcohol exclusion */
+  canonical_url?: string;
+  department_ids?: string[];
+  status?: string;
 }
 
 export interface SyncableProduct {
@@ -149,11 +160,11 @@ export function computeFields(
   return Object.keys(fields).length ? fields : null;
 }
 
-/** One Freshop catalog page (server-side). Returns null on rate limit/error. */
+/** One Freshop catalog page, scoped to the browsable storefront tree. Null on rate limit/error. */
 export async function fetchFreshopPage(skip: number): Promise<FreshopProduct[] | null> {
   try {
     const res = await fetch(
-      `https://api.freshop.ncrcloud.com/1/products?app_key=${FRESHOP_APP_KEY}&store_id=${FRESHOP_STORE_ID}&limit=${FRESHOP_PAGE_SIZE}&skip=${skip}&sort=name&name_sort=asc`,
+      `https://api.freshop.ncrcloud.com/1/products?app_key=${FRESHOP_APP_KEY}&store_id=${FRESHOP_STORE_ID}&department_id=${FRESHOP_STOREFRONT_ROOT}&limit=${FRESHOP_PAGE_SIZE}&skip=${skip}&sort=name&name_sort=asc`,
       { cache: 'no-store' },
     );
     if (!res.ok) return null;
@@ -164,11 +175,11 @@ export async function fetchFreshopPage(skip: number): Promise<FreshopProduct[] |
   }
 }
 
-/** Catalog size (total item count) — null when Freshop won't answer. */
+/** Browsable-store size (storefront tree only) — null when Freshop won't answer. */
 export async function fetchFreshopTotal(): Promise<number | null> {
   try {
     const res = await fetch(
-      `https://api.freshop.ncrcloud.com/1/products?app_key=${FRESHOP_APP_KEY}&store_id=${FRESHOP_STORE_ID}&limit=1`,
+      `https://api.freshop.ncrcloud.com/1/products?app_key=${FRESHOP_APP_KEY}&store_id=${FRESHOP_STORE_ID}&department_id=${FRESHOP_STOREFRONT_ROOT}&limit=1`,
       { cache: 'no-store' },
     );
     if (!res.ok) return null;
@@ -177,4 +188,94 @@ export async function fetchFreshopTotal(): Promise<number | null> {
   } catch {
     return null;
   }
+}
+
+// ── Full-store import helpers ────────────────────────────────────────────
+
+/** First two segments of the shop path: "shop/produce/fresh_fruit/…" → ["produce","fresh_fruit"] */
+function deptPath(p: FreshopProduct): string[] {
+  const m = (p.canonical_url || '').match(/\/shop\/([^/]+)(?:\/([^/]+))?/);
+  return m ? [m[1] || '', m[2] || ''] : ['', ''];
+}
+
+/** Alcohol can't be delivered to boats — exclude the whole Beer/Wine/Spirits tree. */
+export function isAlcohol(p: FreshopProduct): boolean {
+  const [top] = deptPath(p);
+  if (top.includes('beer') || top.includes('wine') || top.includes('spirit')) return true;
+  // Fallback when canonical_url is missing: obvious keywords, guarded against
+  // "root beer" / "ginger ale" / "cooking wine" false positives.
+  if (!top) {
+    const n = (p.name || '').toLowerCase();
+    if (/\b(vodka|whiskey|whisky|tequila|bourbon|brandy|liquor|lager|ipa\b|champagne|seltzer.*(alc|%)|malt liquor)\b/.test(n)) return true;
+  }
+  return false;
+}
+
+/** Map the Freshop department path to one of OUR catalog categories. */
+export function categoryFrom(p: FreshopProduct): string {
+  const [top, second] = deptPath(p);
+  if (top === 'produce') return 'Produce';
+  if (top === 'meat' || top === 'seafood') return 'Meat & Seafood';
+  if (top === 'dairy') return 'Dairy & Eggs';
+  if (top.startsWith('frozen')) return 'Frozen Foods';
+  if (top === 'bakery' || top === 'deli') return 'Bakery & Deli';
+  if (top.includes('home') || top.includes('floral')) return 'Household & Cleaning';
+  if (top === 'pantry') {
+    if (/beverage|drink|soda|water|juice|coffee|tea/.test(second)) return 'Beverages';
+    if (/snack|candy|cookie|chip|sweet|cracker/.test(second)) return 'Snacks & Sweets';
+    return 'Pantry & Grocery';
+  }
+  return 'Pantry & Grocery';
+}
+
+/** Pretty sub-category from the second path segment: "fresh_fruit" → "Fresh Fruit". */
+export function subCategoryFrom(p: FreshopProduct): string | null {
+  const [, second] = deptPath(p);
+  if (!second) return null;
+  return second.split(/[_-]+/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+
+export function isWeighableUpcDigits(upc: string | null | undefined): boolean {
+  const digits = (upc || '').replace(/\D/g, '');
+  if (!digits) return false;
+  const d11 = digits.length === 12 ? digits.slice(0, 11) : digits.padStart(11, '0');
+  return d11.length === 11 && d11.startsWith('2') && d11.endsWith('00000');
+}
+
+/**
+ * Build a NEW products row for a store item the barge catalog doesn't carry.
+ * store_only=TRUE keeps it out of the default browse — reachable only through
+ * the "browse everything Sinclair's carries" / "shop the rest of the store"
+ * flows. Returns null for unsellable rows (no name / no price / alcohol).
+ */
+export function buildStoreProduct(p: FreshopProduct): Record<string, unknown> | null {
+  const name = (p.name || '').trim();
+  const price = priceFrom(p);
+  if (!name || price == null) return null;
+  if (isAlcohol(p)) return null;
+  const upcRaw = (p.upc || '').trim() || norm(p.barcode_upc_a) || null;
+  const weighable = !!p.is_weight_required || isWeighableUpcDigits(upcRaw);
+  const step = typeof p.quantity_step === 'number' && isFinite(p.quantity_step) && p.quantity_step > 0 ? p.quantity_step : null;
+  const ratio = typeof p.quantity_size_ratio === 'number' && isFinite(p.quantity_size_ratio) && p.quantity_size_ratio > 0 ? p.quantity_size_ratio : null;
+  return {
+    description: name,
+    details: detailsFrom(p),
+    category: categoryFrom(p),
+    sub_category: subCategoryFrom(p),
+    upc: upcRaw,
+    pkg_size: (p.size || '').trim() || null,
+    uom: weighable ? 'LB' : 'EA',
+    price,
+    image_url: imageFrom(p),
+    location: locationFrom(p),
+    location_seq: locationSeqFrom(p),
+    quantity_step: step,
+    quantity_label: (p.quantity_label || '').trim() || null,
+    quantity_size_ratio: ratio,
+    billed_by_weight: weighable,
+    freshop_id: p.id != null ? String(p.id) : null,
+    store_only: true,
+    is_active: true,
+    is_available: (p.status || 'available') === 'available',
+  };
 }

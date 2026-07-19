@@ -42,13 +42,16 @@ const normPkg = (p: string | null | undefined) =>
 
 /** Match the form layout against the catalog and bulk-apply via the RPC. */
 export async function applyFormLayout(supabase: SupabaseClient): Promise<FormLayoutResult> {
-  // Pull the whole catalog once — matching happens in memory.
+  // Pull the BARGE catalog once — matching happens in memory. Full-store
+  // imports (store_only) are excluded: the paper form maps onto the curated
+  // catalog, and desc-only matching against 20k store items would misfire.
   const all: Array<{ id: string; upc: string | null; description: string; pkg_size: string | null }> = [];
   const PAGE = 1000;
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await supabase
       .from('products')
       .select('id, upc, description, pkg_size')
+      .eq('store_only', false)
       .range(from, from + PAGE - 1);
     if (error) throw new Error(error.message);
     all.push(...(data || []));
