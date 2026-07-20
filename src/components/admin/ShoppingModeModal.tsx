@@ -13,6 +13,7 @@ import { Order, OrderItem, Product } from '@/types';
 import { formatCurrency, formatLb } from '@/lib/utils';
 import { adminFetch } from '@/lib/admin-auth';
 import { groupByWalkingOrder, DEFAULT_ZONE_ORDER, NO_LOCATION_LABEL } from '@/lib/store-layout';
+import { PickSheetOverlay } from '@/components/admin/PickSheetOverlay';
 
 interface ShoppingModeModalProps {
   order: Order;
@@ -55,14 +56,13 @@ function isWeightItem(item: OrderItem) {
 // ── CONFIRMATION DIALOG ───────────────────────────────────────────────────────
 
 interface ConfirmDialogProps {
-  customerEmail?: string;
   pendingItems: OrderItem[];
   onConfirm: () => void;
   onCancel: () => void;
   completing: boolean;
 }
 
-function ConfirmCompleteDialog({ customerEmail, pendingItems, onConfirm, onCancel, completing }: ConfirmDialogProps) {
+function ConfirmCompleteDialog({ pendingItems, onConfirm, onCancel, completing }: ConfirmDialogProps) {
   const hasPending = pendingItems.length > 0;
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 px-4">
@@ -100,16 +100,11 @@ function ConfirmCompleteDialog({ customerEmail, pendingItems, onConfirm, onCance
         <p className="text-sm text-gray-600 mb-2">
           This will mark the order as <strong className="text-brand-green">Fulfilled</strong> and cannot be undone.
         </p>
-        {customerEmail ? (
-          <p className="text-sm text-gray-600 mb-6">
-            The <strong>Order Shopped</strong> email with the final PDF will be sent to{' '}
-            <span className="font-semibold text-brand-navy">{customerEmail}</span>.
-          </p>
-        ) : (
-          <p className="text-sm text-gray-600 mb-6">
-            No customer email is on file — the Order Shopped email will be skipped.
-          </p>
-        )}
+        <p className="text-sm text-gray-600 mb-6">
+          <strong>No email goes out yet.</strong> Grafton Towboat Services sends the final
+          Order Shopped email from their dashboard once everything (CODs, crew changes,
+          pickups) is wrapped up. The barcode sheet for the register opens next.
+        </p>
         <div className="flex gap-3">
           <button
             onClick={onCancel}
@@ -129,7 +124,7 @@ function ConfirmCompleteDialog({ customerEmail, pendingItems, onConfirm, onCance
           >
             {completing
               ? <><Loader2 className="w-4 h-4 animate-spin" /> Completing…</>
-              : <><CheckCircle2 className="w-4 h-4" /> {hasPending ? 'Complete Anyway' : 'Confirm & Send'}</>
+              : <><CheckCircle2 className="w-4 h-4" /> {hasPending ? 'Complete Anyway' : 'Complete Order'}</>
             }
           </button>
         </div>
@@ -146,6 +141,8 @@ export function ShoppingModeModal({ order, onClose, onComplete }: ShoppingModeMo
     Object.fromEntries(order.items.map(i => [i.id, defaultItemUiState()]))
   );
   const [completing, setCompleting] = useState(false);
+  // After completion: show the barcode sheet in-app for the register run
+  const [showRegisterSheet, setShowRegisterSheet] = useState(false);
   const [completeError, setCompleteError] = useState('');
   const [showConfirm, setShowConfirm] = useState(false);
   const [loadingFresh, setLoadingFresh] = useState(true);
@@ -409,7 +406,11 @@ export function ShoppingModeModal({ order, onClose, onComplete }: ShoppingModeMo
         const err = await res.json();
         throw new Error(err.error || 'Failed to complete order');
       }
-      onComplete();
+      // Shopping's done → next stop is the REGISTER. Show the barcode sheet
+      // in-app (no pop-up windows) so the shopped order can be rung up
+      // straight away; the modal finishes closing when the sheet is closed.
+      setShowConfirm(false);
+      setShowRegisterSheet(true);
     } catch (e) {
       setCompleteError(e instanceof Error ? e.message : 'Something went wrong');
       setShowConfirm(false);
@@ -1025,11 +1026,19 @@ export function ShoppingModeModal({ order, onClose, onComplete }: ShoppingModeMo
       {/* ── CONFIRMATION DIALOG ── */}
       {showConfirm && (
         <ConfirmCompleteDialog
-          customerEmail={order.customer_email}
           pendingItems={pendingItems}
           onConfirm={completeOrder}
           onCancel={() => setShowConfirm(false)}
           completing={completing}
+        />
+      )}
+
+      {/* ── REGISTER SHEET — barcodes for ring-up, shown after completion ── */}
+      {showRegisterSheet && (
+        <PickSheetOverlay
+          orderId={order.id}
+          orderNumber={order.order_number}
+          onClose={() => { setShowRegisterSheet(false); onComplete(); }}
         />
       )}
     </>

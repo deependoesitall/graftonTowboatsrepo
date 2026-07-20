@@ -2,8 +2,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/admin-auth-server';
-import { sendOrderShoppedEmail } from '@/lib/email';
-import { Order } from '@/types';
 
 export async function GET(
   req: NextRequest,
@@ -93,13 +91,13 @@ export async function PATCH(
       po_number: existing.po_number,
     });
 
-    // When order is marked fulfilled, recalculate the subtotal from
-    // final shopping state (exclude out_of_stock items, use actual_total
-    // for weight items), then send the Order Shopped email.
-    // Must be fully awaited before returning — Vercel terminates the function
-    // as soon as the response is sent, so fire-and-forget won't work here.
+    // When order is marked fulfilled, recalculate the subtotal from final
+    // shopping state (exclude out_of_stock items, use actual_total for weight
+    // items). The final "Order Shopped" email is NOT sent here — fulfillment
+    // by Sinclair's often isn't the end of the job (CODs, crew changes,
+    // pickups). A GTS owner fires the final email manually from the dashboard
+    // (POST /api/orders/[id]/send-shopped-email) after everything checks out.
     if (body.status === 'fulfilled') {
-      // Recalculate subtotal from final item state
       const { data: finalItems } = await supabase
         .from('order_items')
         .select('shopping_status, line_total, actual_total')
@@ -115,29 +113,6 @@ export async function PATCH(
           .from('orders')
           .update({ subtotal: newSubtotal })
           .eq('id', id);
-      }
-
-      const { data: fullOrder } = await supabase
-        .from('orders')
-        .select('*, items:order_items(*)')
-        .eq('id', id)
-        .single();
-
-      if (fullOrder) {
-        try {
-          const { data: s } = await supabase
-            .from('admin_settings')
-            .select('business_email, order_email_cc')
-            .single();
-
-          await sendOrderShoppedEmail(fullOrder as Order, {
-            businessEmail: s?.business_email || process.env.BUSINESS_EMAIL,
-            ccEmailRaw: s?.order_email_cc,
-          });
-        } catch (err) {
-          console.error('Order Shopped email error:', err);
-          // Don't fail the status update if email fails
-        }
       }
     }
   }

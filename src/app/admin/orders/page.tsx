@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
 import { Search, Download, Eye, Loader2, RefreshCw, Package, ArrowRight, Trash2, Users, Wrench, Printer } from 'lucide-react';
-import { openPickSheet } from '@/lib/pick-sheet';
+import { PickSheetOverlay } from '@/components/admin/PickSheetOverlay';
 import { formatCurrency, formatDate, ORDER_STATUSES } from '@/lib/utils';
 import { Order, OrderStatus } from '@/types';
 import { OrderDetailModal } from '@/components/admin/OrderDetailModal';
@@ -117,8 +117,10 @@ function OrdersContent() {
     }
   }
 
-  // Barcode pick sheet straight from the list. Printing a NEW order prompts
-  // to lock it In Progress first (declinable — Dave prints future orders early).
+  // Barcode pick sheet straight from the list, shown IN-APP (no pop-ups).
+  // Opening a NEW order prompts to lock it In Progress first (declinable —
+  // Dave prints future orders early).
+  const [pickSheetOrder, setPickSheetOrder] = useState<{ id: string; number: string } | null>(null);
   async function printPickSheet(order: Order) {
     if (canEditOrders && order.status === 'new') {
       const lock = confirm(
@@ -129,11 +131,7 @@ function OrdersContent() {
       );
       if (lock) await updateStatus(order.id, 'in_progress');
     }
-    try {
-      await openPickSheet(order.id);
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'Could not open the pick sheet');
-    }
+    setPickSheetOrder({ id: order.id, number: order.order_number });
   }
 
   async function updateStatus(orderId: string, status: OrderStatus) {
@@ -471,6 +469,15 @@ function OrdersContent() {
             <span className="px-4 py-2 text-sm text-gray-500">Page {page} of {totalPages}</span>
             <button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)} className="btn-outline text-sm px-4 py-2 disabled:opacity-40">Next →</button>
           </div>
+        )}
+
+        {/* In-app barcode pick sheet */}
+        {pickSheetOrder && (
+          <PickSheetOverlay
+            orderId={pickSheetOrder.id}
+            orderNumber={pickSheetOrder.number}
+            onClose={() => setPickSheetOrder(null)}
+          />
         )}
 
         {/* Order detail modal */}

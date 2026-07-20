@@ -11,7 +11,7 @@ import { Order, OrderItem, OrderStatus, Product } from '@/types';
 import { formatCurrency, formatDate, ORDER_STATUSES } from '@/lib/utils';
 import { ShoppingModeModal } from '@/components/admin/ShoppingModeModal';
 import { adminFetch } from '@/lib/admin-auth';
-import { openPickSheet } from '@/lib/pick-sheet';
+import { PickSheetOverlay } from '@/components/admin/PickSheetOverlay';
 
 interface OrderDetailModalProps {
   order: Order;
@@ -32,12 +32,13 @@ export function OrderDetailModal({
 }: OrderDetailModalProps) {
   const [shoppingMode, setShoppingMode] = useState(false);
   const [markingFulfilled, setMarkingFulfilled] = useState(false);
-  const [printingSheet, setPrintingSheet] = useState(false);
+  const [showPickSheet, setShowPickSheet] = useState(false);
 
-  // Barcode pick sheet — Freshop-style printout with scannable UPC-A codes.
-  // Printing a NEW order prompts to lock it (Dave: "if I print it, it needs to
-  // be in progress" — but he also prints future orders early, so it's a choice).
-  async function handlePrintPickSheet() {
+  // Barcode pick sheet — Freshop-style printout with scannable UPC-A codes,
+  // shown IN-APP (no pop-up windows). Opening it on a NEW order prompts to
+  // lock it (Dave: "if I print it, it needs to be in progress" — but he also
+  // prints future orders early, so it's a choice).
+  function handlePrintPickSheet() {
     if (canEdit && order.status === 'new') {
       const lock = confirm(
         'Mark this order as IN PROGRESS before printing?\n\n' +
@@ -47,14 +48,7 @@ export function OrderDetailModal({
       );
       if (lock) onStatusChange('in_progress');
     }
-    setPrintingSheet(true);
-    try {
-      await openPickSheet(order.id);
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'Could not open the pick sheet');
-    } finally {
-      setPrintingSheet(false);
-    }
+    setShowPickSheet(true);
   }
 
   // ── Local item state (so edits reflect immediately without closing modal) ──
@@ -231,10 +225,10 @@ export function OrderDetailModal({
               <h2 className="text-white font-display text-xl font-bold">{order.order_number}</h2>
             </div>
             <div className="flex items-center gap-3">
-              <button onClick={handlePrintPickSheet} disabled={printingSheet}
-                className="text-brand-gold hover:text-brand-amber transition-colors disabled:opacity-50"
+              <button onClick={handlePrintPickSheet}
+                className="text-brand-gold hover:text-brand-amber transition-colors"
                 title="Print Pick Sheet (barcodes)">
-                {printingSheet ? <Loader2 className="w-5 h-5 animate-spin" /> : <Printer className="w-5 h-5" />}
+                <Printer className="w-5 h-5" />
               </button>
               <button onClick={onDownloadPdf} className="text-brand-gold hover:text-brand-amber transition-colors" title="View PDF">
                 <Eye className="w-5 h-5" />
@@ -464,9 +458,9 @@ export function OrderDetailModal({
                       <option key={s.value} value={s.value}>{s.label}</option>
                     ))}
                   </select>
-                  {order.status !== 'fulfilled' && (order.vessel_email || order.customer_email) && (
+                  {order.status !== 'fulfilled' && (
                     <span className="text-xs text-gray-400">
-                      Setting to <strong>Fulfilled</strong> sends the Order Shopped email to {order.vessel_email || order.customer_email}
+                      Fulfilled = shopped. The final customer email is sent separately from the GTS dashboard.
                     </span>
                   )}
                 </div>
@@ -480,7 +474,7 @@ export function OrderDetailModal({
                   <button
                     disabled={markingFulfilled}
                     onClick={async () => {
-                      if (!confirm('Mark this order as fulfilled? A confirmation email will be sent to the customer.')) return;
+                      if (!confirm('Mark this order as fulfilled? (No email goes out — GTS sends the final email from the dashboard.)')) return;
                       setMarkingFulfilled(true);
                       await onStatusChange('fulfilled');
                       setMarkingFulfilled(false);
@@ -872,6 +866,14 @@ export function OrderDetailModal({
           order={order}
           onClose={() => { setShoppingMode(false); onRefresh(); }}
           onComplete={() => { setShoppingMode(false); onRefresh(); onClose(); }}
+        />
+      )}
+
+      {showPickSheet && (
+        <PickSheetOverlay
+          orderId={order.id}
+          orderNumber={order.order_number}
+          onClose={() => setShowPickSheet(false)}
         />
       )}
     </>

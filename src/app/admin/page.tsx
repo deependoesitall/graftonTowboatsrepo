@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import {
   Package, Clock, CheckCircle2, TrendingUp,
   ShoppingBag, Lock, Eye, EyeOff, Loader2, ShoppingCart,
+  Mail, Send, X, FileText, AlertTriangle,
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import { AdminRole, AdminPermission, setAdminSession, setAdminUiState, fetchAdminSession, adminFetch } from '@/lib/admin-auth';
@@ -210,6 +211,13 @@ export default function AdminDashboard() {
             </div>
           )}
 
+          {/* ── FINAL EMAIL QUEUE — shopped orders awaiting the customer email.
+              Owner-only: Sinclair's finishing the shopping isn't the end of the
+              job (CODs, crew changes, pickups). GTS fires the final email when
+              everything's truly done — with a preview step to catch errors
+              (e.g. a substitution Sinclair's forgot to record). ── */}
+          {adminRole === 'owner' && <FinalEmailQueue />}
+
           {/* ── RECENT ORDERS ── */}
           <div className="card-base overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
@@ -314,5 +322,189 @@ function StatusBadge({ status }: { status: string }) {
     <span className={`status-badge ${map[status] || 'bg-gray-100 text-gray-600'}`}>
       {labels[status] || status}
     </span>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FINAL EMAIL QUEUE — the one manual step GTS keeps on purpose.
+// Sinclair's marking an order Fulfilled means the GROCERIES are done; CODs,
+// crew changes, and pickups may still be open. When everything's truly
+// wrapped, a GTS owner sends the final "Order Shopped" email from here —
+// one click, with a confirm dialog and an email/receipt preview that catches
+// errors (unrecorded substitutions, missing weights) before the customer sees them.
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface QueueOrder {
+  id: string;
+  order_number: string;
+  company_name: string;
+  vessel_name: string | null;
+  subtotal: number;
+  status: string;
+  updated_at: string;
+  vessel_email: string | null;
+  customer_email: string | null;
+  shopped_email_sent_at: string | null;
+}
+
+function FinalEmailQueue() {
+  const [orders, setOrders] = useState<QueueOrder[] | null>(null);
+  const [confirmOrder, setConfirmOrder] = useState<QueueOrder | null>(null);
+
+  async function load() {
+    const res = await adminFetch('/api/orders?status=fulfilled&per_page=50');
+    if (!res.ok) { setOrders([]); return; }
+    const data = await res.json();
+    setOrders(((data.orders || []) as QueueOrder[]).filter(o => !o.shopped_email_sent_at));
+  }
+  useEffect(() => { load(); }, []);
+
+  if (!orders || orders.length === 0) return null; // quiet when there's nothing to send
+
+  return (
+    <div className="card-base overflow-hidden mb-6 border-2 border-brand-gold/40">
+      <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-brand-sand/30">
+        <h2 className="font-display text-lg font-bold text-brand-navy flex items-center gap-2">
+          <Mail className="w-5 h-5 text-brand-gold" />
+          Shopped — awaiting final email
+          <span className="text-xs font-bold bg-brand-gold text-brand-navy rounded-full px-2 py-0.5">{orders.length}</span>
+        </h2>
+        <p className="text-xs text-gray-400 hidden sm:block">Send once CODs, crew changes &amp; pickups are wrapped up</p>
+      </div>
+      <div className="divide-y divide-gray-100">
+        {orders.map(o => (
+          <div key={o.id} className="px-6 py-3 flex flex-wrap items-center gap-3">
+            <div className="flex-1 min-w-[180px]">
+              <p className="font-mono font-bold text-brand-navy text-sm">{o.order_number}</p>
+              <p className="text-xs text-gray-500">
+                {o.vessel_name || o.company_name}{o.vessel_name ? ` · ${o.company_name}` : ''} · {formatCurrency(o.subtotal)}
+              </p>
+            </div>
+            <p className="text-xs text-gray-400 hidden md:block">
+              to {o.vessel_email || o.customer_email || <span className="text-red-500 font-semibold">no email on order</span>}
+            </p>
+            <button
+              onClick={() => setConfirmOrder(o)}
+              className="flex items-center gap-1.5 bg-brand-navy text-white text-xs font-bold uppercase tracking-wide px-4 py-2 rounded-lg hover:bg-brand-steel transition-colors">
+              <Send className="w-3.5 h-3.5" /> Send Final Email
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {confirmOrder && (
+        <SendFinalEmailDialog
+          order={confirmOrder}
+          onClose={() => setConfirmOrder(null)}
+          onSent={() => { setConfirmOrder(null); load(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function SendFinalEmailDialog({ order, onClose, onSent }: {
+  order: QueueOrder; onClose: () => void; onSent: () => void;
+}) {
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState('');
+  const [preview, setPreview] = useState<null | 'email' | 'receipt'>(null);
+  const sendTo = order.vessel_email || order.customer_email;
+
+  async function send() {
+    setSending(true); setError('');
+    try {
+      const res = await adminFetch(`/api/orders/${order.id}/send-shopped-email`, { method: 'POST' });
+      const r = await res.json();
+      if (!res.ok) throw new Error(r?.error || 'Email failed to send');
+      onSent();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Email failed to send');
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[95] bg-black/60 flex items-center justify-center p-4">
+      <div className={`bg-white rounded-2xl shadow-2xl w-full flex flex-col max-h-[92vh] transition-all ${preview ? 'max-w-4xl' : 'max-w-md'}`}>
+        {/* Header */}
+        <div className="px-5 py-4 border-b border-gray-100 flex items-start justify-between gap-3 shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
+              <AlertTriangle className="w-5 h-5 text-amber-600" />
+            </div>
+            <div>
+              <h3 className="font-display text-lg font-bold text-brand-navy">Send the final order email?</h3>
+              <p className="text-xs text-gray-500">
+                {order.order_number} · {order.vessel_name || order.company_name} ·{' '}
+                {sendTo ? <>to <strong>{sendTo}</strong></> : <span className="text-red-500 font-semibold">no email on this order</span>}
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+        </div>
+
+        {/* Body */}
+        <div className="p-5 overflow-y-auto flex-1">
+          {!preview && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-900 leading-relaxed mb-4">
+              <strong>Before you send, double-check the order:</strong> substitutions recorded? Actual weights entered?
+              CODs, crew changes and pickups wrapped up? If Sinclair&apos;s shopped from a printed list, changes they
+              made on paper might not be in the system yet — preview below to catch that first.
+            </div>
+          )}
+
+          {/* Preview toggles */}
+          <div className="flex gap-2 mb-3">
+            <button onClick={() => setPreview(p => p === 'email' ? null : 'email')}
+              className={`flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-lg border transition-colors ${
+                preview === 'email' ? 'bg-brand-navy text-white border-brand-navy' : 'border-gray-200 text-gray-600 hover:border-gray-300'
+              }`}>
+              <Eye className="w-3.5 h-3.5" /> Preview Email
+            </button>
+            <button onClick={() => setPreview(p => p === 'receipt' ? null : 'receipt')}
+              className={`flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-lg border transition-colors ${
+                preview === 'receipt' ? 'bg-brand-navy text-white border-brand-navy' : 'border-gray-200 text-gray-600 hover:border-gray-300'
+              }`}>
+              <FileText className="w-3.5 h-3.5" /> Preview Receipt
+            </button>
+          </div>
+
+          {preview && (
+            <div className="border border-gray-200 rounded-xl overflow-hidden bg-gray-50" style={{ height: '52vh' }}>
+              <iframe
+                src={preview === 'email' ? `/api/orders/${order.id}/email-preview` : `/api/orders/${order.id}/pdf`}
+                title={preview === 'email' ? 'Email preview' : 'Receipt preview'}
+                className="w-full h-full bg-white"
+              />
+            </div>
+          )}
+          {preview && (
+            <p className="text-[11px] text-gray-400 mt-2">
+              Something off? Close this, fix the order (substitutions, weights, quantities), then come back and send.
+            </p>
+          )}
+
+          {error && (
+            <p className="mt-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 py-4 border-t border-gray-100 flex gap-3 shrink-0">
+          <button onClick={onClose} disabled={sending}
+            className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50">
+            Cancel
+          </button>
+          <button onClick={send} disabled={sending || !sendTo}
+            className="flex-1 py-2.5 rounded-xl bg-brand-green text-white text-sm font-bold flex items-center justify-center gap-1.5 hover:bg-brand-gmed transition-colors disabled:opacity-50">
+            {sending
+              ? <><Loader2 className="w-4 h-4 animate-spin" /> Sending…</>
+              : <><Send className="w-4 h-4" /> Send Final Email</>}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

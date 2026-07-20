@@ -33,35 +33,37 @@ function itemCard(i: OrderItem): string {
   // Sized for first-scan reliability: at print resolution this yields bars
   // ~0.4mm wide × ~12mm tall — comfortably above UPC-A scanner minimums, so
   // even a toner-tired office printer produces gun-readable codes.
-  const svg = weighable ? null : upcASvg(i.upc, { moduleWidth: 2, height: 56 });
+  const svg = weighable ? null : upcASvg(i.upc, { moduleWidth: 2, height: 52 });
   const scanTimes = !weighable && svg && Number.isInteger(i.quantity) && i.quantity > 0
-    ? `Scan ${i.quantity} time${i.quantity === 1 ? '' : 's'}` : '';
+    ? `Scan<br/><b>&times;${i.quantity}</b>` : '';
   const cod = i.paid_by === 'cod';
   const oos = i.shopping_status === 'out_of_stock';
 
-  const barcodeBlock = weighable
+  // Out-of-stock lines NEVER print a barcode — after shopping, this sheet
+  // goes to the register, and a dimmed-but-scannable code invites mis-rings.
+  const barcodeBlock = oos
+    ? `<div class="wgt"><div class="oos-note">OUT OF STOCK — not billed · do not scan</div></div>`
+    : weighable
     ? `<div class="wgt">
-         <div class="wgt-note">&#9878; BY WEIGHT — scan the <b>package label</b><br/>(catalog code won't ring up)</div>
-         <div class="wgt-line">Weight: ______________ lb</div>
+         <div class="wgt-note">&#9878; BY WEIGHT — scan the <b>package label</b></div>
+         <div class="wgt-line">${i.actual_weight ? `Wt: <b>${esc(String(i.actual_weight))} lb</b> (entered)` : 'Wt: __________ lb'}</div>
        </div>`
     : svg
-      ? `<div class="bc">${svg}<div class="scan">${scanTimes}</div></div>`
-      : `<div class="wgt"><div class="wgt-note">No barcode on file — key in at register</div>
+      ? `<span class="bc">${svg}</span><span class="scan">${scanTimes}</span>`
+      : `<div class="wgt"><div class="wgt-note">No barcode — key in at register</div>
          ${i.upc ? `<div class="upc-raw">UPC: ${esc(i.upc)}</div>` : ''}</div>`;
 
+  // Compact card: qty + name on one line, meta on the next, then a single
+  // row holding barcode · scan count · picked box. No dead rows — Deepen
+  // (July 19): "as many scannable barcodes on a single piece of paper as
+  // possible, minimize the dead spaces."
   return `<div class="item${cod ? ' cod' : ''}${oos ? ' oos' : ''}">
-    <div class="item-main">
-      <div class="qty">&times;${esc(qtyLabel)}</div>
-      <div class="meta">
-        <div class="desc">${esc(i.description)}</div>
-        <div class="sub">${esc(i.pkg_size || '')}${i.pkg_size ? ' · ' : ''}${formatCurrency(i.unit_price)}${i.uom === 'LB' ? '/lb' : ''}${i.location ? ` · <b>${esc(i.location)}</b>` : ''}</div>
-        ${cod ? `<div class="cod-tag">$ COD — ${esc(i.cod_name || 'crew member')} · ring separately</div>` : ''}
-        ${i.paid_by === 'deck' ? `<div class="deck-tag">DECK — company-billed, separate invoice line</div>` : ''}
-        ${i.is_substitution ? `<div class="sub-tag">SUB</div>` : ''}
-      </div>
-    </div>
-    ${barcodeBlock}
-    <div class="check">Picked &#9744;</div>
+    <div class="line1"><span class="qty">${esc(qtyLabel)}</span><span class="desc">${esc(i.description)}</span></div>
+    <div class="sub">${esc(i.pkg_size || '')}${i.pkg_size ? ' · ' : ''}${formatCurrency(i.unit_price)}${i.uom === 'LB' ? '/lb' : ''}${i.location ? ` · <b>${esc(i.location)}</b>` : ''}</div>
+    ${cod ? `<div class="cod-tag">$ COD — ${esc(i.cod_name || 'crew member')} · ring separately</div>` : ''}
+    ${i.paid_by === 'deck' ? `<div class="deck-tag">DECK — separate invoice line</div>` : ''}
+    ${i.is_substitution ? `<div class="sub-tag">SUB</div>` : ''}
+    <div class="scanrow">${barcodeBlock}<span class="check">&#9744;</span></div>
   </div>`;
 }
 
@@ -105,59 +107,65 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
 <title>Pick Sheet — ${esc(order.order_number)}</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: Arial, Helvetica, sans-serif; color: #111; font-size: 11px; padding: 18px; }
+  body { font-family: Arial, Helvetica, sans-serif; color: #111; font-size: 10px; padding: 14px; }
+  @page { margin: 8mm; }
   .toolbar { position: sticky; top: 0; background: #0b2545; color: #fff; padding: 10px 14px; border-radius: 8px;
              display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
   .toolbar button { background: #f2b705; border: 0; padding: 8px 22px; font-weight: bold; border-radius: 6px;
                     font-size: 13px; cursor: pointer; }
   @media print { .toolbar { display: none; } body { padding: 0; } }
 
-  header.sheet { display: flex; justify-content: space-between; border-bottom: 3px solid #0b2545; padding-bottom: 8px; margin-bottom: 10px; }
-  .brand b { font-size: 16px; color: #0b2545; letter-spacing: .5px; }
-  .brand span { display: block; font-size: 10px; color: #555; }
-  .ordmeta { text-align: right; font-size: 10px; line-height: 1.5; }
-  .ordmeta .num { font-size: 15px; font-weight: bold; color: #0b2545; }
+  /* Dense layout — max scannable barcodes per page, minimal dead space */
+  header.sheet { display: flex; justify-content: space-between; align-items: baseline;
+                 border-bottom: 2px solid #0b2545; padding-bottom: 3px; margin-bottom: 5px; }
+  .brand b { font-size: 13px; color: #0b2545; letter-spacing: .5px; }
+  .brand span { font-size: 9px; color: #555; margin-left: 6px; }
+  .ordmeta { text-align: right; font-size: 9px; line-height: 1.3; }
+  .ordmeta .num { font-size: 12px; font-weight: bold; color: #0b2545; margin-right: 6px; }
 
-  .facts { display: flex; flex-wrap: wrap; gap: 6px 18px; background: #f4f6f8; border: 1px solid #dde3ea;
-           border-radius: 6px; padding: 7px 10px; margin-bottom: 10px; font-size: 10.5px; }
+  .facts { display: flex; flex-wrap: wrap; gap: 2px 14px; background: #f4f6f8; border: 1px solid #dde3ea;
+           border-radius: 4px; padding: 3px 8px; margin-bottom: 5px; font-size: 9.5px; }
   .facts b { color: #0b2545; }
-  .warn { background: #fdf3d7; border: 1px solid #e8cd7a; border-radius: 6px; padding: 6px 10px; margin-bottom: 10px; font-size: 10.5px; }
-  .notes { background: #fff8e6; border: 1px solid #e8cd7a; border-radius: 6px; padding: 6px 10px; margin-bottom: 10px; }
+  .warn { background: #fdf3d7; border: 1px solid #e8cd7a; border-radius: 4px; padding: 3px 8px; margin-bottom: 5px; font-size: 9.5px; }
+  .notes { background: #fff8e6; border: 1px solid #e8cd7a; border-radius: 4px; padding: 3px 8px; margin-bottom: 5px; font-size: 9.5px; }
 
   .dept.brk { page-break-before: always; }
-  .dept-head { display: flex; align-items: baseline; gap: 10px; background: #0b2545; color: #fff;
-               padding: 6px 10px; border-radius: 6px 6px 0 0; margin-top: 8px; }
-  .dept-head h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; }
-  .dept-note { font-size: 9.5px; color: #cfd8e3; }
+  .dept-head { display: flex; align-items: baseline; gap: 8px; background: #0b2545; color: #fff;
+               padding: 3px 8px; border-radius: 4px 4px 0 0; margin-top: 4px; }
+  .dept-head h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+  .dept-note { font-size: 8.5px; color: #cfd8e3; }
 
-  .loc-head { background: #e8eef4; border-left: 4px solid #0b2545; font-weight: bold; font-size: 11px;
-              padding: 4px 8px; margin-top: 6px; }
-  .loc-count { font-weight: normal; color: #667; font-size: 9.5px; margin-left: 6px; }
+  .loc-head { background: #e8eef4; border-left: 3px solid #0b2545; font-weight: bold; font-size: 9.5px;
+              padding: 2px 6px; margin-top: 3px; }
+  .loc-count { font-weight: normal; color: #667; font-size: 8.5px; margin-left: 5px; }
 
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; padding: 5px 0; }
-  .item { border: 1px solid #c9d2dc; border-radius: 5px; padding: 5px 7px; display: flex; flex-direction: column;
-          gap: 3px; break-inside: avoid; page-break-inside: avoid; }
-  .item.cod { border: 2px solid #7c3aed; background: #faf6ff; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; padding: 3px 0; }
+  .item { border: 1px solid #c9d2dc; border-radius: 4px; padding: 3px 5px;
+          break-inside: avoid; page-break-inside: avoid; }
+  .item.cod { border: 1.5px solid #7c3aed; background: #faf6ff; }
   .item.oos { opacity: .45; }
-  .item-main { display: flex; gap: 7px; align-items: flex-start; }
-  .qty { font-size: 17px; font-weight: 800; color: #0b2545; min-width: 34px; }
-  .desc { font-weight: bold; font-size: 11px; line-height: 1.25; }
-  .sub { color: #556; font-size: 9.5px; margin-top: 1px; }
-  .cod-tag { color: #7c3aed; font-weight: bold; font-size: 9px; text-transform: uppercase; margin-top: 2px; }
-  .deck-tag { color: #0f766e; font-weight: bold; font-size: 9px; text-transform: uppercase; margin-top: 2px; }
-  .sub-tag { color: #c2410c; font-weight: bold; font-size: 9px; }
+  .line1 { display: flex; gap: 5px; align-items: baseline; }
+  .qty { font-size: 13px; font-weight: 800; color: #0b2545; white-space: nowrap; }
+  .desc { font-weight: bold; font-size: 9.5px; line-height: 1.15; }
+  .sub { color: #556; font-size: 8px; }
+  .cod-tag { color: #7c3aed; font-weight: bold; font-size: 8px; text-transform: uppercase; }
+  .deck-tag { color: #0f766e; font-weight: bold; font-size: 8px; text-transform: uppercase; }
+  .sub-tag { color: #c2410c; font-weight: bold; font-size: 8px; }
 
-  .bc { display: flex; align-items: center; gap: 8px; }
-  .bc svg { height: 46px; width: auto; }
-  .scan { font-size: 9.5px; font-weight: bold; color: #333; }
-  .wgt-note { font-size: 9.5px; font-weight: bold; color: #b45309; }
-  .wgt-line { font-size: 10px; margin-top: 3px; color: #333; }
-  .upc-raw { font-family: monospace; font-size: 9.5px; color: #555; }
-  .check { align-self: flex-end; font-size: 9px; color: #99a; }
+  .scanrow { display: flex; align-items: center; gap: 5px; margin-top: 2px; }
+  .bc svg { height: 42px; width: auto; display: block; }
+  .scan { font-size: 8.5px; line-height: 1.1; color: #333; text-align: center; }
+  .scan b { font-size: 12px; }
+  .wgt { flex: 1; }
+  .wgt-note { font-size: 8.5px; font-weight: bold; color: #b45309; }
+  .wgt-line { font-size: 9px; margin-top: 2px; color: #333; }
+  .upc-raw { font-family: monospace; font-size: 8.5px; color: #555; }
+  .oos-note { font-size: 8.5px; font-weight: bold; color: #999; text-transform: uppercase; }
+  .check { margin-left: auto; font-size: 13px; color: #667; }
 
   .svc { border: 1px dashed #888; border-radius: 6px; padding: 6px 10px; margin-top: 8px; font-size: 10.5px; }
   .svc b { display: block; margin-bottom: 3px; }
-  footer { margin-top: 12px; border-top: 1px solid #ccc; padding-top: 5px; font-size: 9px; color: #777;
+  footer { margin-top: 6px; border-top: 1px solid #ccc; padding-top: 3px; font-size: 8px; color: #777;
            display: flex; justify-content: space-between; }
 </style></head>
 <body>
@@ -215,9 +223,10 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
 
 /**
  * Fetch the freshest copy of the order (location/image backfill happens in the
- * GET) + the manager's zone order, build the sheet, open it in a new tab.
+ * GET) + the manager's zone order, and return the finished sheet HTML.
+ * Rendered IN-APP via PickSheetOverlay (iframe) — no pop-up windows.
  */
-export async function openPickSheet(orderId: string): Promise<void> {
+export async function buildPickSheetForOrder(orderId: string): Promise<string> {
   let zoneOrder = DEFAULT_ZONE_ORDER;
   try {
     const cfg = await fetch('/api/order-config').then(r => (r.ok ? r.json() : null));
@@ -227,9 +236,5 @@ export async function openPickSheet(orderId: string): Promise<void> {
   const res = await fetch(`/api/orders/${orderId}`);
   if (!res.ok) throw new Error('Could not load order for pick sheet');
   const order = (await res.json()) as Order;
-
-  const w = window.open('', '_blank');
-  if (!w) throw new Error('Pop-up blocked — allow pop-ups to print the pick sheet');
-  w.document.write(pickSheetHtml(order, zoneOrder));
-  w.document.close();
+  return pickSheetHtml(order, zoneOrder);
 }

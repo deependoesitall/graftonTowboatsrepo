@@ -398,9 +398,28 @@ export async function sendOrderReceivedEmail(
 }
 
 // ─────────────────────────────────────────────────────────────
-// Order Shopped — sent when staff marks order as fulfilled
+// Order Shopped — the FINAL customer email. NOT automatic: fired manually by
+// a GTS owner from the admin dashboard once everything (groceries + CODs +
+// crew changes + pickups) is truly done. buildOrderShoppedEmailHtml is
+// exported separately so the dashboard can PREVIEW the exact email first.
 // Goes to: customer + business (CC)
 // ─────────────────────────────────────────────────────────────
+export function buildOrderShoppedEmailHtml(order: Order): string {
+  // Orders with no grocery items (crew change / services only) were never
+  // "shopped" — use neutral fulfillment language for those.
+  const hasGroceryItems = order.items.some(i => i.item_type !== 'service');
+  const intro = hasGroceryItems
+    ? `Great news, ${order.contact_name}! Your order has been shopped and is ready. Please find your final order summary attached.`
+    : `Good news, ${order.contact_name}! Your request has been fulfilled. Please find your final order summary attached.`;
+  return buildOrderEmailHtml(order, {
+    tagline:    'Order Fulfilled',
+    intro,
+    buttonText: 'Questions? Contact Us',
+    buttonUrl:  `mailto:GraftonTowboatServices@gmail.com`,
+    footerText: 'Grafton Towboat Services · Grafton, IL 62037 · (618) 556-0290 · GraftonTowboatServices@gmail.com',
+  });
+}
+
 export async function sendOrderShoppedEmail(
   order: Order,
   opts: {
@@ -408,27 +427,14 @@ export async function sendOrderShoppedEmail(
     ccEmailRaw?: string;
   } = {}
 ) {
-  const appUrl     = getAppUrl();
   const fromEmail  = process.env.EMAIL_FROM || 'onboarding@resend.dev';
   const toEmail    = opts.businessEmail || process.env.BUSINESS_EMAIL || 'GraftonTowboatServices@gmail.com';
   const ccList     = parseCcList(opts.ccEmailRaw ?? process.env.ORDER_EMAIL_CC ?? '');
   const pdfBuffer2 = await generateOrderPdfBuffer(order);
   const pdfAttachment2 = [{ filename: `order-${order.order_number}-fulfilled.pdf`, content: pdfBuffer2 }];
 
-  // Orders with no grocery items (crew change / services only) were never
-  // "shopped" — use neutral fulfillment language for those.
   const hasGroceryItems = order.items.some(i => i.item_type !== 'service');
-  const intro = hasGroceryItems
-    ? `Great news, ${order.contact_name}! Your order has been shopped and is ready. Please find your final order summary attached.`
-    : `Good news, ${order.contact_name}! Your request has been fulfilled. Please find your final order summary attached.`;
-
-  const shoppedHtml = buildOrderEmailHtml(order, {
-    tagline:    'Order Fulfilled',
-    intro,
-    buttonText: 'Questions? Contact Us',
-    buttonUrl:  `mailto:GraftonTowboatServices@gmail.com`,
-    footerText: 'Grafton Towboat Services · Grafton, IL 62037 · (618) 556-0290 · GraftonTowboatServices@gmail.com',
-  });
+  const shoppedHtml = buildOrderShoppedEmailHtml(order);
 
   // Vessel email first — the boat tracks the order, not the home office.
   const shoppedTo = order.vessel_email || order.customer_email;

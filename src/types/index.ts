@@ -206,6 +206,9 @@ export interface Order {
   discounts?: OrderDiscount[];
   subtotal: number;
   status: OrderStatus;
+  /** When the FINAL "Order Shopped" email was fired (manually, by a GTS owner). NULL = not yet sent. */
+  shopped_email_sent_at?: string | null;
+  shopped_email_sent_by?: string | null;
   created_at: string;
   updated_at: string;
 }
