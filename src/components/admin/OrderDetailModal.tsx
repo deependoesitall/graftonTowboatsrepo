@@ -59,6 +59,27 @@ export function OrderDetailModal({
   const [localItems, setLocalItems] = useState<OrderItem[]>(order.items);
   const [localSubtotal, setLocalSubtotal] = useState(order.subtotal);
 
+  // ── Register total — actual amount Sinclair's rang at the register ──
+  const [registerTotal, setRegisterTotal] = useState<string>(
+    order.register_total != null ? String(order.register_total) : ''
+  );
+  const [registerTotalSaving, setRegisterTotalSaving] = useState(false);
+
+  async function saveRegisterTotal(raw: string) {
+    const val = raw.trim() === '' ? null : parseFloat(raw.replace(/[^0-9.]/g, ''));
+    if (raw.trim() !== '' && (isNaN(val!) || val! < 0)) return;
+    setRegisterTotalSaving(true);
+    try {
+      await adminFetch(`/api/orders/${order.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ register_total: val }),
+      });
+    } finally {
+      setRegisterTotalSaving(false);
+    }
+  }
+
   // Edit quantity inline
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editQty, setEditQty] = useState('');
@@ -675,10 +696,45 @@ export function OrderDetailModal({
                       )}
                       <tr className="bg-brand-sand/30 border-t-2 border-brand-gold/30">
                         <td colSpan={canEdit ? 5 : 5} className="px-3 py-2 font-bold text-brand-navy text-sm">
-                          TOTAL ({groceryItems.reduce((s, i) => s + i.quantity, 0)} items)
+                          SYSTEM TOTAL ({groceryItems.reduce((s, i) => s + i.quantity, 0)} items)
                         </td>
                         <td className="px-3 py-2 text-right font-display text-base font-bold text-brand-navy">
                           {formatCurrency(subtotal)}
+                        </td>
+                        {canEdit && <td />}
+                      </tr>
+                      {/* Register total — entered after scanning the pick sheet at the register */}
+                      <tr className={`border-t border-gray-200 ${
+                        registerTotal && Math.abs(parseFloat(registerTotal) - subtotal) > 1
+                          ? 'bg-amber-50'
+                          : 'bg-white'
+                      }`}>
+                        <td colSpan={canEdit ? 5 : 5} className="px-3 py-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-bold text-brand-navy">REGISTER TOTAL</span>
+                            <span className="text-xs text-gray-400">(actual amount rung at Sinclair's register)</span>
+                            {registerTotal && Math.abs(parseFloat(registerTotal) - subtotal) > 1 && (
+                              <span className="text-xs font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+                                ⚠ {parseFloat(registerTotal) > subtotal ? '+' : ''}{formatCurrency(parseFloat(registerTotal) - subtotal)} vs system
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <span className="text-sm font-bold text-gray-500">$</span>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              placeholder="0.00"
+                              value={registerTotal}
+                              onChange={e => setRegisterTotal(e.target.value)}
+                              onBlur={e => saveRegisterTotal(e.target.value)}
+                              className="w-24 text-right font-display text-base font-bold text-brand-navy border border-gray-200 rounded px-2 py-0.5 focus:outline-none focus:ring-2 focus:ring-brand-gold/40"
+                            />
+                            {registerTotalSaving && <Loader2 className="w-3 h-3 animate-spin text-gray-400" />}
+                          </div>
                         </td>
                         {canEdit && <td />}
                       </tr>

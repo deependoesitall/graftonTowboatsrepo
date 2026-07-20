@@ -207,6 +207,7 @@ export interface Order {
   /** Per-coupon rundown — present when the API includes it. */
   discounts?: OrderDiscount[];
   subtotal: number;
+  register_total?: number | null;
   status: OrderStatus;
   /** When the FINAL "Order Shopped" email was fired (manually, by a GTS owner). NULL = not yet sent. */
   shopped_email_sent_at?: string | null;

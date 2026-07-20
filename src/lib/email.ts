@@ -273,10 +273,19 @@ export function buildOrderEmailHtml(
           <td colspan="5" style="padding:6px 10px;font-size:11px;font-weight:700;color:#0f766e;">Deck subtotal — company-billed, listed separately (not part of the grocery allowance)</td>
           <td style="padding:6px 10px;text-align:right;font-size:12px;font-weight:800;color:#0f766e;">${formatCurrency(deckSubtotal)}</td>
         </tr>` : ''}
+        ${order.register_total != null ? `
+        <tr style="background:#D9E84A;">
+          <td colspan="5" style="padding:10px;font-size:14px;font-weight:900;color:#1E3D1E;text-transform:uppercase;">TOTAL</td>
+          <td style="padding:10px;text-align:right;font-size:16px;font-weight:900;color:#1E3D1E;">${formatCurrency(order.register_total)}</td>
+        </tr>
+        <tr style="background:#f5f5f5;">
+          <td colspan="5" style="padding:6px 10px;font-size:11px;color:#666;">System estimate</td>
+          <td style="padding:6px 10px;text-align:right;font-size:11px;color:#666;">${formatCurrency(order.subtotal)}</td>
+        </tr>` : `
         <tr style="background:#D9E84A;">
           <td colspan="5" style="padding:10px;font-size:14px;font-weight:900;color:#1E3D1E;text-transform:uppercase;">ESTIMATED TOTAL</td>
           <td style="padding:10px;text-align:right;font-size:16px;font-weight:900;color:#1E3D1E;">${formatCurrency(order.subtotal)}</td>
-        </tr>
+        </tr>`}
         ${discountTotal > 0 ? `<tr style="background:#dcfce7;">
           <td colspan="5" style="padding:8px 10px;font-size:12px;font-weight:900;color:#15803d;text-transform:uppercase;">After estimated coupon savings (−${formatCurrency(discountTotal)})</td>
           <td style="padding:8px 10px;text-align:right;font-size:14px;font-weight:900;color:#15803d;">${formatCurrency(Math.max(0, Number(order.subtotal) - discountTotal))}</td>

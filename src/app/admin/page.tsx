@@ -347,6 +347,7 @@ interface QueueOrder {
   vessel_email: string | null;
   customer_email: string | null;
   shopped_email_sent_at: string | null;
+  register_total: number | null;
 }
 
 function FinalEmailQueue() {
@@ -394,13 +395,23 @@ function FinalEmailQueue() {
         <p className="text-xs text-gray-400 hidden sm:block">Send once CODs, crew changes &amp; pickups are wrapped up</p>
       </div>
       <div className="divide-y divide-gray-100">
-        {orders.map(o => (
+        {orders.map(o => {
+          const regDiff = o.register_total != null
+            ? Math.abs(o.register_total - o.subtotal) > 1
+            : false;
+          return (
           <div key={o.id} className="px-6 py-3 flex flex-wrap items-center gap-3">
             <div className="flex-1 min-w-[180px]">
               <p className="font-mono font-bold text-brand-navy text-sm">{o.order_number}</p>
               <p className="text-xs text-gray-500">
                 {o.vessel_name || o.company_name}{o.vessel_name ? ` · ${o.company_name}` : ''} · {formatCurrency(o.subtotal)}
               </p>
+              {regDiff && (
+                <p className="text-xs font-bold text-amber-700 mt-0.5 flex items-center gap-1">
+                  <AlertTriangle className="w-3 h-3" />
+                  Register total {formatCurrency(o.register_total!)} vs system {formatCurrency(o.subtotal)} — confirm which to bill
+                </p>
+              )}
             </div>
             <p className="text-xs text-gray-400 hidden md:block">
               to {o.vessel_email || o.customer_email || <span className="text-red-500 font-semibold">no email on order</span>}
@@ -417,7 +428,7 @@ function FinalEmailQueue() {
               <X className="w-4 h-4" />
             </button>
           </div>
-        ))}
+        );})}
       </div>
 
       {confirmOrder && (
