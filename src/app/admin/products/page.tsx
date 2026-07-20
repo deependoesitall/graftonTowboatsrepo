@@ -27,6 +27,9 @@ function CatalogSyncStatus({ isOwner }: { isOwner: boolean }) {
     last_error: string | null; checkpoint_updated_at: string | null;
   }>(null);
   const [kicking, setKicking] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const stale = !!status?.in_progress && !!status.checkpoint_updated_at
+    && Date.now() - new Date(status.checkpoint_updated_at).getTime() > 5 * 60_000;
 
   const load = useCallback(async () => {
     try {
@@ -34,16 +37,48 @@ function CatalogSyncStatus({ isOwner }: { isOwner: boolean }) {
       if (res.ok) setStatus(await res.json());
     } catch { /* non-critical */ }
   }, []);
-  useEffect(() => { load(); }, [load]);
+
+  // While a sync is running, poll every 4s so the page shows live progress
+  // as the self-driving chunk chain cascades in the background.
+  const startPolling = useCallback(() => {
+    if (pollRef.current) return;
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await adminFetch('/api/admin/sync-status');
+        if (!res.ok) return;
+        const s = await res.json();
+        setStatus(s);
+        if (!s.in_progress) {
+          clearInterval(pollRef.current!);
+          pollRef.current = null;
+        }
+      } catch { /* non-critical */ }
+    }, 4000);
+  }, []);
+
+  useEffect(() => {
+    load();
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [load]);
+
+  // If we land on the page mid-sync, start polling immediately
+  useEffect(() => {
+    if (status?.in_progress && !stale) startPolling();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status?.in_progress]);
 
   async function syncNow() {
     setKicking(true);
     try {
-      // One chunk of the same engine the nightly run uses (~30-40s)
-      await adminFetch('/api/cron/catalog-sync', { method: 'POST' });
+      // Kick off the first chunk — after() in the cron route self-drives the
+      // rest. We don't await the full sync; we poll status to show progress.
+      adminFetch('/api/cron/catalog-sync', { method: 'POST' });
+      // Give the first chunk a moment to register in the state table
+      await new Promise(r => setTimeout(r, 2000));
+      await load();
+      startPolling();
     } finally {
       setKicking(false);
-      load();
     }
   }
 
@@ -52,8 +87,6 @@ function CatalogSyncStatus({ isOwner }: { isOwner: boolean }) {
   // total during their midnight rebuild is visible, not silent). A session
   // whose checkpoint hasn't moved in a few minutes isn't "syncing" — it's
   // PAUSED and waiting for the next kickoff.
-  const stale = !!status?.in_progress && !!status.checkpoint_updated_at
-    && Date.now() - new Date(status.checkpoint_updated_at).getTime() > 5 * 60_000;
   const label = !status ? 'Checking sync…'
     : status.in_progress && stale
     ? `Sync paused at ${status.pages_done}/${status.pages_total} pages (${status.store_items_imported.toLocaleString()} items in) — resumes tonight, or Sync now`

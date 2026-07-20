@@ -3,7 +3,7 @@
 
 import { useState, useCallback } from 'react';
 import {
-  X, Download, FileText, Printer, Trash2, Loader2, ShoppingCart,
+  X, Download, Printer, Trash2, Loader2, ShoppingCart,
   Ship, MapPin, Users, Package, Wrench, CheckCircle2, Eye,
   Pencil, Plus, Search, Check,
 } from 'lucide-react';
@@ -19,7 +19,6 @@ interface OrderDetailModalProps {
   onClose: () => void;
   onStatusChange: (status: OrderStatus) => void;
   onDownloadPdf: () => void;
-  onDownloadCsv: () => void;
   onDelete?: () => void;
   onRefresh: () => void;
   canEdit?: boolean;
@@ -28,7 +27,7 @@ interface OrderDetailModalProps {
 }
 
 export function OrderDetailModal({
-  order, onClose, onStatusChange, onDownloadPdf, onDownloadCsv,
+  order, onClose, onStatusChange, onDownloadPdf,
   onDelete, onRefresh, canEdit = true, isOwner = false, deleting = false,
 }: OrderDetailModalProps) {
   const [shoppingMode, setShoppingMode] = useState(false);
@@ -240,9 +239,6 @@ export function OrderDetailModal({
               </button>
               <button onClick={onDownloadPdf} className="text-brand-gold hover:text-brand-amber transition-colors" title="Download PDF">
                 <Download className="w-5 h-5" />
-              </button>
-              <button onClick={onDownloadCsv} className="text-brand-gold hover:text-brand-amber transition-colors" title="Download CSV">
-                <FileText className="w-5 h-5" />
               </button>
               {isOwner && onDelete && (
                 <button onClick={onDelete} disabled={deleting}

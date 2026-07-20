@@ -498,7 +498,6 @@ function OrdersContent() {
             onClose={() => setSelectedOrder(null)}
             onStatusChange={(status) => updateStatus(selectedOrder.id, status)}
             onDownloadPdf={() => downloadOrderPdf(selectedOrder.id, selectedOrder.order_number)}
-            onDownloadCsv={() => downloadOrderCsv(selectedOrder)}
             onRefresh={fetchOrders}
             canEdit={canEditOrders}
             isOwner={isOwner}
