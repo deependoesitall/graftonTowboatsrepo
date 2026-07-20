@@ -15,6 +15,7 @@
 // A valid admin session also works, so it can be triggered by hand for testing.
 
 import { NextRequest, NextResponse } from 'next/server';
+import { after } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { getAdminSession } from '@/lib/admin-auth-server';
 import { applyFormLayout } from '@/lib/form-layout-apply';
@@ -118,7 +119,7 @@ async function handle(req: NextRequest) {
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase
       .from('products')
-      .select('id, upc, details, image_url, billed_by_weight, location, location_seq, price, quantity_step, quantity_label, quantity_size_ratio, freshop_id')
+      .select('id, upc, details, image_url, billed_by_weight, location, location_seq, location_manual, price, quantity_step, quantity_label, quantity_size_ratio, freshop_id')
       .range(from, from + 999);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     ours.push(...((data || []) as SyncableProduct[]));
@@ -236,6 +237,27 @@ async function handle(req: NextRequest) {
   }
 
   await saveState(supabase, state);
+
+  // ── SELF-DRIVING: when there's more work and Freshop isn't pushing back,
+  // schedule the next chunk immediately (fires after this response returns).
+  // One kickoff — cron, GitHub Action, or the dashboard's "Sync now" — now
+  // cascades through the whole sweep instead of idling between pokes.
+  // Rate-limited or errored runs DON'T chain; the scheduled pokes resume them.
+  const selfUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : process.env.NEXT_PUBLIC_APP_URL;
+  if (!finished && !rateLimited && secret && selfUrl) {
+    after(async () => {
+      try {
+        // Deliver the request, then abort our wait — the next invocation is
+        // its own function and finishes on its own; we must not sit through
+        // its 40s inside OUR time budget.
+        await fetch(`${selfUrl}/api/cron/catalog-sync`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${secret}` },
+          signal: AbortSignal.timeout(3000),
+        });
+      } catch { /* abort/timeout expected — scheduled invocations are the backstop */ }
+    });
+  }
 
   return NextResponse.json({
     status: finished ? 'done' : rateLimited ? 'rate-limited' : 'in-progress',

@@ -22,6 +22,7 @@ import { AuthModal } from '@/components/auth/AuthModal';
 import { useToast } from '@/hooks/use-toast';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/lib/auth-context';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 
 const ESTIMATED_EXPLANATION =
   'Some orders may display an estimated total at checkout. This is because certain items are sold by weight, market prices may change, or substitutions may be necessary if an item is unavailable. Your final invoice will reflect the actual items delivered, including any approved substitutions, quantity adjustments, or weighted products. We make every effort to keep pricing accurate and will contact you if there are any significant changes to your order. If you have any questions, please contact us at (618) 556-0290 or GraftonTowboatServices@gmail.com.';
@@ -249,6 +250,7 @@ export default function OrderPage() {
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [tooltipOpen, setTooltipOpen] = useState(false);
+  const { confirm: confirmDialog, dialog: confirmDialogEl } = useConfirm();
   const [authOpen, setAuthOpen] = useState(false);
   const [emailHasAccount, setEmailHasAccount] = useState(false);
   const [cutoffs, setCutoffs] = useState({ grocery_cutoff_hours: 4, service_cutoff_hours: 2 });
@@ -549,8 +551,12 @@ export default function OrderPage() {
                 <span className="text-sm text-gray-400">{items.length} item{items.length !== 1 ? 's' : ''}</span>
                 <button
                   type="button"
-                  onClick={() => {
-                    if (window.confirm(`Clear your whole cart? This removes all ${items.length} item${items.length !== 1 ? 's' : ''}.`)) {
+                  onClick={async () => {
+                    if (await confirmDialog({
+                      title: 'Clear your whole cart?',
+                      message: `This removes all ${items.length} item${items.length !== 1 ? 's' : ''}.`,
+                      danger: true,
+                    })) {
                       clearCart();
                       setItems(getCart());
                     }
@@ -844,6 +850,7 @@ export default function OrderPage() {
         </button>
       </main>
       <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} defaultMode="signin" defaultEmail={vessel.email} title="Sign In" />
+      {confirmDialogEl}
     </div>
   );
 
@@ -1478,10 +1485,11 @@ export default function OrderPage() {
           </button>
         </div>
         <p className="text-center text-xs text-gray-400 mt-3">
-          A confirmation will be sent to {vessel.email || 'your billing email'}
+          A confirmation will be sent to {vessel.vessel_email || 'your vessel email'}
         </p>
 
         <ContactPhones className="mt-8" />
+        {confirmDialogEl}
       </main>
     </div>
   );

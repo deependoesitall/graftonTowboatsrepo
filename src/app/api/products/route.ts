@@ -48,6 +48,9 @@ export async function GET(req: NextRequest) {
     else if (status === 'inactive') query = query.eq('is_active', false);
     else if (status === 'available') query = query.eq('is_available', true);
     else if (status === 'unavailable') query = query.eq('is_available', false);
+    // Active listings with no photo — flags what needs a picture taken
+    // (UPC-less meat/deli cuts) vs what Sinclair's site simply has no image for.
+    else if (status === 'no_image') query = query.eq('is_active', true).is('image_url', null);
   }
 
   const { data, count, error } = await query;
@@ -266,6 +269,13 @@ export async function PATCH(req: NextRequest) {
   // Single update
   const { id, ...updates } = body;
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+
+  // Hand-edited locations are LOCKED against the nightly sync (store staff
+  // know the real shelf better than Freshop's walkpath data). Clearing the
+  // location unlocks it — auto-sync resumes.
+  if (updates.location !== undefined) {
+    updates.location_manual = !!String(updates.location || '').trim();
+  }
 
   const { data, error } = await supabase
     .from('products')

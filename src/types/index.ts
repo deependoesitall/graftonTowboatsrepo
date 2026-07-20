@@ -34,6 +34,8 @@ export interface Product {
   form_seq: number | null;        // global position on the form; NULL = not on the order form
   /** TRUE = full-store import (hidden from default browse; reachable via "browse the whole store" flows). */
   store_only: boolean;
+  /** Sinclair's internal product id — set when the item is matched to their website. */
+  freshop_id?: string | null;
   created_at?: string;
 }
 

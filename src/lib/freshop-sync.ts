@@ -72,6 +72,8 @@ export interface SyncableProduct {
   billed_by_weight: boolean;
   location: string | null;
   location_seq: number | null;
+  /** TRUE = an admin corrected this location by hand — never overwrite it. */
+  location_manual?: boolean;
   price: number;
   quantity_step: number | null;
   quantity_label: string | null;
@@ -152,12 +154,16 @@ export function computeFields(
   if (newDetails && !product.details && newDetails !== product.details) { fields.details = newDetails; stats.details++; }
   if (newImage && !product.image_url && newImage !== product.image_url) { fields.image_url = newImage; stats.images++; }
   if (hit.is_weight_required && !product.billed_by_weight) { fields.billed_by_weight = true; stats.weightFlags++; }
-  const newLocation = locationFrom(hit);
-  const newSeq = locationSeqFrom(hit);
-  if (newLocation && (newLocation !== product.location || newSeq !== product.location_seq)) {
-    fields.location = newLocation;
-    fields.location_seq = newSeq;
-    stats.locations++;
+  // Locations sync from Freshop's walkpath — EXCEPT where an admin corrected
+  // one by hand (location_manual): the humans in the store outrank the data.
+  if (!product.location_manual) {
+    const newLocation = locationFrom(hit);
+    const newSeq = locationSeqFrom(hit);
+    if (newLocation && (newLocation !== product.location || newSeq !== product.location_seq)) {
+      fields.location = newLocation;
+      fields.location_seq = newSeq;
+      stats.locations++;
+    }
   }
   const newPrice = priceFrom(hit);
   if (newPrice != null && Math.abs(newPrice - Number(product.price)) >= 0.005) {
@@ -274,13 +280,16 @@ export function buildStoreProduct(p: FreshopProduct, deptCategory: string): Reco
   const weighable = !!p.is_weight_required || isWeighableUpcDigits(upcRaw);
   const step = typeof p.quantity_step === 'number' && isFinite(p.quantity_step) && p.quantity_step > 0 ? p.quantity_step : null;
   const ratio = typeof p.quantity_size_ratio === 'number' && isFinite(p.quantity_size_ratio) && p.quantity_size_ratio > 0 ? p.quantity_size_ratio : null;
+  // Freshop pollutes name/size fields with placeholder junk ("1.0000 zzz",
+  // "0.0000") — strip it everywhere, and treat zero-ish sizes as no size.
+  const cleanSize = stripZzz((p.size || '').trim());
   return {
-    description: name,
+    description: stripZzz(name),
     details: detailsFrom(p),
     category: refineCategory(deptCategory, p),
     sub_category: subCategoryFrom(p),
     upc: upcRaw,
-    pkg_size: (p.size || '').trim() || null,
+    pkg_size: cleanSize && !/^0(\.0+)?$/.test(cleanSize) ? cleanSize : null,
     uom: weighable ? 'LB' : 'EA',
     price,
     image_url: imageFrom(p),

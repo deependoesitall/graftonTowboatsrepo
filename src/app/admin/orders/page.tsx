@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
 import { Search, Download, Eye, Loader2, RefreshCw, Package, ArrowRight, Trash2, Users, Wrench, Printer } from 'lucide-react';
 import { PickSheetOverlay } from '@/components/admin/PickSheetOverlay';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { formatCurrency, formatDate, ORDER_STATUSES } from '@/lib/utils';
 import { Order, OrderStatus } from '@/types';
 import { OrderDetailModal } from '@/components/admin/OrderDetailModal';
@@ -121,15 +122,19 @@ function OrdersContent() {
   // Opening a NEW order prompts to lock it In Progress first (declinable —
   // Dave prints future orders early).
   const [pickSheetOrder, setPickSheetOrder] = useState<{ id: string; number: string } | null>(null);
+  const { confirm: confirmDialog, dialog: confirmDialogEl } = useConfirm();
   async function printPickSheet(order: Order) {
     if (canEditOrders && order.status === 'new') {
-      const lock = confirm(
-        'Mark this order as IN PROGRESS before printing?\n\n' +
-        'In Progress locks the order — the customer can no longer add or change items.\n\n' +
-        'OK — mark In Progress, then print\n' +
-        'Cancel — just print (customer can still make changes until it goes In Progress)'
-      );
-      if (lock) await updateStatus(order.id, 'in_progress');
+      const choice = await confirmDialog({
+        title: 'Mark as In Progress before printing?',
+        message: 'In Progress locks the order — the customer can no longer add or change items. Printing early for a future-day order? Choose Just Print and the customer can keep editing.',
+        actions: [
+          { id: 'lock', label: 'Mark In Progress & Print' },
+          { id: 'print', label: 'Just Print', variant: 'neutral' },
+        ],
+      });
+      if (!choice) return;
+      if (choice === 'lock') await updateStatus(order.id, 'in_progress');
     }
     setPickSheetOrder({ id: order.id, number: order.order_number });
   }
@@ -148,7 +153,11 @@ function OrdersContent() {
   }
 
   async function deleteOrder(orderId: string, orderNumber: string) {
-    if (!confirm(`Permanently delete order ${orderNumber}? This cannot be undone.`)) return;
+    if (!(await confirmDialog({
+      title: `Permanently delete order ${orderNumber}?`,
+      message: 'This cannot be undone.',
+      danger: true,
+    }))) return;
     setDeletingId(orderId);
     const res = await adminFetch(`/api/orders/${orderId}`, {
       method: 'DELETE',
@@ -470,6 +479,8 @@ function OrdersContent() {
             <button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)} className="btn-outline text-sm px-4 py-2 disabled:opacity-40">Next →</button>
           </div>
         )}
+
+        {confirmDialogEl}
 
         {/* In-app barcode pick sheet */}
         {pickSheetOrder && (

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Save, RefreshCw, Eye, EyeOff, Plus, Trash2, UserPlus, ShieldCheck, User, Lock, ScrollText, Search, ArrowRight, ChevronLeft, ChevronRight, MessageSquarePlus, Check, X, Loader2, Send, Wrench } from 'lucide-react';
 import { fetchAdminSession, getAdminRole, canAccess, adminFetch, AdminRole } from '@/lib/admin-auth';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { formatDate } from '@/lib/utils';
 import { DEFAULT_ZONE_ORDER, AISLES_TOKEN } from '@/lib/store-layout';
 
@@ -84,6 +85,7 @@ const ROLE_COLORS = {
 };
 
 export default function AdminSettingsPage() {
+  const { confirm: confirmDialog, dialog: confirmDialogEl } = useConfirm();
   const router = useRouter();
   const [tab, setTab] = useState<'logs' | 'general' | 'sinclair' | 'password' | 'users' | 'email' | 'features'>('general');
   const [settings, setSettings] = useState<Settings>({
@@ -356,7 +358,7 @@ export default function AdminSettingsPage() {
   }
 
   async function deleteUser(id: string) {
-    if (!confirm('Delete this admin user?')) return;
+    if (!(await confirmDialog({ title: 'Delete this admin user?', danger: true }))) return;
     await adminFetch('/api/admin/users', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
@@ -400,6 +402,7 @@ export default function AdminSettingsPage() {
 
   return (
     <div className={`mx-auto px-4 py-8 ${tab === 'logs' ? 'max-w-5xl' : 'max-w-3xl'}`}>
+      {confirmDialogEl}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-brand-navy font-display">Settings</h1>
@@ -1186,6 +1189,7 @@ export default function AdminSettingsPage() {
 
 // ─── Coupons manager (Sinclair-owned, display-only coupons) ───
 function CouponsManager() {
+  const { confirm: confirmDialog, dialog: confirmDialogEl } = useConfirm();
   const [coupons, setCoupons] = useState<Coupon[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -1258,7 +1262,7 @@ function CouponsManager() {
   }
 
   async function remove(id: string) {
-    if (!confirm('Delete this coupon?')) return;
+    if (!(await confirmDialog({ title: 'Delete this coupon?', danger: true }))) return;
     await adminFetch('/api/admin/coupons', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
     setCoupons(cs => cs.filter(c => c.id !== id));
   }
@@ -1274,6 +1278,7 @@ function CouponsManager() {
 
   return (
     <div className="card-base overflow-hidden">
+      {confirmDialogEl}
       <div className="bg-brand-navy px-6 py-4 flex items-center justify-between">
         <div>
           <h2 className="text-white font-bold">Coupons</h2>

@@ -513,6 +513,10 @@ function getCategoryColor(category: string): string {
     'Household & Cleaning': 'bg-teal-400',
     'Health & Personal Care': 'bg-purple-400',
     'Boat Supplies': 'bg-brand-gmed',
+    // Stray spreadsheet category names (pre-normalization) — same colors as
+    // their standard equivalents so cards don't fall back to grey.
+    'Frozen Goods': 'bg-cyan-400',
+    'Dairy & Eggs': 'bg-yellow-300',
   };
   return map[category] ?? 'bg-gray-300';
 }

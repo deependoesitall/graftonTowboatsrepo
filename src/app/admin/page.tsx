@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import { AdminRole, AdminPermission, setAdminSession, setAdminUiState, fetchAdminSession, adminFetch } from '@/lib/admin-auth';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 
 export default function AdminDashboard() {
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
@@ -351,6 +352,7 @@ interface QueueOrder {
 function FinalEmailQueue() {
   const [orders, setOrders] = useState<QueueOrder[] | null>(null);
   const [confirmOrder, setConfirmOrder] = useState<QueueOrder | null>(null);
+  const { confirm: confirmDialog, dialog: confirmDialogEl } = useConfirm();
 
   async function load() {
     const res = await adminFetch('/api/orders?status=fulfilled&per_page=50');
@@ -363,7 +365,11 @@ function FinalEmailQueue() {
   // Clear an order from the queue WITHOUT emailing — for orders with no email
   // on file, or ones handled by phone. Stamps who dismissed it (audit trail).
   async function dismiss(o: QueueOrder) {
-    if (!confirm(`Remove ${o.order_number} from this list WITHOUT sending an email?\n\nUse this when the order has no email or you handled it by phone.`)) return;
+    if (!(await confirmDialog({
+      title: `Remove ${o.order_number} without sending an email?`,
+      message: 'Use this when the order has no email on file, or you already handled it by phone. It will be recorded as dismissed.',
+      danger: true,
+    }))) return;
     await adminFetch(`/api/orders/${o.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -421,6 +427,7 @@ function FinalEmailQueue() {
           onSent={() => { setConfirmOrder(null); load(); }}
         />
       )}
+      {confirmDialogEl}
     </div>
   );
 }

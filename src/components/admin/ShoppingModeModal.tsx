@@ -14,6 +14,7 @@ import { formatCurrency, formatLb } from '@/lib/utils';
 import { adminFetch } from '@/lib/admin-auth';
 import { groupByWalkingOrder, DEFAULT_ZONE_ORDER, NO_LOCATION_LABEL } from '@/lib/store-layout';
 import { PickSheetOverlay } from '@/components/admin/PickSheetOverlay';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 
 interface ShoppingModeModalProps {
   order: Order;
@@ -143,6 +144,7 @@ export function ShoppingModeModal({ order, onClose, onComplete }: ShoppingModeMo
   const [completing, setCompleting] = useState(false);
   // After completion: show the barcode sheet in-app for the register run
   const [showRegisterSheet, setShowRegisterSheet] = useState(false);
+  const { confirm: confirmDialog, dialog: confirmDialogEl } = useConfirm();
   const [completeError, setCompleteError] = useState('');
   const [showConfirm, setShowConfirm] = useState(false);
   const [loadingFresh, setLoadingFresh] = useState(true);
@@ -283,7 +285,10 @@ export function ShoppingModeModal({ order, onClose, onComplete }: ShoppingModeMo
 
   async function resetItem(item: OrderItem) {
     const hasSubs = items.some(i => i.substitutes_item_id === item.id);
-    if (hasSubs && !confirm('Undo this out-of-stock mark? The substitution added for it will be removed too.')) return;
+    if (hasSubs && !(await confirmDialog({
+      title: 'Undo this out-of-stock mark?',
+      message: 'The substitution added for it will be removed too.',
+    }))) return;
     setUi(item.id, { saving: true, saveError: '' });
     try {
       const res = await adminFetch(`/api/orders/${order.id}/items/${item.id}`, {
@@ -1041,6 +1046,8 @@ export function ShoppingModeModal({ order, onClose, onComplete }: ShoppingModeMo
           onClose={() => { setShowRegisterSheet(false); onComplete(); }}
         />
       )}
+
+      {confirmDialogEl}
     </>
   );
 }

@@ -12,6 +12,7 @@ import { Product } from '@/types';
 import { useRouter } from 'next/navigation';
 import { fetchAdminSession, canAccess, adminFetch } from '@/lib/admin-auth';
 import { ImportWizard } from '@/components/admin/ImportWizard';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 
 
 // -- Quiet nightly-sync status. The catalog syncs ITSELF (12:05 AM kickoff,
@@ -21,7 +22,9 @@ import { ImportWizard } from '@/components/admin/ImportWizard';
 function CatalogSyncStatus({ isOwner }: { isOwner: boolean }) {
   const [status, setStatus] = useState<null | {
     completed_at: string | null; session_day: string | null; in_progress: boolean;
-    pages_done: number; pages_total: number; last_error: string | null;
+    pages_done: number; pages_total: number; sized_items: number;
+    departments: string[]; products_updated: number; store_items_imported: number;
+    last_error: string | null; checkpoint_updated_at: string | null;
   }>(null);
   const [kicking, setKicking] = useState(false);
 
@@ -44,24 +47,44 @@ function CatalogSyncStatus({ isOwner }: { isOwner: boolean }) {
     }
   }
 
+  // COMMUNICATE, don't guard: say exactly what the sync is doing and where
+  // it stands — including the store size it was told (so a wobbly Freshop
+  // total during their midnight rebuild is visible, not silent). A session
+  // whose checkpoint hasn't moved in a few minutes isn't "syncing" — it's
+  // PAUSED and waiting for the next kickoff.
+  const stale = !!status?.in_progress && !!status.checkpoint_updated_at
+    && Date.now() - new Date(status.checkpoint_updated_at).getTime() > 5 * 60_000;
   const label = !status ? 'Checking sync…'
-    : status.in_progress ? `Catalog syncing — ${status.pages_done}/${status.pages_total} pages`
-    : status.completed_at ? `Catalog synced ${new Date(status.completed_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`
+    : status.in_progress && stale
+    ? `Sync paused at ${status.pages_done}/${status.pages_total} pages (${status.store_items_imported.toLocaleString()} items in) — resumes tonight, or Sync now`
+    : status.in_progress
+    ? `Syncing — ${status.pages_done}/${status.pages_total} pages · sized at ${status.sized_items.toLocaleString()} store items · ${status.store_items_imported.toLocaleString()} imported so far`
+    : status.completed_at
+    ? `Synced ${new Date(status.completed_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} · ${status.products_updated.toLocaleString()} updated · ${status.store_items_imported.toLocaleString()} store items imported (store sized at ${status.sized_items.toLocaleString()})`
     : 'Nightly sync runs at 12:05 AM';
 
+  const deptDetail = status?.departments?.length
+    ? `Department progress:\n${status.departments.join('\n')}`
+    : 'The catalog updates itself every night — prices, aisle locations, images, new store items, and the order-form layout.';
+
   return (
-    <div className="flex items-center gap-2 text-xs text-gray-400 mr-1" title="The catalog updates itself every night — prices, aisle locations, images, new store items, and the order-form layout. Nothing to do here.">
-      {status?.in_progress || kicking
-        ? <Loader2 className="w-3.5 h-3.5 animate-spin text-brand-river" />
-        : status?.completed_at
-        ? <CheckCircle2 className="w-3.5 h-3.5 text-brand-green" />
-        : <Moon className="w-3.5 h-3.5" />}
-      <span>{label}</span>
-      {isOwner && !status?.in_progress && (
-        <button onClick={syncNow} disabled={kicking}
-          className="underline underline-offset-2 hover:text-brand-navy disabled:opacity-50">
-          {kicking ? 'syncing…' : 'Sync now'}
-        </button>
+    <div className="flex flex-col items-end mr-1">
+      <div className="flex items-center gap-2 text-xs text-gray-400" title={deptDetail}>
+        {kicking || (status?.in_progress && !stale)
+          ? <Loader2 className="w-3.5 h-3.5 animate-spin text-brand-river" />
+          : status?.completed_at && !status?.in_progress
+          ? <CheckCircle2 className="w-3.5 h-3.5 text-brand-green" />
+          : <Moon className="w-3.5 h-3.5" />}
+        <span>{label}</span>
+        {isOwner && (
+          <button onClick={syncNow} disabled={kicking}
+            className="underline underline-offset-2 hover:text-brand-navy disabled:opacity-50">
+            {kicking ? 'running chunk…' : status?.in_progress ? 'Run next chunk' : 'Sync now'}
+          </button>
+        )}
+      </div>
+      {status?.last_error && (
+        <p className="text-[10px] text-amber-600 mt-0.5">{status.last_error}</p>
       )}
     </div>
   );
@@ -209,6 +232,7 @@ const STATUS_FILTERS: { key: string; label: string }[] = [
   { key: 'inactive', label: 'Inactive (hidden)' },
   { key: 'available', label: 'In Stock' },
   { key: 'unavailable', label: 'Out of Stock' },
+  { key: 'no_image', label: 'Missing Image' },
 ];
 
 interface EditState {
@@ -512,6 +536,21 @@ function EditableRow({ product, selected, onSelect, onSaved, onToggleActive, onT
           {product.billed_by_weight && (
             <span className="inline-block text-[10px] font-bold uppercase tracking-wide text-amber-700 bg-amber-50 rounded px-1.5 py-0.5">/lb</span>
           )}
+          {/* Missing-image reason — WHY there's no photo, so staff know
+              whether to grab a camera or shrug (Sinclair's has none either) */}
+          {product.is_active && !product.image_url && (
+            product.freshop_id ? (
+              <span className="inline-block text-[10px] font-bold uppercase tracking-wide text-gray-500 bg-gray-100 rounded px-1.5 py-0.5"
+                title="This item is matched to Sinclair's website, but their site has no photo for it either.">
+                No photo on Sinclair&apos;s site
+              </span>
+            ) : (
+              <span className="inline-block text-[10px] font-bold uppercase tracking-wide text-orange-700 bg-orange-50 rounded px-1.5 py-0.5"
+                title="Not matched to Sinclair's website (no UPC, e.g. custom meat cuts / bakery) — someone needs to take a photo and upload it here.">
+                📷 Needs a photo — not on Sinclair&apos;s site
+              </span>
+            )
+          )}
           {(product.tags || []).map(tag => (
             <span key={tag} className="inline-flex items-center gap-0.5 text-[10px] text-brand-river/70 bg-blue-50 rounded-full px-1.5 py-0.5 font-semibold">
               <Tag className="w-2 h-2" />{tag}
@@ -587,6 +626,7 @@ export default function AdminProductsPage() {
 
   const [denied, setDenied] = useState(false);
   const [sessionRole, setSessionRole] = useState<string | null>(null);
+  const { confirm: confirmDialog, dialog: confirmDialogEl } = useConfirm();
 
   // Auth guard — verify the session cookie with the server
   useEffect(() => {
@@ -669,7 +709,11 @@ export default function AdminProductsPage() {
   // ── Bulk actions on the catalog tab ──
   async function bulkDelete() {
     if (!selected.size) return;
-    if (!confirm(`Delete ${selected.size} selected product${selected.size === 1 ? '' : 's'}? This cannot be undone.`)) return;
+    if (!(await confirmDialog({
+      title: `Delete ${selected.size} selected product${selected.size === 1 ? '' : 's'}?`,
+      message: 'This cannot be undone.',
+      danger: true,
+    }))) return;
     setBulkBusy(true);
     const res = await adminFetch('/api/products', {
       method: 'DELETE',
@@ -736,7 +780,11 @@ export default function AdminProductsPage() {
 
   async function deleteDupSelected() {
     if (!dupSelected.size) return;
-    if (!confirm(`Delete ${dupSelected.size} selected duplicate item${dupSelected.size === 1 ? '' : 's'}? This cannot be undone.`)) return;
+    if (!(await confirmDialog({
+      title: `Delete ${dupSelected.size} selected duplicate item${dupSelected.size === 1 ? '' : 's'}?`,
+      message: 'This cannot be undone.',
+      danger: true,
+    }))) return;
     setDupLoading(true);
     const res = await adminFetch('/api/products', {
       method: 'DELETE',
@@ -763,7 +811,11 @@ export default function AdminProductsPage() {
       for (const item of rest) idsToDelete.push(item.id);
     }
     if (!idsToDelete.length) return;
-    if (!confirm(`Delete ${idsToDelete.length} duplicate item${idsToDelete.length === 1 ? '' : 's'} across ${deletableGroups.length} group${deletableGroups.length === 1 ? '' : 's'}? The first item in each group will be kept. This cannot be undone.`)) return;
+    if (!(await confirmDialog({
+      title: `Delete ${idsToDelete.length} duplicate item${idsToDelete.length === 1 ? '' : 's'} across ${deletableGroups.length} group${deletableGroups.length === 1 ? '' : 's'}?`,
+      message: 'The first item in each group will be kept. This cannot be undone.',
+      danger: true,
+    }))) return;
     setDupLoading(true);
     const res = await adminFetch('/api/products', {
       method: 'DELETE',
@@ -795,6 +847,7 @@ export default function AdminProductsPage() {
 
   return (
     <div>
+      {confirmDialogEl}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="font-display text-2xl font-bold text-brand-navy">Product Catalog</h1>

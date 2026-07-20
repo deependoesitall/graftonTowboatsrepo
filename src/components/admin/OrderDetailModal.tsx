@@ -12,6 +12,7 @@ import { formatCurrency, formatDate, ORDER_STATUSES } from '@/lib/utils';
 import { ShoppingModeModal } from '@/components/admin/ShoppingModeModal';
 import { adminFetch } from '@/lib/admin-auth';
 import { PickSheetOverlay } from '@/components/admin/PickSheetOverlay';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 
 interface OrderDetailModalProps {
   order: Order;
@@ -33,20 +34,24 @@ export function OrderDetailModal({
   const [shoppingMode, setShoppingMode] = useState(false);
   const [markingFulfilled, setMarkingFulfilled] = useState(false);
   const [showPickSheet, setShowPickSheet] = useState(false);
+  const { confirm: confirmDialog, dialog: confirmDialogEl } = useConfirm();
 
   // Barcode pick sheet — Freshop-style printout with scannable UPC-A codes,
   // shown IN-APP (no pop-up windows). Opening it on a NEW order prompts to
   // lock it (Dave: "if I print it, it needs to be in progress" — but he also
   // prints future orders early, so it's a choice).
-  function handlePrintPickSheet() {
+  async function handlePrintPickSheet() {
     if (canEdit && order.status === 'new') {
-      const lock = confirm(
-        'Mark this order as IN PROGRESS before printing?\n\n' +
-        'In Progress locks the order — the customer can no longer add or change items.\n\n' +
-        'OK — mark In Progress, then print\n' +
-        'Cancel — just print (customer can still make changes until it goes In Progress)'
-      );
-      if (lock) onStatusChange('in_progress');
+      const choice = await confirmDialog({
+        title: 'Mark as In Progress before printing?',
+        message: 'In Progress locks the order — the customer can no longer add or change items. Printing early for a future-day order? Choose Just Print and the customer can keep editing.',
+        actions: [
+          { id: 'lock', label: 'Mark In Progress & Print' },
+          { id: 'print', label: 'Just Print', variant: 'neutral' },
+        ],
+      });
+      if (!choice) return;
+      if (choice === 'lock') onStatusChange('in_progress');
     }
     setShowPickSheet(true);
   }
@@ -159,7 +164,7 @@ export function OrderDetailModal({
 
   // ── Delete item ───────────────────────────────────────────────────────────
   async function deleteItem(itemId: string) {
-    if (!confirm('Remove this item from the order?')) return;
+    if (!(await confirmDialog({ title: 'Remove this item from the order?', danger: true }))) return;
     setDeletingItemId(itemId);
     setItemError('');
     try {
@@ -474,7 +479,10 @@ export function OrderDetailModal({
                   <button
                     disabled={markingFulfilled}
                     onClick={async () => {
-                      if (!confirm('Mark this order as fulfilled? (No email goes out — GTS sends the final email from the dashboard.)')) return;
+                      if (!(await confirmDialog({
+                        title: 'Mark this order as fulfilled?',
+                        message: 'No email goes out — GTS sends the final email from the dashboard once everything is wrapped up.',
+                      }))) return;
                       setMarkingFulfilled(true);
                       await onStatusChange('fulfilled');
                       setMarkingFulfilled(false);
@@ -876,6 +884,8 @@ export function OrderDetailModal({
           onClose={() => setShowPickSheet(false)}
         />
       )}
+
+      {confirmDialogEl}
     </>
   );
 }
