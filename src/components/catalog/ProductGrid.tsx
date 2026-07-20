@@ -1,6 +1,7 @@
 'use client';
 // src/components/catalog/ProductGrid.tsx
 import { useState, useCallback, useEffect, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { Product } from '@/types';
 import { formatCurrency, formatLb, lbStepsFor, usesLbSteps, productDisplayName } from '@/lib/utils';
 import { addToCart } from '@/lib/cart';
@@ -105,7 +106,10 @@ export function ProductGrid({ products, totalCount, page, totalPages, search, ca
 
       {/* Product detail modal */}
       {detailProduct && (
-        <ProductDetailModal product={detailProduct} onClose={() => setDetailProduct(null)} />
+        <ProductDetailModal
+          product={detailProduct}
+          onClose={() => setDetailProduct(null)}
+          onSelectProduct={p => setDetailProduct(p)} />
       )}
 
       {/* Pagination */}
@@ -360,12 +364,18 @@ function ProductCard({ product, isLoggedIn, isFavorite, onOpenDetail }: {
 }
 
 // ─── Product detail modal ─────────────────────────────────────
-function ProductDetailModal({ product, onClose }: { product: Product; onClose: () => void }) {
+function ProductDetailModal({ product, onClose, onSelectProduct }: {
+  product: Product; onClose: () => void; onSelectProduct: (p: Product) => void;
+}) {
   const [qty, setQty] = useState(1);
   const [justAdded, setJustAdded] = useState(false);
   const { toast } = useToast();
   const byWeight = !!product.billed_by_weight;
   const lbSteps = usesLbSteps(product.quantity_step) ? lbStepsFor(product.quantity_step!) : null;
+
+  // Reset the stepper whenever the modal swaps to a different product
+  // (tapping through the also-bought row keeps the modal open).
+  useEffect(() => { setQty(1); setJustAdded(false); }, [product.id]);
 
   function handleAdd() {
     addToCart({
@@ -386,7 +396,9 @@ function ProductDetailModal({ product, onClose }: { product: Product; onClose: (
     setTimeout(() => { setJustAdded(false); }, 1500);
   }
 
-  return (
+  // PORTAL to <body> — house rule for every fixed-position overlay in this
+  // codebase (transformed/animated ancestors otherwise trap position:fixed).
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 py-8" onClick={onClose}>
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto animate-fade-in"
         onClick={e => e.stopPropagation()}>
@@ -495,7 +507,82 @@ function ProductDetailModal({ product, onClose }: { product: Product; onClose: (
             {justAdded ? <><Check className="w-4 h-4" /> Added!</> : <><ShoppingCart className="w-4 h-4" /> Add to Cart</>}
           </button>
         </div>
+
+        {/* People who bought this also bought */}
+        <AlsoBought productId={product.id} onSelect={onSelectProduct} />
       </div>
+    </div>,
+    document.body
+  );
+}
+
+// ─── "People who bought this also bought" ─────────────────────
+// Mirrors the row on Sinclair's own product pages. Driven by the Freshop
+// popularity rank we sync nightly (same signal their storefront sorts by),
+// weighted to the current item's category first.
+function AlsoBought({ productId, onSelect }: {
+  productId: string; onSelect: (p: Product) => void;
+}) {
+  const [items, setItems] = useState<Product[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setItems(null);
+    fetch(`/api/products/${productId}/also-bought`)
+      .then(r => (r.ok ? r.json() : { products: [] }))
+      .then(d => { if (!cancelled) setItems(d.products || []); })
+      .catch(() => { if (!cancelled) setItems([]); });
+    return () => { cancelled = true; };
+  }, [productId]);
+
+  if (items !== null && items.length === 0) return null;
+
+  return (
+    <div className="border-t border-gray-100 bg-gray-50/60 px-5 py-4">
+      <h3 className="font-display text-sm font-bold text-brand-navy mb-3">
+        People who bought this also bought
+      </h3>
+
+      {items === null ? (
+        <div className="flex gap-3 overflow-hidden">
+          {[0, 1, 2].map(i => (
+            <div key={i} className="w-24 shrink-0 animate-pulse">
+              <div className="aspect-square bg-gray-200 rounded-lg mb-1.5" />
+              <div className="h-2.5 bg-gray-200 rounded w-full mb-1" />
+              <div className="h-2.5 bg-gray-200 rounded w-2/3" />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="flex gap-3 overflow-x-auto pb-1 -mx-1 px-1 snap-x">
+          {items.map(p => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => onSelect(p)}
+              className="w-24 shrink-0 text-left snap-start group"
+              aria-label={`View ${productDisplayName(p)}`}
+            >
+              <div className="relative w-24 h-24 bg-white border border-gray-200 rounded-lg overflow-hidden mb-1.5 group-hover:border-brand-steel transition-colors">
+                {p.image_url ? (
+                  <Image src={p.image_url} alt={p.description} fill className="object-contain p-1.5" unoptimized />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center">
+                    <Package className="w-6 h-6 text-gray-200" />
+                  </div>
+                )}
+              </div>
+              <p className="text-[11px] font-semibold text-brand-navy leading-tight line-clamp-2 group-hover:text-brand-steel transition-colors">
+                {productDisplayName(p)}
+              </p>
+              <p className="text-[11px] font-bold text-brand-navy mt-0.5">
+                {formatCurrency(p.price)}
+                {p.billed_by_weight && <span className="font-semibold text-gray-400"> /lb</span>}
+              </p>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

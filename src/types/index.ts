@@ -36,6 +36,9 @@ export interface Product {
   store_only: boolean;
   /** Sinclair's internal product id — set when the item is matched to their website. */
   freshop_id?: string | null;
+  /** Freshop store-wide popularity rank (1 = most popular, NULL = unranked).
+   * Drives the "People who bought this also bought" row. */
+  popularity?: number | null;
   created_at?: string;
 }
 

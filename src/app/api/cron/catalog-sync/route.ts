@@ -20,7 +20,7 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { getAdminSession } from '@/lib/admin-auth-server';
 import { applyFormLayout } from '@/lib/form-layout-apply';
 import {
-  fetchFreshopPage, fetchFreshopTotal, freshopKeys, ourKeys, computeFields,
+  fetchFreshopPages, fetchFreshopTotal, freshopKeys, ourKeys, computeFields,
   buildStoreProduct, norm,
   FRESHOP_PAGE_SIZE, FRESHOP_DEPARTMENTS,
   type FreshopProduct, type SyncableProduct, type SyncStats,
@@ -29,9 +29,15 @@ import {
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-const PAGES_PER_RUN = 12;           // small chunks keep us under NCR's rate limits (~208 storefront pages total)
-const PAGE_DELAY_MS = 1200;         // gentle pacing, same spirit as the manual enrich
-const TIME_BUDGET_MS = 40_000;      // leave headroom under maxDuration
+// Throughput: fetch pages in small CONCURRENT batches instead of a serial
+// crawl. The old pacing (1 page every 1.2s) spent ~15s of every 40s budget
+// asleep and needed ~17 invocations for the full store. Batches of 4 with a
+// short breath between them clear the same ground in a fraction of the runs
+// while staying well inside what NCR tolerates.
+const BATCH_SIZE = 4;               // concurrent page fetches
+const PAGES_PER_RUN = 40;           // per invocation (~10 batches)
+const BATCH_DELAY_MS = 250;         // breath between batches
+const TIME_BUDGET_MS = 45_000;      // leave headroom under maxDuration
 
 interface DeptProgress {
   id: string;
@@ -100,26 +106,35 @@ async function handle(req: NextRequest) {
   // department's count is captured once at session start and held for the
   // whole session (progress math stays stable).
   if (!state.depts || state.depts.length === 0) {
-    const depts: DeptProgress[] = [];
-    for (const d of FRESHOP_DEPARTMENTS) {
-      const total = await fetchFreshopTotal(d.id);
-      if (total == null) {
-        state.lastError = `Freshop unreachable sizing ${d.name} — will retry on next invocation`;
-        await saveState(supabase, state);
-        return NextResponse.json({ status: 'waiting', reason: state.lastError }, { status: 200 });
-      }
-      depts.push({ id: d.id, name: d.name, category: d.category, total, pages: Math.ceil(total / FRESHOP_PAGE_SIZE), done: [] });
-      await sleep(400);
+    // Size all 9 departments in parallel — one round-trip instead of nine.
+    const totals = await Promise.all(FRESHOP_DEPARTMENTS.map(d => fetchFreshopTotal(d.id)));
+    const missing = FRESHOP_DEPARTMENTS.filter((_, i) => totals[i] == null);
+    if (missing.length) {
+      state.lastError = `Freshop unreachable sizing ${missing.map(d => d.name).join(', ')} — will retry on next invocation`;
+      await saveState(supabase, state);
+      return NextResponse.json({ status: 'waiting', reason: state.lastError }, { status: 200 });
     }
-    state.depts = depts;
+    state.depts = FRESHOP_DEPARTMENTS.map((d, i) => ({
+      id: d.id, name: d.name, category: d.category,
+      total: totals[i]!, pages: Math.ceil(totals[i]! / FRESHOP_PAGE_SIZE), done: [],
+    }));
   }
 
-  // ── Load our catalog once per invocation (id + syncable fields) ──
+  // ── Load our catalog once per invocation ──
+  // TWO loads, deliberately asymmetric:
+  //  1. FULL syncable fields for the ~1,150 BARGE items (store_only = false).
+  //     These are the curated order-form products we enrich every night.
+  //  2. UPC ONLY for the ~20,700 store_only rows — they were inserted straight
+  //     from Freshop and don't need re-enriching; we just need their UPCs so we
+  //     never import the same item twice.
+  // The old code pulled every field for all ~21,850 rows on EVERY invocation
+  // (~22 round-trips of fat payload); this cuts that to ~2 thin ones.
   const ours: SyncableProduct[] = [];
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase
       .from('products')
-      .select('id, upc, details, image_url, billed_by_weight, location, location_seq, location_manual, price, quantity_step, quantity_label, quantity_size_ratio, freshop_id')
+      .select('id, upc, details, image_url, billed_by_weight, location, location_seq, location_manual, price, quantity_step, quantity_label, quantity_size_ratio, freshop_id, popularity')
+      .eq('store_only', false)
       .range(from, from + 999);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     ours.push(...((data || []) as SyncableProduct[]));
@@ -130,6 +145,21 @@ async function handle(req: NextRequest) {
   // imports when the same UPC appears on multiple Freshop rows.
   const knownUpcKeys = new Set<string>();
   for (const p of ours) for (const k of ourKeys(p.upc || '')) knownUpcKeys.add(k);
+
+  // Store-only UPCs — thin projection, just for dedupe.
+  for (let from = 0; ; from += 5000) {
+    const { data, error } = await supabase
+      .from('products')
+      .select('upc')
+      .eq('store_only', true)
+      .not('upc', 'is', null)
+      .range(from, from + 4999);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    for (const r of (data || []) as Array<{ upc: string | null }>) {
+      for (const k of ourKeys(r.upc || '')) knownUpcKeys.add(k);
+    }
+    if (!data || data.length < 5000) break;
+  }
 
   // ── Fetch a chunk of pages, walking department by department ──
   const stats = state.stats || emptyStats();
@@ -143,72 +173,96 @@ async function handle(req: NextRequest) {
     for (let i = 0; i < dept.pages; i++) if (!done.has(i)) queue.push({ dept, pageIdx: i });
   }
 
-  for (const { dept, pageIdx } of queue) {
+  // Walk the queue in CONCURRENT BATCHES. Each batch's pages are fetched in
+  // parallel, then processed together — one bulk RPC and one bulk insert for
+  // the whole batch instead of per page.
+  for (let qi = 0; qi < queue.length; qi += BATCH_SIZE) {
     if (pagesFetched >= PAGES_PER_RUN || Date.now() - started > TIME_BUDGET_MS) break;
-    const items = await fetchFreshopPage(dept.id, pageIdx * FRESHOP_PAGE_SIZE);
-    if (!items) { rateLimited = true; break; }  // back off — next invocation retries
 
-    // Index THIS page by Freshop keys, then walk our catalog (same matching
-    // semantics as the manual enrich, just page by page).
-    const index = new Map<string, FreshopProduct>();
-    for (const item of items) {
-      for (const key of freshopKeys(item)) if (!index.has(key)) index.set(key, item);
-    }
-    const usedFreshopIds = new Set<string>();
-    const updates: Array<{ id: string; fields: Record<string, unknown> }> = [];
-    for (const product of ours) {
-      if (!product.upc) continue;
-      let hit: FreshopProduct | undefined;
-      for (const key of ourKeys(product.upc)) { hit = index.get(key); if (hit) break; }
-      if (!hit) continue;
-      if (hit.id != null) usedFreshopIds.add(String(hit.id));
-      stats.matched++;
-      const fields = computeFields(product, hit, stats);
-      if (fields) {
-        updates.push({ id: product.id, fields });
-        Object.assign(product, fields);  // keep in-memory copy current for later pages
+    const batch = queue.slice(qi, qi + BATCH_SIZE);
+    const results = await fetchFreshopPages(
+      batch.map(b => ({ departmentId: b.dept.id, skip: b.pageIdx * FRESHOP_PAGE_SIZE })),
+    );
+
+    const batchUpdates: Array<{ id: string; fields: Record<string, unknown> }> = [];
+    const batchInserts: Record<string, unknown>[] = [];
+    const completedPages: Array<{ dept: DeptProgress; pageIdx: number }> = [];
+
+    for (let bi = 0; bi < batch.length; bi++) {
+      const items = results[bi];
+      if (!items) { rateLimited = true; continue; }  // back off — next invocation retries
+      const { dept, pageIdx } = batch[bi];
+
+      // Index THIS page by Freshop keys, then walk our barge catalog (same
+      // matching semantics as the manual enrich, just page by page).
+      const index = new Map<string, FreshopProduct>();
+      for (const item of items) {
+        for (const key of freshopKeys(item)) if (!index.has(key)) index.set(key, item);
       }
+      const usedFreshopIds = new Set<string>();
+      for (const product of ours) {
+        if (!product.upc) continue;
+        let hit: FreshopProduct | undefined;
+        for (const key of ourKeys(product.upc)) { hit = index.get(key); if (hit) break; }
+        if (!hit) continue;
+        if (hit.id != null) usedFreshopIds.add(String(hit.id));
+        stats.matched++;
+        const fields = computeFields(product, hit, stats);
+        if (fields) {
+          batchUpdates.push({ id: product.id, fields });
+          Object.assign(product, fields);  // keep in-memory copy current for later pages
+        }
+      }
+
+      // ── FULL-STORE IMPORT: page items that matched nothing in our catalog
+      // become new store_only products. Category comes from the DEPARTMENT this
+      // page was fetched from (authoritative — AWG items have flat URLs).
+      for (const item of items) {
+        if (item.id != null && usedFreshopIds.has(String(item.id))) continue;
+        const upcKey = norm(item.upc || item.barcode_upc_a);
+        if (upcKey && knownUpcKeys.has(upcKey)) continue;    // already carried / inserted
+        const row = buildStoreProduct(item, dept.category);
+        if (!row) continue;                                   // alcohol stray / no price / no name
+        batchInserts.push(row);
+        if (upcKey) {
+          knownUpcKeys.add(upcKey);
+          if (upcKey.length >= 5) knownUpcKeys.add(upcKey.slice(0, -1));
+        }
+      }
+
+      completedPages.push({ dept, pageIdx });
+      pagesFetched++;
     }
 
-    if (updates.length) {
-      const { error: rpcErr } = await supabase.rpc('apply_enrich_updates', { items: updates });
+    if (batchUpdates.length) {
+      const { error: rpcErr } = await supabase.rpc('apply_enrich_updates', { items: batchUpdates });
       if (rpcErr) {
         state.lastError = `apply_enrich_updates: ${rpcErr.message}`;
         await saveState(supabase, state);
         return NextResponse.json({ error: state.lastError }, { status: 500 });
       }
-      state.applied = (state.applied || 0) + updates.length;
+      state.applied = (state.applied || 0) + batchUpdates.length;
     }
-
-    // ── FULL-STORE IMPORT: page items that matched nothing in our catalog
-    // become new store_only products. Category comes from the DEPARTMENT this
-    // page was fetched from (authoritative — AWG items have flat URLs).
-    const inserts: Record<string, unknown>[] = [];
-    for (const item of items) {
-      if (item.id != null && usedFreshopIds.has(String(item.id))) continue;
-      const upcKey = norm(item.upc || item.barcode_upc_a);
-      if (upcKey && knownUpcKeys.has(upcKey)) continue;      // already carried / inserted
-      const row = buildStoreProduct(item, dept.category);
-      if (!row) continue;                                     // alcohol stray / no price / no name
-      inserts.push(row);
-      if (upcKey) {
-        knownUpcKeys.add(upcKey);
-        if (upcKey.length >= 5) knownUpcKeys.add(upcKey.slice(0, -1));
-      }
-    }
-    if (inserts.length) {
-      const { error: insErr } = await supabase.from('products').insert(inserts);
+    if (batchInserts.length) {
+      const { error: insErr } = await supabase.from('products').insert(batchInserts);
       if (insErr) {
         state.lastError = `store import insert: ${insErr.message}`;
         await saveState(supabase, state);
         return NextResponse.json({ error: state.lastError }, { status: 500 });
       }
-      state.inserted = (state.inserted || 0) + inserts.length;
+      state.inserted = (state.inserted || 0) + batchInserts.length;
     }
 
-    dept.done.push(pageIdx);
-    pagesFetched++;
-    if (pagesFetched < PAGES_PER_RUN) await sleep(PAGE_DELAY_MS);
+    // Only checkpoint pages whose data actually landed in the database.
+    for (const { dept, pageIdx } of completedPages) dept.done.push(pageIdx);
+
+    // Checkpoint after every batch — the admin page polls this, so progress
+    // moves visibly instead of jumping once at the end of the invocation.
+    state.stats = stats;
+    await saveState(supabase, state);
+
+    if (rateLimited) break;
+    if (pagesFetched < PAGES_PER_RUN) await sleep(BATCH_DELAY_MS);
   }
 
   state.stats = stats;
@@ -261,6 +315,10 @@ async function handle(req: NextRequest) {
 
   return NextResponse.json({
     status: finished ? 'done' : rateLimited ? 'rate-limited' : 'in-progress',
+    /** Client-driven chaining: the admin page fires the next chunk when this
+     * is true. after() below is the unattended backstop — belt and braces,
+     * because serverless after() callbacks aren't guaranteed to survive. */
+    has_more: !finished && !rateLimited,
     session_started: state.day,
     pages_done: state.depts.reduce((s, d) => s + d.done.length, 0),
     pages_total: state.depts.reduce((s, d) => s + d.pages, 0),

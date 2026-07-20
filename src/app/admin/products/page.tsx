@@ -67,18 +67,25 @@ function CatalogSyncStatus({ isOwner }: { isOwner: boolean }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status?.in_progress]);
 
+  // CLIENT-DRIVEN CHAIN. The cron route also self-drives via after(), but
+  // serverless after() callbacks aren't guaranteed to survive the function
+  // freezing — which is exactly why a hand-kicked sync used to stall and fall
+  // back to "Nightly sync runs at 12:05 AM". While this tab is open we keep
+  // firing chunks ourselves until the route reports it's finished.
   async function syncNow() {
     setKicking(true);
+    startPolling();
     try {
-      // Kick off the first chunk — after() in the cron route self-drives the
-      // rest. We don't await the full sync; we poll status to show progress.
-      adminFetch('/api/cron/catalog-sync', { method: 'POST' });
-      // Give the first chunk a moment to register in the state table
-      await new Promise(r => setTimeout(r, 2000));
-      await load();
-      startPolling();
+      for (let guard = 0; guard < 40; guard++) {
+        const res = await adminFetch('/api/cron/catalog-sync', { method: 'POST' });
+        if (!res.ok) break;
+        const r = await res.json().catch(() => null);
+        await load();
+        if (!r?.has_more) break;   // done, rate-limited, or waiting on Freshop
+      }
     } finally {
       setKicking(false);
+      load();
     }
   }
 
@@ -112,7 +119,7 @@ function CatalogSyncStatus({ isOwner }: { isOwner: boolean }) {
         {isOwner && (
           <button onClick={syncNow} disabled={kicking}
             className="underline underline-offset-2 hover:text-brand-navy disabled:opacity-50">
-            {kicking ? 'running chunk…' : status?.in_progress ? 'Run next chunk' : 'Sync now'}
+            {kicking ? 'syncing — keep this tab open…' : status?.in_progress ? 'Resume sync' : 'Sync now'}
           </button>
         )}
       </div>

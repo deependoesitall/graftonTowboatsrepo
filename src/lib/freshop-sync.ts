@@ -62,6 +62,10 @@ export interface FreshopProduct {
   canonical_url?: string;
   department_ids?: string[];
   status?: string;
+  /** Freshop's store-wide popularity RANK (1 = most popular). Drives the
+   * "People who bought this also bought" row — same signal Sinclair's own
+   * storefront sorts by. */
+  popularity?: number;
 }
 
 export interface SyncableProduct {
@@ -79,6 +83,7 @@ export interface SyncableProduct {
   quantity_label: string | null;
   quantity_size_ratio: number | null;
   freshop_id: string | null;
+  popularity: number | null;
 }
 
 // ── UPC normalization (identical to the client enrich) ──
@@ -182,6 +187,10 @@ export function computeFields(
   if (newFreshopId && newFreshopId !== product.freshop_id) {
     fields.freshop_id = newFreshopId;
   }
+  // Popularity rank — always synced (it shifts as the store's sales shift).
+  const newPop = typeof hit.popularity === 'number' && isFinite(hit.popularity) && hit.popularity > 0
+    ? Math.round(hit.popularity) : null;
+  if (newPop !== product.popularity) fields.popularity = newPop;
   return Object.keys(fields).length ? fields : null;
 }
 
@@ -198,6 +207,19 @@ export async function fetchFreshopPage(departmentId: string, skip: number): Prom
   } catch {
     return null;
   }
+}
+
+/**
+ * Fetch several pages CONCURRENTLY. NCR tolerates a handful of parallel reads
+ * far better than it tolerates a long serial crawl (the old 1.2s-per-page
+ * pacing spent most of the function's time budget asleep). Any page returning
+ * null (rate limit / error) aborts the batch — the caller checkpoints what
+ * succeeded and the next invocation retries the rest.
+ */
+export async function fetchFreshopPages(
+  reqs: Array<{ departmentId: string; skip: number }>,
+): Promise<Array<FreshopProduct[] | null>> {
+  return Promise.all(reqs.map(r => fetchFreshopPage(r.departmentId, r.skip)));
 }
 
 /** Item count for one department subtree — null when Freshop won't answer / looks broken. */
@@ -300,6 +322,8 @@ export function buildStoreProduct(p: FreshopProduct, deptCategory: string): Reco
     quantity_size_ratio: ratio,
     billed_by_weight: weighable,
     freshop_id: p.id != null ? String(p.id) : null,
+    popularity: typeof p.popularity === 'number' && isFinite(p.popularity) && p.popularity > 0
+      ? Math.round(p.popularity) : null,
     store_only: true,
     is_active: true,
     is_available: (p.status || 'available') === 'available',
