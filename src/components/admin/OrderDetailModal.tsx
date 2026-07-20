@@ -3,7 +3,7 @@
 
 import { useState, useCallback } from 'react';
 import {
-  X, Download, Printer, Trash2, Loader2, ShoppingCart,
+  X, Download, FileText, Printer, Trash2, Loader2, ShoppingCart,
   Ship, MapPin, Users, Package, Wrench, CheckCircle2, Eye,
   Pencil, Plus, Search, Check,
 } from 'lucide-react';
