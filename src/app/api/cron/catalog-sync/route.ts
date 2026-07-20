@@ -21,7 +21,8 @@ import { applyFormLayout } from '@/lib/form-layout-apply';
 import {
   fetchFreshopPage, fetchFreshopTotal, freshopKeys, ourKeys, computeFields,
   buildStoreProduct, norm,
-  FRESHOP_PAGE_SIZE, type FreshopProduct, type SyncableProduct, type SyncStats,
+  FRESHOP_PAGE_SIZE, FRESHOP_DEPARTMENTS,
+  type FreshopProduct, type SyncableProduct, type SyncStats,
 } from '@/lib/freshop-sync';
 
 export const dynamic = 'force-dynamic';
@@ -31,11 +32,20 @@ const PAGES_PER_RUN = 12;           // small chunks keep us under NCR's rate lim
 const PAGE_DELAY_MS = 1200;         // gentle pacing, same spirit as the manual enrich
 const TIME_BUDGET_MS = 40_000;      // leave headroom under maxDuration
 
+interface DeptProgress {
+  id: string;
+  name: string;
+  category: string;
+  total: number;
+  pages: number;
+  done: number[];
+}
+
 interface SyncState {
   day?: string;                     // date the current sync session STARTED (America/Chicago)
-  total?: number;
-  pages?: number;
-  donePages?: number[];
+  /** Per-department progress — departments are fetched separately so alcohol
+   * is never requested and category mapping is authoritative. */
+  depts?: DeptProgress[];
   stats?: SyncStats;
   applied?: number;
   /** New store items inserted this session (full-store import). */
@@ -77,21 +87,30 @@ async function handle(req: NextRequest) {
     if (state.day === today) {
       return NextResponse.json({ status: 'done', day: today, completedAt: state.completedAt, stats: state.stats, inserted: state.inserted || 0 });
     }
-    state = { day: today, donePages: [], stats: emptyStats(), applied: 0, inserted: 0 };
-  } else if (!state.day) {
-    state = { day: today, donePages: [], stats: emptyStats(), applied: 0, inserted: 0 };
+    state = { day: today, stats: emptyStats(), applied: 0, inserted: 0 };
+  } else if (!state.day || !state.depts) {
+    // !state.depts also catches checkpoints from the pre-department layout —
+    // they restart cleanly under the new per-department structure.
+    state = { day: today, stats: emptyStats(), applied: 0, inserted: 0 };
   }
 
-  // ── Discover catalog size once per session ──
-  if (!state.total || !state.pages) {
-    const total = await fetchFreshopTotal();
-    if (!total) {
-      state.lastError = 'Freshop unreachable (rate limit?) — will retry on next invocation';
-      await saveState(supabase, state);
-      return NextResponse.json({ status: 'waiting', reason: state.lastError }, { status: 200 });
+  // ── Discover per-department sizes once per session ──
+  // Freshop's totals can wobble during their own nightly rebuild, so each
+  // department's count is captured once at session start and held for the
+  // whole session (progress math stays stable).
+  if (!state.depts || state.depts.length === 0) {
+    const depts: DeptProgress[] = [];
+    for (const d of FRESHOP_DEPARTMENTS) {
+      const total = await fetchFreshopTotal(d.id);
+      if (total == null) {
+        state.lastError = `Freshop unreachable sizing ${d.name} — will retry on next invocation`;
+        await saveState(supabase, state);
+        return NextResponse.json({ status: 'waiting', reason: state.lastError }, { status: 200 });
+      }
+      depts.push({ id: d.id, name: d.name, category: d.category, total, pages: Math.ceil(total / FRESHOP_PAGE_SIZE), done: [] });
+      await sleep(400);
     }
-    state.total = total;
-    state.pages = Math.ceil(total / FRESHOP_PAGE_SIZE);
+    state.depts = depts;
   }
 
   // ── Load our catalog once per invocation (id + syncable fields) ──
@@ -111,16 +130,21 @@ async function handle(req: NextRequest) {
   const knownUpcKeys = new Set<string>();
   for (const p of ours) for (const k of ourKeys(p.upc || '')) knownUpcKeys.add(k);
 
-  // ── Fetch a chunk of pages ──
-  const doneSet = new Set(state.donePages || []);
-  const queue = Array.from({ length: state.pages }, (_, i) => i).filter(i => !doneSet.has(i));
+  // ── Fetch a chunk of pages, walking department by department ──
   const stats = state.stats || emptyStats();
   let pagesFetched = 0;
   let rateLimited = false;
 
-  for (const pageIdx of queue) {
+  // Flat work queue: every not-yet-done (department, page) pair in order.
+  const queue: Array<{ dept: DeptProgress; pageIdx: number }> = [];
+  for (const dept of state.depts) {
+    const done = new Set(dept.done);
+    for (let i = 0; i < dept.pages; i++) if (!done.has(i)) queue.push({ dept, pageIdx: i });
+  }
+
+  for (const { dept, pageIdx } of queue) {
     if (pagesFetched >= PAGES_PER_RUN || Date.now() - started > TIME_BUDGET_MS) break;
-    const items = await fetchFreshopPage(pageIdx * FRESHOP_PAGE_SIZE);
+    const items = await fetchFreshopPage(dept.id, pageIdx * FRESHOP_PAGE_SIZE);
     if (!items) { rateLimited = true; break; }  // back off — next invocation retries
 
     // Index THIS page by Freshop keys, then walk our catalog (same matching
@@ -156,14 +180,15 @@ async function handle(req: NextRequest) {
     }
 
     // ── FULL-STORE IMPORT: page items that matched nothing in our catalog
-    // become new store_only products (alcohol + unsellable rows excluded).
+    // become new store_only products. Category comes from the DEPARTMENT this
+    // page was fetched from (authoritative — AWG items have flat URLs).
     const inserts: Record<string, unknown>[] = [];
     for (const item of items) {
       if (item.id != null && usedFreshopIds.has(String(item.id))) continue;
       const upcKey = norm(item.upc || item.barcode_upc_a);
       if (upcKey && knownUpcKeys.has(upcKey)) continue;      // already carried / inserted
-      const row = buildStoreProduct(item);
-      if (!row) continue;                                     // alcohol / no price / no name
+      const row = buildStoreProduct(item, dept.category);
+      if (!row) continue;                                     // alcohol stray / no price / no name
       inserts.push(row);
       if (upcKey) {
         knownUpcKeys.add(upcKey);
@@ -180,17 +205,16 @@ async function handle(req: NextRequest) {
       state.inserted = (state.inserted || 0) + inserts.length;
     }
 
-    doneSet.add(pageIdx);
+    dept.done.push(pageIdx);
     pagesFetched++;
     if (pagesFetched < PAGES_PER_RUN) await sleep(PAGE_DELAY_MS);
   }
 
-  state.donePages = Array.from(doneSet);
   state.stats = stats;
   state.lastError = rateLimited ? 'Freshop rate limit mid-run — resuming next invocation' : undefined;
 
-  // ── Finished the whole catalog? Re-apply the order-form layout + log once ──
-  const finished = state.donePages.length >= (state.pages || 0);
+  // ── Finished every department? Re-apply the order-form layout + log once ──
+  const finished = state.depts.every(d => d.done.length >= d.pages);
   if (finished) {
     try {
       const layout = await applyFormLayout(supabase);
@@ -216,8 +240,9 @@ async function handle(req: NextRequest) {
   return NextResponse.json({
     status: finished ? 'done' : rateLimited ? 'rate-limited' : 'in-progress',
     session_started: state.day,
-    pages_done: state.donePages.length,
-    pages_total: state.pages,
+    pages_done: state.depts.reduce((s, d) => s + d.done.length, 0),
+    pages_total: state.depts.reduce((s, d) => s + d.pages, 0),
+    departments: state.depts.map(d => `${d.name}: ${d.done.length}/${d.pages}`),
     applied_so_far: state.applied || 0,
     store_items_imported: state.inserted || 0,
     stats,

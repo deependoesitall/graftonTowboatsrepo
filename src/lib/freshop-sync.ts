@@ -17,10 +17,29 @@ const IMAGE_BASE = 'https://images.freshop.ncrcloud.com';
 
 // Freshop's catalog ballooned to ~71,600 rows (the AWG warehouse superset).
 // The BROWSABLE store is the storefront department tree — ~20,700 items
-// (probed live July 19, 2026). Scoping every catalog request to this root
-// keeps the nightly sweep at ~208 pages instead of ~717 and keeps warehouse
-// junk out of the import.
+// (probed live July 19, 2026).
 export const FRESHOP_STOREFRONT_ROOT = '21585437';
+
+// The sync fetches DEPARTMENT BY DEPARTMENT (not the root tree) because:
+//  1. Alcohol exclusion becomes airtight — the Beer/Wine/Spirits tree
+//     (1595059) is simply never requested.
+//  2. Category mapping is authoritative — an item's category is the
+//     department we fetched it from. (canonical_url parsing failed: the AWG
+//     general-merch items have FLAT product URLs with no department path.)
+//  3. Junk outside the 9 real departments is never fetched at all.
+// IDs probed live from /1/departments, July 19 2026.
+export const FRESHOP_DEPARTMENTS: Array<{ id: string; name: string; category: string }> = [
+  { id: '1595064', name: 'Meat',          category: 'Meat & Seafood' },
+  { id: '1595067', name: 'Seafood',       category: 'Meat & Seafood' },
+  { id: '1595060', name: 'Dairy',         category: 'Dairy & Eggs' },
+  { id: '1595066', name: 'Produce',       category: 'Produce' },
+  { id: '1595062', name: 'Frozen Foods',  category: 'Frozen Foods' },
+  { id: '1595058', name: 'Bakery',        category: 'Bakery & Deli' },
+  { id: '1595061', name: 'Deli',          category: 'Bakery & Deli' },
+  { id: '1595065', name: 'Pantry',        category: 'Pantry & Grocery' },
+  { id: '1595063', name: 'Home & Floral', category: 'Household & Cleaning' },
+  // 1595059 Beer, Wine & Spirits — INTENTIONALLY ABSENT (can't deliver alcohol)
+];
 
 export interface FreshopProduct {
   id?: string | number;
@@ -160,11 +179,11 @@ export function computeFields(
   return Object.keys(fields).length ? fields : null;
 }
 
-/** One Freshop catalog page, scoped to the browsable storefront tree. Null on rate limit/error. */
-export async function fetchFreshopPage(skip: number): Promise<FreshopProduct[] | null> {
+/** One Freshop catalog page, scoped to ONE department subtree. Null on rate limit/error. */
+export async function fetchFreshopPage(departmentId: string, skip: number): Promise<FreshopProduct[] | null> {
   try {
     const res = await fetch(
-      `https://api.freshop.ncrcloud.com/1/products?app_key=${FRESHOP_APP_KEY}&store_id=${FRESHOP_STORE_ID}&department_id=${FRESHOP_STOREFRONT_ROOT}&limit=${FRESHOP_PAGE_SIZE}&skip=${skip}&sort=name&name_sort=asc`,
+      `https://api.freshop.ncrcloud.com/1/products?app_key=${FRESHOP_APP_KEY}&store_id=${FRESHOP_STORE_ID}&department_id=${departmentId}&limit=${FRESHOP_PAGE_SIZE}&skip=${skip}&sort=name&name_sort=asc`,
       { cache: 'no-store' },
     );
     if (!res.ok) return null;
@@ -175,11 +194,11 @@ export async function fetchFreshopPage(skip: number): Promise<FreshopProduct[] |
   }
 }
 
-/** Browsable-store size (storefront tree only) — null when Freshop won't answer. */
-export async function fetchFreshopTotal(): Promise<number | null> {
+/** Item count for one department subtree — null when Freshop won't answer / looks broken. */
+export async function fetchFreshopTotal(departmentId: string): Promise<number | null> {
   try {
     const res = await fetch(
-      `https://api.freshop.ncrcloud.com/1/products?app_key=${FRESHOP_APP_KEY}&store_id=${FRESHOP_STORE_ID}&department_id=${FRESHOP_STOREFRONT_ROOT}&limit=1`,
+      `https://api.freshop.ncrcloud.com/1/products?app_key=${FRESHOP_APP_KEY}&store_id=${FRESHOP_STORE_ID}&department_id=${departmentId}&limit=1`,
       { cache: 'no-store' },
     );
     if (!res.ok) return null;
@@ -198,34 +217,30 @@ function deptPath(p: FreshopProduct): string[] {
   return m ? [m[1] || '', m[2] || ''] : ['', ''];
 }
 
-/** Alcohol can't be delivered to boats — exclude the whole Beer/Wine/Spirits tree. */
+/**
+ * Belt-and-braces alcohol guard. The Beer/Wine/Spirits department is never
+ * even fetched, so this only catches strays cross-listed into other
+ * departments. Name-keyword based, guarded against "root beer" / "ginger
+ * ale" / "cooking wine" false positives.
+ */
 export function isAlcohol(p: FreshopProduct): boolean {
   const [top] = deptPath(p);
   if (top.includes('beer') || top.includes('wine') || top.includes('spirit')) return true;
-  // Fallback when canonical_url is missing: obvious keywords, guarded against
-  // "root beer" / "ginger ale" / "cooking wine" false positives.
-  if (!top) {
-    const n = (p.name || '').toLowerCase();
-    if (/\b(vodka|whiskey|whisky|tequila|bourbon|brandy|liquor|lager|ipa\b|champagne|seltzer.*(alc|%)|malt liquor)\b/.test(n)) return true;
-  }
-  return false;
+  const n = (p.name || '').toLowerCase();
+  return /\b(vodka|whiskey|whisky|tequila|bourbon|brandy|liquor|lager|malt liquor|champagne|hard seltzer|hard cider|ipa)\b/.test(n);
 }
 
-/** Map the Freshop department path to one of OUR catalog categories. */
-export function categoryFrom(p: FreshopProduct): string {
-  const [top, second] = deptPath(p);
-  if (top === 'produce') return 'Produce';
-  if (top === 'meat' || top === 'seafood') return 'Meat & Seafood';
-  if (top === 'dairy') return 'Dairy & Eggs';
-  if (top.startsWith('frozen')) return 'Frozen Foods';
-  if (top === 'bakery' || top === 'deli') return 'Bakery & Deli';
-  if (top.includes('home') || top.includes('floral')) return 'Household & Cleaning';
-  if (top === 'pantry') {
-    if (/beverage|drink|soda|water|juice|coffee|tea/.test(second)) return 'Beverages';
-    if (/snack|candy|cookie|chip|sweet|cracker/.test(second)) return 'Snacks & Sweets';
-    return 'Pantry & Grocery';
-  }
-  return 'Pantry & Grocery';
+/**
+ * Refine the department's base category for Pantry items using the item's
+ * canonical sub-path when present ("pantry/beverages/…" → Beverages).
+ * AWG flat-URL items simply keep the department category.
+ */
+export function refineCategory(baseCategory: string, p: FreshopProduct): string {
+  if (baseCategory !== 'Pantry & Grocery') return baseCategory;
+  const [, second] = deptPath(p);
+  if (/beverage|drink|soda|water|juice|coffee|tea/.test(second)) return 'Beverages';
+  if (/snack|candy|cookie|chip|sweet|cracker/.test(second)) return 'Snacks & Sweets';
+  return baseCategory;
 }
 
 /** Pretty sub-category from the second path segment: "fresh_fruit" → "Fresh Fruit". */
@@ -244,11 +259,13 @@ export function isWeighableUpcDigits(upc: string | null | undefined): boolean {
 
 /**
  * Build a NEW products row for a store item the barge catalog doesn't carry.
+ * `deptCategory` = OUR category for the department this item was fetched from
+ * (authoritative — canonical_url is unreliable for the AWG flat-URL items).
  * store_only=TRUE keeps it out of the default browse — reachable only through
  * the "browse everything Sinclair's carries" / "shop the rest of the store"
  * flows. Returns null for unsellable rows (no name / no price / alcohol).
  */
-export function buildStoreProduct(p: FreshopProduct): Record<string, unknown> | null {
+export function buildStoreProduct(p: FreshopProduct, deptCategory: string): Record<string, unknown> | null {
   const name = (p.name || '').trim();
   const price = priceFrom(p);
   if (!name || price == null) return null;
@@ -260,7 +277,7 @@ export function buildStoreProduct(p: FreshopProduct): Record<string, unknown> | 
   return {
     description: name,
     details: detailsFrom(p),
-    category: categoryFrom(p),
+    category: refineCategory(deptCategory, p),
     sub_category: subCategoryFrom(p),
     upc: upcRaw,
     pkg_size: (p.size || '').trim() || null,

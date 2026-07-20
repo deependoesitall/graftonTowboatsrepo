@@ -99,7 +99,7 @@ Note: the checkout's ETA cutoff hint ("orders need N hours before arrival") is a
 ## Backlog / future (parked in the room)
 
 - Delivery fees built into orders — per company/boat, manual at first (Ingram flat vs Arco/ACBL split billing). "Wanted to get bugs worked out first."
-- Live inventory counts ("4 remaining") — Fresh Shop doesn't do it either; Dave curious, not asked for.
+- ~~Live inventory counts~~ — **NEVER DOING THIS (Deepen, July 19: "We are not touching live inventory counts at all. Never.")** Do not propose, build, or scope it. Fresh Shop doesn't do it either.
 - Barcode-scan verify / scan-to-substitute in shopping mode (Fresh Shop iPad parity) — pairs with them maybe buying tablets.
 - Restricted-items list beyond alcohol — Dave asking Ingram; nothing else blocked today.
 - Meat-seasoning promotions / goody-bag tie-ins; highlighted local items as marketing.
