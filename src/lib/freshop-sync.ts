@@ -31,7 +31,7 @@ export const FRESHOP_STOREFRONT_ROOT = '21585437';
 export const FRESHOP_DEPARTMENTS: Array<{ id: string; name: string; category: string }> = [
   { id: '1595064', name: 'Meat',          category: 'Meat & Seafood' },
   { id: '1595067', name: 'Seafood',       category: 'Meat & Seafood' },
-  { id: '1595060', name: 'Dairy',         category: 'Dairy & Eggs' },
+  { id: '1595060', name: 'Dairy',         category: 'Dairy' },
   { id: '1595066', name: 'Produce',       category: 'Produce' },
   { id: '1595062', name: 'Frozen Foods',  category: 'Frozen Foods' },
   { id: '1595058', name: 'Bakery',        category: 'Bakery & Deli' },

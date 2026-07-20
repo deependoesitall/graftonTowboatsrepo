@@ -2,7 +2,7 @@
 // src/components/catalog/ProductGrid.tsx
 import { useState, useCallback, useEffect, type ReactNode } from 'react';
 import { Product } from '@/types';
-import { formatCurrency, formatLb, lbStepsFor, usesLbSteps } from '@/lib/utils';
+import { formatCurrency, formatLb, lbStepsFor, usesLbSteps, productDisplayName } from '@/lib/utils';
 import { addToCart } from '@/lib/cart';
 import { Plus, Minus, ShoppingCart, Package, Check, Star, X, Scale, Tag } from 'lucide-react';
 import Link from 'next/link';
@@ -175,7 +175,9 @@ function ProductCard({ product, isLoggedIn, isFavorite, onOpenDetail }: {
   const handleAdd = useCallback(() => {
     addToCart({
       product_id: product.id,
-      description: product.description,
+      // Customers see the full website name everywhere (cart, emails,
+      // receipts) — not the POS abbreviation ("YOP STRWBRY YOG").
+      description: productDisplayName(product),
       category: product.category,
       pkg_size: product.pkg_size,
       uom: product.uom,
@@ -189,7 +191,7 @@ function ProductCard({ product, isLoggedIn, isFavorite, onOpenDetail }: {
     setJustAdded(true);
     toast({
       title: 'Added to cart',
-      description: `${lbSteps ? formatLb(qty) : `${qty}×`} ${product.description}`,
+      description: `${lbSteps ? formatLb(qty) : `${qty}×`} ${productDisplayName(product)}`,
       variant: 'success',
       duration: 2000,
     });
@@ -247,17 +249,11 @@ function ProductCard({ product, isLoggedIn, isFavorite, onOpenDetail }: {
             {product.category}
           </span>
 
-          {/* Product name */}
+          {/* Product name — the FULL website name, like Sinclair's own site
+              ("Yoplait Low Fat Strawberry Yogurt"), never the POS abbreviation */}
           <h3 className="font-body font-semibold text-brand-navy text-sm leading-tight line-clamp-2 min-h-[2.5rem]">
-            {product.description}
+            {productDisplayName(product)}
           </h3>
-
-          {/* Customer-facing description */}
-          {product.details && (
-            <p className="text-[11px] text-gray-500 leading-snug line-clamp-3 -mt-1">
-              {product.details}
-            </p>
-          )}
 
           {/* Pack size */}
           {product.pkg_size && (
@@ -374,7 +370,7 @@ function ProductDetailModal({ product, onClose }: { product: Product; onClose: (
   function handleAdd() {
     addToCart({
       product_id: product.id,
-      description: product.description,
+      description: productDisplayName(product),
       category: product.category,
       pkg_size: product.pkg_size,
       uom: product.uom,
@@ -386,7 +382,7 @@ function ProductDetailModal({ product, onClose }: { product: Product; onClose: (
       paid_by: 'vessel',
     });
     setJustAdded(true);
-    toast({ title: 'Added to cart', description: `${lbSteps ? formatLb(qty) : `${qty}×`} ${product.description}`, variant: 'success', duration: 2000 });
+    toast({ title: 'Added to cart', description: `${lbSteps ? formatLb(qty) : `${qty}×`} ${productDisplayName(product)}`, variant: 'success', duration: 2000 });
     setTimeout(() => { setJustAdded(false); }, 1500);
   }
 
@@ -412,10 +408,10 @@ function ProductDetailModal({ product, onClose }: { product: Product; onClose: (
         <div className="p-5 space-y-3">
           <div>
             <p className="text-[11px] font-bold text-brand-river uppercase tracking-wide">{product.category}</p>
-            <h2 className="font-display text-lg font-bold text-brand-navy leading-snug mt-0.5">{product.description}</h2>
+            <h2 className="font-display text-lg font-bold text-brand-navy leading-snug mt-0.5">{productDisplayName(product)}</h2>
           </div>
 
-          {product.details && (
+          {product.details && product.details.trim() !== productDisplayName(product) && (
             <p className="text-sm text-gray-600 leading-relaxed">{product.details}</p>
           )}
 
@@ -507,7 +503,7 @@ function ProductDetailModal({ product, onClose }: { product: Product; onClose: (
 function getCategoryColor(category: string): string {
   const map: Record<string, string> = {
     'Meat & Seafood': 'bg-brand-orange',
-    'Dairy & Eggs': 'bg-yellow-300',
+    'Dairy': 'bg-yellow-300',
     'Produce': 'bg-brand-glight',
     'Frozen Foods': 'bg-cyan-400',
     'Bakery & Deli': 'bg-amber-400',

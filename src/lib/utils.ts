@@ -51,7 +51,7 @@ export function getStatusLabel(status: string): string {
 export function normalizeCategory(raw: string): string {
   const upper = raw.toUpperCase().trim();
   if (upper.includes('MEAT') || upper.includes('BEEF') || upper.includes('PORK') || upper.includes('CHICKEN') || upper.includes('SEAFOOD') || upper.includes('FISH')) return 'Meat & Seafood';
-  if (upper.includes('DAIRY') || upper.includes('CHEESE') || upper.includes('MILK') || upper.includes('BUTTER') || upper.includes('YOGURT') || upper.includes('EGG')) return 'Dairy & Eggs';
+  if (upper.includes('DAIRY') || upper.includes('CHEESE') || upper.includes('MILK') || upper.includes('BUTTER') || upper.includes('YOGURT') || upper.includes('EGG')) return 'Dairy';
   if (upper.includes('PRODUCE') || upper.includes('VEGETABLE') || upper.includes('FRUIT') || upper.includes('SALAD')) return 'Produce';
   if (upper.includes('FROZEN')) return 'Frozen Foods';
   if (upper.includes('BREAD') || upper.includes('BAKERY') || upper.includes('DELI')) return 'Bakery & Deli';
@@ -97,9 +97,21 @@ export function formatQty(quantity: number, asPounds: boolean | undefined | null
   return asPounds ? formatLb(quantity) : `×${quantity}`;
 }
 
+/**
+ * Customer-facing product name. The catalog spreadsheet's `description` is
+ * abbreviated POS-style ("YOP STRWBRY YOG"); the full name from Sinclair's
+ * website lives in `details` ("Yoplait Low Fat Strawberry Yogurt 6 oz").
+ * Customers see the full name — like Sinclair's own site. `description`
+ * stays untouched in the DB: the paper-order-form matcher depends on it.
+ */
+export function productDisplayName(p: { description: string; details?: string | null }): string {
+  const d = (p.details || '').trim();
+  return d.length >= 4 ? d : p.description;
+}
+
 export const MAIN_CATEGORIES = [
   'Meat & Seafood',
-  'Dairy & Eggs',
+  'Dairy',
   'Produce',
   'Frozen Foods',
   'Bakery & Deli',

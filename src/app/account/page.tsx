@@ -14,7 +14,7 @@ import { CartBar } from '@/components/cart/CartBar';
 import { createClient } from '@/lib/supabase/client';
 import { getFavoriteProducts, removeFavorite } from '@/lib/favorites';
 import { addToCart, saveVesselInfo, getVesselInfo } from '@/lib/cart';
-import { formatCurrency, formatDate } from '@/lib/utils';
+import { formatCurrency, formatDate, productDisplayName } from '@/lib/utils';
 import { Product, Order } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 
@@ -140,11 +140,11 @@ function AccountContent() {
 
   function favToCart(p: Product) {
     addToCart({
-      product_id: p.id, description: p.description, category: p.category,
+      product_id: p.id, description: productDisplayName(p), category: p.category,
       pkg_size: p.pkg_size, uom: p.uom, price: p.price, quantity: 1,
       image_url: p.image_url, paid_by: 'vessel',
     });
-    toast({ title: 'Added to cart', description: p.description, variant: 'success', duration: 1500 });
+    toast({ title: 'Added to cart', description: productDisplayName(p), variant: 'success', duration: 1500 });
   }
 
   // Show loading screen while auth resolves

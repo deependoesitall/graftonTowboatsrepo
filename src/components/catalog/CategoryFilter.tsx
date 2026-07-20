@@ -13,7 +13,7 @@ interface CategoryFilterProps {
 
 const CATEGORY_ICONS: Record<string, string> = {
   'Meat & Seafood': '🥩',
-  'Dairy & Eggs': '🥚',
+  'Dairy': '🥚',
   'Produce': '🥦',
   'Frozen Foods': '🧊',
   'Bakery & Deli': '🍞',
