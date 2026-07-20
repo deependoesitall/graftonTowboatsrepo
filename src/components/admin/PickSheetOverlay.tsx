@@ -6,6 +6,7 @@
 // prints, never the admin chrome around it.
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Printer, Loader2, AlertCircle } from 'lucide-react';
 import { buildPickSheetForOrder } from '@/lib/pick-sheet';
 
@@ -30,7 +31,9 @@ export function PickSheetOverlay({ orderId, orderNumber, onClose }: {
     frameRef.current?.contentWindow?.print();
   }
 
-  return (
+  // PORTAL to <body>: this overlay mounts inside animated modals (order
+  // detail, shopping mode) whose transforms would trap position:fixed.
+  return createPortal(
     <div className="fixed inset-0 z-[95] bg-black/60 flex flex-col">
       {/* Header bar */}
       <div className="bg-brand-navy px-4 py-3 flex items-center justify-between shrink-0">
@@ -71,6 +74,7 @@ export function PickSheetOverlay({ orderId, orderNumber, onClose }: {
           />
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

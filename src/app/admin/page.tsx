@@ -1,6 +1,7 @@
 'use client';
 // src/app/admin/page.tsx
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import {
   Package, Clock, CheckCircle2, TrendingUp,
@@ -359,6 +360,21 @@ function FinalEmailQueue() {
   }
   useEffect(() => { load(); }, []);
 
+  // Clear an order from the queue WITHOUT emailing — for orders with no email
+  // on file, or ones handled by phone. Stamps who dismissed it (audit trail).
+  async function dismiss(o: QueueOrder) {
+    if (!confirm(`Remove ${o.order_number} from this list WITHOUT sending an email?\n\nUse this when the order has no email or you handled it by phone.`)) return;
+    await adminFetch(`/api/orders/${o.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        shopped_email_sent_at: new Date().toISOString(),
+        shopped_email_sent_by: 'dismissed — no email sent',
+      }),
+    });
+    load();
+  }
+
   if (!orders || orders.length === 0) return null; // quiet when there's nothing to send
 
   return (
@@ -387,6 +403,12 @@ function FinalEmailQueue() {
               onClick={() => setConfirmOrder(o)}
               className="flex items-center gap-1.5 bg-brand-navy text-white text-xs font-bold uppercase tracking-wide px-4 py-2 rounded-lg hover:bg-brand-steel transition-colors">
               <Send className="w-3.5 h-3.5" /> Send Final Email
+            </button>
+            <button
+              onClick={() => dismiss(o)}
+              title="Remove from this list without sending (e.g. no email on the order, or handled by phone)"
+              className="text-gray-300 hover:text-red-400 transition-colors p-1">
+              <X className="w-4 h-4" />
             </button>
           </div>
         ))}
@@ -425,9 +447,13 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
     }
   }
 
-  return (
-    <div className="fixed inset-0 z-[95] bg-black/60 flex items-center justify-center p-4">
-      <div className={`bg-white rounded-2xl shadow-2xl w-full flex flex-col max-h-[92vh] transition-all ${preview ? 'max-w-4xl' : 'max-w-md'}`}>
+  // PORTAL to <body>: the queue card animates with a transform, which traps
+  // position:fixed descendants inside it (the dialog rendered wedged into the
+  // card and couldn't be dismissed). Portaling escapes any ancestor styling.
+  return createPortal(
+    <div className="fixed inset-0 z-[95] bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
+      <div onClick={e => e.stopPropagation()}
+        className={`bg-white rounded-2xl shadow-2xl w-full flex flex-col max-h-[92vh] transition-all ${preview ? 'max-w-4xl' : 'max-w-md'}`}>
         {/* Header */}
         <div className="px-5 py-4 border-b border-gray-100 flex items-start justify-between gap-3 shrink-0">
           <div className="flex items-center gap-3">
@@ -501,10 +527,11 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
             className="flex-1 py-2.5 rounded-xl bg-brand-green text-white text-sm font-bold flex items-center justify-center gap-1.5 hover:bg-brand-gmed transition-colors disabled:opacity-50">
             {sending
               ? <><Loader2 className="w-4 h-4 animate-spin" /> Sending…</>
-              : <><Send className="w-4 h-4" /> Send Final Email</>}
+              : <><Send className="w-4 h-4" /> {sendTo ? 'Send Final Email' : 'No Email on Order'}</>}
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
