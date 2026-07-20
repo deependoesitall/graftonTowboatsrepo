@@ -67,9 +67,9 @@ function itemCard(i: OrderItem): string {
   </div>`;
 }
 
-function sectionHtml(title: string, note: string, groups: LocationGroup<OrderItem>[], pageBreak: boolean): string {
+function sectionHtml(title: string, note: string, groups: LocationGroup<OrderItem>[]): string {
   if (!groups.some(g => g.items.length)) return '';
-  return `<section class="dept${pageBreak ? ' brk' : ''}">
+  return `<section class="dept">
     <div class="dept-head"><h2>${esc(title)}</h2><span class="dept-note">${esc(note)}</span></div>
     ${groups.map(g => `
       <div class="loc-group">
@@ -109,11 +109,7 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: Arial, Helvetica, sans-serif; color: #111; font-size: 10px; padding: 14px; }
   @page { margin: 8mm; }
-  .toolbar { position: sticky; top: 0; background: #0b2545; color: #fff; padding: 10px 14px; border-radius: 8px;
-             display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
-  .toolbar button { background: #f2b705; border: 0; padding: 8px 22px; font-weight: bold; border-radius: 6px;
-                    font-size: 13px; cursor: pointer; }
-  @media print { .toolbar { display: none; } body { padding: 0; } }
+  @media print { body { padding: 0; } }
 
   /* Dense layout — max scannable barcodes per page, minimal dead space */
   header.sheet { display: flex; justify-content: space-between; align-items: baseline;
@@ -129,7 +125,8 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
   .warn { background: #fdf3d7; border: 1px solid #e8cd7a; border-radius: 4px; padding: 3px 8px; margin-bottom: 5px; font-size: 9.5px; }
   .notes { background: #fff8e6; border: 1px solid #e8cd7a; border-radius: 4px; padding: 3px 8px; margin-bottom: 5px; font-size: 9.5px; }
 
-  .dept.brk { page-break-before: always; }
+  /* No forced page-breaks — let the browser pack as many cards per page as fit.
+     Meat & Seafood / Produce section headers are the department handoff cue. */
   .dept-head { display: flex; align-items: baseline; gap: 8px; background: #0b2545; color: #fff;
                padding: 3px 8px; border-radius: 4px 4px 0 0; margin-top: 4px; }
   .dept-head h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
@@ -169,11 +166,6 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
            display: flex; justify-content: space-between; }
 </style></head>
 <body>
-  <div class="toolbar">
-    <span><b>Pick Sheet</b> — ${esc(order.order_number)} · scan barcodes at the register like tag sheets</span>
-    <button onclick="window.print()">&#128424; Print</button>
-  </div>
-
   <header class="sheet">
     <div class="brand"><b>SINCLAIR'S FOODS</b><span>Boat order via Grafton Towboat Services</span></div>
     <div class="ordmeta">
@@ -200,11 +192,11 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
 
   ${order.notes ? `<div class="notes"><b>Customer notes:</b> ${esc(order.notes)}</div>` : ''}
 
-  ${sectionHtml('Grocery', 'Walk order — start here', restGroups, false)}
-  ${sectionHtml('Produce', 'Hand this page to the Produce department', produceGroups, true)}
-  ${sectionHtml('Meat & Seafood', 'Hand this page to the Meat department', meatGroups, true)}
+  ${sectionHtml('Grocery', 'Walk order — start here', restGroups)}
+  ${sectionHtml('Produce', 'Hand to Produce dept', produceGroups)}
+  ${sectionHtml('Meat & Seafood', 'Hand to Meat dept', meatGroups)}
 
-  ${services.length ? `<section class="dept brk">
+  ${services.length ? `<section class="dept">
     <div class="dept-head"><h2>Outside Pickups</h2><span class="dept-note">Items the customer linked from other stores — Sinclair's handles these</span></div>
     ${services.map(s => {
       const d = (s.service_details || {}) as Record<string, string>;
