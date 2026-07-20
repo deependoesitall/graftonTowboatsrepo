@@ -17,6 +17,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
+import { Product } from '@/types';
 
 const LIMIT = 8;
 
@@ -41,7 +42,9 @@ export async function GET(
 
   if (!seed) return NextResponse.json({ products: [] });
 
-  const picked = new Map<string, Record<string, unknown>>();
+  // The typed Supabase client can't infer a row shape from a concatenated
+  // select string, so results are cast to Product explicitly.
+  const picked = new Map<string, Product>();
 
   // Pass 1 — popular items in the SAME category as the product being viewed.
   const { data: sameCat } = await supabase
@@ -55,7 +58,7 @@ export async function GET(
     .order('popularity', { ascending: true })
     .limit(LIMIT);
 
-  for (const p of sameCat || []) picked.set(p.id as string, p);
+  for (const p of (sameCat || []) as unknown as Product[]) picked.set(p.id, p);
 
   // Pass 2 — store-wide staples fill any remaining slots.
   if (picked.size < LIMIT) {
@@ -69,9 +72,9 @@ export async function GET(
       .order('popularity', { ascending: true })
       .limit(LIMIT * 3);
 
-    for (const p of storeWide || []) {
+    for (const p of (storeWide || []) as unknown as Product[]) {
       if (picked.size >= LIMIT) break;
-      if (!picked.has(p.id as string)) picked.set(p.id as string, p);
+      if (!picked.has(p.id)) picked.set(p.id, p);
     }
   }
 
