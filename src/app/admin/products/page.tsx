@@ -1,6 +1,7 @@
 'use client';
 // src/app/admin/products/page.tsx
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Upload, Package, AlertCircle, CheckCircle2, Loader2,
          Search, Pencil, Check, X, ToggleLeft, ToggleRight,
          ChevronLeft, ChevronRight, RefreshCw, Plus, Lock,
@@ -127,6 +128,262 @@ function CatalogSyncStatus({ isOwner }: { isOwner: boolean }) {
         <p className="text-[10px] text-amber-600 mt-0.5">{status.last_error}</p>
       )}
     </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHOTO BACKFILL — finds photos + proper names on Sinclair's site for items
+// the nightly UPC sync can't reach (no UPC, or a UPC that doesn't line up).
+// Catches the POS-abbreviation rows: "SCHUBERT DNR YST RLS" → Sister
+// Schubert's Dinner Yeast Rolls, with the photo.
+//
+// Name matching is fuzzy and a wrong photo is customer-visible, so NOTHING is
+// written until a human has looked at it — search, review side by side,
+// deselect anything wrong, then apply.
+// ─────────────────────────────────────────────────────────────────────────────
+interface BackfillProposal {
+  id: string;
+  description: string;
+  category: string;
+  pkg_size: string | null;
+  price: number;
+  current_details: string | null;
+  candidate: {
+    proper_name: string;
+    freshop_name: string;
+    image_url: string;
+    score: number;
+    dept_path: string;
+    freshop_size: string | null;
+    freshop_price: number | null;
+    rename: boolean;
+    size_match: boolean;
+    price_match: boolean;
+  };
+}
+
+function PhotoBackfillPanel({ onClose, onApplied }: {
+  onClose: () => void; onApplied: () => void;
+}) {
+  const [proposals, setProposals] = useState<BackfillProposal[]>([]);
+  const [scanning, setScanning] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [done, setDone] = useState(false);
+  const [totalMissing, setTotalMissing] = useState(0);
+  const [scannedCount, setScannedCount] = useState(0);
+  const [note, setNote] = useState('');
+  // id → keep photo, and whether to also take the corrected name
+  const [picks, setPicks] = useState<Record<string, { photo: boolean; name: boolean }>>({});
+
+  const scan = useCallback(async () => {
+    setScanning(true);
+    setNote('');
+    let cursor = 0;
+    try {
+      for (let guard = 0; guard < 60; guard++) {
+        const res = await adminFetch('/api/admin/backfill-photos', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: 'preview', cursor }),
+        });
+        if (!res.ok) { setNote('Could not reach the catalog. Try again in a moment.'); break; }
+        const r = await res.json();
+
+        setTotalMissing(r.total_missing || 0);
+        setScannedCount(c => c + (r.scanned || 0));
+        if (r.proposals?.length) {
+          setProposals(prev => [...prev, ...r.proposals]);
+          setPicks(prev => {
+            const next = { ...prev };
+            for (const p of r.proposals as BackfillProposal[]) {
+              next[p.id] = { photo: true, name: p.candidate.rename };
+            }
+            return next;
+          });
+        }
+        cursor = r.cursor;
+        if (r.rate_limited) {
+          setNote("Sinclair's paused our requests — showing what we found so far. Run again shortly to continue.");
+          break;
+        }
+        if (!r.has_more) { setDone(true); break; }
+      }
+    } finally {
+      setScanning(false);
+    }
+  }, []);
+
+  useEffect(() => { scan(); }, [scan]);
+
+  async function apply() {
+    const chosen = proposals
+      .filter(p => picks[p.id]?.photo)
+      .map(p => ({
+        id: p.id,
+        image_url: p.candidate.image_url,
+        ...(picks[p.id]?.name ? { details: p.candidate.proper_name } : {}),
+      }));
+    if (!chosen.length) return;
+    setApplying(true);
+    try {
+      const res = await adminFetch('/api/admin/backfill-photos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'apply', picks: chosen }),
+      });
+      if (!res.ok) { setNote('Could not save. Nothing was changed.'); return; }
+      onApplied();
+      onClose();
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  const keptCount = proposals.filter(p => picks[p.id]?.photo).length;
+  const renameCount = proposals.filter(p => picks[p.id]?.photo && picks[p.id]?.name).length;
+  const noMatch = Math.max(0, scannedCount - proposals.length);
+
+  return createPortal(
+    <div className="fixed inset-0 z-[95] bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
+      <div onClick={e => e.stopPropagation()}
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl flex flex-col max-h-[92vh]">
+        {/* Header */}
+        <div className="px-5 py-4 border-b border-gray-100 flex items-start justify-between gap-3 shrink-0">
+          <div>
+            <h3 className="font-display text-lg font-bold text-brand-navy flex items-center gap-2">
+              <ImagePlus className="w-5 h-5 text-brand-gold" />
+              Find photos on Sinclair&apos;s site
+            </h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {scanning
+                ? `Searching Sinclair's — checked ${scannedCount.toLocaleString()} of ${totalMissing.toLocaleString()} items…`
+                : `Checked ${scannedCount.toLocaleString()} items · found ${proposals.length} match${proposals.length === 1 ? '' : 'es'} · ${noMatch} with nothing on their site`}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+        </div>
+
+        {/* Body */}
+        <div className="p-5 overflow-y-auto flex-1">
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-900 leading-relaxed mb-4">
+            These are matched by <strong>name</strong>, not barcode — so give them a look before saving.
+            Items only appear here when the match came from the right department on Sinclair&apos;s site
+            (a search for &ldquo;beef liver&rdquo; also returns dog food; those are filtered out).
+            Untick anything that looks wrong.
+          </div>
+
+          {note && (
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">{note}</p>
+          )}
+
+          {proposals.length === 0 && !scanning && (
+            <p className="text-sm text-gray-400 text-center py-10">
+              No matches found on Sinclair&apos;s site for the items missing photos.
+            </p>
+          )}
+
+          <div className="space-y-2">
+            {proposals.map(p => {
+              const pick = picks[p.id] || { photo: false, name: false };
+              return (
+                <div key={p.id}
+                  className={`flex items-center gap-4 border rounded-xl p-3 transition-colors ${
+                    pick.photo ? 'border-brand-gold/40 bg-brand-sand/20' : 'border-gray-200 bg-gray-50 opacity-60'
+                  }`}>
+                  {/* Keep toggle */}
+                  <input
+                    type="checkbox"
+                    checked={pick.photo}
+                    onChange={e => setPicks(prev => ({ ...prev, [p.id]: { ...pick, photo: e.target.checked } }))}
+                    className="w-4 h-4 accent-brand-navy shrink-0"
+                    aria-label={`Keep match for ${p.description}`}
+                  />
+
+                  {/* Proposed photo */}
+                  <div className="relative w-16 h-16 bg-white border border-gray-200 rounded-lg overflow-hidden shrink-0">
+                    <Image src={p.candidate.image_url} alt={p.candidate.freshop_name} fill
+                      className="object-contain p-1" unoptimized />
+                  </div>
+
+                  {/* Ours → theirs */}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-gray-400 truncate">
+                      <span className="font-mono">{p.description}</span>
+                      {p.pkg_size && <span className="ml-1.5">· {p.pkg_size}</span>}
+                      <span className="ml-1.5">· {formatCurrency(p.price)}</span>
+                    </p>
+                    <p className="text-sm font-semibold text-brand-navy truncate mt-0.5">
+                      {p.candidate.freshop_name}
+                    </p>
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                      <span className="text-[10px] text-gray-400">{p.candidate.dept_path}</span>
+                      {p.candidate.price_match && (
+                        <span className="text-[10px] font-bold text-green-700 bg-green-50 border border-green-200 rounded-full px-1.5">
+                          price matches
+                        </span>
+                      )}
+                      {p.candidate.size_match && (
+                        <span className="text-[10px] font-bold text-green-700 bg-green-50 border border-green-200 rounded-full px-1.5">
+                          size matches
+                        </span>
+                      )}
+                      {!p.candidate.price_match && !p.candidate.size_match && (
+                        <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-1.5">
+                          name only — check this one
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Rename opt-in */}
+                  <label className={`flex items-start gap-2 w-56 shrink-0 text-xs cursor-pointer ${
+                    pick.photo ? '' : 'pointer-events-none'
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={pick.name}
+                      onChange={e => setPicks(prev => ({ ...prev, [p.id]: { ...pick, name: e.target.checked } }))}
+                      className="w-3.5 h-3.5 accent-brand-navy mt-0.5 shrink-0"
+                    />
+                    <span className="min-w-0">
+                      <span className="block text-gray-400">Also show as</span>
+                      <span className="block font-semibold text-brand-navy leading-tight">
+                        {p.candidate.proper_name}
+                      </span>
+                    </span>
+                  </label>
+                </div>
+              );
+            })}
+          </div>
+
+          {scanning && (
+            <p className="flex items-center justify-center gap-2 text-xs text-gray-400 py-4">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Searching Sinclair&apos;s site…
+            </p>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 py-4 border-t border-gray-100 flex items-center gap-3 shrink-0">
+          <p className="text-xs text-gray-500 flex-1">
+            {keptCount} photo{keptCount === 1 ? '' : 's'} selected
+            {renameCount > 0 && ` · ${renameCount} name${renameCount === 1 ? '' : 's'} corrected`}
+          </p>
+          <button onClick={onClose} disabled={applying}
+            className="px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50">
+            Cancel
+          </button>
+          <button onClick={apply} disabled={applying || scanning || keptCount === 0}
+            className="px-5 py-2.5 rounded-xl bg-brand-green text-white text-sm font-bold flex items-center gap-1.5 hover:bg-brand-gmed disabled:opacity-50">
+            {applying
+              ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
+              : <><Check className="w-4 h-4" /> Save {keptCount > 0 ? keptCount : ''} selected</>}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
   );
 }
 
@@ -666,6 +923,7 @@ export default function AdminProductsPage() {
 
   const [denied, setDenied] = useState(false);
   const [sessionRole, setSessionRole] = useState<string | null>(null);
+  const [showBackfill, setShowBackfill] = useState(false);
   const { confirm: confirmDialog, dialog: confirmDialogEl } = useConfirm();
 
   // Auth guard — verify the session cookie with the server
@@ -888,6 +1146,11 @@ export default function AdminProductsPage() {
   return (
     <div>
       {confirmDialogEl}
+      {showBackfill && (
+        <PhotoBackfillPanel
+          onClose={() => setShowBackfill(false)}
+          onApplied={() => fetchProducts()} />
+      )}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="font-display text-2xl font-bold text-brand-navy">Product Catalog</h1>
@@ -895,6 +1158,11 @@ export default function AdminProductsPage() {
         </div>
         <div className="flex items-center gap-2">
           <CatalogSyncStatus isOwner={sessionRole === 'owner'} />
+          <button onClick={() => setShowBackfill(true)}
+            title="Search Sinclair's site for photos and proper names on items the nightly barcode sync can't match"
+            className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5">
+            <ImagePlus className="w-4 h-4" /> Find Photos
+          </button>
           <button onClick={exportCatalog} className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5">
             <Download className="w-4 h-4" /> Export CSV
           </button>
