@@ -133,7 +133,7 @@ async function handle(req: NextRequest) {
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase
       .from('products')
-      .select('id, upc, details, image_url, billed_by_weight, location, location_seq, location_manual, price, quantity_step, quantity_label, quantity_size_ratio, freshop_id, popularity')
+      .select('id, upc, details, image_url, billed_by_weight, location, location_seq, location_manual, manual_fields, price, quantity_step, quantity_label, quantity_size_ratio, freshop_id, popularity')
       .eq('store_only', false)
       .range(from, from + 999);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });

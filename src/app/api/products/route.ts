@@ -270,12 +270,47 @@ export async function PATCH(req: NextRequest) {
   const { id, ...updates } = body;
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
 
-  // Hand-edited locations are LOCKED against the nightly sync (store staff
-  // know the real shelf better than Freshop's walkpath data). Clearing the
-  // location unlocks it — auto-sync resumes.
+  // MANUAL-EDIT LOCK. Any field a human actually CHANGES here is recorded in
+  // products.manual_fields, and the nightly sync never overwrites a locked
+  // field again — so hand-entered descriptions, prices, weight flags, etc.
+  // persist forever, including when a seasonal item goes inactive and returns.
+  // We diff against the stored row so re-saving a product WITHOUT changing a
+  // field doesn't accidentally freeze it against Sinclair's updates.
+  const LOCKABLE = [
+    'description', 'details', 'category', 'sub_category', 'pkg_size',
+    'uom', 'price', 'tags', 'billed_by_weight', 'image_url', 'location',
+  ];
+
+  const { data: existing } = await supabase
+    .from('products')
+    .select('description, details, category, sub_category, pkg_size, uom, price, tags, billed_by_weight, image_url, location, manual_fields')
+    .eq('id', id)
+    .single();
+
+  const changed = (field: string): boolean => {
+    if (!(field in updates) || !existing) return false;
+    const next = (updates as Record<string, unknown>)[field];
+    const prev = (existing as Record<string, unknown>)[field];
+    if (field === 'price') return Math.abs(Number(next) - Number(prev)) >= 0.005;
+    if (field === 'tags') return JSON.stringify([...(next as string[] ?? [])].sort()) !== JSON.stringify([...(prev as string[] ?? [])].sort());
+    // Normalize null / '' so clearing then re-clearing isn't a "change".
+    return String(next ?? '') !== String(prev ?? '');
+  };
+
+  const locked = new Set<string>((existing?.manual_fields as string[]) || []);
+  for (const field of LOCKABLE) if (changed(field)) locked.add(field);
+
+  // Location keeps its own paired seq lock + legacy boolean. Clearing the
+  // location UNLOCKS it (auto-sync resumes) — the one field an admin commonly
+  // wants handed back to the data.
   if (updates.location !== undefined) {
-    updates.location_manual = !!String(updates.location || '').trim();
+    const hasLocation = !!String(updates.location || '').trim();
+    updates.location_manual = hasLocation;
+    if (hasLocation) { locked.add('location'); locked.add('location_seq'); }
+    else { locked.delete('location'); locked.delete('location_seq'); }
   }
+
+  updates.manual_fields = Array.from(locked);
 
   const { data, error } = await supabase
     .from('products')

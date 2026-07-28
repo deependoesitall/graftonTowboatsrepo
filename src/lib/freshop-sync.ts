@@ -37,7 +37,10 @@ export const FRESHOP_DEPARTMENTS: Array<{ id: string; name: string; category: st
   { id: '1595058', name: 'Bakery',        category: 'Bakery & Deli' },
   { id: '1595061', name: 'Deli',          category: 'Bakery & Deli' },
   { id: '1595065', name: 'Pantry',        category: 'Pantry & Grocery' },
-  { id: '1595063', name: 'Home & Floral', category: 'Household & Cleaning' },
+  // 1595063 Home & Floral — INTENTIONALLY ABSENT. Probed live July 2026: the
+  //   whole department is bouquets, plants, ferns, mulch and topsoil — nothing
+  //   a boat crew orders. Every real household item (dish soap, paper towels,
+  //   detergent, trash bags) lives under Pantry, so nothing useful is lost.
   // 1595059 Beer, Wine & Spirits — INTENTIONALLY ABSENT (can't deliver alcohol)
 ];
 
@@ -76,8 +79,13 @@ export interface SyncableProduct {
   billed_by_weight: boolean;
   location: string | null;
   location_seq: number | null;
-  /** TRUE = an admin corrected this location by hand — never overwrite it. */
+  /** TRUE = an admin corrected this location by hand — never overwrite it.
+   * (Legacy — superseded by manual_fields, still honored for old rows.) */
   location_manual?: boolean;
+  /** Field names a human edited in the admin — the sync never overwrites these,
+   * so hand-entered descriptions, prices, etc. persist through every sync and
+   * survive seasonal items going inactive and coming back. */
+  manual_fields?: string[] | null;
   price: number;
   quantity_step: number | null;
   quantity_label: string | null;
@@ -154,14 +162,20 @@ export function computeFields(
   stats: SyncStats,
 ): Record<string, unknown> | null {
   const fields: Record<string, unknown> = {};
+
+  // Fields a human edited in the admin are OFF-LIMITS to the sync — forever,
+  // and through inactive/seasonal cycles. Legacy location_manual still counts.
+  const locked = new Set(product.manual_fields || []);
+  if (product.location_manual) { locked.add('location'); locked.add('location_seq'); }
+
   const newDetails = detailsFrom(hit);
   const newImage = imageFrom(hit);
-  if (newDetails && !product.details && newDetails !== product.details) { fields.details = newDetails; stats.details++; }
-  if (newImage && !product.image_url && newImage !== product.image_url) { fields.image_url = newImage; stats.images++; }
-  if (hit.is_weight_required && !product.billed_by_weight) { fields.billed_by_weight = true; stats.weightFlags++; }
+  if (!locked.has('details') && newDetails && !product.details && newDetails !== product.details) { fields.details = newDetails; stats.details++; }
+  if (!locked.has('image_url') && newImage && !product.image_url && newImage !== product.image_url) { fields.image_url = newImage; stats.images++; }
+  if (!locked.has('billed_by_weight') && hit.is_weight_required && !product.billed_by_weight) { fields.billed_by_weight = true; stats.weightFlags++; }
   // Locations sync from Freshop's walkpath — EXCEPT where an admin corrected
-  // one by hand (location_manual): the humans in the store outrank the data.
-  if (!product.location_manual) {
+  // one by hand: the humans in the store outrank the data.
+  if (!locked.has('location')) {
     const newLocation = locationFrom(hit);
     const newSeq = locationSeqFrom(hit);
     if (newLocation && (newLocation !== product.location || newSeq !== product.location_seq)) {
@@ -171,7 +185,7 @@ export function computeFields(
     }
   }
   const newPrice = priceFrom(hit);
-  if (newPrice != null && Math.abs(newPrice - Number(product.price)) >= 0.005) {
+  if (!locked.has('price') && newPrice != null && Math.abs(newPrice - Number(product.price)) >= 0.005) {
     fields.price = newPrice;
     stats.prices++;
   }
@@ -259,6 +273,18 @@ export function isAlcohol(p: FreshopProduct): boolean {
 }
 
 /**
+ * Belt-and-braces floral/garden guard. The Home & Floral department is never
+ * fetched, so this only catches strays cross-listed into other departments.
+ * Boats don't order bouquets, houseplants, or landscaping supplies.
+ */
+export function isFloral(p: FreshopProduct): boolean {
+  const [top] = deptPath(p);
+  if (top === 'home_floral') return true;
+  const n = (p.name || '').toLowerCase();
+  return /\b(bouquet|bqt|floral|fresh cut|houseplant|potting soil|top ?soil|peat moss|mulch|perennial|succulent|orchid|hanging basket)\b/.test(n);
+}
+
+/**
  * Refine the department's base category for Pantry items using the item's
  * canonical sub-path when present ("pantry/beverages/…" → Beverages).
  * AWG flat-URL items simply keep the department category.
@@ -298,6 +324,7 @@ export function buildStoreProduct(p: FreshopProduct, deptCategory: string): Reco
   const price = priceFrom(p);
   if (!name || price == null) return null;
   if (isAlcohol(p)) return null;
+  if (isFloral(p)) return null;
   const upcRaw = (p.upc || '').trim() || norm(p.barcode_upc_a) || null;
   const weighable = !!p.is_weight_required || isWeighableUpcDigits(upcRaw);
   const step = typeof p.quantity_step === 'number' && isFinite(p.quantity_step) && p.quantity_step > 0 ? p.quantity_step : null;
