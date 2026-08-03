@@ -16,6 +16,34 @@ import { ImportWizard } from '@/components/admin/ImportWizard';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 
 
+// -- Thumbnail that opens the full-size image in a click-to-close lightbox,
+// so a reviewer can eyeball the actual photo before approving a match.
+function ZoomableThumb({ src, alt }: { src: string; alt: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}
+        className="relative w-16 h-16 bg-white border border-gray-200 rounded-lg overflow-hidden shrink-0 cursor-zoom-in hover:border-brand-steel transition-colors"
+        title="Click to view full size">
+        <Image src={src} alt={alt} fill className="object-contain p-1" unoptimized />
+      </button>
+      {open && createPortal(
+        <div className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-6 cursor-zoom-out"
+          onClick={() => setOpen(false)}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={src} alt={alt} onClick={e => e.stopPropagation()}
+            className="max-w-full max-h-full object-contain rounded-lg shadow-2xl bg-white" />
+          <button onClick={() => setOpen(false)}
+            className="absolute top-4 right-4 text-white/80 hover:text-white bg-black/40 rounded-full p-2">
+            <X className="w-5 h-5" />
+          </button>
+        </div>,
+        document.body
+      )}
+    </>
+  );
+}
+
 // -- Quiet nightly-sync status. The catalog syncs ITSELF (12:05 AM kickoff,
 // chunks overnight: prices, locations, images, new store items, order-form
 // layout). Admins never run anything — this line just proves it's happening.
@@ -290,20 +318,20 @@ function PhotoBackfillPanel({ onClose, onApplied }: {
                   className={`flex items-center gap-4 border rounded-xl p-3 transition-colors ${
                     pick.photo ? 'border-brand-gold/40 bg-brand-sand/20' : 'border-gray-200 bg-gray-50 opacity-60'
                   }`}>
-                  {/* Keep toggle */}
-                  <input
-                    type="checkbox"
-                    checked={pick.photo}
-                    onChange={e => setPicks(prev => ({ ...prev, [p.id]: { ...pick, photo: e.target.checked } }))}
-                    className="w-4 h-4 accent-brand-navy shrink-0"
-                    aria-label={`Keep match for ${p.description}`}
-                  />
+                  {/* Use-photo toggle (independent of the name below) */}
+                  <label className="flex flex-col items-center gap-0.5 shrink-0 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={pick.photo}
+                      onChange={e => setPicks(prev => ({ ...prev, [p.id]: { ...pick, photo: e.target.checked } }))}
+                      className="w-4 h-4 accent-brand-navy"
+                      aria-label={`Use photo for ${p.description}`}
+                    />
+                    <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">Use&nbsp;photo</span>
+                  </label>
 
                   {/* Proposed photo */}
-                  <div className="relative w-16 h-16 bg-white border border-gray-200 rounded-lg overflow-hidden shrink-0">
-                    <Image src={p.candidate.image_url} alt={p.candidate.freshop_name} fill
-                      className="object-contain p-1" unoptimized />
-                  </div>
+                  <ZoomableThumb src={p.candidate.image_url} alt={p.candidate.freshop_name} />
 
                   {/* Ours → theirs */}
                   <div className="flex-1 min-w-0">
@@ -468,12 +496,13 @@ function PhotoReviewPanel({ onClose, onApplied }: { onClose: () => void; onAppli
               <div key={p.id} className={`flex items-center gap-4 border rounded-xl p-3 transition-colors ${
                 pick.keep ? 'border-brand-gold/40 bg-brand-sand/20' : 'border-gray-200 bg-gray-50 opacity-60'
               }`}>
-                <input type="checkbox" checked={pick.keep}
-                  onChange={e => setPicks(v => ({ ...v, [p.id]: { ...pick, keep: e.target.checked } }))}
-                  className="w-4 h-4 accent-brand-navy shrink-0" />
-                <div className="relative w-16 h-16 bg-white border border-gray-200 rounded-lg overflow-hidden shrink-0">
-                  <Image src={p.proposed_image_url} alt={p.proposed_name || ''} fill className="object-contain p-1" unoptimized />
-                </div>
+                <label className="flex flex-col items-center gap-0.5 shrink-0 cursor-pointer">
+                  <input type="checkbox" checked={pick.keep}
+                    onChange={e => setPicks(v => ({ ...v, [p.id]: { ...pick, keep: e.target.checked } }))}
+                    className="w-4 h-4 accent-brand-navy" />
+                  <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">Use&nbsp;photo</span>
+                </label>
+                <ZoomableThumb src={p.proposed_image_url} alt={p.proposed_name || ''} />
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-gray-400 truncate">
                     <span className="font-mono">{p.description}</span>

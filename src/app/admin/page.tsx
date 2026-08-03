@@ -100,7 +100,7 @@ export default function AdminDashboard() {
               <input
                 type="text"
                 className="input-base"
-                placeholder="e.g. jennifer"
+                placeholder=""
                 value={username}
                 onChange={e => setUsername(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleLogin()}
