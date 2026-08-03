@@ -28,6 +28,8 @@ export async function POST(
   if ('delivery_service_type' in body) deliveryUpdate.delivery_service_type = body.delivery_service_type || null;
   if ('delivery_company_id' in body) deliveryUpdate.delivery_company_id = body.delivery_company_id || null;
   if ('bill_for_groceries' in body) deliveryUpdate.bill_for_groceries = !!body.bill_for_groceries;
+  // Grocery total from Sinclair's receipt (only sent for grocery-billed orders).
+  if (body.register_total != null && body.register_total !== '') deliveryUpdate.register_total = Number(body.register_total);
   if (Object.keys(deliveryUpdate).length) {
     await supabase.from('orders').update(deliveryUpdate).eq('id', id);
   }

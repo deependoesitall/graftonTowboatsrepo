@@ -348,6 +348,7 @@ interface QueueOrder {
   customer_email: string | null;
   shopped_email_sent_at: string | null;
   register_total: number | null;
+  sinclairs_receipt_url: string | null;
 }
 
 function FinalEmailQueue() {
@@ -459,6 +460,27 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
   const [fee, setFee] = useState('');
   const [billGroceries, setBillGroceries] = useState(true);
   const [rateHint, setRateHint] = useState('');
+  // Grocery billing: Sinclair's actual receipt total + the receipt PDF itself.
+  const [groceryTotal, setGroceryTotal] = useState(order.register_total != null ? String(order.register_total) : '');
+  const [receiptUrl, setReceiptUrl] = useState<string | null>(order.sinclairs_receipt_url);
+  const [uploadingReceipt, setUploadingReceipt] = useState(false);
+
+  async function uploadReceipt(file: File) {
+    setUploadingReceipt(true); setError('');
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('kind', 'receipt');
+      const res = await adminFetch(`/api/orders/${order.id}/documents`, { method: 'POST', body: fd });
+      const r = await res.json();
+      if (!res.ok) throw new Error(r?.error || 'Upload failed');
+      setReceiptUrl(r.url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Upload failed');
+    } finally {
+      setUploadingReceipt(false);
+    }
+  }
 
   // Load barge lines + service types; default the company to the order's.
   useEffect(() => {
@@ -499,7 +521,15 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
   if (fee !== '') previewQuery.set('delivery_fee', fee);
   if (serviceType) previewQuery.set('delivery_service_type', serviceType);
   previewQuery.set('bill_for_groceries', String(billGroceries));
+  if (billGroceries && groceryTotal !== '') previewQuery.set('register_total', groceryTotal);
   const emailPreviewSrc = `/api/orders/${order.id}/email-preview?${previewQuery.toString()}`;
+
+  // Grocery-billed orders can't go out on an estimate — they need Sinclair's
+  // actual receipt total AND the receipt PDF to ride along.
+  const [overrideReceipt, setOverrideReceipt] = useState(false);
+  const [showOverride, setShowOverride] = useState(false);
+  const missingGroceryDocs = billGroceries && (groceryTotal === '' || !receiptUrl);
+  const needsGroceryDocs = missingGroceryDocs && !overrideReceipt;
 
   async function send() {
     setSending(true); setError('');
@@ -512,6 +542,7 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
           delivery_service_type: serviceType || null,
           delivery_company_id: companyId || null,
           bill_for_groceries: billGroceries,
+          register_total: billGroceries && groceryTotal !== '' ? Number(groceryTotal) : undefined,
         }),
       });
       const r = await res.json();
@@ -603,6 +634,61 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
                   </span>
                 </span>
               </label>
+
+              {/* Grocery-billed orders REQUIRE Sinclair's actual receipt total
+                  + the receipt PDF — the email can't go out on an estimate. */}
+              {billGroceries && (
+                <div className="mt-3 pt-3 border-t border-gray-100 space-y-2.5">
+                  <label className="block">
+                    <span className="text-[11px] font-semibold text-gray-500">Sinclair&apos;s grocery total (from their receipt)</span>
+                    <div className="flex items-center gap-1 mt-0.5">
+                      <span className="text-gray-400 text-sm">$</span>
+                      <input type="number" step="0.01" min="0" placeholder="0.00" value={groceryTotal}
+                        onChange={e => setGroceryTotal(e.target.value)}
+                        className="w-32 border border-gray-200 rounded-lg px-2 py-1.5 text-sm" />
+                    </div>
+                  </label>
+                  <div>
+                    <span className="text-[11px] font-semibold text-gray-500">Sinclair&apos;s register receipt (PDF)</span>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <label className={`flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg border cursor-pointer transition-colors ${
+                        receiptUrl ? 'border-green-300 bg-green-50 text-green-700' : 'border-brand-navy/30 text-brand-navy hover:bg-gray-50'
+                      }`}>
+                        {uploadingReceipt ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+                        {receiptUrl ? 'Receipt attached — replace' : 'Attach receipt'}
+                        <input type="file" accept="application/pdf,image/*" className="hidden"
+                          onChange={e => { const f = e.target.files?.[0]; if (f) uploadReceipt(f); }} />
+                      </label>
+                      {receiptUrl && (
+                        <a href={receiptUrl} target="_blank" rel="noreferrer" className="text-xs text-brand-river underline">View</a>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-1">
+                      It rides along with the final email so the customer gets Sinclair&apos;s exact prices, line by line.
+                    </p>
+                  </div>
+                  {missingGroceryDocs && (
+                    <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                      Enter the grocery total and attach Sinclair&apos;s receipt before sending, or turn off &ldquo;Bill groceries.&rdquo;
+                      {/* Deliberate owner-only override — small on purpose, and it
+                          takes an explicit tick so it can't happen by accident. */}
+                      {!showOverride ? (
+                        <button type="button" onClick={() => setShowOverride(true)}
+                          className="block mt-1 text-[10px] text-gray-400 underline underline-offset-2 hover:text-gray-600">
+                          Owner: send without the receipt
+                        </button>
+                      ) : (
+                        <label className="flex items-start gap-1.5 mt-1.5 text-[10px] text-red-700 cursor-pointer">
+                          <input type="checkbox" checked={overrideReceipt}
+                            onChange={e => setOverrideReceipt(e.target.checked)}
+                            className="w-3 h-3 accent-red-600 mt-0.5" />
+                          <span>I&apos;m sending this grocery bill <strong>without</strong> Sinclair&apos;s receipt attached, on purpose.</span>
+                        </label>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -648,11 +734,11 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
             className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50">
             Cancel
           </button>
-          <button onClick={send} disabled={sending || !sendTo}
+          <button onClick={send} disabled={sending || !sendTo || needsGroceryDocs}
             className="flex-1 py-2.5 rounded-xl bg-brand-green text-white text-sm font-bold flex items-center justify-center gap-1.5 hover:bg-brand-gmed transition-colors disabled:opacity-50">
             {sending
               ? <><Loader2 className="w-4 h-4 animate-spin" /> Sending…</>
-              : <><Send className="w-4 h-4" /> {sendTo ? 'Send Final Email' : 'No Email on Order'}</>}
+              : <><Send className="w-4 h-4" /> {!sendTo ? 'No Email on Order' : needsGroceryDocs ? 'Receipt Needed' : 'Send Final Email'}</>}
           </button>
         </div>
       </div>

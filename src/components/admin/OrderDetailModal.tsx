@@ -2,10 +2,11 @@
 // src/components/admin/OrderDetailModal.tsx
 
 import { useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import {
   X, Download, FileText, Printer, Trash2, Loader2, ShoppingCart,
   Ship, MapPin, Users, Package, Wrench, CheckCircle2, Eye,
-  Pencil, Plus, Search, Check,
+  Pencil, Plus, Search, Check, Receipt, FileSignature,
 } from 'lucide-react';
 import { Order, OrderItem, OrderStatus, Product } from '@/types';
 import { formatCurrency, formatDate, ORDER_STATUSES } from '@/lib/utils';
@@ -34,6 +35,28 @@ export function OrderDetailModal({
   const [markingFulfilled, setMarkingFulfilled] = useState(false);
   const [showPickSheet, setShowPickSheet] = useState(false);
   const { confirm: confirmDialog, dialog: confirmDialogEl } = useConfirm();
+
+  // ── Billing documents (owner): Sinclair's receipt + signed Ingram slip ──
+  const [docReceipt, setDocReceipt] = useState<string | null>(order.sinclairs_receipt_url ?? null);
+  const [docSlip, setDocSlip] = useState<string | null>(order.ingram_slip_url ?? null);
+  const [docUploading, setDocUploading] = useState<'receipt' | 'slip' | null>(null);
+  const [showInvoice, setShowInvoice] = useState(false);
+
+  async function uploadDoc(kind: 'receipt' | 'slip', file: File) {
+    setDocUploading(kind);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('kind', kind);
+      const res = await adminFetch(`/api/orders/${order.id}/documents`, { method: 'POST', body: fd });
+      if (res.ok) {
+        const r = await res.json();
+        if (kind === 'receipt') setDocReceipt(r.url); else setDocSlip(r.url);
+      }
+    } finally {
+      setDocUploading(null);
+    }
+  }
 
   // Barcode pick sheet — Freshop-style printout with scannable UPC-A codes,
   // shown IN-APP (no pop-up windows). Opening it on a NEW order prompts to
@@ -917,6 +940,55 @@ export function OrderDetailModal({
               </div>
             )}
 
+            {/* Billing documents + invoice — owner only */}
+            {isOwner && (
+              <div className="border-2 border-brand-navy/15 rounded-lg p-4">
+                <p className="text-xs font-bold text-brand-navy uppercase tracking-wide mb-3 flex items-center gap-1.5">
+                  <FileText className="w-3.5 h-3.5" /> Billing documents &amp; invoice
+                </p>
+                <div className="grid sm:grid-cols-2 gap-3">
+                  {/* Sinclair's receipt */}
+                  <div className="border border-gray-200 rounded-lg p-3">
+                    <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide flex items-center gap-1.5 mb-1.5">
+                      <Receipt className="w-3.5 h-3.5" /> Sinclair&apos;s receipt
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <label className={`flex items-center gap-1.5 text-xs font-bold px-2.5 py-1.5 rounded-lg border cursor-pointer transition-colors ${
+                        docReceipt ? 'border-green-300 bg-green-50 text-green-700' : 'border-brand-navy/30 text-brand-navy hover:bg-gray-50'
+                      }`}>
+                        {docUploading === 'receipt' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                        {docReceipt ? 'Replace' : 'Upload'}
+                        <input type="file" accept="application/pdf,image/*" className="hidden"
+                          onChange={e => { const f = e.target.files?.[0]; if (f) uploadDoc('receipt', f); }} />
+                      </label>
+                      {docReceipt && <a href={docReceipt} target="_blank" rel="noreferrer" className="text-xs text-brand-river underline">View</a>}
+                    </div>
+                  </div>
+                  {/* Ingram signed slip */}
+                  <div className="border border-gray-200 rounded-lg p-3">
+                    <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide flex items-center gap-1.5 mb-1.5">
+                      <FileSignature className="w-3.5 h-3.5" /> Signed Ingram slip
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <label className={`flex items-center gap-1.5 text-xs font-bold px-2.5 py-1.5 rounded-lg border cursor-pointer transition-colors ${
+                        docSlip ? 'border-green-300 bg-green-50 text-green-700' : 'border-brand-navy/30 text-brand-navy hover:bg-gray-50'
+                      }`}>
+                        {docUploading === 'slip' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                        {docSlip ? 'Replace' : 'Upload'}
+                        <input type="file" accept="application/pdf,image/*" className="hidden"
+                          onChange={e => { const f = e.target.files?.[0]; if (f) uploadDoc('slip', f); }} />
+                      </label>
+                      {docSlip && <a href={docSlip} target="_blank" rel="noreferrer" className="text-xs text-brand-river underline">View</a>}
+                    </div>
+                  </div>
+                </div>
+                <button onClick={() => setShowInvoice(true)}
+                  className="mt-3 w-full flex items-center justify-center gap-1.5 bg-brand-navy text-white text-xs font-bold uppercase tracking-wide px-4 py-2 rounded-lg hover:bg-brand-steel transition-colors">
+                  <FileText className="w-3.5 h-3.5" /> View / Print Invoice
+                </button>
+              </div>
+            )}
+
           </div>
         </div>
       </div>
@@ -935,6 +1007,20 @@ export function OrderDetailModal({
           orderNumber={order.order_number}
           onClose={() => setShowPickSheet(false)}
         />
+      )}
+
+      {showInvoice && createPortal(
+        <div className="fixed inset-0 z-[95] bg-black/70 flex flex-col" onClick={() => setShowInvoice(false)}>
+          <div className="bg-brand-navy text-white px-4 py-2.5 flex items-center justify-between shrink-0">
+            <span className="text-sm font-bold">Invoice — {order.order_number}</span>
+            <button onClick={() => setShowInvoice(false)} className="text-white/80 hover:text-white flex items-center gap-1 text-sm">
+              <X className="w-4 h-4" /> Close
+            </button>
+          </div>
+          <iframe src={`/api/orders/${order.id}/invoice`} title="Invoice"
+            className="flex-1 w-full bg-white" onClick={e => e.stopPropagation()} />
+        </div>,
+        document.body
       )}
 
       {confirmDialogEl}

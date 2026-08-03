@@ -220,6 +220,13 @@ export interface Order {
   /** TRUE: GTS bills groceries + delivery together. FALSE: customer pays
    * Sinclair's directly, so the final email shows only the delivery charge. */
   bill_for_groceries?: boolean;
+  /** Sinclair's actual register receipt (PDF) — attached to the final email
+   * on grocery-billed orders; its total feeds register_total. */
+  sinclairs_receipt_url?: string | null;
+  /** Signed Ingram Receipt Acknowledgement photo, for the QuickBooks bill. */
+  ingram_slip_url?: string | null;
+  /** Sequential GTS invoice number, assigned when the invoice is first generated. */
+  invoice_number?: number | null;
   status: OrderStatus;
   /** When the FINAL "Order Shopped" email was fired (manually, by a GTS owner). NULL = not yet sent. */
   shopped_email_sent_at?: string | null;

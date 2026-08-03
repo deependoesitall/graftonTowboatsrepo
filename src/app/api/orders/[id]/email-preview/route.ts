@@ -35,6 +35,7 @@ export async function GET(
   if (searchParams.has('delivery_fee')) merged.delivery_fee = Number(searchParams.get('delivery_fee')) || 0;
   if (searchParams.has('delivery_service_type')) merged.delivery_service_type = searchParams.get('delivery_service_type');
   if (searchParams.has('bill_for_groceries')) merged.bill_for_groceries = searchParams.get('bill_for_groceries') === 'true';
+  if (searchParams.has('register_total')) merged.register_total = Number(searchParams.get('register_total')) || null;
 
   const html = buildOrderShoppedEmailHtml(merged);
   return new NextResponse(html, {

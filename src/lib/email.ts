@@ -104,7 +104,7 @@ export function buildOrderEmailHtml(
       </div>
       <table width="100%" style="border-collapse:collapse;font-size:13px;">
         ${billGroceries ? `<tr>
-          <td style="padding:8px 12px;color:#333;">Groceries (Sinclair&apos;s)</td>
+          <td style="padding:8px 12px;color:#333;">Groceries (Sinclair&apos;s)${order.sinclairs_receipt_url ? ` <span style="color:#4d7c5f;font-size:10px;">— itemized receipt attached</span>` : ''}</td>
           <td style="padding:8px 12px;text-align:right;font-weight:700;">${formatCurrency(groceryTotal)}</td>
         </tr>` : `<tr>
           <td colspan="2" style="padding:8px 12px;color:#666;font-size:11px;font-style:italic;">Groceries are billed to you directly by Sinclair&apos;s — this invoice covers Grafton Towboat Services delivery only.</td>
@@ -476,7 +476,24 @@ export async function sendOrderShoppedEmail(
   const toEmail    = opts.businessEmail || process.env.BUSINESS_EMAIL || 'GraftonTowboatServices@gmail.com';
   const ccList     = parseCcList(opts.ccEmailRaw ?? process.env.ORDER_EMAIL_CC ?? '');
   const pdfBuffer2 = await generateOrderPdfBuffer(order);
-  const pdfAttachment2 = [{ filename: `order-${order.order_number}-fulfilled.pdf`, content: pdfBuffer2 }];
+  const attachments: Array<{ filename: string; content: Buffer }> = [
+    { filename: `order-${order.order_number}-fulfilled.pdf`, content: pdfBuffer2 },
+  ];
+
+  // On grocery-billed orders, attach Sinclair's ACTUAL register receipt so the
+  // customer gets their itemized prices line by line (not our estimate).
+  if (order.bill_for_groceries !== false && order.sinclairs_receipt_url) {
+    try {
+      const res = await fetch(order.sinclairs_receipt_url);
+      if (res.ok) {
+        const buf = Buffer.from(await res.arrayBuffer());
+        const ext = order.sinclairs_receipt_url.split('.').pop()?.split('?')[0] || 'pdf';
+        attachments.push({ filename: `sinclairs-receipt-${order.order_number}.${ext}`, content: buf });
+      }
+    } catch (e) {
+      console.error('Could not attach Sinclair receipt:', e);
+    }
+  }
 
   const hasGroceryItems = order.items.some(i => i.item_type !== 'service');
   const shoppedHtml = buildOrderShoppedEmailHtml(order);
@@ -497,7 +514,7 @@ export async function sendOrderShoppedEmail(
                    ? `📦 Your Order is Ready — ${order.order_number} — Grafton Towboat Services`
                    : `✅ Your Request is Fulfilled — ${order.order_number} — Grafton Towboat Services`,
     html:        shoppedHtml,
-    attachments: pdfAttachment2,
+    attachments,
   });
 
   if (result.error) {
