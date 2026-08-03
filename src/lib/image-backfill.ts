@@ -56,7 +56,9 @@ const CATEGORY_PATHS: Record<string, string[]> = {
   'Frozen Foods': ['frozen', 'frozen_foods'],
   'Bakery & Deli': ['bakery', 'deli', 'frozen_foods'],
   'Pantry & Grocery': ['pantry', 'frozen_foods', 'bakery', 'deli', 'dairy'],
-  'Beverages': ['pantry', 'beverages'],
+  // Beverages includes frozen — frozen juice concentrate (MM OJ FRZ) lives
+  // under frozen_foods on Sinclair's even though we file it under Beverages.
+  'Beverages': ['pantry', 'beverages', 'frozen_foods'],
   'Snacks & Sweets': ['pantry', 'frozen_foods', 'bakery'],
   'Household & Cleaning': ['home_floral', 'home', 'floral'],
   'Health & Personal Care': ['health', 'personal_care', 'pantry'],
@@ -76,22 +78,56 @@ function stripZzz(s: string): string {
   return s.replace(/\s*\(?\d+(\.\d+)?\s*zzz\)?/gi, '').trim();
 }
 
+/**
+ * POS register abbreviations → real words, so we SEARCH Sinclair's with terms
+ * their engine understands ("HSBRWN PTY" → "hash brown patty" finds it;
+ * "SCHUBERT DNR YST RLS" → "schubert dinner yeast rolls"). Vowel-dropped
+ * shorthand doesn't match their search at all otherwise. Curated + safe in a
+ * grocery context; the department gate + scoring still guard against a stray
+ * expansion pointing at the wrong item. Extend freely as new ones surface.
+ */
+const ABBREV: Record<string, string> = {
+  // words
+  HSBRWN: 'hash brown', HSHBRN: 'hash brown', PTY: 'patty', PTYS: 'patties',
+  DNR: 'dinner', YST: 'yeast', RLS: 'rolls', RL: 'roll', FRZ: 'frozen',
+  PEPPR: 'pepper', PPR: 'pepper', JALPENO: 'jalapeno', ASPRGS: 'asparagus',
+  CHDR: 'cheddar', CHS: 'cheese', MLK: 'milk', BRD: 'bread', CHKN: 'chicken',
+  CKN: 'chicken', SAUS: 'sausage', SASG: 'sausage', VEG: 'vegetable',
+  SHRD: 'shredded', SLCD: 'sliced', BNLS: 'boneless', SKNLS: 'skinless',
+  BRST: 'breast', THGH: 'thigh', GRND: 'ground', SMKD: 'smoked',
+  CRM: 'cream', BTR: 'butter', SGR: 'sugar', FLR: 'flour', WHT: 'wheat',
+  WHL: 'whole', CHOC: 'chocolate', VAN: 'vanilla', STRWBRY: 'strawberry',
+  BLBRRY: 'blueberry', ORG: 'orange', LMNADE: 'lemonade', BEV: 'beverage',
+  PZA: 'pizza', PEPP: 'pepperoni', SND: 'sandwich', BRGR: 'burger',
+  NGT: 'nugget', CRNCH: 'crunch', ASPRG: 'asparagus', CUTS: 'cuts',
+  // brands
+  MM: 'minute maid', BC: 'best choice', BSTCH: 'best choice', KR: 'kraft',
+  PF: 'prairie farms', HNZ: 'heinz', DELMNT: 'del monte', FLVRPAC: 'flavor pac',
+};
+
 /** First two path segments of a Freshop shop URL; null when the URL is flat. */
 function deptPath(p: FreshopProduct): { top: string; sub: string } | null {
   const m = (p.canonical_url || '').match(/\/shop\/([^/]+)\/([^/]+)/);
   return m ? { top: m[1].toLowerCase(), sub: (m[2] || '').toLowerCase() } : null;
 }
 
-/** Meaningful uppercase tokens — units, punctuation and size markers removed. */
+/** Meaningful uppercase tokens — units and size markers removed, POS
+ *  abbreviations expanded to real words so Sinclair's search can find them. */
 export function tokenize(name: string): string[] {
   const n = stripZzz(name)
     .toUpperCase()
     .replace(/(\d+)\s*PERCENT/g, '$1%')                            // "80 Percent" → "80%"
     .replace(/~?\s*\d+(\.\d+)?\s*(LB|LBS|#|OZ|CT|EA)\b/g, ' ')     // "~5lb", "16 oz"
     .replace(/[^A-Z0-9%\s]/g, ' ');
-  return n.split(/\s+/).filter(
-    t => t && !NOISE.has(t) && !/^\d+(\.\d+)?$/.test(t),
-  );
+  const raw = n.split(/\s+/).filter(t => t && !NOISE.has(t) && !/^\d+(\.\d+)?$/.test(t));
+  // Expand abbreviations (may become multiple tokens: HSBRWN → HASH, BROWN)
+  const out: string[] = [];
+  for (const t of raw) {
+    const exp = ABBREV[t];
+    if (exp) out.push(...exp.toUpperCase().split(' '));
+    else out.push(t);
+  }
+  return out;
 }
 
 /** Is `short` an in-order subsequence of `long`, anchored on the first letter? */
@@ -162,18 +198,33 @@ export interface ImageCandidate {
   price_match: boolean;
 }
 
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+/**
+ * Search Sinclair's, retrying once on failure. NCR rate-limits datacenter IPs
+ * (Vercel) hard, so a single blocked call would otherwise make Find Photos
+ * report "no matches" for everything. One paced retry rides out the throttle.
+ * Returns [] for a genuine empty result, null only when Sinclair's truly
+ * wouldn't answer after the retry.
+ */
 async function searchFreshop(term: string): Promise<FreshopProduct[] | null> {
-  try {
-    const url = `https://api.freshop.ncrcloud.com/1/products`
-      + `?app_key=${FRESHOP_APP_KEY}&store_id=${FRESHOP_STORE_ID}`
-      + `&q=${encodeURIComponent(term)}&limit=20`;
-    const res = await fetch(url, { cache: 'no-store' });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return Array.isArray(data?.items) ? (data.items as FreshopProduct[]) : null;
-  } catch {
-    return null;
+  const url = `https://api.freshop.ncrcloud.com/1/products`
+    + `?app_key=${FRESHOP_APP_KEY}&store_id=${FRESHOP_STORE_ID}`
+    + `&q=${encodeURIComponent(term)}&limit=20`;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(url, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        return Array.isArray(data?.items) ? (data.items as FreshopProduct[]) : [];
+      }
+      // 429 / 5xx — back off and retry once before giving up.
+      if (attempt === 0) { await sleep(1200); continue; }
+    } catch {
+      if (attempt === 0) { await sleep(1200); continue; }
+    }
   }
+  return null;
 }
 
 /**
@@ -198,7 +249,9 @@ export async function findMatchFor(
   // Sister Schubert's listings). Stop at the first width that yields a match.
   const widths = Array.from(new Set([toks.length, 3, 2, 1])).filter(n => n >= 1 && n <= toks.length);
 
-  for (const n of widths) {
+  for (let wi = 0; wi < widths.length; wi++) {
+    const n = widths[wi];
+    if (wi > 0) await sleep(200); // gentle pacing between relaxation attempts
     const term = toks.slice(0, n).join(' ');
     const items = await searchFreshop(term);
     if (items === null) return { candidate: null, rateLimited: true };

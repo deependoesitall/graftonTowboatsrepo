@@ -5,12 +5,13 @@
 //                         the month, grouped by company, checkbox selection,
 //                         per-company CSV export + combined export.
 //   Analytics           — charts, top products, revenue trend (unchanged).
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import {
   Lock, RefreshCw, Download, FileText, TrendingUp, ShoppingBag,
   DollarSign, Package, Calendar, Star, Repeat, ChevronDown, ChevronRight,
-  Receipt, BarChart3, CheckSquare, Square, Printer,
+  Receipt, BarChart3, CheckSquare, Square, Printer, Eye, X,
 } from 'lucide-react';
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -700,6 +701,9 @@ function BillingTab() {
   // Totals-first by default (Mary Kay: "the date, the boat, the total");
   // item-by-item cross-reference sheets are opt-in.
   const [includeDetail, setIncludeDetail] = useState(false);
+  // Generated packet HTML — shown in an in-app preview (no pop-up window).
+  const [packetHtml, setPacketHtml] = useState<string | null>(null);
+  const packetFrameRef = useRef<HTMLIFrameElement>(null);
 
   const range = useMemo(() => {
     const [y, m] = month.split('-').map(Number);
@@ -764,8 +768,7 @@ function BillingTab() {
     const monthLabel = new Date(month + '-01T00:00:00')
       .toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
     const html = billingPacketHtml(groupOrders(packetOrders), monthLabel, includeDetail);
-    const blob = new Blob([html], { type: 'text/html' });
-    window.open(URL.createObjectURL(blob), '_blank');
+    setPacketHtml(html); // in-app preview — print / save PDF from there
   }
 
   const selCompanyCount = new Set(selectedOrders.map(o => billingGroupLabel(o))).size;
@@ -792,7 +795,7 @@ function BillingTab() {
           </label>
           <button onClick={() => openPacket(selectedOrders)} disabled={selected.size === 0}
             className="btn-primary text-sm px-4 py-2 flex items-center gap-2 disabled:opacity-50">
-            <FileText className="w-4 h-4" /> Billing Packet — One PDF
+            <Eye className="w-4 h-4" /> Preview Packet
           </button>
         </div>
       </div>
@@ -880,6 +883,28 @@ function BillingTab() {
             on any vessel to print just that boat&apos;s packet.
           </p>
         </>
+      )}
+
+      {/* In-app packet preview — review it, then print / save as one PDF */}
+      {packetHtml && createPortal(
+        <div className="fixed inset-0 z-[95] bg-black/70 flex flex-col">
+          <div className="bg-brand-navy text-white px-4 py-2.5 flex items-center justify-between shrink-0">
+            <span className="text-sm font-bold">Billing packet preview</span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => packetFrameRef.current?.contentWindow?.print()}
+                className="flex items-center gap-1.5 bg-brand-gold text-brand-navy text-xs font-bold px-3 py-1.5 rounded-lg hover:opacity-90">
+                <Printer className="w-3.5 h-3.5" /> Print / Save PDF
+              </button>
+              <button onClick={() => setPacketHtml(null)} className="text-white/80 hover:text-white flex items-center gap-1 text-sm">
+                <X className="w-4 h-4" /> Close
+              </button>
+            </div>
+          </div>
+          <iframe ref={packetFrameRef} srcDoc={packetHtml} title="Billing packet preview"
+            className="flex-1 w-full bg-white" />
+        </div>,
+        document.body
       )}
     </>
   );

@@ -20,10 +20,14 @@ import { findMatchFor, type ImageCandidate } from '@/lib/image-backfill';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-const BATCH_SIZE = 4;          // concurrent searches
-const SCAN_PER_RUN = 60;       // products examined per invocation
+// NCR rate-limits Vercel's datacenter IP hard, so keep the request pattern
+// gentle — small concurrency, a real breath between batches, fewer items per
+// invocation (the client chains more chunks). This is why an aggressive first
+// version came back empty: NCR was throttling every search.
+const BATCH_SIZE = 2;          // concurrent items (each may do a couple searches)
+const SCAN_PER_RUN = 24;       // products examined per invocation
 const TIME_BUDGET_MS = 45_000;
-const BATCH_DELAY_MS = 250;
+const BATCH_DELAY_MS = 500;
 
 interface Row {
   id: string;

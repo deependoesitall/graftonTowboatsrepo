@@ -121,11 +121,17 @@ export function ourKeys(upc: string): string[] {
 function stripZzz(s: string): string {
   return s.replace(/\s*\(?\d+(\.\d+)?\s*zzz\)?/gi, '').trim();
 }
+/** A usable size — rejects Freshop's zero placeholders ("0", "0.0000", "00"). */
+function isRealSize(s: string): boolean {
+  return !!s && !/^0+(\.0+)?$/.test(s.trim());
+}
 function detailsFrom(p: FreshopProduct): string | null {
   const name = stripZzz((p.name || '').trim());
   if (!name) return null;
   const size = stripZzz((p.size || '').trim());
-  if (size && !name.toLowerCase().includes(size.toLowerCase())) return `${name} (${size})`;
+  // Only append a REAL size — never a "0.0000" placeholder (that leaked into
+  // names like "5 LB RUSSET (0.0000)").
+  if (isRealSize(size) && !name.toLowerCase().includes(size.toLowerCase())) return `${name} (${size})`;
   return name;
 }
 function imageFrom(p: FreshopProduct): string | null {
@@ -338,7 +344,7 @@ export function buildStoreProduct(p: FreshopProduct, deptCategory: string): Reco
     category: refineCategory(deptCategory, p),
     sub_category: subCategoryFrom(p),
     upc: upcRaw,
-    pkg_size: cleanSize && !/^0(\.0+)?$/.test(cleanSize) ? cleanSize : null,
+    pkg_size: isRealSize(cleanSize) ? cleanSize : null,
     uom: weighable ? 'LB' : 'EA',
     price,
     image_url: imageFrom(p),

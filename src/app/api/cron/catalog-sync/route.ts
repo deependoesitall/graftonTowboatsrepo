@@ -19,6 +19,7 @@ import { after } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { getAdminSession } from '@/lib/admin-auth-server';
 import { applyFormLayout } from '@/lib/form-layout-apply';
+import { findMatchFor } from '@/lib/image-backfill';
 import {
   fetchFreshopPages, fetchFreshopTotal, freshopKeys, ourKeys, computeFields,
   buildStoreProduct, norm,
@@ -267,6 +268,37 @@ async function handle(req: NextRequest) {
 
   state.stats = stats;
   state.lastError = rateLimited ? 'Freshop rate limit mid-run — resuming next invocation' : undefined;
+
+  // ── AUTO PHOTO/NAME BACKFILL (paced, defensive) ──
+  // A few barge items per invocation that the barcode pass can't reach get
+  // name-matched to Sinclair's; HIGH-confidence matches (name + price/size
+  // corroborated) are auto-applied so obvious items clean themselves up.
+  // Wrapped so it can NEVER break the core sync; skipped when NCR is already
+  // pushing back this run.
+  if (!rateLimited && Date.now() - started < TIME_BUDGET_MS - 8000) {
+    try {
+      const staleBefore = new Date(Date.now() - 14 * 864e5).toISOString();
+      const { data: needy } = await supabase
+        .from('products')
+        .select('id, description, category, pkg_size, price, manual_fields')
+        .eq('store_only', false).eq('is_active', true)
+        .is('image_url', null).is('freshop_id', null)
+        .or(`photo_match_tried_at.is.null,photo_match_tried_at.lt.${staleBefore}`)
+        .limit(6);
+      for (const p of (needy || []) as Array<{ id: string; description: string; category: string; pkg_size: string | null; price: number; manual_fields: string[] | null }>) {
+        if (Date.now() - started > TIME_BUDGET_MS - 2000) break;
+        const { candidate } = await findMatchFor(p.description, p.category, p.pkg_size, Number(p.price));
+        const upd: Record<string, unknown> = { photo_match_tried_at: new Date().toISOString() };
+        if (candidate && candidate.rename) {
+          const locked = new Set(p.manual_fields || []);
+          if (!locked.has('image_url')) upd.image_url = candidate.image_url;
+          if (!locked.has('details')) upd.details = candidate.proper_name;
+          upd.image_source = 'name_match';
+        }
+        await supabase.from('products').update(upd).eq('id', p.id);
+      }
+    } catch { /* never let backfill break the sync */ }
+  }
 
   // ── Finished every department? Re-apply the order-form layout + log once ──
   const finished = state.depts.every(d => d.done.length >= d.pages);

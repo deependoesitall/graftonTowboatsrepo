@@ -128,6 +128,11 @@ export default function AdminSettingsPage() {
   const [addingUser, setAddingUser] = useState(false);
   const [showAddUser, setShowAddUser] = useState(false);
   const [showNewUserPw, setShowNewUserPw] = useState(false);
+  // Owner resetting another admin's forgotten password
+  const [pwResetUser, setPwResetUser] = useState<string | null>(null);
+  const [pwResetValue, setPwResetValue] = useState('');
+  const [pwResetSaving, setPwResetSaving] = useState(false);
+  const [pwResetDone, setPwResetDone] = useState<string | null>(null);
 
   // Activity logs
   const [logs, setLogs] = useState<ActivityLog[]>([]);
@@ -355,6 +360,25 @@ export default function AdminSettingsPage() {
       body: JSON.stringify({ id: u.id, is_active: !u.is_active }),
     });
     if (res.ok) setUsers(us => us.map(x => x.id === u.id ? { ...x, is_active: !x.is_active } : x));
+  }
+
+  // Owner sets a NEW password for another admin who forgot theirs (no current
+  // password needed — that's the whole point of an owner reset).
+  async function resetUserPassword(id: string) {
+    if (pwResetValue.length < 4) return;
+    setPwResetSaving(true);
+    const res = await adminFetch('/api/admin/users', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, password: pwResetValue }),
+    });
+    setPwResetSaving(false);
+    if (res.ok) {
+      setPwResetUser(null);
+      setPwResetValue('');
+      setPwResetDone(id);
+      setTimeout(() => setPwResetDone(d => (d === id ? null : d)), 3000);
+    }
   }
 
   async function deleteUser(id: string) {
@@ -611,16 +635,6 @@ export default function AdminSettingsPage() {
             <label className="label-base">Business Email (receives all orders)</label>
             <input type="email" className="input-base" value={settings.business_email}
               onChange={e => setSettings(s => ({ ...s, business_email: e.target.value }))} />
-          </div>
-          <div className="bg-brand-sand/40 rounded-lg p-4 text-sm text-gray-600">
-            <p className="font-semibold text-brand-navy mb-1">📋 Squarespace Button for your website</p>
-            <p className="mb-2">Add this button to your Squarespace site to link customers to the ordering app:</p>
-            <p className="font-semibold mb-1">Button text:</p>
-            <code className="bg-white rounded px-2 py-1 text-xs block mb-2">Order Groceries & Supplies</code>
-            <p className="font-semibold mb-1">Button URL:</p>
-            <code className="bg-white rounded px-2 py-1 text-xs block break-all">
-              {process.env.NEXT_PUBLIC_APP_URL || '(set NEXT_PUBLIC_APP_URL in Vercel)'}/catalog
-            </code>
           </div>
         </div>
       )}
@@ -954,41 +968,73 @@ export default function AdminSettingsPage() {
             ) : (
               <div className="divide-y divide-gray-100">
                 {users.map(u => (
-                  <div key={u.id} className={`px-6 py-4 flex items-center justify-between gap-4 ${!u.is_active ? 'opacity-50' : ''}`}>
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 bg-brand-steel/10 rounded-full flex items-center justify-center font-bold text-brand-steel text-sm">
-                        {(u.display_name || u.username)[0].toUpperCase()}
+                  <div key={u.id} className={`px-6 py-4 ${!u.is_active ? 'opacity-50' : ''}`}>
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 bg-brand-steel/10 rounded-full flex items-center justify-center font-bold text-brand-steel text-sm">
+                          {(u.display_name || u.username)[0].toUpperCase()}
+                        </div>
+                        <div>
+                          <p className="font-semibold text-brand-navy text-sm">{u.display_name || u.username}</p>
+                          <p className="text-xs text-gray-400">@{u.username} · {u.last_login ? `Last login ${new Date(u.last_login).toLocaleDateString()}` : 'Never logged in'}</p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-semibold text-brand-navy text-sm">{u.display_name || u.username}</p>
-                        <p className="text-xs text-gray-400">@{u.username} · {u.last_login ? `Last login ${new Date(u.last_login).toLocaleDateString()}` : 'Never logged in'}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3 flex-wrap justify-end">
-                      <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${ROLE_COLORS[u.role]}`}>
-                        {ROLE_LABELS[u.role]}
-                      </span>
-                      {u.permissions?.includes('sinclair') && (
-                        <span className="text-xs font-bold px-2.5 py-1 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">
-                          Sinclair
+                      <div className="flex items-center gap-3 flex-wrap justify-end">
+                        <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${ROLE_COLORS[u.role]}`}>
+                          {ROLE_LABELS[u.role]}
                         </span>
-                      )}
-                      <button
-                        onClick={() => togglePermission(u, 'sinclair')}
-                        title={u.permissions?.includes('sinclair') ? 'Remove Sinclair access' : 'Grant Sinclair access'}
-                        className="text-xs text-gray-400 hover:text-emerald-600 transition-colors"
-                      >
-                        {u.permissions?.includes('sinclair') ? '− Sinclair' : '+ Sinclair'}
-                      </button>
-                      <button onClick={() => toggleUser(u)}
-                        className="text-xs text-gray-400 hover:text-brand-river transition-colors">
-                        {u.is_active ? 'Deactivate' : 'Activate'}
-                      </button>
-                      <button onClick={() => deleteUser(u.id)}
-                        className="text-gray-300 hover:text-red-500 transition-colors">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                        {u.permissions?.includes('sinclair') && (
+                          <span className="text-xs font-bold px-2.5 py-1 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">
+                            Sinclair
+                          </span>
+                        )}
+                        <button
+                          onClick={() => togglePermission(u, 'sinclair')}
+                          title={u.permissions?.includes('sinclair') ? 'Remove Sinclair access' : 'Grant Sinclair access'}
+                          className="text-xs text-gray-400 hover:text-emerald-600 transition-colors"
+                        >
+                          {u.permissions?.includes('sinclair') ? '− Sinclair' : '+ Sinclair'}
+                        </button>
+                        <button
+                          onClick={() => { setPwResetUser(pwResetUser === u.id ? null : u.id); setPwResetValue(''); }}
+                          className="text-xs text-gray-400 hover:text-brand-river transition-colors">
+                          {pwResetDone === u.id ? <span className="text-green-600 font-semibold">✓ Password set</span> : 'Set password'}
+                        </button>
+                        <button onClick={() => toggleUser(u)}
+                          className="text-xs text-gray-400 hover:text-brand-river transition-colors">
+                          {u.is_active ? 'Deactivate' : 'Activate'}
+                        </button>
+                        <button onClick={() => deleteUser(u.id)}
+                          className="text-gray-300 hover:text-red-500 transition-colors">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
+
+                    {/* Owner reset: set a new password for this user (they forgot theirs) */}
+                    {pwResetUser === u.id && (
+                      <div className="mt-3 flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg p-2.5">
+                        <input
+                          type="text"
+                          autoFocus
+                          value={pwResetValue}
+                          onChange={e => setPwResetValue(e.target.value)}
+                          onKeyDown={e => e.key === 'Enter' && resetUserPassword(u.id)}
+                          placeholder={`New password for @${u.username} (min 4 chars)`}
+                          className="input-base text-sm flex-1" />
+                        <button onClick={() => resetUserPassword(u.id)} disabled={pwResetSaving || pwResetValue.length < 4}
+                          className="btn-primary text-xs px-3 py-2 disabled:opacity-50 whitespace-nowrap">
+                          {pwResetSaving ? 'Saving…' : 'Set password'}
+                        </button>
+                        <button onClick={() => { setPwResetUser(null); setPwResetValue(''); }}
+                          className="text-xs text-gray-400 hover:text-gray-600 px-2">Cancel</button>
+                      </div>
+                    )}
+                    {pwResetUser === u.id && (
+                      <p className="text-[11px] text-gray-400 mt-1.5 px-1">
+                        Give them this new password directly — it&apos;s shown in plain text so you can pass it along, then they can change it themselves.
+                      </p>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1089,18 +1135,6 @@ export default function AdminSettingsPage() {
             </div>
           </div>
 
-          <div className="bg-blue-50 rounded-lg p-4 text-sm">
-            <p className="font-semibold text-blue-800 mb-2">📧 Email Setup (Resend + Gmail)</p>
-            <p className="text-blue-700 text-xs leading-relaxed">
-              To send order emails directly to <strong>GraftonTowboatServices@gmail.com</strong>:
-              <br />1. In Resend dashboard → Domains → Add Domain
-              <br />2. Add your domain (or use a subdomain of your Squarespace site)
-              <br />3. Resend provides DNS records — add them in Squarespace: Settings → Domains → DNS
-              <br />4. Update EMAIL_FROM in Vercel environment variables
-              <br />5. Update BUSINESS_EMAIL to GraftonTowboatServices@gmail.com
-            </p>
-          </div>
-
           <div className="border border-gray-200 rounded-lg p-4">
             <div className="flex items-center justify-between flex-wrap gap-3">
               <div>
@@ -1156,7 +1190,6 @@ export default function AdminSettingsPage() {
           {[
             { key: 'fleet_cta_enabled' as const, label: 'Fleet Pricing Banner', desc: 'Show the B2B fleet-contract banner on the catalog ("sign your whole fleet up for special pricing — call us"). Leave off until the wording is final.' },
             { key: 'repeat_orders_enabled' as const, label: 'Repeat Last Order', desc: 'Let customers quickly re-add all items from their previous order' },
-            { key: 'draft_orders_enabled' as const, label: 'Save Draft Orders', desc: 'Allow customers to save and resume orders later' },
             { key: 'tax_enabled' as const, label: 'Enable Tax', desc: 'Apply sales tax to orders based on the rate below' },
             { key: 'email_debug_enabled' as const, label: 'Email Debug Mode', desc: 'Show email send results as a toast notification after each order submission (dev/testing only)' },
           ].map(({ key, label, desc }) => (

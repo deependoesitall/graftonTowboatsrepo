@@ -5,7 +5,7 @@
 // flip between the two. Jen (July 20): the old "shop the rest" entry point was
 // too hidden; she missed it entirely. This puts it front and center up top.
 import Link from 'next/link';
-import { ClipboardList, Store } from 'lucide-react';
+import { Ship, Store } from 'lucide-react';
 
 export function StoreScopeToggle({ storeAll, bargeHref, storeAllHref, bargeCount, fullCount }: {
   storeAll: boolean;
@@ -29,7 +29,7 @@ export function StoreScopeToggle({ storeAll, bargeHref, storeAllHref, bargeCount
             !storeAll ? 'text-white' : 'text-gray-500 hover:text-brand-navy'
           }`}>
           <span className="flex items-center gap-1.5 text-sm font-bold uppercase tracking-wide">
-            <ClipboardList className="w-4 h-4" /> Barge Order Form
+            <Ship className="w-4 h-4" /> Barge Order Form
           </span>
           <span className={`text-[11px] ${!storeAll ? 'text-white/70' : 'text-gray-400'}`}>
             {bargeCount.toLocaleString()} everyday items
