@@ -66,7 +66,8 @@ export async function POST(req: NextRequest) {
       if (!p?.id || !p?.image_url) continue;
       // image_url always; details only when the reviewer kept the rename.
       // description and freshop_id are deliberately NEVER touched here.
-      const updates: Record<string, unknown> = { image_url: p.image_url };
+      // Tag the source 'name_match' so the catalog flags it for review.
+      const updates: Record<string, unknown> = { image_url: p.image_url, image_source: 'name_match' };
       if (p.details) { updates.details = p.details; names++; }
       const { error } = await supabase.from('products').update(updates).eq('id', p.id);
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });

@@ -89,9 +89,11 @@ export async function POST(
   const publicUrl = urlData.publicUrl;
 
   // Update product record
+  // A human uploaded this — mark it 'manual'. The sync only fills a MISSING
+  // image, so an uploaded photo is never overwritten.
   const { data: updated, error: updateErr } = await supabase
     .from('products')
-    .update({ image_url: publicUrl })
+    .update({ image_url: publicUrl, image_source: 'manual' })
     .eq('id', productId)
     .select()
     .single();
@@ -123,7 +125,7 @@ export async function DELETE(
   // Clear image_url on product
   const { data: updated, error: updateErr } = await supabase
     .from('products')
-    .update({ image_url: null })
+    .update({ image_url: null, image_source: null })
     .eq('id', productId)
     .select()
     .single();

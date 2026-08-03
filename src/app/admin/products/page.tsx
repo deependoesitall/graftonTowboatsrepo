@@ -530,6 +530,7 @@ const STATUS_FILTERS: { key: string; label: string }[] = [
   { key: 'available', label: 'In Stock' },
   { key: 'unavailable', label: 'Out of Stock' },
   { key: 'no_image', label: 'Missing Image' },
+  { key: 'name_matched', label: 'Auto-matched Photos (review)' },
 ];
 
 interface EditState {
@@ -832,6 +833,14 @@ function EditableRow({ product, selected, onSelect, onSaved, onToggleActive, onT
           )}
           {product.billed_by_weight && (
             <span className="inline-block text-[10px] font-bold uppercase tracking-wide text-amber-700 bg-amber-50 rounded px-1.5 py-0.5">/lb</span>
+          )}
+          {/* Name-matched photo — pulled from Sinclair's by NAME (not barcode),
+              so it may be the wrong item. Flagged for a human to confirm. */}
+          {product.image_url && product.image_source === 'name_match' && (
+            <span className="inline-block text-[10px] font-bold uppercase tracking-wide text-purple-700 bg-purple-50 rounded px-1.5 py-0.5"
+              title="Photo was auto-matched from Sinclair's site by name (not barcode). Confirm it's the right item, or upload the real photo to replace it.">
+              🔍 Auto-matched — review
+            </span>
           )}
           {/* Missing-image reason — WHY there's no photo, so staff know
               whether to grab a camera or shrug (Sinclair's has none either) */}

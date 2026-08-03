@@ -12,6 +12,8 @@ export interface Product {
   description: string;
   details: string | null;
   image_url: string | null;
+  /** Where the photo came from: sinclair_sync | name_match | manual | off | null */
+  image_source?: string | null;
   location: string | null;
   /** Sinclair's walkpath stop number for this location (from Freshop). */
   location_seq: number | null;

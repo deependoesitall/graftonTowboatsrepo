@@ -51,6 +51,8 @@ export async function GET(req: NextRequest) {
     // Active listings with no photo — flags what needs a picture taken
     // (UPC-less meat/deli cuts) vs what Sinclair's site simply has no image for.
     else if (status === 'no_image') query = query.eq('is_active', true).is('image_url', null);
+    // Name-matched photos awaiting a human's confirmation (Find Photos results).
+    else if (status === 'name_matched') query = query.eq('image_source', 'name_match');
   }
 
   const { data, count, error } = await query;

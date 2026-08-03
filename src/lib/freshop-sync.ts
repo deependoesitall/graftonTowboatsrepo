@@ -171,7 +171,7 @@ export function computeFields(
   const newDetails = detailsFrom(hit);
   const newImage = imageFrom(hit);
   if (!locked.has('details') && newDetails && !product.details && newDetails !== product.details) { fields.details = newDetails; stats.details++; }
-  if (!locked.has('image_url') && newImage && !product.image_url && newImage !== product.image_url) { fields.image_url = newImage; stats.images++; }
+  if (!locked.has('image_url') && newImage && !product.image_url && newImage !== product.image_url) { fields.image_url = newImage; fields.image_source = 'sinclair_sync'; stats.images++; }
   if (!locked.has('billed_by_weight') && hit.is_weight_required && !product.billed_by_weight) { fields.billed_by_weight = true; stats.weightFlags++; }
   // Locations sync from Freshop's walkpath — EXCEPT where an admin corrected
   // one by hand: the humans in the store outrank the data.
@@ -342,6 +342,7 @@ export function buildStoreProduct(p: FreshopProduct, deptCategory: string): Reco
     uom: weighable ? 'LB' : 'EA',
     price,
     image_url: imageFrom(p),
+    image_source: imageFrom(p) ? 'sinclair_sync' : null,
     location: locationFrom(p),
     location_seq: locationSeqFrom(p),
     quantity_step: step,
