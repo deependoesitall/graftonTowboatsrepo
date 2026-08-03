@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import {
   Package, Clock, CheckCircle2, TrendingUp,
   ShoppingBag, Lock, Eye, EyeOff, Loader2, ShoppingCart,
-  Mail, Send, X, FileText, AlertTriangle,
+  Mail, Send, X, FileText, AlertTriangle, Truck,
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import { AdminRole, AdminPermission, setAdminSession, setAdminUiState, fetchAdminSession, adminFetch } from '@/lib/admin-auth';
@@ -451,10 +451,69 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
   const [preview, setPreview] = useState<null | 'email' | 'receipt'>(null);
   const sendTo = order.vessel_email || order.customer_email;
 
+  // ── GTS delivery billing — rides on this final email as a line item ──
+  const [companies, setCompanies] = useState<Array<{ id: string; name: string }>>([]);
+  const [serviceTypes, setServiceTypes] = useState<Array<{ id: string; name: string; default_rate: number }>>([]);
+  const [companyId, setCompanyId] = useState('');
+  const [serviceType, setServiceType] = useState('');
+  const [fee, setFee] = useState('');
+  const [billGroceries, setBillGroceries] = useState(true);
+  const [rateHint, setRateHint] = useState('');
+
+  // Load barge lines + service types; default the company to the order's.
+  useEffect(() => {
+    (async () => {
+      const [c, s] = await Promise.all([
+        adminFetch('/api/admin/companies'),
+        adminFetch('/api/admin/service-rates'),
+      ]);
+      const comps = c.ok ? (await c.json()).companies : [];
+      const svcs = s.ok ? (await s.json()).service_types : [];
+      setCompanies(comps);
+      setServiceTypes(svcs);
+      // Best-effort match of the order's company name to a barge line.
+      const oc = (order.company_name || '').toLowerCase().trim();
+      const match = comps.find((x: { name: string }) => oc && (x.name.toLowerCase() === oc || oc.includes(x.name.toLowerCase()) || x.name.toLowerCase().includes(oc)));
+      if (match) setCompanyId(match.id);
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-fill the fee from the chosen company's rate card when both are set.
+  const svcId = serviceTypes.find(s => s.name === serviceType)?.id;
+  useEffect(() => {
+    if (!companyId || !svcId) { setRateHint(''); return; }
+    let cancelled = false;
+    adminFetch(`/api/admin/service-rates?company_id=${companyId}&service_type_id=${svcId}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (cancelled || !d || d.rate == null) return;
+        setRateHint(`${d.is_override ? "this company's rate" : 'default rate'}: $${Number(d.rate).toFixed(2)}`);
+        setFee(prev => prev === '' ? String(d.rate) : prev);
+      });
+    return () => { cancelled = true; };
+  }, [companyId, svcId]);
+
+  // Query params so the email preview reflects the live delivery choice.
+  const previewQuery = new URLSearchParams();
+  if (fee !== '') previewQuery.set('delivery_fee', fee);
+  if (serviceType) previewQuery.set('delivery_service_type', serviceType);
+  previewQuery.set('bill_for_groceries', String(billGroceries));
+  const emailPreviewSrc = `/api/orders/${order.id}/email-preview?${previewQuery.toString()}`;
+
   async function send() {
     setSending(true); setError('');
     try {
-      const res = await adminFetch(`/api/orders/${order.id}/send-shopped-email`, { method: 'POST' });
+      const res = await adminFetch(`/api/orders/${order.id}/send-shopped-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          delivery_fee: fee === '' ? null : Number(fee),
+          delivery_service_type: serviceType || null,
+          delivery_company_id: companyId || null,
+          bill_for_groceries: billGroceries,
+        }),
+      });
       const r = await res.json();
       if (!res.ok) throw new Error(r?.error || 'Email failed to send');
       onSent();
@@ -499,6 +558,54 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
             </div>
           )}
 
+          {/* GTS delivery charge — goes on this final email as a line item */}
+          {!preview && (
+            <div className="border border-brand-navy/20 rounded-xl p-3 mb-4">
+              <p className="text-xs font-bold text-brand-navy uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                <Truck className="w-3.5 h-3.5" /> Delivery charge on this bill
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block">
+                  <span className="text-[11px] font-semibold text-gray-500">Barge line</span>
+                  <select value={companyId} onChange={e => setCompanyId(e.target.value)}
+                    className="mt-0.5 w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm">
+                    <option value="">—</option>
+                    {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="text-[11px] font-semibold text-gray-500">Service type</span>
+                  <select value={serviceType} onChange={e => setServiceType(e.target.value)}
+                    className="mt-0.5 w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm">
+                    <option value="">—</option>
+                    {serviceTypes.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                  </select>
+                </label>
+              </div>
+              <label className="block mt-2">
+                <span className="text-[11px] font-semibold text-gray-500">
+                  Delivery fee {rateHint && <span className="text-brand-green font-normal">· {rateHint}</span>}
+                </span>
+                <div className="flex items-center gap-1 mt-0.5">
+                  <span className="text-gray-400 text-sm">$</span>
+                  <input type="number" step="0.01" min="0" placeholder="0.00" value={fee}
+                    onChange={e => setFee(e.target.value)}
+                    className="w-32 border border-gray-200 rounded-lg px-2 py-1.5 text-sm" />
+                </div>
+              </label>
+              <label className="flex items-start gap-2 mt-2.5 text-xs cursor-pointer">
+                <input type="checkbox" checked={billGroceries} onChange={e => setBillGroceries(e.target.checked)}
+                  className="w-4 h-4 accent-brand-navy mt-0.5" />
+                <span>
+                  <span className="font-semibold text-brand-navy">Bill groceries on this invoice</span>
+                  <span className="block text-gray-400">
+                    On: Sinclair&apos;s grocery total + delivery = one final total. Off: customer pays Sinclair&apos;s directly, email shows delivery charge only.
+                  </span>
+                </span>
+              </label>
+            </div>
+          )}
+
           {/* Preview toggles */}
           <div className="flex gap-2 mb-3">
             <button onClick={() => setPreview(p => p === 'email' ? null : 'email')}
@@ -518,7 +625,7 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
           {preview && (
             <div className="border border-gray-200 rounded-xl overflow-hidden bg-gray-50" style={{ height: '52vh' }}>
               <iframe
-                src={preview === 'email' ? `/api/orders/${order.id}/email-preview` : `/api/orders/${order.id}/pdf`}
+                src={preview === 'email' ? emailPreviewSrc : `/api/orders/${order.id}/pdf`}
                 title={preview === 'email' ? 'Email preview' : 'Receipt preview'}
                 className="w-full h-full bg-white"
               />

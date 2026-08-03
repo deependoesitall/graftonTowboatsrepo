@@ -35,13 +35,12 @@ interface Delivery {
   incentive: string | null;
 }
 
-function monthNow() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
+// Deliveries began January 2026 — never offer a month before that.
+const LEDGER_YEAR = 2026;
 
 export default function DeliveriesPage() {
-  const [month, setMonth] = useState(monthNow());
+  // 'all' = whole-year list (default); otherwise a specific 'YYYY-MM'.
+  const [month, setMonth] = useState<string>('all');
   const [rows, setRows] = useState<Delivery[]>([]);
   const [totals, setTotals] = useState({ count: 0, delivery_fees: 0, groceries: 0, driver_pay: 0 });
   const [loading, setLoading] = useState(true);
@@ -53,7 +52,8 @@ export default function DeliveriesPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await adminFetch(`/api/admin/deliveries?month=${month}`);
+    const q = month === 'all' ? `year=${LEDGER_YEAR}` : `month=${month}`;
+    const res = await adminFetch(`/api/admin/deliveries?${q}`);
     if (res.ok) { const d = await res.json(); setRows(d.deliveries); setTotals(d.totals); }
     setLoading(false);
   }, [month]);
@@ -76,12 +76,18 @@ export default function DeliveriesPage() {
     load();
   }
 
-  // Month options: last 18 months
-  const monthOpts = Array.from({ length: 18 }, (_, i) => {
-    const d = new Date(); d.setMonth(d.getMonth() - i);
-    const v = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-    return { v, label: d.toLocaleString('en-US', { month: 'long', year: 'numeric' }) };
-  });
+  // Filter options: "All of 2026" first, then Jan 2026 up to the current month
+  // (never before the ledger's Jan-2026 start, never into empty future months).
+  const now = new Date();
+  const lastMonth = now.getFullYear() > LEDGER_YEAR ? 12 : now.getMonth() + 1;
+  const monthOpts = [
+    { v: 'all', label: `All of ${LEDGER_YEAR}` },
+    ...Array.from({ length: lastMonth }, (_, i) => {
+      const m = i + 1;
+      const v = `${LEDGER_YEAR}-${String(m).padStart(2, '0')}`;
+      return { v, label: new Date(LEDGER_YEAR, i, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' }) };
+    }).reverse(),
+  ];
 
   return (
     <div>

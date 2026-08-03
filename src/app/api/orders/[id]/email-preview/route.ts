@@ -28,7 +28,15 @@ export async function GET(
     .single();
   if (error || !order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
 
-  const html = buildOrderShoppedEmailHtml(order as Order);
+  // Live overrides from the send dialog — lets the owner preview the delivery
+  // fee / bill-for-groceries choice BEFORE it's saved to the order.
+  const { searchParams } = new URL(req.url);
+  const merged = { ...order } as Order;
+  if (searchParams.has('delivery_fee')) merged.delivery_fee = Number(searchParams.get('delivery_fee')) || 0;
+  if (searchParams.has('delivery_service_type')) merged.delivery_service_type = searchParams.get('delivery_service_type');
+  if (searchParams.has('bill_for_groceries')) merged.bill_for_groceries = searchParams.get('bill_for_groceries') === 'true';
+
+  const html = buildOrderShoppedEmailHtml(merged);
   return new NextResponse(html, {
     headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
   });

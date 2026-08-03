@@ -20,6 +20,18 @@ export async function POST(
   const { id } = await params;
   const supabase = createServiceClient();
 
+  // Delivery billing from the send dialog — persist it FIRST so the email
+  // (and the stored order) reflect the final fee + bill-for-groceries choice.
+  const body = await req.json().catch(() => ({}));
+  const deliveryUpdate: Record<string, unknown> = {};
+  if ('delivery_fee' in body) deliveryUpdate.delivery_fee = body.delivery_fee === '' || body.delivery_fee == null ? null : Number(body.delivery_fee);
+  if ('delivery_service_type' in body) deliveryUpdate.delivery_service_type = body.delivery_service_type || null;
+  if ('delivery_company_id' in body) deliveryUpdate.delivery_company_id = body.delivery_company_id || null;
+  if ('bill_for_groceries' in body) deliveryUpdate.bill_for_groceries = !!body.bill_for_groceries;
+  if (Object.keys(deliveryUpdate).length) {
+    await supabase.from('orders').update(deliveryUpdate).eq('id', id);
+  }
+
   const { data: order, error } = await supabase
     .from('orders')
     .select('*, items:order_items(*), discounts:order_discounts(*)')

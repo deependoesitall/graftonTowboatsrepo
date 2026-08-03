@@ -213,6 +213,13 @@ export interface Order {
   discounts?: OrderDiscount[];
   subtotal: number;
   register_total?: number | null;
+  /** GTS delivery billing — rides on the final email as a line item. */
+  delivery_fee?: number | null;
+  delivery_service_type?: string | null;
+  delivery_company_id?: string | null;
+  /** TRUE: GTS bills groceries + delivery together. FALSE: customer pays
+   * Sinclair's directly, so the final email shows only the delivery charge. */
+  bill_for_groceries?: boolean;
   status: OrderStatus;
   /** When the FINAL "Order Shopped" email was fired (manually, by a GTS owner). NULL = not yet sent. */
   shopped_email_sent_at?: string | null;

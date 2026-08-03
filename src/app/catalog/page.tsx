@@ -8,6 +8,7 @@ import { ProductGrid } from '@/components/catalog/ProductGrid';
 import { CategoryFilter } from '@/components/catalog/CategoryFilter';
 import { SearchBar } from '@/components/catalog/SearchBar';
 import { CatalogTabBar } from '@/components/catalog/CatalogTabBar';
+import { StoreScopeToggle } from '@/components/catalog/StoreScopeToggle';
 import { AdditionalServicesTab } from '@/components/catalog/AdditionalServicesTab';
 import { OtherPickupCard } from '@/components/catalog/OtherPickupCard';
 import { fetchSinclairCoupons } from '@/lib/sinclair-coupons';
@@ -141,31 +142,33 @@ export default async function CatalogPage({ searchParams }: PageProps) {
     query = query.eq('category', category);
   }
 
-  // Teaser: when browsing the barge view, count how many MORE matches exist
-  // in the full store (shown as "N more in the full store — browse them").
-  let storeCountQuery = null;
-  if (!storeAll) {
-    let scq = supabase
+  // Counts for the barge/full-store toggle — both scoped to the current
+  // search + category so the numbers match what each view would show.
+  const scopedCount = (storeOnly: boolean | null) => {
+    let q = supabase
       .from('products')
       .select('id', { count: 'exact', head: true })
       .eq('is_active', true)
-      .eq('is_available', true)
-      .eq('store_only', true);
-    if (search) scq = scq.ilike('search_text', `%${search}%`);
-    if (category && category !== 'All') scq = scq.eq('category', category);
-    storeCountQuery = scq;
-  }
+      .eq('is_available', true);
+    if (storeOnly === false) q = q.eq('store_only', false);
+    if (search) q = q.ilike('search_text', `%${search}%`);
+    if (category && category !== 'All') q = q.eq('category', category);
+    return q;
+  };
 
-  const [{ data: products, count }, { data: catCounts }, { data: pageSettings }, storeCountRes] = await Promise.all([
+  const [{ data: products, count }, { data: catCounts }, { data: pageSettings }, bargeCountRes, fullCountRes] = await Promise.all([
     query,
     supabase.rpc('get_category_counts'),
     // admin_settings is RLS-locked to the service role — the anon client read
     // null here, which meant the fleet CTA toggle silently never worked.
     createServiceClient().from('admin_settings').select('fleet_cta_enabled').single(),
-    storeCountQuery ?? Promise.resolve(null),
+    scopedCount(false),  // barge order form
+    scopedCount(null),   // full store
   ]);
   const fleetCtaEnabled = !!pageSettings?.fleet_cta_enabled;
-  const storeMatchCount = storeCountRes && 'count' in storeCountRes ? (storeCountRes.count || 0) : 0;
+  const bargeCount = bargeCountRes?.count || 0;
+  const fullCount = fullCountRes?.count || 0;
+  const storeMatchCount = Math.max(0, fullCount - bargeCount); // extra store-only items
 
   // Helper to rebuild the current URL with store=all (keeps search/category)
   const storeAllHref = (() => {
@@ -237,6 +240,15 @@ export default async function CatalogPage({ searchParams }: PageProps) {
       {/* ── GROCERIES TAB ── */}
       {tab === 'groceries' && (
         <>
+          {/* Barge order form ↔ full store — prominent, up top (Jen, Jul 20) */}
+          <StoreScopeToggle
+            storeAll={storeAll}
+            bargeHref={bargeHref}
+            storeAllHref={storeAllHref}
+            bargeCount={bargeCount}
+            fullCount={fullCount}
+          />
+
           {/* Weekly ad + coupons strip */}
           <div className="mb-4 space-y-2">
             <Link href="/weekly-ad"

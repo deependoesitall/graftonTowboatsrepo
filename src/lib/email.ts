@@ -65,6 +65,8 @@ export function buildOrderEmailHtml(
     buttonUrl: string;
     footerText: string;
     showSinclairNote?: boolean;
+    /** Final email only — renders the GTS delivery charge + grand total. */
+    showDelivery?: boolean;
   }
 ): string {
   const groceryItems  = order.items.filter(i => i.item_type !== 'service');
@@ -86,6 +88,37 @@ export function buildOrderEmailHtml(
   }, new Map<string, typeof codItems>()).entries()).sort((a, b) => a[0].localeCompare(b[0]));
   const discounts = order.discounts || [];
   const discountTotal = Number(order.discount_total) || 0;
+
+  // ── GTS final billing (final email only) ──
+  // Groceries are the actual register total when entered, else the estimate.
+  // The delivery fee is GTS's own charge; whether groceries are on THIS bill
+  // depends on bill_for_groceries (some barge lines pay Sinclair's directly).
+  const deliveryFee = Number(order.delivery_fee) || 0;
+  const billGroceries = order.bill_for_groceries !== false; // default true
+  const groceryTotal = order.register_total != null ? Number(order.register_total) : Number(order.subtotal);
+  const grandTotal = (billGroceries ? groceryTotal : 0) + deliveryFee;
+  const deliveryBox = opts.showDelivery && deliveryFee > 0 ? `
+    <div style="border:2px solid #1E3D1E;border-radius:6px;margin-bottom:18px;overflow:hidden;">
+      <div style="background:#1E3D1E;color:#D9E84A;padding:8px 12px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;">
+        Grafton Towboat Services — Final Charges
+      </div>
+      <table width="100%" style="border-collapse:collapse;font-size:13px;">
+        ${billGroceries ? `<tr>
+          <td style="padding:8px 12px;color:#333;">Groceries (Sinclair&apos;s)</td>
+          <td style="padding:8px 12px;text-align:right;font-weight:700;">${formatCurrency(groceryTotal)}</td>
+        </tr>` : `<tr>
+          <td colspan="2" style="padding:8px 12px;color:#666;font-size:11px;font-style:italic;">Groceries are billed to you directly by Sinclair&apos;s — this invoice covers Grafton Towboat Services delivery only.</td>
+        </tr>`}
+        <tr>
+          <td style="padding:8px 12px;color:#333;">Delivery${order.delivery_service_type ? ` — ${order.delivery_service_type}` : ''}</td>
+          <td style="padding:8px 12px;text-align:right;font-weight:700;">${formatCurrency(deliveryFee)}</td>
+        </tr>
+        <tr style="background:#D9E84A;">
+          <td style="padding:10px 12px;font-size:14px;font-weight:900;color:#1E3D1E;text-transform:uppercase;">Final Total Due</td>
+          <td style="padding:10px 12px;text-align:right;font-size:16px;font-weight:900;color:#1E3D1E;">${formatCurrency(grandTotal)}</td>
+        </tr>
+      </table>
+    </div>` : '';
   const codMethodLabel = order.cod_payment_method === 'credit_card' ? 'Credit Card — we’ll call to collect'
     : order.cod_payment_method === 'venmo' ? 'Venmo — we’ll send a payment request'
     : order.cod_payment_method === 'cashapp' ? 'Cash App — we’ll send a payment request'
@@ -293,6 +326,8 @@ export function buildOrderEmailHtml(
       </tfoot>
     </table>` : ''}
 
+    ${deliveryBox}
+
     ${serviceSection}
 
     ${sinclairNote}
@@ -426,6 +461,7 @@ export function buildOrderShoppedEmailHtml(order: Order): string {
     buttonText: 'Questions? Contact Us',
     buttonUrl:  `mailto:GraftonTowboatServices@gmail.com`,
     footerText: 'Grafton Towboat Services · Grafton, IL 62037 · (618) 556-0290 · GraftonTowboatServices@gmail.com',
+    showDelivery: true,
   });
 }
 

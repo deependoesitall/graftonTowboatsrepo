@@ -29,7 +29,8 @@ export async function GET(req: NextRequest) {
   const supabase = createServiceClient();
 
   const { searchParams } = new URL(req.url);
-  const month = searchParams.get('month'); // YYYY-MM
+  const month = searchParams.get('month'); // YYYY-MM  (single month)
+  const year = searchParams.get('year');   // YYYY     (whole year)
 
   let query = supabase
     .from('deliveries')
@@ -41,6 +42,8 @@ export async function GET(req: NextRequest) {
     const [y, m] = month.split('-').map(Number);
     const next = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`;
     query = query.gte('delivery_date', start).lt('delivery_date', next);
+  } else if (year && /^\d{4}$/.test(year)) {
+    query = query.gte('delivery_date', `${year}-01-01`).lt('delivery_date', `${Number(year) + 1}-01-01`);
   }
 
   const { data, error } = await query;
