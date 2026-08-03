@@ -290,10 +290,19 @@ async function handle(req: NextRequest) {
         const { candidate } = await findMatchFor(p.description, p.category, p.pkg_size, Number(p.price));
         const upd: Record<string, unknown> = { photo_match_tried_at: new Date().toISOString() };
         if (candidate && candidate.rename) {
+          // STRONG (name + price/size corroborated) → auto-apply, clear any proposal.
           const locked = new Set(p.manual_fields || []);
           if (!locked.has('image_url')) upd.image_url = candidate.image_url;
           if (!locked.has('details')) upd.details = candidate.proper_name;
           upd.image_source = 'name_match';
+          upd.proposed_image_url = null; upd.proposed_details = null;
+          upd.proposed_name = null; upd.proposed_score = null;
+        } else if (candidate) {
+          // WEAKER → park as a proposal for the Photo Review tab.
+          upd.proposed_image_url = candidate.image_url;
+          upd.proposed_details = candidate.proper_name;
+          upd.proposed_name = candidate.freshop_name;
+          upd.proposed_score = candidate.score;
         }
         await supabase.from('products').update(upd).eq('id', p.id);
       }

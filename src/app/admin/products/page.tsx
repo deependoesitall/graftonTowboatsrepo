@@ -387,6 +387,136 @@ function PhotoBackfillPanel({ onClose, onApplied }: {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// PHOTO REVIEW — the nightly sync's weaker name-matches, waiting for a human.
+// Strong matches auto-applied overnight; these are the judgment calls. No live
+// searching here (that already happened, paced, overnight) — just approve/reject.
+// ─────────────────────────────────────────────────────────────────────────────
+interface PhotoProposal {
+  id: string;
+  description: string;
+  details: string | null;
+  category: string;
+  pkg_size: string | null;
+  price: number;
+  proposed_image_url: string;
+  proposed_details: string | null;
+  proposed_name: string | null;
+  proposed_score: number | null;
+}
+
+function PhotoReviewPanel({ onClose, onApplied }: { onClose: () => void; onApplied: () => void }) {
+  const [proposals, setProposals] = useState<PhotoProposal[] | null>(null);
+  const [picks, setPicks] = useState<Record<string, { keep: boolean; name: boolean }>>({});
+  const [applying, setApplying] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const res = await adminFetch('/api/admin/photo-review');
+      const list: PhotoProposal[] = res.ok ? (await res.json()).proposals : [];
+      setProposals(list);
+      const init: Record<string, { keep: boolean; name: boolean }> = {};
+      for (const p of list) init[p.id] = { keep: true, name: true };
+      setPicks(init);
+    })();
+  }, []);
+
+  async function apply() {
+    if (!proposals) return;
+    setApplying(true);
+    try {
+      const approve = proposals.filter(p => picks[p.id]?.keep).map(p => ({ id: p.id, keepName: !!picks[p.id]?.name }));
+      const reject = proposals.filter(p => !picks[p.id]?.keep).map(p => p.id);
+      const res = await adminFetch('/api/admin/photo-review', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approve, reject }),
+      });
+      if (res.ok) { onApplied(); onClose(); }
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  const keptCount = proposals ? proposals.filter(p => picks[p.id]?.keep).length : 0;
+
+  return createPortal(
+    <div className="fixed inset-0 z-[95] bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl flex flex-col max-h-[92vh]">
+        <div className="px-5 py-4 border-b border-gray-100 flex items-start justify-between gap-3 shrink-0">
+          <div>
+            <h3 className="font-display text-lg font-bold text-brand-navy flex items-center gap-2">
+              <ImagePlus className="w-5 h-5 text-brand-gold" /> Photo Review
+            </h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {proposals === null ? 'Loading…'
+                : `${proposals.length} match${proposals.length === 1 ? '' : 'es'} the nightly sync found — approve the good ones, untick the wrong ones.`}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+        </div>
+
+        <div className="p-5 overflow-y-auto flex-1 space-y-2">
+          {proposals !== null && proposals.length === 0 && (
+            <p className="text-sm text-gray-400 text-center py-10">
+              Nothing waiting for review — the nightly sync will drop new matches here as it works through the catalog.
+            </p>
+          )}
+          {(proposals || []).map(p => {
+            const pick = picks[p.id] || { keep: false, name: false };
+            const strong = (p.proposed_score ?? 0) >= 0.8;
+            return (
+              <div key={p.id} className={`flex items-center gap-4 border rounded-xl p-3 transition-colors ${
+                pick.keep ? 'border-brand-gold/40 bg-brand-sand/20' : 'border-gray-200 bg-gray-50 opacity-60'
+              }`}>
+                <input type="checkbox" checked={pick.keep}
+                  onChange={e => setPicks(v => ({ ...v, [p.id]: { ...pick, keep: e.target.checked } }))}
+                  className="w-4 h-4 accent-brand-navy shrink-0" />
+                <div className="relative w-16 h-16 bg-white border border-gray-200 rounded-lg overflow-hidden shrink-0">
+                  <Image src={p.proposed_image_url} alt={p.proposed_name || ''} fill className="object-contain p-1" unoptimized />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-gray-400 truncate">
+                    <span className="font-mono">{p.description}</span>
+                    {p.pkg_size && <span className="ml-1.5">· {p.pkg_size}</span>}
+                    <span className="ml-1.5">· {formatCurrency(p.price)}</span>
+                  </p>
+                  <p className="text-sm font-semibold text-brand-navy truncate mt-0.5">{p.proposed_name}</p>
+                  <div className="flex items-center gap-1.5 mt-1">
+                    <span className="text-[10px] text-gray-400">{p.category}</span>
+                    <span className={`text-[10px] font-bold px-1.5 rounded-full border ${strong ? 'text-green-700 bg-green-50 border-green-200' : 'text-amber-700 bg-amber-50 border-amber-200'}`}>
+                      {Math.round((p.proposed_score ?? 0) * 100)}% match
+                    </span>
+                  </div>
+                </div>
+                <label className={`flex items-start gap-2 w-52 shrink-0 text-xs cursor-pointer ${pick.keep ? '' : 'pointer-events-none'}`}>
+                  <input type="checkbox" checked={pick.name}
+                    onChange={e => setPicks(v => ({ ...v, [p.id]: { ...pick, name: e.target.checked } }))}
+                    className="w-3.5 h-3.5 accent-brand-navy mt-0.5 shrink-0" />
+                  <span className="min-w-0">
+                    <span className="block text-gray-400">Also show as</span>
+                    <span className="block font-semibold text-brand-navy leading-tight">{p.proposed_details}</span>
+                  </span>
+                </label>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="px-5 py-4 border-t border-gray-100 flex items-center gap-3 shrink-0">
+          <p className="text-xs text-gray-500 flex-1">{keptCount} to approve · {(proposals?.length || 0) - keptCount} to reject</p>
+          <button onClick={onClose} disabled={applying}
+            className="px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50">Cancel</button>
+          <button onClick={apply} disabled={applying || proposals === null || proposals.length === 0}
+            className="px-5 py-2.5 rounded-xl bg-brand-green text-white text-sm font-bold flex items-center gap-1.5 hover:bg-brand-gmed disabled:opacity-50">
+            {applying ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : <><Check className="w-4 h-4" /> Apply decisions</>}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 // -- Shared image upload cell
 function ProductImageCell({ productId, imageUrl, onUploaded }: {
   productId: string | null;
@@ -933,7 +1063,17 @@ export default function AdminProductsPage() {
   const [denied, setDenied] = useState(false);
   const [sessionRole, setSessionRole] = useState<string | null>(null);
   const [showBackfill, setShowBackfill] = useState(false);
+  const [showPhotoReview, setShowPhotoReview] = useState(false);
+  const [photoReviewCount, setPhotoReviewCount] = useState(0);
   const { confirm: confirmDialog, dialog: confirmDialogEl } = useConfirm();
+
+  const loadPhotoReviewCount = useCallback(async () => {
+    try {
+      const res = await adminFetch('/api/admin/photo-review');
+      if (res.ok) setPhotoReviewCount((await res.json()).count || 0);
+    } catch { /* non-critical */ }
+  }, []);
+  useEffect(() => { loadPhotoReviewCount(); }, [loadPhotoReviewCount]);
 
   // Auth guard — verify the session cookie with the server
   useEffect(() => {
@@ -1160,6 +1300,11 @@ export default function AdminProductsPage() {
           onClose={() => setShowBackfill(false)}
           onApplied={() => fetchProducts()} />
       )}
+      {showPhotoReview && (
+        <PhotoReviewPanel
+          onClose={() => setShowPhotoReview(false)}
+          onApplied={() => { fetchProducts(); loadPhotoReviewCount(); }} />
+      )}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="font-display text-2xl font-bold text-brand-navy">Product Catalog</h1>
@@ -1167,6 +1312,14 @@ export default function AdminProductsPage() {
         </div>
         <div className="flex items-center gap-2">
           <CatalogSyncStatus isOwner={sessionRole === 'owner'} />
+          {photoReviewCount > 0 && (
+            <button onClick={() => setShowPhotoReview(true)}
+              title="Approve or reject the photo matches the nightly sync found"
+              className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5 border-brand-gold/50 text-brand-navy">
+              <ImagePlus className="w-4 h-4" /> Photo Review
+              <span className="text-[10px] font-bold bg-brand-gold text-brand-navy rounded-full px-1.5">{photoReviewCount}</span>
+            </button>
+          )}
           <button onClick={() => setShowBackfill(true)}
             title="Search Sinclair's site for photos and proper names on items the nightly barcode sync can't match"
             className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5">

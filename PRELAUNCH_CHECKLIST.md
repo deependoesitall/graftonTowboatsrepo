@@ -21,6 +21,7 @@ dress rehearsal that de-risks a public launch.
   - [ ] 046 — order delivery billing (`delivery_fee`, `delivery_service_type`, `delivery_company_id`, `bill_for_groceries`)
   - [ ] 047 — order documents (`sinclairs_receipt_url`, `ingram_slip_url`)
   - [ ] 048 — invoice number sequence
+  - [ ] 049 — `photo_match_tried_at` (nightly auto photo/name backfill marker)
 - [ ] **Create the `order-documents` storage bucket** in Supabase → Storage
       (public), same as the existing `product-images` bucket. Receipts and
       signed Ingram slips upload here.
@@ -55,7 +56,8 @@ dress rehearsal that de-risks a public launch.
   - [ ] `DELETE FROM products WHERE store_only = TRUE AND category = 'Household & Cleaning';` (removes already-imported floral)
   - [ ] `UPDATE products SET pkg_size = NULL WHERE pkg_size ~* 'zzz';` (junk pack sizes)
   - [ ] `SELECT category, COUNT(*) FROM products GROUP BY 1 ORDER BY 2 DESC;` → fix strays, e.g. `UPDATE products SET category = 'Frozen Foods' WHERE category = 'Frozen Goods';`
-- [ ] Run **Find Photos** and apply the name-matched images (they're tagged for review).
+  - [ ] Clean leftover "(0.0000)" in names: `UPDATE products SET details = regexp_replace(details, '\s*\(0+(\.0+)?\)\s*$', '') WHERE details ~ '\(0+(\.0+)?\)\s*$';`
+- [ ] Run **Find Photos** and apply the name-matched images (now paced + abbreviation-aware). The nightly sync also auto-applies high-confidence matches on its own.
 - [ ] Align the invoice sequence to continue after QuickBooks:
       `ALTER SEQUENCE gts_invoice_seq RESTART WITH 1084;` (or your true next number).
 
