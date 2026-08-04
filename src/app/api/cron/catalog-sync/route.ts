@@ -93,7 +93,18 @@ async function handle(req: NextRequest) {
   // fresh on the next new day; completed-today invocations are no-ops.
   if (state.completedAt) {
     if (state.day === today) {
-      return NextResponse.json({ status: 'done', day: today, completedAt: state.completedAt, stats: state.stats, inserted: state.inserted || 0 });
+      // Catalog sweep is done for today — but keep clearing the photo-match
+      // backlog and self-chain until it's empty, so Photo Review fills up in
+      // ONE night instead of only during the sweep's handful of runs.
+      const selfUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : process.env.NEXT_PUBLIC_APP_URL;
+      let backfill = { processed: 0, hasMore: false };
+      try { backfill = await runPhotoBackfill(supabase, started + TIME_BUDGET_MS - 5000); } catch { /* never break */ }
+      if (backfill.hasMore) chainSelf(secret, selfUrl);
+      return NextResponse.json({
+        status: 'done', day: today, completedAt: state.completedAt,
+        stats: state.stats, inserted: state.inserted || 0,
+        photo_backfill: backfill, has_more: backfill.hasMore,
+      });
     }
     state = { day: today, stats: emptyStats(), applied: 0, inserted: 0 };
   } else if (!state.day || !state.depts) {
@@ -269,43 +280,13 @@ async function handle(req: NextRequest) {
   state.stats = stats;
   state.lastError = rateLimited ? 'Freshop rate limit mid-run — resuming next invocation' : undefined;
 
-  // ── AUTO PHOTO/NAME BACKFILL (paced, defensive) ──
-  // A few barge items per invocation that the barcode pass can't reach get
-  // name-matched to Sinclair's; HIGH-confidence matches (name + price/size
-  // corroborated) are auto-applied so obvious items clean themselves up.
-  // Wrapped so it can NEVER break the core sync; skipped when NCR is already
-  // pushing back this run.
+  // ── PHOTO/NAME BACKFILL (paced, defensive) ── run a batch when there's
+  // spare budget; the self-chain below keeps it going until the backlog clears.
+  let backfillHasMore = false;
   if (!rateLimited && Date.now() - started < TIME_BUDGET_MS - 8000) {
     try {
-      const staleBefore = new Date(Date.now() - 14 * 864e5).toISOString();
-      const { data: needy } = await supabase
-        .from('products')
-        .select('id, description, category, pkg_size, price, manual_fields')
-        .eq('store_only', false).eq('is_active', true)
-        .is('image_url', null).is('freshop_id', null)
-        .or(`photo_match_tried_at.is.null,photo_match_tried_at.lt.${staleBefore}`)
-        .limit(6);
-      for (const p of (needy || []) as Array<{ id: string; description: string; category: string; pkg_size: string | null; price: number; manual_fields: string[] | null }>) {
-        if (Date.now() - started > TIME_BUDGET_MS - 2000) break;
-        const { candidate } = await findMatchFor(p.description, p.category, p.pkg_size, Number(p.price));
-        const upd: Record<string, unknown> = { photo_match_tried_at: new Date().toISOString() };
-        if (candidate && candidate.rename) {
-          // STRONG (name + price/size corroborated) → auto-apply, clear any proposal.
-          const locked = new Set(p.manual_fields || []);
-          if (!locked.has('image_url')) upd.image_url = candidate.image_url;
-          if (!locked.has('details')) upd.details = candidate.proper_name;
-          upd.image_source = 'name_match';
-          upd.proposed_image_url = null; upd.proposed_details = null;
-          upd.proposed_name = null; upd.proposed_score = null;
-        } else if (candidate) {
-          // WEAKER → park as a proposal for the Photo Review tab.
-          upd.proposed_image_url = candidate.image_url;
-          upd.proposed_details = candidate.proper_name;
-          upd.proposed_name = candidate.freshop_name;
-          upd.proposed_score = candidate.score;
-        }
-        await supabase.from('products').update(upd).eq('id', p.id);
-      }
+      const r = await runPhotoBackfill(supabase, started + TIME_BUDGET_MS - 2000);
+      backfillHasMore = r.hasMore;
     } catch { /* never let backfill break the sync */ }
   }
 
@@ -338,28 +319,16 @@ async function handle(req: NextRequest) {
   // One kickoff — cron, GitHub Action, or the dashboard's "Sync now" — now
   // cascades through the whole sweep instead of idling between pokes.
   // Rate-limited or errored runs DON'T chain; the scheduled pokes resume them.
+  // Keep chaining while EITHER the sweep or the photo backfill has work left.
   const selfUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : process.env.NEXT_PUBLIC_APP_URL;
-  if (!finished && !rateLimited && secret && selfUrl) {
-    after(async () => {
-      try {
-        // Deliver the request, then abort our wait — the next invocation is
-        // its own function and finishes on its own; we must not sit through
-        // its 40s inside OUR time budget.
-        await fetch(`${selfUrl}/api/cron/catalog-sync`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${secret}` },
-          signal: AbortSignal.timeout(3000),
-        });
-      } catch { /* abort/timeout expected — scheduled invocations are the backstop */ }
-    });
-  }
+  const moreWork = (!finished || backfillHasMore) && !rateLimited;
+  if (moreWork) chainSelf(secret, selfUrl);
 
   return NextResponse.json({
     status: finished ? 'done' : rateLimited ? 'rate-limited' : 'in-progress',
     /** Client-driven chaining: the admin page fires the next chunk when this
-     * is true. after() below is the unattended backstop — belt and braces,
-     * because serverless after() callbacks aren't guaranteed to survive. */
-    has_more: !finished && !rateLimited,
+     * is true. chainSelf() is the unattended backstop. */
+    has_more: moreWork,
     session_started: state.day,
     pages_done: state.depts.reduce((s, d) => s + d.done.length, 0),
     pages_total: state.depts.reduce((s, d) => s + d.pages, 0),
@@ -374,6 +343,59 @@ async function saveState(supabase: ReturnType<typeof createServiceClient>, state
   await supabase.from('catalog_sync_state')
     .update({ state, updated_at: new Date().toISOString() })
     .eq('id', 1);
+}
+
+/**
+ * Photo/name backfill: name-match a batch of barge items the barcode pass
+ * can't reach, queue every match into the Photo Review tab (never auto-apply —
+ * a high score can still be the wrong flavor). Returns whether MORE items
+ * remain, so the caller can self-chain and clear the whole backlog in one
+ * night rather than piggybacking only on the catalog sweep's few runs.
+ */
+async function runPhotoBackfill(
+  supabase: ReturnType<typeof createServiceClient>,
+  deadline: number,
+): Promise<{ processed: number; hasMore: boolean }> {
+  const staleBefore = new Date(Date.now() - 14 * 864e5).toISOString();
+  const { data } = await supabase
+    .from('products')
+    .select('id, description, category, pkg_size, price')
+    .eq('store_only', false).eq('is_active', true)
+    .is('image_url', null).is('freshop_id', null)
+    .or(`photo_match_tried_at.is.null,photo_match_tried_at.lt.${staleBefore}`)
+    .limit(13); // one extra row tells us the backlog isn't empty yet
+  const rows = (data || []) as Array<{ id: string; description: string; category: string; pkg_size: string | null; price: number }>;
+  let processed = 0;
+  for (const p of rows.slice(0, 12)) {
+    if (Date.now() > deadline) break;
+    try {
+      const { candidate } = await findMatchFor(p.description, p.category, p.pkg_size, Number(p.price));
+      const upd: Record<string, unknown> = { photo_match_tried_at: new Date().toISOString() };
+      if (candidate) {
+        upd.proposed_image_url = candidate.image_url;
+        upd.proposed_details = candidate.proper_name;
+        upd.proposed_name = candidate.freshop_name;
+        upd.proposed_score = candidate.score;
+      }
+      await supabase.from('products').update(upd).eq('id', p.id);
+      processed++;
+    } catch { /* skip this item, keep going */ }
+  }
+  return { processed, hasMore: rows.length > processed };
+}
+
+/** Fire another invocation of this route (self-driving chain). */
+function chainSelf(secret: string | undefined, selfUrl: string | undefined) {
+  if (!secret || !selfUrl) return;
+  after(async () => {
+    try {
+      await fetch(`${selfUrl}/api/cron/catalog-sync`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${secret}` },
+        signal: AbortSignal.timeout(3000),
+      });
+    } catch { /* the scheduled pokes are the backstop */ }
+  });
 }
 
 // Vercel cron uses GET; the GitHub Action and manual tests may use either.

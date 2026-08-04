@@ -444,7 +444,9 @@ function PhotoReviewPanel({ onClose, onApplied }: { onClose: () => void; onAppli
       const list: PhotoProposal[] = res.ok ? (await res.json()).proposals : [];
       setProposals(list);
       const init: Record<string, { keep: boolean; name: boolean }> = {};
-      for (const p of list) init[p.id] = { keep: true, name: true };
+      // Photo kept by default; name pre-checked only for strong matches — weaker
+      // ones (where the flavor/variant may differ) default to image-only.
+      for (const p of list) init[p.id] = { keep: true, name: (p.proposed_score ?? 0) >= 0.85 };
       setPicks(init);
     })();
   }, []);
@@ -1406,6 +1408,33 @@ export default function AdminProductsPage() {
                 <option value="store">Full Store Only</option>
               </select>
             </div>
+          </div>
+
+          {/* Quick filters — one-click category + spot-check views */}
+          <div className="px-4 py-2.5 border-b border-gray-100 flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wide mr-1">Quick filters</span>
+            {['', ...CATEGORIES].map(c => (
+              <button key={c || 'all'}
+                onClick={() => { setCategory(c); setStatus(''); setPage(1); }}
+                className={`text-xs font-semibold px-2.5 py-1 rounded-full border transition-colors ${
+                  category === c && !status ? 'bg-brand-navy text-white border-brand-navy' : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                }`}>
+                {c || 'All'}
+              </button>
+            ))}
+            <span className="w-px h-4 bg-gray-200 mx-1" />
+            <button onClick={() => { setStatus('no_image'); setPage(1); }}
+              className={`text-xs font-semibold px-2.5 py-1 rounded-full border transition-colors ${
+                status === 'no_image' ? 'bg-orange-600 text-white border-orange-600' : 'border-gray-200 text-gray-600 hover:border-gray-300'
+              }`}>
+              📷 Missing Image
+            </button>
+            <button onClick={() => { setStatus('name_matched'); setPage(1); }}
+              className={`text-xs font-semibold px-2.5 py-1 rounded-full border transition-colors ${
+                status === 'name_matched' ? 'bg-purple-600 text-white border-purple-600' : 'border-gray-200 text-gray-600 hover:border-gray-300'
+              }`}>
+              🔍 Auto-matched
+            </button>
           </div>
 
           {/* Bulk action bar */}

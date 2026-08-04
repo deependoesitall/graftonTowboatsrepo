@@ -99,6 +99,14 @@ export function norm(raw: string | null | undefined): string {
   const s = String(raw ?? '').trim().replace(/\.0+$/, '');
   return s.replace(/\D/g, '').replace(/^0+/, '');
 }
+// Check-digit tolerance (dropping the last digit) is ONLY valid for full-length
+// barcodes — it's meant to bridge a UPC-A that carries its check digit vs one
+// that doesn't. Produce items use short 4–5 digit PLU codes, and truncating
+// those just collides two unrelated items (a cucumber PLU matching a mushroom
+// row → wrong photo). So the drop-a-digit key is gated on length >= 8; short
+// PLUs must match EXACTLY.
+const CHECKDIGIT_MIN_LEN = 8;
+
 export function freshopKeys(p: FreshopProduct): string[] {
   const keys = new Set<string>();
   for (const raw of [p.upc, p.barcode_upc_a, p.barcode_ean13]) {
@@ -106,14 +114,14 @@ export function freshopKeys(p: FreshopProduct): string[] {
     if (n.length >= 4) keys.add(n);
   }
   const upcA = norm(p.barcode_upc_a);
-  if (upcA.length >= 5) keys.add(upcA.slice(0, -1));
+  if (upcA.length >= CHECKDIGIT_MIN_LEN) keys.add(upcA.slice(0, -1));
   return Array.from(keys);
 }
 export function ourKeys(upc: string): string[] {
   const n = norm(upc);
   if (n.length < 4) return [];
   const keys = [n];
-  if (n.length >= 5) keys.push(n.slice(0, -1));
+  if (n.length >= CHECKDIGIT_MIN_LEN) keys.push(n.slice(0, -1));
   return keys;
 }
 

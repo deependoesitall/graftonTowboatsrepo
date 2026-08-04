@@ -33,6 +33,7 @@ interface Delivery {
   gts_correspondent: string | null;
   invoice_sent: string | null;
   incentive: string | null;
+  sinclairs_receipt_url: string | null;
 }
 
 // Deliveries began January 2026 — never offer a month before that.
@@ -220,6 +221,23 @@ function DeliveryEditor({ delivery, companies, serviceTypes, onClose, onSaved }:
   const [rateHint, setRateHint] = useState<string>('');
   const set = (k: string, v: any) => setF(p => ({ ...p, [k]: v }));
 
+  // Sinclair's receipt on this delivery (only when billing groceries)
+  const [receiptUrl, setReceiptUrl] = useState<string | null>(delivery?.sinclairs_receipt_url ?? null);
+  const [uploadingReceipt, setUploadingReceipt] = useState(false);
+  async function uploadReceipt(file: File) {
+    if (!delivery?.id) return;
+    setUploadingReceipt(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('delivery_id', delivery.id);
+      const res = await adminFetch('/api/admin/deliveries/receipt', { method: 'POST', body: fd });
+      if (res.ok) setReceiptUrl((await res.json()).url);
+    } finally {
+      setUploadingReceipt(false);
+    }
+  }
+
   // When company + service type are both chosen, auto-fill the fee from the
   // rate card (default, or that company's override). Editable afterward.
   const svcId = serviceTypes.find(s => s.name === f.service_type)?.id;
@@ -302,6 +320,29 @@ function DeliveryEditor({ delivery, companies, serviceTypes, onClose, onSaved }:
             <input type="checkbox" checked={!!f.updated_quickbooks} onChange={e => set('updated_quickbooks', e.target.checked)} className="w-4 h-4 accent-brand-green" />
             Updated QuickBooks
           </label>
+
+          {/* Sinclair's receipt — only when billing for groceries */}
+          {f.bill_for_groceries && (
+            <div className="col-span-2 border border-gray-200 rounded-lg p-3">
+              <p className="text-xs font-semibold text-gray-500 mb-1.5">Sinclair&apos;s receipt</p>
+              {delivery?.id ? (
+                <div className="flex items-center gap-2">
+                  <label className={`flex items-center gap-1.5 text-xs font-bold px-2.5 py-1.5 rounded-lg border cursor-pointer transition-colors ${
+                    receiptUrl ? 'border-green-300 bg-green-50 text-green-700' : 'border-brand-navy/30 text-brand-navy hover:bg-gray-50'
+                  }`}>
+                    {uploadingReceipt ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                    {receiptUrl ? 'Replace receipt' : 'Attach receipt'}
+                    <input type="file" accept="application/pdf,image/*" className="hidden"
+                      onChange={e => { const file = e.target.files?.[0]; if (file) uploadReceipt(file); }} />
+                  </label>
+                  {receiptUrl && <a href={receiptUrl} target="_blank" rel="noreferrer" className="text-xs text-brand-river underline">View</a>}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400">Save the delivery first, then reopen it to attach the receipt.</p>
+              )}
+            </div>
+          )}
+
           <label className="block col-span-2">
             <span className="text-xs font-semibold text-gray-500">Issues / comments</span>
             <textarea value={f.issues_comments} onChange={e => set('issues_comments', e.target.value)} rows={2}
@@ -327,6 +368,7 @@ function RateCardEditor({ companies, serviceTypes, onClose, onChanged }: {
   const [companyId, setCompanyId] = useState<string>(''); // '' = shared defaults
   const [overrides, setOverrides] = useState<Override[]>([]);
   const [saving, setSaving] = useState<string | null>(null);
+  const [savedId, setSavedId] = useState<string | null>(null);
 
   const loadOverrides = useCallback(async () => {
     const res = await adminFetch('/api/admin/service-rates');
@@ -334,17 +376,27 @@ function RateCardEditor({ companies, serviceTypes, onClose, onChanged }: {
   }, []);
   useEffect(() => { loadOverrides(); }, [loadOverrides]);
 
+  function flagSaved(id: string) {
+    setSavedId(id);
+    setTimeout(() => setSavedId(s => (s === id ? null : s)), 2000);
+  }
   async function saveDefault(st: ServiceType, val: string) {
+    if (String(parseFloat(val) || 0) === String(st.default_rate)) return; // unchanged
     setSaving(st.id);
-    await adminFetch('/api/admin/service-rates', { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    const res = await adminFetch('/api/admin/service-rates', { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mode: 'default', id: st.id, default_rate: parseFloat(val) || 0 }) });
-    setSaving(null); onChanged();
+    setSaving(null);
+    if (res.ok) { flagSaved(st.id); onChanged(); }
   }
   async function saveOverride(st: ServiceType, val: string) {
+    const current = overrideFor(st.id);
+    const next = val === '' ? null : parseFloat(val);
+    if (String(current ?? '') === String(next ?? '')) return; // unchanged
     setSaving(st.id);
-    await adminFetch('/api/admin/service-rates', { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode: 'override', company_id: companyId, service_type_id: st.id, rate: val === '' ? null : parseFloat(val) }) });
+    const res = await adminFetch('/api/admin/service-rates', { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'override', company_id: companyId, service_type_id: st.id, rate: next }) });
     await loadOverrides(); setSaving(null);
+    if (res.ok) flagSaved(st.id);
   }
   const overrideFor = (stId: string) => overrides.find(o => o.company_id === companyId && o.service_type_id === stId)?.rate;
 
@@ -372,21 +424,27 @@ function RateCardEditor({ companies, serviceTypes, onClose, onChanged }: {
                 {companyId === '' ? (
                   <div className="flex items-center gap-1">
                     <span className="text-gray-400 text-sm">$</span>
-                    <input type="number" step="0.01" defaultValue={st.default_rate}
+                    {/* key re-mounts the input per service type so defaultValue is fresh */}
+                    <input key={`def-${st.id}`} type="number" step="0.01" defaultValue={st.default_rate}
                       onBlur={e => saveDefault(st, e.target.value)}
                       className="w-24 text-right border border-gray-200 rounded px-2 py-1 text-sm" />
                   </div>
                 ) : (
                   <div className="flex items-center gap-1">
                     <span className="text-gray-400 text-sm">$</span>
-                    <input type="number" step="0.01" defaultValue={ov ?? ''} placeholder={String(st.default_rate)}
+                    {/* key includes companyId so switching companies re-mounts with that company's value */}
+                    <input key={`${companyId}-${st.id}`} type="number" step="0.01" defaultValue={ov ?? ''} placeholder={String(st.default_rate)}
                       onBlur={e => saveOverride(st, e.target.value)}
                       className="w-24 text-right border border-gray-200 rounded px-2 py-1 text-sm" />
                     {ov == null && <span className="text-[10px] text-gray-400 w-14">default</span>}
                     {ov != null && <span className="text-[10px] text-brand-green font-bold w-14">custom</span>}
                   </div>
                 )}
-                {saving === st.id && <Loader2 className="w-3.5 h-3.5 animate-spin text-gray-400" />}
+                {saving === st.id
+                  ? <Loader2 className="w-3.5 h-3.5 animate-spin text-gray-400" />
+                  : savedId === st.id
+                  ? <Check className="w-3.5 h-3.5 text-green-600" />
+                  : <span className="w-3.5" />}
               </div>
             );
           })}
