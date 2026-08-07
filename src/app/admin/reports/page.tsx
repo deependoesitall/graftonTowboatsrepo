@@ -18,6 +18,7 @@ import {
   Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend,
 } from 'recharts';
 import { fetchAdminSession, canAccess, adminFetch } from '@/lib/admin-auth';
+import { billingKey, canonicalVesselName } from '@/lib/vessel';
 import { formatCurrency } from '@/lib/utils';
 
 // ─── Analytics types ──────────────────────────────────────────
@@ -153,14 +154,28 @@ function billingGroupLabel(o: BillingOrder): string {
   return o.vessel_name ? `${o.company_name} — ${o.vessel_name}` : o.company_name;
 }
 
+/** Identity key — collapses spelling variants of the same boat so one vessel
+ *  never splits into two invoices ("W. Scott Noble" ≡ "Scott Noble"). */
+function billingGroupKey(o: BillingOrder): string {
+  return billingKey(o.company_name, o.vessel_name);
+}
+
 function groupOrders(orders: BillingOrder[]): [string, BillingOrder[]][] {
+  // Group by identity KEY (spelling-insensitive) so a boat entered two ways
+  // stays one invoice; label the group with the fullest spelling actually used.
   const map = new Map<string, BillingOrder[]>();
   for (const o of orders) {
-    const key = billingGroupLabel(o);
+    const key = billingGroupKey(o);
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(o);
   }
-  return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  return Array.from(map.entries())
+    .map(([, os]) => {
+      const vessel = canonicalVesselName(os.map(o => o.vessel_name));
+      const company = os[0].company_name;
+      return [vessel ? `${company} — ${vessel}` : company, os] as [string, BillingOrder[]];
+    })
+    .sort((a, b) => a[0].localeCompare(b[0]));
 }
 
 // Grocery lines the company actually gets invoiced for — COD lines are
@@ -426,7 +441,7 @@ function orderDetailSheet(o: BillingOrder, groupLabel: string, monthLabel: strin
 // ── Per-vessel invoice statement page ──────────────────────────
 function vesselStatementPage(group: string, orders: BillingOrder[], monthLabel: string, generated: string, sectionNum: number, sectionCount: number): string {
   const first = orders[0];
-  const estTotal = orders.reduce((s, o) => s + billedGroceries(o), 0);
+  const estTotal = orders.reduce((s, o) => s + billedGroceries(o) + (Number(o.delivery_fee) || 0), 0);
   const deliveryTotal = deliverySum(orders);
   const directOrders = orders.filter(paysSinclairDirect);
   // Deck portion — company-billed but invoiced as its OWN line, never mixed
@@ -524,12 +539,14 @@ function vesselStatementPage(group: string, orders: BillingOrder[], monthLabel: 
             <td style="padding:5px 10px;text-align:right;font-weight:800;font-size:11px;color:#0f766e;">${money(deckSum)}</td>
           </tr>` : ''}
           ${deliveryTotal > 0 ? `<tr>
-            <td style="padding:7px 10px;font-size:11px;color:#555;">GTS delivery charge${orders.length > 1 ? `s (${orders.filter(o => Number(o.delivery_fee) > 0).length})` : (orders[0]?.delivery_service_type ? ` — ${esc(orders[0].delivery_service_type)}` : '')}</td>
+            <td style="padding:7px 10px;font-size:11px;color:#555;">GTS delivery${orders.length > 1
+              ? ` — ${orders.filter(o => Number(o.delivery_fee) > 0).length} run${orders.filter(o => Number(o.delivery_fee) > 0).length === 1 ? '' : 's'}`
+              : (orders[0]?.delivery_service_type ? ` — ${esc(orders[0].delivery_service_type)}` : '')}</td>
             <td style="padding:7px 10px;text-align:right;font-weight:800;font-size:13px;color:${GREEN};">${money(deliveryTotal)}</td>
           </tr>
-          <tr>
-            <td style="padding:5px 10px;font-size:10px;color:#777;">Groceries + delivery</td>
-            <td style="padding:5px 10px;text-align:right;font-weight:800;font-size:12px;color:#555;">${money(estTotal + deliveryTotal)}</td>
+          <tr style="background:#fafaf7;">
+            <td style="padding:7px 10px;font-size:11px;font-weight:800;color:${GREEN};">Invoice total — groceries + delivery</td>
+            <td style="padding:7px 10px;text-align:right;font-weight:900;font-size:14px;color:${GREEN};">${money(estTotal + deliveryTotal)}</td>
           </tr>` : ''}
           <tr style="background:${LIME};">
             <td style="padding:9px 10px;font-size:12px;font-weight:900;color:${GREEN};text-transform:uppercase;">Final Invoice Total</td>
@@ -563,8 +580,11 @@ function billingPacketHtml(groups: [string, BillingOrder[]][], monthLabel: strin
   const generated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
   const allOrders = groups.flatMap(([, os]) => os);
   const packetEst = allOrders.reduce((s, o) => s + billedGroceries(o), 0);
+  // The statement ATTACHES to the QuickBooks invoice, so it must reconcile to
+  // that invoice — groceries + delivery. (Double-entry is prevented by the
+  // QuickBooks queue being the only place billing is worked from.)
   const packetDelivery = deliverySum(allOrders);
-  const packetInvoiced = packetEst + packetDelivery;   // what GTS actually bills
+  const packetInvoiced = packetEst + packetDelivery;
   const packetSavings = allOrders.reduce((s, o) => s + (Number(o.discount_total) || 0), 0);
   const packetItems = allOrders.reduce((s, o) =>
     s + billableItems(o).filter(i => i.shopping_status !== 'out_of_stock').reduce((q, i) => q + i.quantity, 0), 0);
@@ -592,8 +612,8 @@ function billingPacketHtml(groups: [string, BillingOrder[]][], monthLabel: strin
         [`${allOrders.length}`, allOrders.length === 1 ? 'Order' : 'Orders'],
         [`${packetItems}`, 'Items Billed'],
         ...(packetSavings > 0 ? [[`−${money(packetSavings)}`, 'Coupon Savings']] : []),
-        [money(packetEst), 'Groceries Billed'],
-        ...(packetDelivery > 0 ? [[money(packetDelivery), 'Delivery Charges']] : []),
+        [money(packetEst), 'Groceries'],
+        ...(packetDelivery > 0 ? [[money(packetDelivery), 'Delivery']] : []),
         [money(packetInvoiced), 'Total to Invoice'],
       ].map(([v, l]) => `
       <td style="padding:12px 10px;text-align:center;">
@@ -868,7 +888,7 @@ function BillingTab() {
                 // What GTS actually invoices: groceries (only when we bill them)
                 // plus our delivery charge — matches the packet exactly.
                 const companyTotal = companyOrders.filter(o => selected.has(o.id))
-                  .reduce((s, o) => s + billedGroceries(o) + (Number(o.delivery_fee) || 0), 0);
+                  .reduce((s, o) => s + billedGroceries(o), 0);
                 const codCount = companyOrders.reduce((s, o) => s + codLines(o).length, 0);
                 return (
                   <div key={company} className="card-base overflow-hidden">

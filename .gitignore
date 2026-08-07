@@ -36,3 +36,7 @@ next-env.d.ts
 ROUND8_PLAN.md
 PRELAUNCH_CHECKLIST.md
 PRELAUNCH_CHECKLIST.md
+
+# FUSE mount artifacts — never commit
+.fuse_hidden*
+**/.fuse_hidden*

@@ -5,10 +5,11 @@
 // rate card, and an editable rate-card manager. No more Google Drive.
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Truck, Plus, Pencil, Trash2, X, Loader2, DollarSign, Check, SlidersHorizontal } from 'lucide-react';
+import { Truck, Plus, Pencil, Trash2, X, Loader2, DollarSign, Check, SlidersHorizontal, FileText, Search } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import { adminFetch } from '@/lib/admin-auth';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
+import { vesselKey, canonicalVesselName, vesselSuggestions } from '@/lib/vessel';
 
 interface Company { id: string; name: string; is_active: boolean; }
 interface ServiceType { id: string; name: string; default_rate: number; sort: number; }
@@ -34,6 +35,7 @@ interface Delivery {
   invoice_sent: string | null;
   incentive: string | null;
   sinclairs_receipt_url: string | null;
+  ingram_slip_url: string | null;
 }
 
 // Deliveries began January 2026 — never offer a month before that.
@@ -49,6 +51,18 @@ export default function DeliveriesPage() {
   const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
   const [editing, setEditing] = useState<Delivery | 'new' | null>(null);
   const [showRates, setShowRates] = useState(false);
+  const [showQb, setShowQb] = useState(false);
+  const [search, setSearch] = useState('');
+  // Anything billable that hasn't been keyed into QuickBooks yet
+  const pendingQbCount = rows.filter(d => !d.updated_quickbooks && (Number(d.delivery_fee) > 0 || d.bill_for_groceries)).length;
+
+  // "Which delivery was that?" — vessel first, since a company can run 15+
+  // boats and the boat is how everyone actually refers to a delivery.
+  const q = search.trim().toLowerCase();
+  const visibleRows = !q ? rows : rows.filter(d =>
+    [d.vessel_name, d.company?.name, d.service_type, d.location_delivered,
+     d.delivery_driver, d.gts_correspondent, d.delivery_date, d.issues_comments]
+      .some(v => (v || '').toString().toLowerCase().includes(q)));
   const { confirm, dialog } = useConfirm();
 
   const load = useCallback(async () => {
@@ -100,13 +114,27 @@ export default function DeliveriesPage() {
           </h1>
           <p className="text-gray-400 text-sm">Your deliveries spreadsheet — logged and billed here, no Google Drive.</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+            <input type="search" value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="Search boat, company, driver…"
+              className="border border-gray-200 rounded-lg pl-9 pr-3 py-2 text-sm w-56" />
+          </div>
           <select value={month} onChange={e => setMonth(e.target.value)}
             className="border border-gray-200 rounded-lg px-3 py-2 text-sm font-medium text-brand-navy">
             {monthOpts.map(m => <option key={m.v} value={m.v}>{m.label}</option>)}
           </select>
           <button onClick={() => setShowRates(true)} className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5">
             <SlidersHorizontal className="w-4 h-4" /> Rate Cards
+          </button>
+          <button onClick={() => setShowQb(true)}
+            title="Everything still waiting to be entered into QuickBooks"
+            className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5 border-brand-gold/60">
+            <FileText className="w-4 h-4" /> QuickBooks Queue
+            {pendingQbCount > 0 && (
+              <span className="text-[10px] font-bold bg-brand-gold text-brand-navy rounded-full px-1.5">{pendingQbCount}</span>
+            )}
           </button>
           <button onClick={() => setEditing('new')} className="bg-brand-green text-white text-sm font-bold px-4 py-2 rounded-lg flex items-center gap-1.5 hover:bg-brand-gmed">
             <Plus className="w-4 h-4" /> Add Delivery
@@ -133,8 +161,12 @@ export default function DeliveriesPage() {
       <div className="card-base overflow-x-auto">
         {loading ? (
           <div className="py-16 text-center text-gray-400"><Loader2 className="w-6 h-6 animate-spin mx-auto" /></div>
-        ) : rows.length === 0 ? (
-          <div className="py-16 text-center text-gray-400 text-sm">No deliveries logged for this month yet.</div>
+        ) : visibleRows.length === 0 ? (
+          <div className="py-16 text-center text-gray-400 text-sm">
+            {search
+              ? <>No deliveries match &ldquo;{search}&rdquo; in this view. Try &ldquo;All of {LEDGER_YEAR}&rdquo;.</>
+              : 'No deliveries logged for this month yet.'}
+          </div>
         ) : (
           <table className="w-full text-sm">
             <thead>
@@ -152,7 +184,7 @@ export default function DeliveriesPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.map(d => (
+              {visibleRows.map(d => (
                 <tr key={d.id} className="border-b border-gray-100 hover:bg-gray-50">
                   <td className="px-3 py-2.5 whitespace-nowrap">{d.delivery_date || '—'}</td>
                   <td className="px-3 py-2.5 font-medium text-brand-navy">{d.company?.name || '—'}</td>
@@ -181,8 +213,15 @@ export default function DeliveriesPage() {
           delivery={editing === 'new' ? null : editing}
           companies={companies}
           serviceTypes={serviceTypes}
+          knownVessels={vesselSuggestions(rows)}
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); load(); }}
+        />
+      )}
+      {showQb && (
+        <QuickBooksQueue
+          onClose={() => setShowQb(false)}
+          onEntered={load}
         />
       )}
       {showRates && (
@@ -193,9 +232,249 @@ export default function DeliveriesPage() {
   );
 }
 
+// ── QuickBooks entry queue ───────────────────────────────────────────────
+// QuickBooks stays the invoice system of record (it owns the numbering and the
+// hosted pay link). What actually costs Mary Karen time is re-deriving each
+// delivery's numbers from three places, then tracking what's keyed in with
+// coloured spreadsheet cells. This is that job, laid out in QuickBooks' own
+// entry order: customer → date → line items → PO, each field copyable, the
+// receipt and signed slip one click away, and a "Mark entered" that replaces
+// the checkmark.
+function QuickBooksQueue({ onClose, onEntered }: {
+  onClose: () => void; onEntered: () => void;
+}) {
+  const [all, setAll] = useState<Delivery[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [copied, setCopied] = useState<string>('');
+
+  // Loads EVERY unentered delivery, not just the month on screen — being a
+  // week behind at a month boundary must never hide work.
+  const loadPending = useCallback(async () => {
+    const res = await adminFetch('/api/admin/deliveries?pending=1');
+    if (res.ok) setAll((await res.json()).deliveries as Delivery[]);
+  }, []);
+  useEffect(() => { loadPending(); }, [loadPending]);
+
+  function copy(text: string, key: string) {
+    navigator.clipboard?.writeText(text);
+    setCopied(key);
+    setTimeout(() => setCopied(k => (k === key ? '' : k)), 1200);
+  }
+
+  async function markEntered(ids: string[], key: string) {
+    if (!ids.length) return;
+    setBusy(key);
+    try {
+      for (const id of ids) {
+        await adminFetch('/api/admin/deliveries', {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id, updated_quickbooks: true }),
+        });
+      }
+      await loadPending();
+      onEntered();
+    } finally { setBusy(null); }
+  }
+
+  // Ingram won't accept an invoice without the signed slip, and a grocery-billed
+  // line can't be keyed without Sinclair's total. Surface both as blockers up
+  // front instead of letting her discover them mid-entry.
+  function blockersFor(d: Delivery): string[] {
+    const b: string[] = [];
+    if (!d.company?.name) b.push('no company set');
+    if (d.bill_for_groceries && !(Number(d.sinclairs_grocery_total) > 0)) b.push("Sinclair's total missing");
+    if (/ingram/i.test(d.company?.name || '') && !d.ingram_slip_url) b.push('signed Ingram slip missing');
+    return b;
+  }
+
+  const billable = (all || []).filter(d => Number(d.delivery_fee) > 0 || d.bill_for_groceries);
+  const ready = billable.filter(d => blockersFor(d).length === 0);
+  const blocked = billable.filter(d => blockersFor(d).length > 0);
+
+  // Billing is per COMPANY **and VESSEL** — Ingram has 15+ boats and each one
+  // gets its own invoice ("Ingram — Jenny Kay"). Grouping by company alone
+  // would lump eight boats into one bulk action and produce the wrong invoice.
+  // Nested: company → vessel → that vessel's deliveries.
+  // Grouped by vessel IDENTITY (spelling-insensitive) so "W. Scott Noble" and
+  // "Scott Noble" stay one boat — and one invoice. The label shown is the
+  // fullest spelling actually used on those records.
+  const byCompanyVessel = Array.from(
+    ready.reduce((m, d) => {
+      const co = d.company?.name || 'Unassigned';
+      const vk = vesselKey(d.vessel_name) || 'no-vessel';
+      if (!m.has(co)) m.set(co, new Map<string, Delivery[]>());
+      const vm = m.get(co)!;
+      if (!vm.has(vk)) vm.set(vk, []);
+      vm.get(vk)!.push(d);
+      return m;
+    }, new Map<string, Map<string, Delivery[]>>()).entries(),
+  )
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([co, vm]) => [
+      co,
+      Array.from(vm.values())
+        .map(ds => [canonicalVesselName(ds.map(d => d.vessel_name)) || 'No vessel', ds] as [string, Delivery[]])
+        .sort((a, b) => a[0].localeCompare(b[0])),
+    ] as const);
+
+  const lineTotal = (d: Delivery) =>
+    (Number(d.delivery_fee) || 0) + (d.bill_for_groceries ? (Number(d.sinclairs_grocery_total) || 0) : 0);
+
+  const Field = ({ label, value, k }: { label: string; value: string; k: string }) => (
+    <button onClick={() => copy(value, k)}
+      className="text-left group flex items-start gap-1.5 hover:bg-white rounded px-1.5 py-1 -mx-1.5 transition-colors"
+      title="Click to copy">
+      <span className="min-w-[92px] text-[11px] text-gray-400 pt-0.5">{label}</span>
+      <span className="text-sm font-medium text-brand-navy flex-1">{value}</span>
+      <span className={`text-[10px] shrink-0 pt-1 ${copied === k ? 'text-green-600 font-bold' : 'text-gray-300 group-hover:text-gray-500'}`}>
+        {copied === k ? 'copied' : 'copy'}
+      </span>
+    </button>
+  );
+
+  return createPortal(
+    <div className="fixed inset-0 z-[95] bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[92vh]">
+        <div className="px-5 py-4 border-b border-gray-100 flex items-start justify-between gap-3 shrink-0">
+          <div>
+            <h3 className="font-display text-lg font-bold text-brand-navy flex items-center gap-2">
+              <FileText className="w-5 h-5 text-brand-gold" /> QuickBooks entry queue
+            </h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {all === null ? 'Loading…'
+                : billable.length === 0 ? 'Everything is entered — nothing waiting.'
+                : `${ready.length} ready to key in${blocked.length ? ` · ${blocked.length} need attention` : ''} · all months`}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+        </div>
+
+        <div className="p-5 overflow-y-auto flex-1 space-y-5">
+          {all !== null && billable.length === 0 && (
+            <p className="text-sm text-gray-400 text-center py-10">
+              Nothing waiting — every billable delivery is marked entered.
+            </p>
+          )}
+
+          {/* Blocked first — she can't key these until something's fixed */}
+          {blocked.length > 0 && (
+            <div className="border border-amber-300 bg-amber-50/60 rounded-xl p-3">
+              <p className="text-xs font-bold text-amber-800 uppercase tracking-wide mb-2">
+                Need attention before entering ({blocked.length})
+              </p>
+              <div className="space-y-1.5">
+                {blocked.map(d => (
+                  <div key={d.id} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
+                    <span className="font-semibold text-brand-navy min-w-[150px]">
+                      {d.company?.name || 'No company'} · {d.delivery_date}
+                    </span>
+                    <span className="text-gray-500">{d.vessel_name}</span>
+                    <span className="text-amber-800 font-semibold">{blockersFor(d).join(' · ')}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Ready, grouped by company — one company, one sitting, one bulk mark */}
+          {byCompanyVessel.map(([company, vessels]) => {
+            const coCount = vessels.reduce((s, [, ds]) => s + ds.length, 0);
+            const coTotal = vessels.reduce((s, [, ds]) => s + ds.reduce((t, d) => t + lineTotal(d), 0), 0);
+            return (
+              <div key={company}>
+                {/* Company header — context only. The invoice unit is the vessel. */}
+                <div className="flex items-baseline justify-between gap-3 pb-1.5 mb-2 border-b-2 border-brand-navy/15">
+                  <p className="text-sm font-bold text-brand-navy">{company}</p>
+                  <p className="text-[11px] text-gray-400">
+                    {vessels.length} boat{vessels.length === 1 ? '' : 's'} · {coCount} deliver{coCount === 1 ? 'y' : 'ies'} · {formatCurrency(coTotal)}
+                  </p>
+                </div>
+
+                <div className="space-y-4 pl-1">
+                {vessels.map(([vessel, ds]) => {
+                  const groupTotal = ds.reduce((s, d) => s + lineTotal(d), 0);
+                  const key = `grp-${company}-${vessel}`;
+                  return (
+                    <div key={key}>
+                      <div className="flex items-center justify-between gap-3 mb-2">
+                        <p className="text-sm font-semibold text-brand-navy">
+                          {company} — {vessel}
+                          <span className="text-gray-400 font-normal"> · {ds.length} deliver{ds.length === 1 ? 'y' : 'ies'} · {formatCurrency(groupTotal)}</span>
+                        </p>
+                        <button onClick={() => markEntered(ds.map(d => d.id), key)} disabled={busy === key}
+                          className="flex items-center gap-1 bg-brand-green text-white text-[11px] font-bold px-3 py-1.5 rounded-lg hover:bg-brand-gmed disabled:opacity-50">
+                          {busy === key ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                          Mark this boat entered ({ds.length})
+                        </button>
+                      </div>
+
+                      <div className="space-y-2">
+                  {ds.map(d => {
+                    const fee = Number(d.delivery_fee) || 0;
+                    const groc = Number(d.sinclairs_grocery_total) || 0;
+                    const billsGroc = !!d.bill_for_groceries;
+                    const who = d.vessel_name || company;
+                    return (
+                      <div key={d.id} className="border border-gray-200 rounded-xl bg-gray-50/60 p-3">
+                        <div className="flex items-center justify-between gap-3 mb-1.5">
+                          <p className="text-xs font-semibold text-gray-500">
+                            {d.delivery_date} · {d.vessel_name || '—'}
+                            {d.location_delivered ? ` · ${d.location_delivered}` : ''}
+                          </p>
+                          <div className="flex items-center gap-2">
+                            {d.sinclairs_receipt_url && (
+                              <a href={d.sinclairs_receipt_url} target="_blank" rel="noreferrer"
+                                className="text-[11px] font-bold text-brand-river underline">Receipt</a>
+                            )}
+                            {d.ingram_slip_url && (
+                              <a href={d.ingram_slip_url} target="_blank" rel="noreferrer"
+                                className="text-[11px] font-bold text-brand-river underline">Slip</a>
+                            )}
+                            <button onClick={() => markEntered([d.id], d.id)} disabled={busy === d.id}
+                              className="text-[11px] font-bold text-gray-400 hover:text-brand-green">
+                              {busy === d.id ? '…' : 'Mark entered'}
+                            </button>
+                          </div>
+                        </div>
+                        <div className="grid sm:grid-cols-2 gap-x-4">
+                          <Field label="Customer" value={company} k={`${d.id}-c`} />
+                          <Field label="Invoice date" value={d.delivery_date || ''} k={`${d.id}-d`} />
+                          <Field label="Line 1" value={`${d.service_type || 'Delivery'} — ${d.delivery_date} ${who}`} k={`${d.id}-l1`} />
+                          <Field label="Rate" value={fee.toFixed(2)} k={`${d.id}-r1`} />
+                          {billsGroc && <>
+                            <Field label="Line 2" value={`Sinclair's — ${d.delivery_date} ${who} grocery order`} k={`${d.id}-l2`} />
+                            <Field label="Rate" value={groc.toFixed(2)} k={`${d.id}-r2`} />
+                          </>}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-x-4 mt-2 pt-2 border-t border-gray-200 text-xs">
+                          <span className="font-bold text-brand-navy">Invoice total {formatCurrency(lineTotal(d))}</span>
+                          {!billsGroc && <span className="text-amber-700 font-semibold">Delivery only — pays Sinclair&apos;s direct</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                      </div>
+                    </div>
+                  );
+                })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="px-5 py-3 border-t border-gray-100 text-[11px] text-gray-400 shrink-0">
+          Enter these in QuickBooks, then mark them — this replaces the &ldquo;Updated QuickBooks&rdquo; column on the spreadsheet.
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 // ── Add / edit a delivery ────────────────────────────────────────────────
-function DeliveryEditor({ delivery, companies, serviceTypes, onClose, onSaved }: {
-  delivery: Delivery | null; companies: Company[]; serviceTypes: ServiceType[];
+function DeliveryEditor({ delivery, companies, serviceTypes, knownVessels = [], onClose, onSaved }: {
+  delivery: Delivery | null; companies: Company[]; serviceTypes: ServiceType[]; knownVessels?: string[];
   onClose: () => void; onSaved: () => void;
 }) {
   const [f, setF] = useState<Record<string, any>>(() => ({
@@ -289,7 +568,18 @@ function DeliveryEditor({ delivery, companies, serviceTypes, onClose, onSaved }:
               {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </label>
-          {field('Vessel', 'vessel_name')}
+          {/* Free text on purpose — a brand-new boat must be able to order and
+              be logged the same day. The datalist just offers spellings already
+              in use so we don't accidentally create a second "Scott Noble". */}
+          <label className="block">
+            <span className="text-xs font-semibold text-gray-500">Vessel</span>
+            <input list="known-vessels" value={f.vessel_name ?? ''} onChange={e => set('vessel_name', e.target.value)}
+              placeholder="Type any boat — new ones welcome"
+              className="mt-0.5 w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-green/30" />
+            <datalist id="known-vessels">
+              {knownVessels.map(v => <option key={v} value={v} />)}
+            </datalist>
+          </label>
           <label className="block">
             <span className="text-xs font-semibold text-gray-500">Service type</span>
             <select value={f.service_type} onChange={e => set('service_type', e.target.value)}

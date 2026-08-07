@@ -71,65 +71,123 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const rows = lines.map((l, i) => `
     <tr>
-      <td style="padding:10px 8px;border-bottom:1px solid #eee;">${i + 1}.</td>
-      <td style="padding:10px 8px;border-bottom:1px solid #eee;font-weight:600;">${esc(l.svc)}</td>
-      <td style="padding:10px 8px;border-bottom:1px solid #eee;color:#555;">${esc(l.desc)}</td>
-      <td style="padding:10px 8px;border-bottom:1px solid #eee;text-align:center;">1</td>
-      <td style="padding:10px 8px;border-bottom:1px solid #eee;text-align:right;">${formatCurrency(l.amount)}</td>
-      <td style="padding:10px 8px;border-bottom:1px solid #eee;text-align:right;font-weight:700;">${formatCurrency(l.amount)}</td>
+      <td class="n">${i + 1}.</td>
+      <td class="svc">${esc(l.svc)}</td>
+      <td class="dsc">${esc(l.desc)}</td>
+      <td class="c">1</td>
+      <td class="r">${formatCurrency(l.amount)}</td>
+      <td class="r amt">${formatCurrency(l.amount)}</td>
     </tr>`).join('');
 
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/>
-<title>Invoice — ${esc(order.order_number)}</title>
+<title>Invoice ${invoiceNumber ?? esc(order.order_number)} — Grafton Towboat Services</title>
 <style>
-  *{box-sizing:border-box;margin:0;padding:0;} body{font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;padding:32px;font-size:13px;}
-  @media print{ .toolbar{display:none;} body{padding:0;} }
-  .toolbar{position:sticky;top:0;display:flex;justify-content:flex-end;margin-bottom:16px;}
-  .toolbar button{background:#1E3D1E;color:#D9E84A;border:0;padding:8px 20px;border-radius:6px;font-weight:bold;cursor:pointer;}
-  h1{font-size:26px;letter-spacing:2px;color:#1E3D1E;} .muted{color:#777;font-size:12px;}
-  .head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1E3D1E;padding-bottom:14px;margin-bottom:18px;}
-  .grid{display:flex;gap:40px;margin-bottom:22px;} .grid h4{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#999;margin-bottom:4px;}
-  table{width:100%;border-collapse:collapse;margin-bottom:6px;} thead th{background:#1E3D1E;color:#D9E84A;font-size:10px;text-transform:uppercase;letter-spacing:.5px;padding:8px;text-align:left;}
-  thead th.r{text-align:right;} thead th.c{text-align:center;}
-  .total{display:flex;justify-content:flex-end;margin-top:8px;} .total .box{min-width:240px;}
-  .total .row{display:flex;justify-content:space-between;padding:6px 8px;} .total .grand{background:#D9E84A;font-weight:900;font-size:16px;color:#1E3D1E;border-radius:4px;}
-  .note{margin-top:22px;font-size:11px;color:#777;border-top:1px solid #eee;padding-top:12px;}
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;
+       color:#2b2b2b;background:#f4f4f2;padding:28px;font-size:13px;line-height:1.55;
+       -webkit-font-smoothing:antialiased;}
+  .sheet{max-width:770px;margin:0 auto;background:#fff;padding:54px 58px 46px;
+         box-shadow:0 1px 4px rgba(0,0,0,.09);}
+  @media print{ .toolbar{display:none;} body{padding:0;background:#fff;}
+                .sheet{box-shadow:none;max-width:none;padding:0;} @page{margin:14mm;} }
+  .toolbar{max-width:770px;margin:0 auto 14px;display:flex;justify-content:flex-end;}
+  .toolbar button{background:#1E3D1E;color:#fff;border:0;padding:9px 22px;border-radius:6px;
+                  font-size:13px;font-weight:600;cursor:pointer;}
+  .mast{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;}
+  .word{font-size:34px;font-weight:300;letter-spacing:7px;color:#1E3D1E;line-height:1;}
+  .rule{height:2px;background:#1E3D1E;width:54px;margin-top:13px;}
+  .co{font-size:12px;color:#6b6b6b;line-height:1.75;text-align:right;}
+  .co b{display:block;color:#1E3D1E;font-size:13px;font-weight:600;letter-spacing:.2px;margin-bottom:2px;}
+  .cols{display:flex;gap:36px;margin-top:40px;}
+  .cols>div{flex:1;}
+  .lbl{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:1.4px;
+       color:#9a9a9a;margin-bottom:8px;}
+  .party{font-size:13px;line-height:1.65;}
+  .party b{font-weight:600;color:#1E3D1E;}
+  .kv{font-size:12.5px;line-height:1.9;}
+  .kv span{display:inline-block;min-width:88px;color:#8a8a8a;}
+  .kv em{font-style:normal;font-weight:600;color:#1E3D1E;}
+  table{width:100%;border-collapse:collapse;margin-top:36px;}
+  thead th{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:1.2px;
+           color:#9a9a9a;padding:0 8px 10px;text-align:left;border-bottom:1.5px solid #1E3D1E;}
+  thead th.c{text-align:center;} thead th.r{text-align:right;}
+  tbody td{padding:16px 8px;border-bottom:1px solid #ededed;vertical-align:top;font-size:13px;}
+  td.n{color:#b4b4b4;width:26px;} td.svc{font-weight:600;color:#1E3D1E;width:27%;}
+  td.dsc{color:#666;} td.c{text-align:center;color:#666;width:44px;}
+  td.r{text-align:right;white-space:nowrap;} td.amt{font-weight:600;width:98px;}
+  .tot{display:flex;justify-content:flex-end;margin-top:24px;}
+  .tot .box{width:300px;}
+  .tot .row{display:flex;justify-content:space-between;padding:7px 0;font-size:12.5px;color:#666;}
+  .tot .grand{display:flex;justify-content:space-between;align-items:baseline;
+              margin-top:10px;padding-top:15px;border-top:2px solid #1E3D1E;}
+  .tot .grand .k{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.6px;color:#1E3D1E;}
+  .tot .grand .v{font-size:26px;font-weight:600;color:#1E3D1E;letter-spacing:-.5px;}
+  .pay{margin-top:42px;padding-top:20px;border-top:1px solid #ededed;
+       display:flex;justify-content:space-between;gap:30px;align-items:flex-start;}
+  .pay .t{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:1.4px;color:#9a9a9a;margin-bottom:7px;}
+  .pay p{font-size:11.5px;color:#7a7a7a;line-height:1.75;max-width:410px;}
+  .thanks{font-size:12.5px;color:#1E3D1E;font-weight:600;white-space:nowrap;}
 </style></head><body>
-  <div class="toolbar"><button onclick="window.print()">🖨 Print / Save PDF</button></div>
-  <div class="head">
-    <div>
-      <h1>INVOICE</h1>
-      <div class="muted" style="margin-top:6px;">
-        <strong>Grafton Towboat Services LLC</strong><br/>
-        25 Dagget Holw, Grafton, IL 62037-1196<br/>
-        (314) 809-0853 · GraftonTowboatServices@gmail.com
+  <div class="toolbar"><button onclick="window.print()">Print / Save PDF</button></div>
+
+  <div class="sheet">
+    <div class="mast">
+      <div>
+        <div class="word">INVOICE</div>
+        <div class="rule"></div>
+      </div>
+      <div class="co">
+        <b>Grafton Towboat Services LLC</b>
+        25 Dagget Holw<br/>
+        Grafton, IL 62037-1196<br/>
+        (314) 809-0853<br/>
+        GraftonTowboatServices@gmail.com
       </div>
     </div>
-    <div style="text-align:right;" class="muted">
-      <div><strong style="color:#1E3D1E;font-size:14px;">Invoice No. ${invoiceNumber ?? esc(order.order_number)}</strong></div>
-      <div>Order ref: ${esc(order.order_number)}</div>
-      <div>Invoice date: ${dateStr}</div>
-      <div>Terms: Net 30 · Due ${dueStr}</div>
+
+    <div class="cols">
+      <div>
+        <div class="lbl">Bill to</div>
+        <div class="party"><b>${esc(billTo)}</b>${order.po_number ? `<br/>PO #: ${esc(order.po_number)}` : ''}</div>
+      </div>
+      <div>
+        <div class="lbl">Ship to</div>
+        <div class="party">${order.vessel_name ? `<b>${esc(order.vessel_name)}</b><br/>` : ''}${esc(order.terminal_name || 'Grafton, IL')}</div>
+      </div>
+      <div>
+        <div class="lbl">Invoice details</div>
+        <div class="kv">
+          <div><span>Invoice no.</span><em>${invoiceNumber ?? esc(order.order_number)}</em></div>
+          <div><span>Terms</span>Net 30</div>
+          <div><span>Invoice date</span>${dateStr}</div>
+          <div><span>Due date</span>${dueStr}</div>
+        </div>
+      </div>
+    </div>
+
+    <table>
+      <thead><tr>
+        <th>#</th><th>Product or service</th><th>Description</th>
+        <th class="c">Qty</th><th class="r">Rate</th><th class="r">Amount</th>
+      </tr></thead>
+      <tbody>${rows || `<tr><td colspan="6" style="padding:20px 8px;color:#aaa;">No billable delivery fee set on this order yet.</td></tr>`}</tbody>
+    </table>
+
+    <div class="tot"><div class="box">
+      ${lines.map(l => `<div class="row"><span>${esc(l.svc)}</span><span>${formatCurrency(l.amount)}</span></div>`).join('')}
+      <div class="grand"><span class="k">Total due</span><span class="v">${formatCurrency(total)}</span></div>
+    </div></div>
+
+    <div class="pay">
+      <div>
+        <div class="t">Ways to pay</div>
+        <p>${!billGroceries
+          ? 'Groceries are billed to you directly by Sinclair&apos;s Foods — this invoice covers Grafton Towboat Services delivery only. Remit by check or ACH and reference the invoice number above.'
+          : 'Groceries reflect Sinclair&apos;s register total. Grafton Towboat Services delivery is billed separately from Sinclair&apos;s and shown here as one combined total. Remit by check or ACH and reference the invoice number above.'}</p>
+      </div>
+      <div class="thanks">Thank you for your business.</div>
     </div>
   </div>
-
-  <div class="grid">
-    <div><h4>Bill To</h4><div><strong>${esc(billTo)}</strong>${order.vessel_name ? `<br/>Vessel: ${esc(order.vessel_name)}` : ''}${order.po_number ? `<br/>PO #: ${esc(order.po_number)}` : ''}</div></div>
-    <div><h4>Delivery</h4><div>${esc(dateStr)}${order.terminal_name ? `<br/>${esc(order.terminal_name)}` : ''}</div></div>
-  </div>
-
-  <table>
-    <thead><tr><th>#</th><th>Product or service</th><th>Description</th><th class="c">Qty</th><th class="r">Rate</th><th class="r">Amount</th></tr></thead>
-    <tbody>${rows || `<tr><td colspan="6" style="padding:14px;color:#999;">No billable delivery fee set on this order yet.</td></tr>`}</tbody>
-  </table>
-
-  <div class="total"><div class="box">
-    ${lines.map(l => `<div class="row"><span>${esc(l.svc)}</span><span>${formatCurrency(l.amount)}</span></div>`).join('')}
-    <div class="row grand"><span>TOTAL</span><span>${formatCurrency(total)}</span></div>
-  </div></div>
-
-  ${!billGroceries ? `<p class="note">Groceries are billed to the customer directly by Sinclair&apos;s Foods. This invoice covers Grafton Towboat Services delivery only.</p>`
-    : `<p class="note">Groceries reflect Sinclair&apos;s register total. Grafton Towboat Services delivery is billed separately from Sinclair&apos;s and shown above as one combined total.</p>`}
 </body></html>`;
 
   return new NextResponse(html, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });

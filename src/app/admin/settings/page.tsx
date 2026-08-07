@@ -128,6 +128,39 @@ export default function AdminSettingsPage() {
   const [addingUser, setAddingUser] = useState(false);
   const [showAddUser, setShowAddUser] = useState(false);
   const [showNewUserPw, setShowNewUserPw] = useState(false);
+  // Invoice numbering — read the live "next" value, let the owner correct it
+  const [invoiceNo, setInvoiceNo] = useState('');
+  const [savingInvoiceNo, setSavingInvoiceNo] = useState(false);
+  const [invoiceMsg, setInvoiceMsg] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await adminFetch('/api/admin/invoice-number');
+        if (res.ok) setInvoiceNo(String((await res.json()).next_invoice_number ?? ''));
+      } catch { /* non-critical */ }
+    })();
+  }, []);
+
+  async function saveInvoiceNumber() {
+    setSavingInvoiceNo(true); setInvoiceMsg('');
+    try {
+      const res = await adminFetch('/api/admin/invoice-number', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ next_invoice_number: Number(invoiceNo) }),
+      });
+      const r = await res.json();
+      if (res.ok) {
+        setInvoiceNo(String(r.next_invoice_number));
+        setInvoiceMsg(`✓ Next invoice will be #${r.next_invoice_number}`);
+        setTimeout(() => setInvoiceMsg(''), 4000);
+      } else setInvoiceMsg(r.error || 'Could not save');
+    } finally {
+      setSavingInvoiceNo(false);
+    }
+  }
+
   // Owner resetting another admin's forgotten password
   const [pwResetUser, setPwResetUser] = useState<string | null>(null);
   const [pwResetValue, setPwResetValue] = useState('');
@@ -635,6 +668,28 @@ export default function AdminSettingsPage() {
             <label className="label-base">Business Email (receives all orders)</label>
             <input type="email" className="input-base" value={settings.business_email}
               onChange={e => setSettings(s => ({ ...s, business_email: e.target.value }))} />
+          </div>
+
+          {/* Invoice numbering — must match where QuickBooks actually left off */}
+          <div className="border-t border-gray-100 pt-4">
+            <label className="label-base">Next Invoice Number</label>
+            <p className="text-xs text-gray-400 -mt-1 mb-2">
+              The number the next generated invoice will use, then it counts up on its own.
+              Set this to continue after your last QuickBooks invoice so the two never collide.
+              Changing it only affects invoices created from now on.
+            </p>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold text-gray-400">#</span>
+              <input type="number" min="1" step="1" className="input-base w-40"
+                value={invoiceNo}
+                onChange={e => { setInvoiceNo(e.target.value); setInvoiceMsg(''); }}
+                placeholder="1084" />
+              <button onClick={saveInvoiceNumber} disabled={savingInvoiceNo || !invoiceNo}
+                className="btn-outline text-sm px-4 py-2 disabled:opacity-50">
+                {savingInvoiceNo ? 'Saving…' : 'Set'}
+              </button>
+              {invoiceMsg && <span className="text-xs font-semibold text-green-600">{invoiceMsg}</span>}
+            </div>
           </div>
         </div>
       )}

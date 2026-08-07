@@ -31,11 +31,21 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const month = searchParams.get('month'); // YYYY-MM  (single month)
   const year = searchParams.get('year');   // YYYY     (whole year)
+  const pending = searchParams.get('pending'); // '1' → everything not yet in QuickBooks
 
   let query = supabase
     .from('deliveries')
     .select('*, company:companies(id, name)')
     .order('delivery_date', { ascending: false, nullsFirst: false });
+
+  // The QuickBooks queue is deliberately NOT month-scoped: if Mary Karen is a
+  // week behind at a month boundary, last month's unentered deliveries must
+  // still show up or they'd silently drop out of view and never get billed.
+  if (pending === '1') {
+    const { data, error } = await query.eq('updated_quickbooks', false);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ deliveries: data || [] });
+  }
 
   if (month && /^\d{4}-\d{2}$/.test(month)) {
     const start = `${month}-01`;

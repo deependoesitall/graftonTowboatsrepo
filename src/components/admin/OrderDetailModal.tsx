@@ -40,7 +40,6 @@ export function OrderDetailModal({
   const [docReceipt, setDocReceipt] = useState<string | null>(order.sinclairs_receipt_url ?? null);
   const [docSlip, setDocSlip] = useState<string | null>(order.ingram_slip_url ?? null);
   const [docUploading, setDocUploading] = useState<'receipt' | 'slip' | null>(null);
-  const [showInvoice, setShowInvoice] = useState(false);
 
   async function uploadDoc(kind: 'receipt' | 'slip', file: File) {
     setDocUploading(kind);
@@ -982,10 +981,14 @@ export function OrderDetailModal({
                     </div>
                   </div>
                 </div>
-                <button onClick={() => setShowInvoice(true)}
-                  className="mt-3 w-full flex items-center justify-center gap-1.5 bg-brand-navy text-white text-xs font-bold uppercase tracking-wide px-4 py-2 rounded-lg hover:bg-brand-steel transition-colors">
-                  <FileText className="w-3.5 h-3.5" /> View / Print Invoice
-                </button>
+                {/* No invoice button here on purpose: QuickBooks issues the
+                    invoices, and delivery billing is worked from the Delivery
+                    Ledger's QuickBooks queue. Two places to bill from would
+                    mean double-entry. These uploads feed that queue. */}
+                <p className="mt-3 text-[11px] text-gray-400 leading-relaxed">
+                  These documents attach to the final email and show up in the
+                  Delivery Ledger&apos;s QuickBooks queue, where this delivery gets invoiced.
+                </p>
               </div>
             )}
 
@@ -1007,20 +1010,6 @@ export function OrderDetailModal({
           orderNumber={order.order_number}
           onClose={() => setShowPickSheet(false)}
         />
-      )}
-
-      {showInvoice && createPortal(
-        <div className="fixed inset-0 z-[95] bg-black/70 flex flex-col" onClick={() => setShowInvoice(false)}>
-          <div className="bg-brand-navy text-white px-4 py-2.5 flex items-center justify-between shrink-0">
-            <span className="text-sm font-bold">Invoice — {order.order_number}</span>
-            <button onClick={() => setShowInvoice(false)} className="text-white/80 hover:text-white flex items-center gap-1 text-sm">
-              <X className="w-4 h-4" /> Close
-            </button>
-          </div>
-          <iframe src={`/api/orders/${order.id}/invoice`} title="Invoice"
-            className="flex-1 w-full bg-white" onClick={e => e.stopPropagation()} />
-        </div>,
-        document.body
       )}
 
       {confirmDialogEl}
