@@ -355,16 +355,42 @@ export function ShoppingModeModal({ order, onClose, onComplete }: ShoppingModeMo
 
   // ── SUBSTITUTION ──────────────────────────────────────────────────────────
 
-  const searchProducts = useCallback(async (itemId: string, q: string) => {
-    if (q.trim().length < 2) { setUi(itemId, { subResults: [] }); return; }
-    setUi(itemId, { subSearching: true });
-    try {
-      const res = await adminFetch(`/api/products?search=${encodeURIComponent(q)}&status=active&per_page=12`);
-      const { products } = await res.json();
-      setUi(itemId, { subResults: products || [] });
-    } finally {
-      setUi(itemId, { subSearching: false });
+  // Substitution lookup — DEBOUNCED and race-guarded. A shopper standing in an
+  // aisle types a whole product name; firing a request per keystroke over store
+  // wifi was slow AND could land an older response after a newer one, showing
+  // results for a half-typed word. We wait for a pause, and a sequence number
+  // means only the newest response is ever rendered.
+  const subTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const subSeq = useRef<Record<string, number>>({});
+
+  const searchProducts = useCallback((itemId: string, q: string) => {
+    clearTimeout(subTimers.current[itemId]);
+    if (q.trim().length < 2) {
+      setUi(itemId, { subResults: [], subSearching: false });
+      return;
     }
+    setUi(itemId, { subSearching: true });
+    subTimers.current[itemId] = setTimeout(async () => {
+      const seq = (subSeq.current[itemId] || 0) + 1;
+      subSeq.current[itemId] = seq;
+      try {
+        const res = await adminFetch(`/api/products?search=${encodeURIComponent(q)}&status=active&per_page=12`);
+        const { products } = await res.json();
+        if (subSeq.current[itemId] !== seq) return;      // a newer search won
+        setUi(itemId, { subResults: products || [] });
+      } catch {
+        if (subSeq.current[itemId] === seq) setUi(itemId, { subResults: [] });
+      } finally {
+        if (subSeq.current[itemId] === seq) setUi(itemId, { subSearching: false });
+      }
+    }, 300);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Don't leave pending searches running when shopping mode closes.
+  useEffect(() => {
+    const timers = subTimers.current;
+    return () => { Object.values(timers).forEach(t => clearTimeout(t)); };
   }, []);
 
   async function confirmSubstitution(item: OrderItem) {
@@ -1043,6 +1069,13 @@ export function ShoppingModeModal({ order, onClose, onComplete }: ShoppingModeMo
         <PickSheetOverlay
           orderId={order.id}
           orderNumber={order.order_number}
+          // The register run: scan the barcodes, then enter the total the
+          // register rang — Sinclair's final confirming step for the order.
+          registerStep
+          estimatedTotal={items
+            .filter(i => i.item_type !== 'service' && i.shopping_status !== 'out_of_stock')
+            .reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0)}
+          initialRegisterTotal={order.register_total ?? null}
           onClose={() => { setShowRegisterSheet(false); onComplete(); }}
         />
       )}

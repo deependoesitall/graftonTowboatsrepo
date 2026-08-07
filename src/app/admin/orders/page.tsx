@@ -173,23 +173,6 @@ function OrdersContent() {
     window.open(`/api/orders/${orderId}/pdf`, '_blank');
   }
 
-  async function downloadOrderCsv(order: Order) {
-    const rows = [
-      ['Order Number', 'Company', 'Contact', 'Phone', 'Date', 'Status', 'Total'],
-      [order.order_number, order.company_name, order.contact_name, order.phone,
-       new Date(order.created_at).toLocaleDateString(), order.status, order.subtotal],
-      [],
-      ['Description', 'Category', 'Pack Size', 'Qty', 'Unit Price', 'Line Total'],
-      ...order.items.map(i => [i.description, i.category, i.pkg_size || '', i.quantity, i.unit_price, i.line_total]),
-    ];
-    const csv = rows.map(r => r.map(c => `"${c}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `${order.order_number}.csv`; a.click();
-    URL.revokeObjectURL(url);
-  }
-
   const totalPages = Math.ceil(total / 25);
 
   return (

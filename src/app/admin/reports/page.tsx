@@ -87,6 +87,12 @@ interface BillingOrder {
   arrival_time: string | null;
   subtotal: number;
   discount_total: number;
+  /** Actual Sinclair's register total, when entered (beats the estimate). */
+  register_total?: number | null;
+  /** GTS delivery charge + whether groceries ride on this invoice. */
+  delivery_fee?: number | null;
+  delivery_service_type?: string | null;
+  bill_for_groceries?: boolean | null;
   status: string;
   created_at: string;
   extended_info: { personal_cod_notes?: string } | null;
@@ -183,8 +189,30 @@ function vesselTotal(o: BillingOrder): number {
     .reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0);
 }
 // Net of digital-coupon savings — what Sinclair's register should ring.
+// Prefers the ACTUAL register total once it's been entered on the order, so
+// the packet reconciles against Sinclair's receipt instead of our estimate.
 function netTotal(o: BillingOrder): number {
+  if (o.register_total != null) return Number(o.register_total);
   return Math.max(0, vesselTotal(o) - (Number(o.discount_total) || 0));
+}
+/**
+ * Groceries GTS actually INVOICES for this order.
+ *
+ * Some barge lines pay Sinclair's directly (bill_for_groceries = false) — GTS
+ * only bills them for delivery. Invoicing groceries on those would double-bill
+ * the customer, so they contribute $0 to the invoice total. The grocery value
+ * is still shown on the sheet as a reference figure for reconciling.
+ */
+function billedGroceries(o: BillingOrder): number {
+  return o.bill_for_groceries === false ? 0 : netTotal(o);
+}
+/** True when the customer settles groceries straight with Sinclair's. */
+function paysSinclairDirect(o: BillingOrder): boolean {
+  return o.bill_for_groceries === false;
+}
+/** GTS delivery charges for these orders — billed on top of groceries. */
+function deliverySum(orders: BillingOrder[]): number {
+  return orders.reduce((s, o) => s + (Number(o.delivery_fee) || 0), 0);
 }
 
 // ─── Branded MONTHLY BILLING PACKET (print-ready → one PDF) ───────────────
@@ -390,7 +418,7 @@ function orderDetailSheet(o: BillingOrder, groupLabel: string, monthLabel: strin
   </table>
 
   <div style="text-align:center;font-size:8px;color:#aaa;border-top:1px solid #eee;margin-top:14px;padding-top:6px;">
-    ${esc(monthLabel)} Billing Packet · ${esc(groupLabel)} · ${esc(o.order_number)} · Generated ${generated}
+    ${esc(monthLabel)} Billing Statement · ${esc(groupLabel)} · ${esc(o.order_number)} · Generated ${generated}
   </div>
 </div>`;
 }
@@ -398,7 +426,9 @@ function orderDetailSheet(o: BillingOrder, groupLabel: string, monthLabel: strin
 // ── Per-vessel invoice statement page ──────────────────────────
 function vesselStatementPage(group: string, orders: BillingOrder[], monthLabel: string, generated: string, sectionNum: number, sectionCount: number): string {
   const first = orders[0];
-  const estTotal = orders.reduce((s, o) => s + netTotal(o), 0);
+  const estTotal = orders.reduce((s, o) => s + billedGroceries(o), 0);
+  const deliveryTotal = deliverySum(orders);
+  const directOrders = orders.filter(paysSinclairDirect);
   // Deck portion — company-billed but invoiced as its OWN line, never mixed
   // into the boat's grocery allowance.
   const deckSum = orders.reduce((s, o) => s + deckTotal(o), 0);
@@ -479,12 +509,27 @@ function vesselStatementPage(group: string, orders: BillingOrder[], monthLabel: 
       <td>
         <table width="100%" style="border-collapse:collapse;border-top:3px solid ${GREEN};">
           <tr>
-            <td style="padding:7px 10px;font-size:11px;color:#555;">Estimated Total (${orders.length} order${orders.length === 1 ? '' : 's'})</td>
+            <td style="padding:7px 10px;font-size:11px;color:#555;">Groceries billed (${orders.length} order${orders.length === 1 ? '' : 's'})</td>
             <td style="padding:7px 10px;text-align:right;font-weight:800;font-size:13px;color:${GREEN};">${money(estTotal)}</td>
           </tr>
+          ${directOrders.length > 0 ? `<tr>
+            <td style="padding:5px 10px;font-size:10px;color:#b45309;font-weight:700;">
+              ${directOrders.length} order${directOrders.length === 1 ? '' : 's'} paid to Sinclair&apos;s directly — groceries excluded from this invoice
+              (reference value ${money(directOrders.reduce((s, o) => s + netTotal(o), 0))})
+            </td>
+            <td style="padding:5px 10px;text-align:right;font-weight:800;font-size:11px;color:#b45309;">not billed</td>
+          </tr>` : ''}
           ${deckSum > 0 ? `<tr>
             <td style="padding:5px 10px;font-size:10px;color:#0f766e;font-weight:700;">of which Deck — invoice as its own line (grocery ${money(estTotal - deckSum)} / deck ${money(deckSum)})</td>
             <td style="padding:5px 10px;text-align:right;font-weight:800;font-size:11px;color:#0f766e;">${money(deckSum)}</td>
+          </tr>` : ''}
+          ${deliveryTotal > 0 ? `<tr>
+            <td style="padding:7px 10px;font-size:11px;color:#555;">GTS delivery charge${orders.length > 1 ? `s (${orders.filter(o => Number(o.delivery_fee) > 0).length})` : (orders[0]?.delivery_service_type ? ` — ${esc(orders[0].delivery_service_type)}` : '')}</td>
+            <td style="padding:7px 10px;text-align:right;font-weight:800;font-size:13px;color:${GREEN};">${money(deliveryTotal)}</td>
+          </tr>
+          <tr>
+            <td style="padding:5px 10px;font-size:10px;color:#777;">Groceries + delivery</td>
+            <td style="padding:5px 10px;text-align:right;font-weight:800;font-size:12px;color:#555;">${money(estTotal + deliveryTotal)}</td>
           </tr>` : ''}
           <tr style="background:${LIME};">
             <td style="padding:9px 10px;font-size:12px;font-weight:900;color:${GREEN};text-transform:uppercase;">Final Invoice Total</td>
@@ -504,7 +549,7 @@ function vesselStatementPage(group: string, orders: BillingOrder[], monthLabel: 
   </div>
 
   <div style="text-align:center;font-size:8px;color:#aaa;border-top:1px solid #eee;margin-top:18px;padding-top:8px;">
-    Grafton Towboat Services · ${esc(monthLabel)} Billing Packet · ${esc(group)} · Generated ${generated}
+    Grafton Towboat Services · ${esc(monthLabel)} Billing · ${esc(group)} · Generated ${generated}
   </div>
 </div>`;
 }
@@ -517,7 +562,9 @@ function vesselStatementPage(group: string, orders: BillingOrder[], monthLabel: 
 function billingPacketHtml(groups: [string, BillingOrder[]][], monthLabel: string, includeDetail = false): string {
   const generated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
   const allOrders = groups.flatMap(([, os]) => os);
-  const packetEst = allOrders.reduce((s, o) => s + netTotal(o), 0);
+  const packetEst = allOrders.reduce((s, o) => s + billedGroceries(o), 0);
+  const packetDelivery = deliverySum(allOrders);
+  const packetInvoiced = packetEst + packetDelivery;   // what GTS actually bills
   const packetSavings = allOrders.reduce((s, o) => s + (Number(o.discount_total) || 0), 0);
   const packetItems = allOrders.reduce((s, o) =>
     s + billableItems(o).filter(i => i.shopping_status !== 'out_of_stock').reduce((q, i) => q + i.quantity, 0), 0);
@@ -529,15 +576,15 @@ function billingPacketHtml(groups: [string, BillingOrder[]][], monthLabel: strin
       <td style="padding:7px 10px;border-bottom:1px solid #eee;font-size:11px;font-weight:800;color:${GREEN};">${esc(label)}</td>
       <td style="padding:7px 10px;border-bottom:1px solid #eee;font-size:11px;text-align:center;">${os.length}</td>
       <td style="padding:7px 10px;border-bottom:1px solid #eee;font-size:11px;text-align:center;">${os.reduce((s, o) => s + billableItems(o).filter(x => x.shopping_status !== 'out_of_stock').reduce((q, x) => q + x.quantity, 0), 0)}</td>
-      <td style="padding:7px 10px;border-bottom:1px solid #eee;font-size:12px;font-weight:800;text-align:right;color:${GREEN};">${money(os.reduce((s, o) => s + netTotal(o), 0))}</td>
+      <td style="padding:7px 10px;border-bottom:1px solid #eee;font-size:12px;font-weight:800;text-align:right;color:${GREEN};">${money(os.reduce((s, o) => s + billedGroceries(o) + (Number(o.delivery_fee) || 0), 0))}</td>
       <td style="padding:7px 10px;border-bottom:1px solid #eee;"><div style="border:1.5px solid #bbb;border-radius:3px;height:20px;width:90px;margin-left:auto;"></div></td>
     </tr>`).join('');
 
   const cover = `
 <div style="max-width:760px;margin:0 auto;padding:8px 0 24px;">
-  ${brandBar(monthLabel, 'Monthly<br>Billing Packet', generated)}
+  ${brandBar(monthLabel, 'Monthly<br>Billing Statements', generated)}
 
-  <!-- Packet summary band -->
+  <!-- Month summary band -->
   <table width="100%" style="border-collapse:collapse;background:${LIME};">
     <tr>
       ${[
@@ -545,7 +592,9 @@ function billingPacketHtml(groups: [string, BillingOrder[]][], monthLabel: strin
         [`${allOrders.length}`, allOrders.length === 1 ? 'Order' : 'Orders'],
         [`${packetItems}`, 'Items Billed'],
         ...(packetSavings > 0 ? [[`−${money(packetSavings)}`, 'Coupon Savings']] : []),
-        [money(packetEst), 'Estimated Total'],
+        [money(packetEst), 'Groceries Billed'],
+        ...(packetDelivery > 0 ? [[money(packetDelivery), 'Delivery Charges']] : []),
+        [money(packetInvoiced), 'Total to Invoice'],
       ].map(([v, l]) => `
       <td style="padding:12px 10px;text-align:center;">
         <div style="font-size:19px;font-weight:900;color:${GREEN};">${v}</div>
@@ -570,8 +619,8 @@ function billingPacketHtml(groups: [string, BillingOrder[]][], monthLabel: strin
     <tbody>${indexRows}</tbody>
     <tfoot>
       <tr style="border-top:3px solid ${GREEN};">
-        <td colspan="4" style="padding:8px 10px;font-size:11px;font-weight:900;color:${GREEN};text-transform:uppercase;">Packet total</td>
-        <td style="padding:8px 10px;text-align:right;font-size:13px;font-weight:900;color:${GREEN};">${money(packetEst)}</td>
+        <td colspan="4" style="padding:8px 10px;font-size:11px;font-weight:900;color:${GREEN};text-transform:uppercase;">Total to invoice</td>
+        <td style="padding:8px 10px;text-align:right;font-size:13px;font-weight:900;color:${GREEN};">${money(packetInvoiced)}</td>
         <td></td>
       </tr>
     </tfoot>
@@ -585,7 +634,7 @@ function billingPacketHtml(groups: [string, BillingOrder[]][], monthLabel: strin
 
   <!-- How to use -->
   <div style="margin-top:14px;border:1px solid #ddd;border-radius:6px;padding:12px 16px;">
-    <div style="font-size:9px;font-weight:900;color:${GREEN};text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">How this packet is organized — three ways to cross-check every number</div>
+    <div style="font-size:9px;font-weight:900;color:${GREEN};text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">How this is organized — three ways to cross-check every number</div>
     <div style="font-size:9px;color:#555;line-height:1.9;">
       <strong>1. This index</strong> — every vessel&#39;s estimated total at a glance; fill in the Final column as invoices go out.<br>
       <strong>2. Invoice statements</strong> — one page per vessel (each starts on a fresh page). This is the page to attach to the QuickBooks invoice.${includeDetail ? `<br>
@@ -595,7 +644,7 @@ function billingPacketHtml(groups: [string, BillingOrder[]][], monthLabel: strin
   </div>
 
   <div style="text-align:center;font-size:8px;color:#aaa;border-top:1px solid #eee;margin-top:18px;padding-top:8px;">
-    Grafton Towboat Services · ${esc(monthLabel)} Billing Packet · Generated ${generated}
+    Grafton Towboat Services · ${esc(monthLabel)} Billing · Generated ${generated}
   </div>
 </div>`;
 
@@ -608,7 +657,7 @@ function billingPacketHtml(groups: [string, BillingOrder[]][], monthLabel: strin
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Billing Packet — ${esc(monthLabel)} — Grafton Towboat Services</title>
+<title>Monthly Billing — ${esc(monthLabel)} — Grafton Towboat Services</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
   body { font-family: Arial, Helvetica, sans-serif; color:#222; background:#fff; padding:24px 16px; }
@@ -795,7 +844,7 @@ function BillingTab() {
           </label>
           <button onClick={() => openPacket(selectedOrders)} disabled={selected.size === 0}
             className="btn-primary text-sm px-4 py-2 flex items-center gap-2 disabled:opacity-50">
-            <Eye className="w-4 h-4" /> Preview Packet
+            <Eye className="w-4 h-4" /> Preview Billing
           </button>
         </div>
       </div>
@@ -816,7 +865,10 @@ function BillingTab() {
               {byCompany.map(([company, companyOrders]) => {
                 const collapsed = collapsedCompanies.has(company);
                 const allSelected = companyOrders.every(o => selected.has(o.id));
-                const companyTotal = companyOrders.filter(o => selected.has(o.id)).reduce((s, o) => s + netTotal(o), 0);
+                // What GTS actually invoices: groceries (only when we bill them)
+                // plus our delivery charge — matches the packet exactly.
+                const companyTotal = companyOrders.filter(o => selected.has(o.id))
+                  .reduce((s, o) => s + billedGroceries(o) + (Number(o.delivery_fee) || 0), 0);
                 const codCount = companyOrders.reduce((s, o) => s + codLines(o).length, 0);
                 return (
                   <div key={company} className="card-base overflow-hidden">
@@ -839,7 +891,7 @@ function BillingTab() {
                       <span className="text-sm font-bold text-brand-navy">{formatCurrency(companyTotal)}</span>
                       <button
                         onClick={() => openPacket(companyOrders)}
-                        title={`Print billing packet for ${company} only`}
+                        title={`Print billing for ${company} only`}
                         className="p-1.5 text-gray-400 hover:text-brand-navy transition-colors shrink-0">
                         <Printer className="w-4 h-4" />
                       </button>
@@ -875,12 +927,12 @@ function BillingTab() {
           </div>
 
           <p className="text-xs text-gray-400">
-            The <strong>Billing Packet</strong> is one branded, print-ready document: a cover page with an invoice index,
+            <strong>Monthly Billing</strong> is one branded, print-ready document: a cover page with an invoice index,
             then for each vessel (&ldquo;Ingram — Jenny Kay&rdquo; style, one invoice per boat) an invoice statement followed by
             item-level cross-reference sheets — every line has a verify checkbox, estimated vs. actual price, and a spot to
             staple Sinclair&apos;s register receipt. <strong>COD items are excluded from all totals</strong> (settled at delivery,
             never invoiced). Final Total boxes stay blank on purpose — fill them in after reconciling. Use the printer icon
-            on any vessel to print just that boat&apos;s packet.
+            on any vessel to print just that boat&apos;s statement.
           </p>
         </>
       )}
@@ -889,7 +941,7 @@ function BillingTab() {
       {packetHtml && createPortal(
         <div className="fixed inset-0 z-[95] bg-black/70 flex flex-col">
           <div className="bg-brand-navy text-white px-4 py-2.5 flex items-center justify-between shrink-0">
-            <span className="text-sm font-bold">Billing packet preview</span>
+            <span className="text-sm font-bold">Monthly billing preview</span>
             <div className="flex items-center gap-2">
               <button
                 onClick={() => packetFrameRef.current?.contentWindow?.print()}
@@ -901,7 +953,7 @@ function BillingTab() {
               </button>
             </div>
           </div>
-          <iframe ref={packetFrameRef} srcDoc={packetHtml} title="Billing packet preview"
+          <iframe ref={packetFrameRef} srcDoc={packetHtml} title="Monthly billing preview"
             className="flex-1 w-full bg-white" />
         </div>,
         document.body

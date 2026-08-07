@@ -95,7 +95,14 @@ export function buildOrderEmailHtml(
   // depends on bill_for_groceries (some barge lines pay Sinclair's directly).
   const deliveryFee = Number(order.delivery_fee) || 0;
   const billGroceries = order.bill_for_groceries !== false; // default true
-  const groceryTotal = order.register_total != null ? Number(order.register_total) : Number(order.subtotal);
+  // Company-billed groceries ONLY. orders.subtotal includes COD lines, and
+  // CODs are settled personally at delivery — invoicing them would charge the
+  // company for a crew member's own purchase. Sinclair's rings CODs separately,
+  // so an entered register_total is already COD-free.
+  const billableGroceryTotal = groceryItems
+    .filter(i => i.paid_by !== 'cod' && i.shopping_status !== 'out_of_stock')
+    .reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0);
+  const groceryTotal = order.register_total != null ? Number(order.register_total) : billableGroceryTotal;
   const grandTotal = (billGroceries ? groceryTotal : 0) + deliveryFee;
   const deliveryBox = opts.showDelivery && deliveryFee > 0 ? `
     <div style="border:2px solid #1E3D1E;border-radius:6px;margin-bottom:18px;overflow:hidden;">

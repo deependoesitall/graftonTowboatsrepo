@@ -22,6 +22,8 @@ dress rehearsal that de-risks a public launch.
   - [ ] 047 — order documents (`sinclairs_receipt_url`, `ingram_slip_url`)
   - [ ] 048 — invoice number sequence
   - [ ] 049 — `photo_match_tried_at` (nightly auto photo/name backfill marker)
+  - [ ] 050 — photo proposal columns (Photo Review queue)
+  - [ ] 051 — `sinclairs_receipt_url` on deliveries
 - [ ] **Create the `order-documents` storage bucket** in Supabase → Storage
       (public), same as the existing `product-images` bucket. Receipts and
       signed Ingram slips upload here.
@@ -57,7 +59,8 @@ dress rehearsal that de-risks a public launch.
   - [ ] `UPDATE products SET pkg_size = NULL WHERE pkg_size ~* 'zzz';` (junk pack sizes)
   - [ ] `SELECT category, COUNT(*) FROM products GROUP BY 1 ORDER BY 2 DESC;` → fix strays, e.g. `UPDATE products SET category = 'Frozen Foods' WHERE category = 'Frozen Goods';`
   - [ ] Clean leftover "(0.0000)" in names: `UPDATE products SET details = regexp_replace(details, '\s*\(0+(\.0+)?\)\s*$', '') WHERE details ~ '\(0+(\.0+)?\)\s*$';`
-- [ ] Run **Find Photos** and apply the name-matched images (now paced + abbreviation-aware). The nightly sync also auto-applies high-confidence matches on its own.
+  - [ ] Clear collision-prone produce images so they re-match correctly: `UPDATE products SET image_url = NULL, image_source = NULL WHERE store_only = false AND image_source = 'sinclair_sync' AND length(regexp_replace(coalesce(upc,''), '\D', '', 'g')) BETWEEN 1 AND 7;`
+- [ ] After the first overnight run, open **Photo Review** and approve the matches (photos default on, names opt-in). Spot-check **Produce** via the quick-filter chip for any remaining bad images.
 - [ ] Align the invoice sequence to continue after QuickBooks:
       `ALTER SEQUENCE gts_invoice_seq RESTART WITH 1084;` (or your true next number).
 

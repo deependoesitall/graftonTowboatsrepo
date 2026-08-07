@@ -444,9 +444,10 @@ function PhotoReviewPanel({ onClose, onApplied }: { onClose: () => void; onAppli
       const list: PhotoProposal[] = res.ok ? (await res.json()).proposals : [];
       setProposals(list);
       const init: Record<string, { keep: boolean; name: boolean }> = {};
-      // Photo kept by default; name pre-checked only for strong matches — weaker
-      // ones (where the flavor/variant may differ) default to image-only.
-      for (const p of list) init[p.id] = { keep: true, name: (p.proposed_score ?? 0) >= 0.85 };
+      // Photo kept by default; NAME never changes by default. Every item here is
+      // a barge order-form item, and those keep their curated names — renaming
+      // is a deliberate per-row opt-in (e.g. a cryptic "MM LEMONADE").
+      for (const p of list) init[p.id] = { keep: true, name: false };
       setPicks(init);
     })();
   }, []);

@@ -22,7 +22,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const supabase = createServiceClient();
   const { data: order, error } = await supabase
     .from('orders')
-    .select('*')
+    .select('*, items:order_items(*)')
     .eq('id', id)
     .single();
   if (error || !order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
@@ -52,7 +52,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const deliveryFee = Number(order.delivery_fee) || 0;
   const billGroceries = order.bill_for_groceries !== false;
-  const groceryTotal = order.register_total != null ? Number(order.register_total) : Number(order.subtotal);
+  // Company-billed groceries ONLY — orders.subtotal includes COD lines, which
+  // crew members settle personally and must never appear on a company invoice.
+  const items = (order.items || []) as Array<{
+    item_type?: string; paid_by?: string; shopping_status?: string;
+    line_total: number; actual_total: number | null;
+  }>;
+  const billableGroceryTotal = items
+    .filter(i => i.item_type !== 'service' && i.paid_by !== 'cod' && i.shopping_status !== 'out_of_stock')
+    .reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0);
+  const groceryTotal = order.register_total != null ? Number(order.register_total) : billableGroceryTotal;
   const desc = `${dateStr} · ${esc(order.vessel_name || order.company_name || '')}`;
 
   const lines: Array<{ svc: string; desc: string; amount: number }> = [];

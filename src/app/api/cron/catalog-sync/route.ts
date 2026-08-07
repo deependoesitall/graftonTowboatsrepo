@@ -357,11 +357,16 @@ async function runPhotoBackfill(
   deadline: number,
 ): Promise<{ processed: number; hasMore: boolean }> {
   const staleBefore = new Date(Date.now() - 14 * 864e5).toISOString();
+  // BARGE ORDER FORM ONLY, and EVERY imageless one — including items that DID
+  // match a UPC but whose Sinclair's listing simply has no photo (a similar
+  // product's photo still beats a blank card). Full-store items are excluded
+  // on purpose: they arrive with their own photos and are the lowest priority.
   const { data } = await supabase
     .from('products')
     .select('id, description, category, pkg_size, price')
     .eq('store_only', false).eq('is_active', true)
-    .is('image_url', null).is('freshop_id', null)
+    .is('image_url', null)
+    .is('proposed_image_url', null)   // don't re-propose what's already queued
     .or(`photo_match_tried_at.is.null,photo_match_tried_at.lt.${staleBefore}`)
     .limit(13); // one extra row tells us the backlog isn't empty yet
   const rows = (data || []) as Array<{ id: string; description: string; category: string; pkg_size: string | null; price: number }>;
