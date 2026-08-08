@@ -43,13 +43,13 @@ export function StoreScopeToggle({ storeAll, bargeHref, storeAllHref, bargeCount
             <Store className="w-4 h-4" /> Full Sinclair&apos;s Store
           </span>
           <span className={`text-[11px] ${storeAll ? 'text-white/70' : 'text-gray-400'}`}>
-            {fullCount.toLocaleString()} total items
+            {fullCount.toLocaleString()} more items
           </span>
         </Link>
       </div>
       <p className="text-center text-xs text-gray-400 mt-1.5">
         {storeAll
-          ? 'Browsing everything Sinclair’s carries — slide back to the everyday barge order form anytime.'
+          ? 'Everything beyond the order form — slide back to the everyday barge list anytime.'
           : 'You’re on the barge order form — your everyday list. Slide over for the whole Sinclair’s store.'}
       </p>
     </div>

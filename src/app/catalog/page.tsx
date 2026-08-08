@@ -130,7 +130,11 @@ export default async function CatalogPage({ searchParams }: PageProps) {
     .order('description', { ascending: true })
     .range(offset, offset + perPage - 1);
 
-  if (!storeAll) query = query.eq('store_only', false);
+  // The two views are mutually exclusive: the barge order form shows the
+  // curated list, the store view shows ONLY what's beyond it. Overlapping them
+  // meant the store view opened on barge items (ground chuck, beef liver…),
+  // which is exactly what the order form is already for.
+  query = query.eq('store_only', storeAll);
 
   if (search) {
     // search_text is a stored generated column: lower(description || ' ' || category || ' ' || tags).
@@ -144,31 +148,47 @@ export default async function CatalogPage({ searchParams }: PageProps) {
 
   // Counts for the barge/full-store toggle — both scoped to the current
   // search + category so the numbers match what each view would show.
-  const scopedCount = (storeOnly: boolean | null) => {
+  const scopedCount = (storeOnly: boolean) => {
     let q = supabase
       .from('products')
       .select('id', { count: 'exact', head: true })
       .eq('is_active', true)
-      .eq('is_available', true);
-    if (storeOnly === false) q = q.eq('store_only', false);
+      .eq('is_available', true)
+      .eq('store_only', storeOnly);
     if (search) q = q.ilike('search_text', `%${search}%`);
     if (category && category !== 'All') q = q.eq('category', category);
     return q;
   };
 
-  const [{ data: products, count }, { data: catCounts }, { data: pageSettings }, bargeCountRes, fullCountRes] = await Promise.all([
+  // Sidebar counts must match the view you're in. get_category_counts is scoped
+  // to the barge form, so the store view counts its own categories.
+  const storeCategoryCounts = storeAll
+    ? Promise.all(MAIN_CATEGORIES.map(async c => {
+        let q = supabase.from('products')
+          .select('id', { count: 'exact', head: true })
+          .eq('is_active', true).eq('is_available', true).eq('store_only', true)
+          .eq('category', c);
+        if (search) q = q.ilike('search_text', `%${search}%`);
+        const { count } = await q;
+        return { category: c, count: count || 0 };
+      }))
+    : Promise.resolve(null);
+
+  const [{ data: products, count }, { data: catCounts }, { data: pageSettings }, bargeCountRes, storeCountRes, storeCats] = await Promise.all([
     query,
     supabase.rpc('get_category_counts'),
     // admin_settings is RLS-locked to the service role — the anon client read
     // null here, which meant the fleet CTA toggle silently never worked.
     createServiceClient().from('admin_settings').select('fleet_cta_enabled').single(),
     scopedCount(false),  // barge order form
-    scopedCount(null),   // full store
+    scopedCount(true),   // everything beyond the order form
+    storeCategoryCounts,
   ]);
   const fleetCtaEnabled = !!pageSettings?.fleet_cta_enabled;
   const bargeCount = bargeCountRes?.count || 0;
-  const fullCount = fullCountRes?.count || 0;
-  const storeMatchCount = Math.max(0, fullCount - bargeCount); // extra store-only items
+  const storeCount = storeCountRes?.count || 0;
+  const storeMatchCount = storeCount;                 // items only in the store view
+  const sidebarCounts = storeAll ? (storeCats || []) : (catCounts || []);
 
   // Helper to rebuild the current URL with store=all (keeps search/category)
   const storeAllHref = (() => {
@@ -246,7 +266,7 @@ export default async function CatalogPage({ searchParams }: PageProps) {
             bargeHref={bargeHref}
             storeAllHref={storeAllHref}
             bargeCount={bargeCount}
-            fullCount={fullCount}
+            fullCount={storeCount}
           />
 
           {/* Weekly ad + coupons strip */}
@@ -284,7 +304,7 @@ export default async function CatalogPage({ searchParams }: PageProps) {
             <aside className="w-full md:w-52 shrink-0">
               <CategoryFilter
                 categories={MAIN_CATEGORIES}
-                counts={catCounts || []}
+                counts={sidebarCounts}
                 activeCategory={category}
               />
             </aside>
