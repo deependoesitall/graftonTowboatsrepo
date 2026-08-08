@@ -158,17 +158,22 @@ async function handle(req: NextRequest) {
   const knownUpcKeys = new Set<string>();
   for (const p of ours) for (const k of ourKeys(p.upc || '')) knownUpcKeys.add(k);
 
-  // Store-only UPCs — thin projection, just for dedupe.
+  // Identity of everything already imported — BOTH the Freshop id and the UPC.
+  // The freshop_id set is what stops no-barcode produce duplicating each run;
+  // the name+size fallback covers the rare item with neither.
+  const knownFreshopIds = new Set<string>();
   for (let from = 0; ; from += 5000) {
     const { data, error } = await supabase
       .from('products')
-      .select('upc')
+      .select('upc, freshop_id, description, pkg_size')
       .eq('store_only', true)
-      .not('upc', 'is', null)
       .range(from, from + 4999);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    for (const r of (data || []) as Array<{ upc: string | null }>) {
+    const rowsIn = (data || []) as Array<{ upc: string | null; freshop_id: string | null; description: string | null; pkg_size: string | null }>;
+    for (const r of rowsIn) {
       for (const k of ourKeys(r.upc || '')) knownUpcKeys.add(k);
+      if (r.freshop_id) knownFreshopIds.add(String(r.freshop_id));
+      knownFreshopIds.add(`${String(r.description || '').toLowerCase()}|${String(r.pkg_size || '')}`);
     }
     if (!data || data.length < 5000) break;
   }
@@ -231,11 +236,29 @@ async function handle(req: NextRequest) {
       // page was fetched from (authoritative — AWG items have flat URLs).
       for (const item of items) {
         if (item.id != null && usedFreshopIds.has(String(item.id))) continue;
+
+        // DEDUPE BY FRESHOP ID FIRST. UPC alone isn't enough: produce sold by
+        // weight (Calhoun heirloom tomatoes, bulk items) often has no barcode,
+        // so a UPC-only check silently skipped them and re-inserted the same
+        // product on EVERY sync — one row per run. Every Freshop item has an
+        // id, so that's the reliable identity.
+        const fid = item.id != null ? String(item.id) : '';
+        if (fid && knownFreshopIds.has(fid)) continue;
+
         const upcKey = norm(item.upc || item.barcode_upc_a);
         if (upcKey && knownUpcKeys.has(upcKey)) continue;    // already carried / inserted
+
         const row = buildStoreProduct(item, dept.category);
         if (!row) continue;                                   // alcohol stray / no price / no name
+
+        // Belt and braces: without a Freshop id AND without a UPC there's no
+        // stable identity, so fall back to name+size so it can't duplicate.
+        const nameKey = fid || `${String(row.description || '').toLowerCase()}|${String(row.pkg_size || '')}`;
+        if (knownFreshopIds.has(nameKey)) continue;
+
         batchInserts.push(row);
+        knownFreshopIds.add(nameKey);
+        if (fid) knownFreshopIds.add(fid);
         if (upcKey) {
           knownUpcKeys.add(upcKey);
           if (upcKey.length >= 5) knownUpcKeys.add(upcKey.slice(0, -1));
@@ -258,11 +281,22 @@ async function handle(req: NextRequest) {
     if (batchInserts.length) {
       const { error: insErr } = await supabase.from('products').insert(batchInserts);
       if (insErr) {
-        state.lastError = `store import insert: ${insErr.message}`;
-        await saveState(supabase, state);
-        return NextResponse.json({ error: state.lastError }, { status: 500 });
+        // 23505 = unique violation: the DB's duplicate guard caught something
+        // the in-memory dedupe missed. That's the guard doing its job, NOT a
+        // sync failure — retry the batch row by row so the good rows still land.
+        if (insErr.code === '23505') {
+          for (const row of batchInserts) {
+            const { error: rowErr } = await supabase.from('products').insert(row);
+            if (!rowErr) state.inserted = (state.inserted || 0) + 1;
+          }
+        } else {
+          state.lastError = `store import insert: ${insErr.message}`;
+          await saveState(supabase, state);
+          return NextResponse.json({ error: state.lastError }, { status: 500 });
+        }
+      } else {
+        state.inserted = (state.inserted || 0) + batchInserts.length;
       }
-      state.inserted = (state.inserted || 0) + batchInserts.length;
     }
 
     // Only checkpoint pages whose data actually landed in the database.
