@@ -53,8 +53,17 @@ export default function DeliveriesPage() {
   const [showRates, setShowRates] = useState(false);
   const [showQb, setShowQb] = useState(false);
   const [search, setSearch] = useState('');
-  // Anything billable that hasn't been keyed into QuickBooks yet
-  const pendingQbCount = rows.filter(d => !d.updated_quickbooks && (Number(d.delivery_fee) > 0 || d.bill_for_groceries)).length;
+  // Badge count comes from the SAME query the queue opens with (all months,
+  // not just the view on screen) — otherwise the badge promises rows the queue
+  // doesn't show.
+  const [pendingQbCount, setPendingQbCount] = useState(0);
+  const loadPendingCount = useCallback(async () => {
+    const res = await adminFetch('/api/admin/deliveries?pending=1');
+    if (!res.ok) return;
+    const ds = ((await res.json()).deliveries || []) as Delivery[];
+    setPendingQbCount(ds.filter(d => Number(d.delivery_fee) > 0 || d.bill_for_groceries).length);
+  }, []);
+  useEffect(() => { loadPendingCount(); }, [loadPendingCount]);
 
   // "Which delivery was that?" — vessel first, since a company can run 15+
   // boats and the boat is how everyone actually refers to a delivery.
@@ -221,7 +230,7 @@ export default function DeliveriesPage() {
       {showQb && (
         <QuickBooksQueue
           onClose={() => setShowQb(false)}
-          onEntered={load}
+          onEntered={() => { load(); loadPendingCount(); }}
         />
       )}
       {showRates && (

@@ -42,7 +42,10 @@ export async function GET(req: NextRequest) {
   // week behind at a month boundary, last month's unentered deliveries must
   // still show up or they'd silently drop out of view and never get billed.
   if (pending === '1') {
-    const { data, error } = await query.eq('updated_quickbooks', false);
+    // NULL means "never marked", same as false — and the imported 2026 history
+    // has NULLs. `eq(false)` alone silently skips them in Postgres, which made
+    // the badge count rows the queue then refused to show.
+    const { data, error } = await query.or('updated_quickbooks.is.null,updated_quickbooks.eq.false');
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ deliveries: data || [] });
   }
