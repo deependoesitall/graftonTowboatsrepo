@@ -31,8 +31,10 @@ export function SiteHeader() {
       <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between gap-4">
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2 shrink-0">
+          {/* Self-hosted: the logo used to hotlink Squarespace's CDN, so a
+              change on their marketing site would have broken it here. */}
           <img
-            src="https://images.squarespace-cdn.com/content/v1/6819038bc556772f05a46e4d/00f04765-aff3-41b3-8b27-6d14b9688c52/image0+%282%29.png?format=300w"
+            src="/branding/gts-logo.png"
             alt="Grafton Towboat Services"
             className="h-10 w-auto"
           />

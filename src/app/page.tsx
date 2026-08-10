@@ -12,7 +12,7 @@ export default function HomePage() {
           {/* Logo */}
           <Link href="/" className="flex items-center gap-3 shrink-0">
             <img
-              src="https://images.squarespace-cdn.com/content/v1/6819038bc556772f05a46e4d/00f04765-aff3-41b3-8b27-6d14b9688c52/image0+%282%29.png?format=300w"
+              src="/branding/gts-logo.png"
               alt="Grafton Towboat Services"
               className="h-14 w-auto"
             />

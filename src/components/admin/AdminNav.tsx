@@ -49,7 +49,7 @@ export function AdminNav() {
           {/* Logo / title */}
           <Link href="/admin" className="flex items-center gap-3 shrink-0">
             <img
-              src="/branding/logo-circle.png"
+              src="/branding/gts-logo.png"
               alt="Grafton Towboat Services"
               className="h-14 w-14 object-contain shrink-0"
             />

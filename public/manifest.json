@@ -9,10 +9,16 @@
   "orientation": "portrait-primary",
   "icons": [
     {
+      "src": "/branding/gts-logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
       "src": "/icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "maskable"
     }
   ],
   "categories": ["food", "shopping", "utilities"],
