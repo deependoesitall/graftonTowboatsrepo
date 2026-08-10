@@ -4,87 +4,76 @@ import { ShoppingCart, Phone, MapPin, Mail, ChevronRight, Package, FileText, Tru
 
 export default function HomePage() {
   return (
-    <main className="min-h-screen bg-[#F7F6EF]">
+    <main className="min-h-screen" style={{ background: 'linear-gradient(135deg, #D9E84A 0%, #E8F070 50%, #F0F7A0 100%)' }}>
 
-      {/* ── HERO PANEL ──────────────────────────────────────────────────────
-          Deep green, full-bleed. The lime is a brilliant accent but as a
-          full-page wash it flattened everything and read cheap; on dark it
-          does the work of a highlight. */}
-      <div className="relative bg-brand-green overflow-hidden">
-        {/* Subtle depth — river-light glow, no gradients on text */}
-        <div aria-hidden className="pointer-events-none absolute inset-0 opacity-[0.18]"
-          style={{ background: 'radial-gradient(60% 60% at 50% 0%, #D9E84A 0%, transparent 70%)' }} />
-
-        {/* Nav */}
-        <nav className="relative z-50 border-b border-white/10">
-          <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between gap-6">
-            <Link href="/" className="flex items-center gap-3 shrink-0">
-              <img
-                src="/branding/gts-logo.png"
-                alt="Grafton Towboat Services"
-                className="h-16 w-auto drop-shadow"
-              />
-            </Link>
-
-            <div className="hidden md:flex items-center gap-8">
-              {[
-                { href: 'https://www.graftontowboatservices.com/', label: 'Home' },
-                { href: 'https://www.graftontowboatservices.com/services', label: 'Services' },
-                { href: 'https://www.graftontowboatservices.com/about', label: 'About' },
-                { href: 'https://www.graftontowboatservices.com/contact', label: 'Contact' },
-              ].map(({ href, label }) => (
-                <a key={label} href={href}
-                  className="text-white/75 font-body font-semibold text-sm hover:text-brand-yellow transition-colors tracking-wide">
-                  {label}
-                </a>
-              ))}
-            </div>
-
-            <Link href="/catalog"
-              className="bg-brand-yellow text-brand-green text-xs font-bold uppercase tracking-widest px-5 py-2.5 rounded-full hover:brightness-105 transition-all flex items-center gap-2 whitespace-nowrap shadow-lg">
-              <ShoppingCart className="w-3.5 h-3.5" />
-              Order Now
-            </Link>
-          </div>
-        </nav>
-
-        {/* Hero copy */}
-        <section className="relative z-10 max-w-5xl mx-auto px-6 pt-20 pb-24 text-center">
-          <p className="text-brand-yellow/90 text-xs font-bold uppercase tracking-[0.25em] mb-5">
-            Now ordering online
-          </p>
-          <h1 className="gts-heading text-5xl md:text-7xl leading-[0.95] mb-6 text-white">
-            Groceries, Supplies<br />
-            <span className="text-brand-yellow">&amp; Crew Change</span><br />
-            When You Need It.
-        </h1>
-          <p className="text-white/65 text-lg mb-10 font-body max-w-xl mx-auto leading-relaxed">
-            Partnered with Sinclair&apos;s Foods · Grafton, IL<br />
-            Mile Marker 219 Mississippi River · Mile Marker 0 Illinois River
-          </p>
-          <Link
-            href="/catalog"
-            className="inline-flex items-center gap-3 bg-brand-yellow text-brand-green font-bold text-lg uppercase tracking-widest px-10 py-4 rounded-full hover:brightness-105 transition-all shadow-xl group"
-          >
-            <ShoppingCart className="w-5 h-5" />
-            Order Groceries &amp; Supplies
-            <ChevronRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+      {/* Nav — matches GTS site exactly */}
+      <nav className="sticky top-0 z-50 bg-white/60 backdrop-blur-md border-b border-brand-green/10">
+        {/* Taller bar so the square logo (roundel + wordmark) is legible */}
+        <div className="max-w-7xl mx-auto px-6 h-24 flex items-center justify-between gap-6">
+          {/* Logo */}
+          <Link href="/" className="flex items-center gap-3 shrink-0">
+            <img
+              src="/branding/gts-logo.png"
+              alt="Grafton Towboat Services"
+              className="h-20 w-auto"
+            />
           </Link>
-          <p className="text-white/40 text-xs mt-4 tracking-widest uppercase">
-            No login required · Instant confirmation · PDF receipt
-          </p>
-        </section>
-      </div>
 
-      {/* Delivery callout — straddles the hero edge so it reads as a card */}
-      <section className="max-w-5xl mx-auto px-6">
-        <div className="-mt-10 relative z-20 flex items-center gap-4 bg-white rounded-2xl px-8 py-6 shadow-xl border border-brand-green/10 text-left">
-          <div className="w-12 h-12 bg-brand-green rounded-full flex items-center justify-center shrink-0">
+          {/* Desktop nav links */}
+          <div className="hidden md:flex items-center gap-8">
+            {[
+              { href: 'https://www.graftontowboatservices.com/', label: 'Home' },
+              { href: 'https://www.graftontowboatservices.com/services', label: 'Services' },
+              { href: 'https://www.graftontowboatservices.com/about', label: 'About' },
+              { href: 'https://www.graftontowboatservices.com/contact', label: 'Contact' },
+            ].map(({ href, label }) => (
+              <a key={label} href={href}
+                className="text-brand-green font-body font-semibold text-sm hover:text-brand-orange transition-colors tracking-wide">
+                {label}
+              </a>
+            ))}
+          </div>
+
+          {/* CTA */}
+          <Link href="/catalog"
+            className="bg-brand-green text-white text-xs font-bold uppercase tracking-widest px-5 py-2.5 rounded-full hover:bg-brand-gmed transition-colors flex items-center gap-2 whitespace-nowrap">
+            <ShoppingCart className="w-3.5 h-3.5" />
+            Order Now
+          </Link>
+        </div>
+      </nav>
+
+      {/* Hero */}
+      <section className="max-w-5xl mx-auto px-6 pt-16 pb-10 text-center">
+        <h1 className="gts-heading text-5xl md:text-7xl leading-none mb-6 text-brand-green">
+          Groceries, Supplies<br />
+          <span className="text-brand-orange">&amp; Crew Change</span><br />
+          When You Need It.
+        </h1>
+        <p className="text-brand-green/70 text-lg mb-10 font-body max-w-xl mx-auto">
+          Partnered with Sinclair&apos;s Foods · Grafton, IL<br />
+          Mile Marker 219 on the Mississippi River, Mile Marker 0 on the Illinois River
+        </p>
+        <Link
+          href="/catalog"
+          className="inline-flex items-center gap-3 bg-brand-green text-white font-bold text-lg uppercase tracking-widest px-10 py-4 rounded-full hover:bg-brand-gmed transition-colors shadow-lg group"
+        >
+          <ShoppingCart className="w-5 h-5" />
+          Order Groceries &amp; Supplies
+          <ChevronRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+        </Link>
+        <p className="text-brand-green/50 text-xs mt-4 tracking-widest uppercase">
+          No login required · Instant confirmation · PDF receipt
+        </p>
+
+        {/* Delivery callout */}
+        <div className="mt-10 inline-flex items-center gap-4 bg-brand-green text-white rounded-2xl px-8 py-5 shadow-lg text-left">
+          <div className="w-12 h-12 bg-brand-yellow/20 rounded-full flex items-center justify-center shrink-0">
             <Truck className="w-6 h-6 text-brand-yellow" />
           </div>
           <div>
-            <p className="font-bold text-base leading-tight text-brand-green">We deliver directly to your vessel — by boat or refrigerated van.</p>
-            <p className="text-brand-green/60 text-sm mt-1 font-body leading-snug">
+            <p className="font-bold text-base leading-tight">We deliver directly to your vessel — by boat or refrigerated van.</p>
+            <p className="text-brand-yellow/80 text-sm mt-0.5 font-body leading-snug">
               Order online · we pack &amp; bring it to your boat at Mile Marker 219 on the Mississippi River, Mile Marker 0 on the Illinois River.
               Cold &amp; frozen goods ride refrigerated the whole way.
             </p>
@@ -93,7 +82,7 @@ export default function HomePage() {
       </section>
 
       {/* How it works */}
-      <section className="max-w-5xl mx-auto px-6 py-20">
+      <section className="max-w-5xl mx-auto px-6 py-16">
         <h2 className="gts-heading text-4xl text-brand-green text-center mb-12">How It Works</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {[
@@ -101,7 +90,7 @@ export default function HomePage() {
             { num: '02', icon: Package, title: 'Enter Vessel Info', desc: 'Company name, contact, PO#, ETA, and any special instructions.' },
             { num: '03', icon: Truck, title: 'We Deliver to Your Boat', desc: "Submit your order and we'll have it packed and waiting at your vessel when you arrive." },
           ].map(({ num, icon: Icon, title, desc }) => (
-            <div key={num} className="bg-white rounded-2xl p-8 border border-brand-green/10 text-center shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-colors">
+            <div key={num} className="bg-white/60 backdrop-blur-sm rounded-2xl p-8 border border-brand-green/10 text-center hover:bg-white/80 transition-colors">
               <div className="w-16 h-16 bg-brand-green rounded-full flex items-center justify-center mx-auto mb-4 shadow-md">
                 <Icon className="w-7 h-7 text-brand-yellow" />
               </div>
