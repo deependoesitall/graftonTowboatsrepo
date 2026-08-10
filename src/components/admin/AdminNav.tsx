@@ -51,7 +51,7 @@ export function AdminNav() {
             <img
               src="/branding/gts-logo.png"
               alt="Grafton Towboat Services"
-              className="h-14 w-14 object-contain shrink-0"
+              className="h-14 w-auto object-contain shrink-0"
             />
             <div className="hidden sm:flex flex-col justify-center leading-tight">
               <span className="font-display font-bold text-white text-base uppercase tracking-wide">

@@ -28,7 +28,7 @@ export function SiteHeader() {
 
   return (
     <header className="sticky top-0 z-40 bg-white/70 backdrop-blur-md border-b border-brand-green/15 shadow-sm">
-      <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between gap-4">
+      <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2 shrink-0">
           {/* Self-hosted: the logo used to hotlink Squarespace's CDN, so a
@@ -36,7 +36,7 @@ export function SiteHeader() {
           <img
             src="/branding/gts-logo.png"
             alt="Grafton Towboat Services"
-            className="h-10 w-auto"
+            className="h-12 w-auto"
           />
         </Link>
 
