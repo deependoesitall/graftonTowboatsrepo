@@ -70,6 +70,55 @@ function chicagoDay(): string {
 }
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
+// ── Duplicate identity (mirrors migration 054's SQL functions exactly) ──
+// Sinclair's carries the same product under two Freshop entries with different
+// wording — "BLACKBERRIES 6 OZ" vs "BLACKBERRY 6 OZ", and worse, sometimes with
+// the size in pkg_size and sometimes baked into the name. Both have to be
+// normalized or the pair slips through and re-inserts every night.
+const SIZE_UNITS =
+  String.raw`ounces?|oz|pounds?|lbs?|counts?|ct|packs?|pk|pints?|pt|quarts?|qt|gallons?|gal|liters?|litres?|milliliters?|ml|kilograms?|kg|grams?|g|inches|inch|in|dozen|doz|dz|l`;
+const SIZE_SUFFIX_RE =
+  new RegExp(String.raw`[\s(\[]*(\d+(?:\.\d+)?\s*-?\s*(?:${SIZE_UNITS}))\.?\s*[)\]]?\s*$`, 'i');
+
+// "1 GALLON" and "1 gal" are the same size — canonicalize the unit, don't just
+// strip punctuation. Mirrors the CASE block in migration 054.
+const UNIT_CANON: Record<string, string> = {};
+for (const [canon, spellings] of [
+  ['oz', ['oz', 'ounce', 'ounces']], ['lb', ['lb', 'lbs', 'pound', 'pounds']],
+  ['gal', ['gal', 'gallon', 'gallons']], ['pt', ['pt', 'pint', 'pints']],
+  ['qt', ['qt', 'quart', 'quarts']], ['ml', ['ml', 'milliliter', 'milliliters']],
+  ['l', ['l', 'liter', 'liters', 'litre', 'litres']], ['kg', ['kg', 'kilogram', 'kilograms']],
+  ['g', ['g', 'gram', 'grams']], ['ct', ['ct', 'cnt', 'count', 'counts']],
+  ['pk', ['pk', 'pkg', 'pack', 'packs']], ['in', ['in', 'inch', 'inches']],
+  ['dz', ['dz', 'doz', 'dozen']], ['ea', ['ea', 'each']],
+] as Array<[string, string[]]>) for (const s of spellings) UNIT_CANON[s] = canon;
+
+function sizeToken(rs: string): string {
+  const m = (rs || '').toLowerCase().match(/(\d+(?:\.\d+)?)[^a-z0-9]*([a-z]+)?/);
+  if (!m) {
+    // No number at all. "each" is not a size, so it must read the same as a
+    // blank pkg_size or "BANANAS" and "Banana (each)" stay split forever.
+    const plain = (rs || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    return plain === 'each' || plain === 'ea' ? '' : plain;
+  }
+  const unit = m[2] || '';
+  return m[1] + (UNIT_CANON[unit] ?? unit);
+}
+
+/** name|size identity: plural/case/punctuation-insensitive name, plus the size
+ *  from pkg_size — falling back to whatever was baked into the name. */
+function productMatchKey(name: string, size: string): string {
+  const raw = name || '';
+  const base = raw.replace(SIZE_SUFFIX_RE, '');
+  const nameKey = (base.trim() === '' ? raw : base)
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+    .replace(/ies/g, 'y')
+    .replace(/s$/, '');
+  const rs = size.trim() || raw.match(SIZE_SUFFIX_RE)?.[1] || '';
+  return `${nameKey}|${sizeToken(rs)}`;
+}
+
 async function handle(req: NextRequest) {
   // ── Auth: cron secret or admin session ──
   const secret = process.env.CRON_SECRET;
@@ -165,15 +214,15 @@ async function handle(req: NextRequest) {
   for (let from = 0; ; from += 5000) {
     const { data, error } = await supabase
       .from('products')
-      .select('upc, freshop_id, description, pkg_size')
+      .select('upc, freshop_id, description, pkg_size, price')
       .eq('store_only', true)
       .range(from, from + 4999);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    const rowsIn = (data || []) as Array<{ upc: string | null; freshop_id: string | null; description: string | null; pkg_size: string | null }>;
+    const rowsIn = (data || []) as Array<{ upc: string | null; freshop_id: string | null; description: string | null; pkg_size: string | null; price: number | null }>;
     for (const r of rowsIn) {
       for (const k of ourKeys(r.upc || '')) knownUpcKeys.add(k);
       if (r.freshop_id) knownFreshopIds.add(String(r.freshop_id));
-      knownFreshopIds.add(`${String(r.description || '').toLowerCase()}|${String(r.pkg_size || '')}`);
+      knownFreshopIds.add(`${productMatchKey(String(r.description || ''), String(r.pkg_size || ''))}|${r.price}`);
     }
     if (!data || data.length < 5000) break;
   }
@@ -251,13 +300,15 @@ async function handle(req: NextRequest) {
         const row = buildStoreProduct(item, dept.category);
         if (!row) continue;                                   // alcohol stray / no price / no name
 
-        // Belt and braces: without a Freshop id AND without a UPC there's no
-        // stable identity, so fall back to name+size so it can't duplicate.
-        const nameKey = fid || `${String(row.description || '').toLowerCase()}|${String(row.pkg_size || '')}`;
-        if (knownFreshopIds.has(nameKey)) continue;
+        // NEAR-duplicate guard — the id check above can't catch these because
+        // they're separate Freshop entries. Price is part of the key on
+        // purpose: same name at a different price may be a different product,
+        // and showing a wrong price is worse than showing a duplicate.
+        const matchKey = `${productMatchKey(String(row.description || ''), String(row.pkg_size || ''))}|${row.price}`;
+        if (knownFreshopIds.has(matchKey)) continue;
 
         batchInserts.push(row);
-        knownFreshopIds.add(nameKey);
+        knownFreshopIds.add(matchKey);
         if (fid) knownFreshopIds.add(fid);
         if (upcKey) {
           knownUpcKeys.add(upcKey);
