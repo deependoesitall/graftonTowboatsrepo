@@ -67,6 +67,63 @@ const CATEGORY_PATHS: Record<string, string[]> = {
   'Dairy & Eggs': ['dairy'],
 };
 
+/**
+ * Our category → Freshop DEPARTMENT IDS to search inside.
+ *
+ * WHY THIS EXISTS. The old code searched Sinclair's store-wide and then threw
+ * away anything in the wrong department. That fails badly on short generic
+ * names: a live probe of q="limes" returns 601 hits and the first twenty are
+ * ALL lemon-lime soda, so the 20-result window never contained a single lime
+ * and "LIMES" — an item Sinclair's plainly sells — came back unmatched.
+ * Scoping the SAME query to the Produce department returns 20 hits total with
+ * "P2 LIMES" first.
+ *
+ * This is a strictly better gate than filtering afterwards: the wrong-category
+ * hit (dog food on "beef liver") can never enter the result set at all, and we
+ * stop burning our 20-row window on products we were always going to discard.
+ *
+ * Ordered — most likely department first, so the usual case costs one request.
+ * NOTE: department_id does NOT accept a comma-separated list. Probed live:
+ * "1595066,1595065" returns exactly the same 20 rows as "1595066" alone, so
+ * the extra ids are silently ignored. Hence one request per department.
+ */
+const CATEGORY_DEPTS: Record<string, string[]> = {
+  'Meat & Seafood': ['1595064', '1595067'],           // Meat, Seafood
+  'Dairy': ['1595060'],
+  'Produce': ['1595066'],
+  'Frozen Foods': ['1595062'],
+  'Bakery & Deli': ['1595058', '1595061', '1595062'], // Bakery, Deli, Frozen
+  'Pantry & Grocery': ['1595065', '1595062', '1595060'],
+  'Beverages': ['1595065', '1595062'],
+  'Snacks & Sweets': ['1595065', '1595058'],
+  'Household & Cleaning': ['1595065'],                // real household goods live in Pantry
+  'Health & Personal Care': ['1595065'],
+  'Frozen Goods': ['1595062'],
+  'Dairy & Eggs': ['1595060'],
+};
+
+/**
+ * Sinclair's serves a generic department icon when a product has no real
+ * photograph — "fp_dpt_generic/<hash>", and the SAME hash comes back on
+ * unrelated items (P2 LIMES and POMPEII LIME JUICE share one). Accepting it
+ * would mark an item as photographed while showing the crew a grey placeholder,
+ * which is worse than an honest "needs a photo" flag.
+ */
+function isRealPhoto(coverImage: string | undefined | null): boolean {
+  const c = String(coverImage || '');
+  return !!c && !c.startsWith('fp_dpt_generic/');
+}
+
+/**
+ * Sinclair's own availability flag. Anything other than "available" (seen in
+ * the wild: "no_movement") means they are not selling it right now, so we must
+ * not let a crew order it. Absent status is treated as available — that is how
+ * buildStoreProduct has always read it for the full-store import.
+ */
+export function isSellable(p: FreshopProduct): boolean {
+  return (p.status || 'available') === 'available';
+}
+
 /** Words carrying no matching signal — packaging, units, filler. */
 const NOISE = new Set([
   'LB', 'LBS', 'OZ', 'CT', 'EA', 'EACH', 'PK', 'PKG', 'PACK', 'COUNT',
@@ -196,6 +253,17 @@ export interface ImageCandidate {
   /** Which signals corroborated — surfaced in the review UI. */
   size_match: boolean;
   price_match: boolean;
+  /** Sinclair's own status for the matched listing ("available", "no_movement"). */
+  status: string;
+  /** Is Sinclair's actually selling this right now? */
+  sellable: boolean;
+  /** Freshop id of the row the PHOTO came from, when that differs from the
+   *  row that established availability (see borrowed_photo). */
+  image_freshop_id: string | null;
+  /** True when the exact match had no real photograph and the image was taken
+   *  from a same-department sibling ("P2 LIMES" has no photo; "Coast Tropical
+   *  Limes, Persian" does). Availability NEVER comes from a sibling. */
+  borrowed_photo: boolean;
 }
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -207,9 +275,10 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
  * Returns [] for a genuine empty result, null only when Sinclair's truly
  * wouldn't answer after the retry.
  */
-async function searchFreshop(term: string): Promise<FreshopProduct[] | null> {
+async function searchFreshop(term: string, departmentId?: string): Promise<FreshopProduct[] | null> {
   const url = `https://api.freshop.ncrcloud.com/1/products`
     + `?app_key=${FRESHOP_APP_KEY}&store_id=${FRESHOP_STORE_ID}`
+    + (departmentId ? `&department_id=${encodeURIComponent(departmentId)}` : '')
     + `&q=${encodeURIComponent(term)}&limit=20`;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -239,7 +308,8 @@ export async function findMatchFor(
   price: number | null,
 ): Promise<{ candidate: ImageCandidate | null; rateLimited: boolean }> {
   const allowedPaths = CATEGORY_PATHS[category];
-  if (!allowedPaths) return { candidate: null, rateLimited: false };
+  const depts = CATEGORY_DEPTS[category];
+  if (!allowedPaths || !depts) return { candidate: null, rateLimited: false };
 
   const toks = tokenize(description);
   if (!toks.length) return { candidate: null, rateLimited: false };
@@ -249,50 +319,97 @@ export async function findMatchFor(
   // Sister Schubert's listings). Stop at the first width that yields a match.
   const widths = Array.from(new Set([toks.length, 3, 2, 1])).filter(n => n >= 1 && n <= toks.length);
 
+  let paced = false;
   for (let wi = 0; wi < widths.length; wi++) {
     const n = widths[wi];
-    if (wi > 0) await sleep(200); // gentle pacing between relaxation attempts
     const term = toks.slice(0, n).join(' ');
-    const items = await searchFreshop(term);
-    if (items === null) return { candidate: null, rateLimited: true };
 
-    let best: ImageCandidate | null = null;
-    for (const item of items) {
-      if (!item.cover_image) continue;                    // gate 3
-      if (isAlcohol(item)) continue;
-      const path = deptPath(item);
-      if (!path) continue;                                // flat AWG url
-      if (!allowedPaths.includes(path.top)) continue;     // gate 1
+    // Search each candidate department separately — department_id ignores all
+    // but the first value in a comma list, so a CSV would silently drop the rest.
+    for (const deptId of depts) {
+      if (paced) await sleep(200);                        // gentle pacing; NCR throttles bursts
+      paced = true;
+      const items = await searchFreshop(term, deptId);
+      if (items === null) return { candidate: null, rateLimited: true };
 
-      const sizeMatch = !!sizeNum(pkgSize) && sizeNum(pkgSize) === sizeNum(item.size);
-      const itemPrice = typeof item.base_price === 'number' ? item.base_price : null;
-      const priceMatch = price != null && itemPrice != null && Math.abs(itemPrice - price) < 0.01;
+      // Pass 1 — establish IDENTITY and AVAILABILITY. Strict: this is the row
+      // that decides whether a crew is allowed to order the item at all, so a
+      // real photo is NOT required here and never influences the decision.
+      let best: ImageCandidate | null = null;
+      let bestItem: FreshopProduct | null = null;
+      for (const item of items) {
+        if (isAlcohol(item)) continue;
+        const path = deptPath(item);
+        // The department_id filter already guarantees the department. A parsed
+        // canonical_url is a bonus check, not a requirement — rejecting on a
+        // flat AWG url here would discard correctly-scoped items for the shape
+        // of their link.
+        if (path && !allowedPaths.includes(path.top)) continue;
 
-      // Size/price agreement is strong corroboration that this is the same
-      // product, so it lifts confidence toward the rename threshold.
-      let score = scoreMatch(description, item.name || '');
-      if (sizeMatch) score += 0.15;
-      if (priceMatch) score += 0.15;
-      score = Math.min(1, score);
+        const sizeMatch = !!sizeNum(pkgSize) && sizeNum(pkgSize) === sizeNum(item.size);
+        const itemPrice = typeof item.base_price === 'number' ? item.base_price : null;
+        const priceMatch = price != null && itemPrice != null && Math.abs(itemPrice - price) < 0.01;
 
-      if (score < MIN_SCORE) continue;                    // gate 2
-      if (best && score <= best.score) continue;
+        // Size/price agreement is strong corroboration that this is the same
+        // product, so it lifts confidence toward the rename threshold.
+        let score = scoreMatch(description, item.name || '');
+        if (sizeMatch) score += 0.15;
+        if (priceMatch) score += 0.15;
+        score = Math.min(1, score);
 
-      best = {
-        proper_name: cleanName(item.name || ''),
-        freshop_name: stripZzz((item.name || '').trim()),
-        image_url: `${IMAGE_BASE}/${item.cover_image}_large.png`,
-        score: Math.round(score * 100) / 100,
-        dept_path: `${path.top}/${path.sub}`,
-        freshop_size: item.size ? stripZzz(item.size) || null : null,
-        freshop_price: itemPrice,
-        rename: score >= NAME_SCORE && (sizeMatch || priceMatch),
-        size_match: sizeMatch,
-        price_match: priceMatch,
-      };
+        if (score < MIN_SCORE) continue;                  // confidence gate
+        if (best && score <= best.score) continue;
+
+        const real = isRealPhoto(item.cover_image);
+        bestItem = item;
+        best = {
+          proper_name: cleanName(item.name || ''),
+          freshop_name: stripZzz((item.name || '').trim()),
+          image_url: real ? `${IMAGE_BASE}/${item.cover_image}_large.png` : '',
+          score: Math.round(score * 100) / 100,
+          dept_path: path ? `${path.top}/${path.sub}` : `dept:${deptId}`,
+          freshop_size: item.size ? stripZzz(item.size) || null : null,
+          freshop_price: itemPrice,
+          rename: score >= NAME_SCORE && (sizeMatch || priceMatch),
+          size_match: sizeMatch,
+          price_match: priceMatch,
+          status: item.status || 'available',
+          sellable: isSellable(item),
+          image_freshop_id: real && item.id != null ? String(item.id) : null,
+          borrowed_photo: false,
+        };
+      }
+
+      if (!best) continue;
+
+      // Pass 2 — PHOTO ONLY. Sinclair's often has no photograph of their own
+      // listing for loose produce and hand-cut meat ("P2 LIMES" carries the
+      // generic icon) while a sibling in the same department does. A lime looks
+      // like a lime, so borrowing that image is safe and far better than a grey
+      // box — but it is cosmetic only and can never make an item orderable.
+      if (!best.image_url) {
+        let sib: { url: string; id: string | null; score: number } | null = null;
+        for (const item of items) {
+          if (item === bestItem || isAlcohol(item)) continue;
+          if (!isRealPhoto(item.cover_image)) continue;
+          const s = scoreMatch(description, item.name || '');
+          if (s < NAME_SCORE) continue;                   // deliberately stricter than MIN_SCORE
+          if (sib && s <= sib.score) continue;
+          sib = {
+            url: `${IMAGE_BASE}/${item.cover_image}_large.png`,
+            id: item.id != null ? String(item.id) : null,
+            score: s,
+          };
+        }
+        if (sib) {
+          best.image_url = sib.url;
+          best.image_freshop_id = sib.id;
+          best.borrowed_photo = true;
+        }
+      }
+
+      return { candidate: best, rateLimited: false };
     }
-
-    if (best) return { candidate: best, rateLimited: false };
   }
 
   return { candidate: null, rateLimited: false };

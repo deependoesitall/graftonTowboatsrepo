@@ -711,7 +711,7 @@ function RateCardEditor({ companies, serviceTypes, onClose, onChanged }: {
           <select value={companyId} onChange={e => setCompanyId(e.target.value)}
             className="mt-1 w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm">
             <option value="">Shared default (applies to any company without its own rate)</option>
-            {companies.map(c => <option key={c.id} value={c.id}>{c.name} — custom rates</option>)}
+            {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </div>
         <div className="p-5 overflow-y-auto space-y-1.5">

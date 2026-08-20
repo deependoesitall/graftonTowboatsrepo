@@ -60,6 +60,12 @@ interface SyncState {
   inserted?: number;
   completedAt?: string;
   lastError?: string;
+  /** Result of the end-of-sweep store reconcile (see reconcile_store_availability). */
+  reconcile?: {
+    skipped: boolean; reason?: string;
+    hidden?: number; restored?: number; would_hide?: number;
+    total?: number; pct?: number;
+  };
 }
 
 const emptyStats = (): SyncStats =>
@@ -253,6 +259,7 @@ async function handle(req: NextRequest) {
     const batchUpdates: Array<{ id: string; fields: Record<string, unknown> }> = [];
     const batchInserts: Record<string, unknown>[] = [];
     const completedPages: Array<{ dept: DeptProgress; pageIdx: number }> = [];
+    const seenThisBatch = new Set<string>();
 
     for (let bi = 0; bi < batch.length; bi++) {
       const items = results[bi];
@@ -265,6 +272,13 @@ async function handle(req: NextRequest) {
       for (const item of items) {
         for (const key of freshopKeys(item)) if (!index.has(key)) index.set(key, item);
       }
+
+      // ── ROLL CALL ── every id Sinclair's just showed us is still listed.
+      // Recorded for EVERY item on the page, including ones we go on to skip as
+      // duplicates: "we already carry it" and "Sinclair's dropped it" are
+      // completely different facts, and conflating them would hide live products.
+      // One small bulk insert per batch beats touching ~20k product rows nightly.
+      for (const item of items) if (item.id != null) seenThisBatch.add(String(item.id));
       const usedFreshopIds = new Set<string>();
       for (const product of ours) {
         if (!product.upc) continue;
@@ -350,6 +364,19 @@ async function handle(req: NextRequest) {
       }
     }
 
+    // Roll call for this batch. Written BEFORE the page checkpoint below, so a
+    // page can never be marked done while its ids are missing from the roster —
+    // that combination would make live products look delisted at reconcile time.
+    if (seenThisBatch.size) {
+      const day = state.day || today;
+      const rows = Array.from(seenThisBatch, id => ({ freshop_id: id, seen_day: day }));
+      for (let i = 0; i < rows.length; i += 500) {
+        // Duplicates across pages are expected and harmless — ignore conflicts.
+        await supabase.from('catalog_sync_seen')
+          .upsert(rows.slice(i, i + 500), { onConflict: 'freshop_id,seen_day', ignoreDuplicates: true });
+      }
+    }
+
     // Only checkpoint pages whose data actually landed in the database.
     for (const { dept, pageIdx } of completedPages) dept.done.push(pageIdx);
 
@@ -378,6 +405,20 @@ async function handle(req: NextRequest) {
   // ── Finished every department? Re-apply the order-form layout + log once ──
   const finished = state.depts.every(d => d.done.length >= d.pages);
   if (finished) {
+    // ── RECONCILE ── only now, with every department walked, is "absent from
+    // the roster" trustworthy. Store items Sinclair's no longer lists go
+    // is_available = false, which the customer catalog already filters on, so
+    // they leave the site with no new gating code. Items that came back are
+    // restored. BARGE ITEMS ARE NEVER TOUCHED — they're Jen's curated list, not
+    // Sinclair's, and they aren't synced. The RPC's own safety cap aborts the
+    // whole thing if an implausible share would disappear.
+    try {
+      const { data: rec } = await supabase.rpc('reconcile_store_availability', {
+        p_day: state.day || today, p_max_pct: 15,
+      });
+      state.reconcile = (rec ?? undefined) as SyncState['reconcile'];
+    } catch { /* never let reconcile break the sweep */ }
+
     try {
       const layout = await applyFormLayout(supabase);
       state.completedAt = new Date().toISOString();
@@ -411,6 +452,7 @@ async function handle(req: NextRequest) {
 
   return NextResponse.json({
     status: finished ? 'done' : rateLimited ? 'rate-limited' : 'in-progress',
+    reconcile: state.reconcile,
     /** Client-driven chaining: the admin page fires the next chunk when this
      * is true. chainSelf() is the unattended backstop. */
     has_more: moreWork,
@@ -461,11 +503,18 @@ async function runPhotoBackfill(
     try {
       const { candidate } = await findMatchFor(p.description, p.category, p.pkg_size, Number(p.price));
       const upd: Record<string, unknown> = { photo_match_tried_at: new Date().toISOString() };
-      if (candidate) {
+      // PHOTOS ONLY. Barge items are Jen's curated order form — we are not
+      // verifying them against Sinclair's and not syncing them. This pass exists
+      // purely to find each one a picture; once it has an image_url the query
+      // above stops selecting it, so the work is one-and-done by construction.
+      if (candidate && candidate.image_url) {
         upd.proposed_image_url = candidate.image_url;
         upd.proposed_details = candidate.proper_name;
         upd.proposed_name = candidate.freshop_name;
         upd.proposed_score = candidate.score;
+        // A borrowed photo came from a DIFFERENT listing in the same
+        // department, so the reviewer must see that before approving.
+        upd.proposed_image_borrowed = candidate.borrowed_photo;
       }
       await supabase.from('products').update(upd).eq('id', p.id);
       processed++;

@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
 
   const { data, error } = await supabase
     .from('products')
-    .select('id, description, details, category, pkg_size, price, proposed_image_url, proposed_details, proposed_name, proposed_score')
+    .select('id, description, details, category, pkg_size, price, proposed_image_url, proposed_details, proposed_name, proposed_score, proposed_image_borrowed')
     .not('proposed_image_url', 'is', null)
     .order('proposed_score', { ascending: false, nullsFirst: false })
     .limit(500);
@@ -37,13 +37,16 @@ export async function POST(req: NextRequest) {
     if (!a?.id) continue;
     const { data: p } = await supabase
       .from('products')
-      .select('proposed_image_url, proposed_details, manual_fields')
+      .select('proposed_image_url, proposed_details, manual_fields, proposed_image_borrowed')
       .eq('id', a.id).single();
     if (!p?.proposed_image_url) continue;
     const locked = new Set((p.manual_fields as string[]) || []);
     const upd: Record<string, unknown> = {
-      image_source: 'name_match',
+      // Distinguish a photo of the item itself from one borrowed off a similar
+      // listing — a human approved both, but only one is literally this product.
+      image_source: p.proposed_image_borrowed ? 'name_match_similar' : 'name_match',
       proposed_image_url: null, proposed_details: null, proposed_name: null, proposed_score: null,
+      proposed_image_borrowed: false,
     };
     if (!locked.has('image_url')) upd.image_url = p.proposed_image_url;
     if (a.keepName !== false && p.proposed_details && !locked.has('details')) upd.details = p.proposed_details;
@@ -55,7 +58,10 @@ export async function POST(req: NextRequest) {
   // sync won't re-propose the same item for another 14 days.
   if (Array.isArray(reject) && reject.length) {
     const { error } = await supabase.from('products')
-      .update({ proposed_image_url: null, proposed_details: null, proposed_name: null, proposed_score: null })
+      .update({
+        proposed_image_url: null, proposed_details: null, proposed_name: null,
+        proposed_score: null, proposed_image_borrowed: false,
+      })
       .in('id', reject);
     if (!error) rejected = reject.length;
   }

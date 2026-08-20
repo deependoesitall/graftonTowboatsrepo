@@ -431,6 +431,8 @@ interface PhotoProposal {
   proposed_details: string | null;
   proposed_name: string | null;
   proposed_score: number | null;
+  /** Photo came from a DIFFERENT Sinclair's listing in the same department. */
+  proposed_image_borrowed: boolean | null;
 }
 
 function PhotoReviewPanel({ onClose, onApplied }: { onClose: () => void; onApplied: () => void }) {
@@ -518,6 +520,17 @@ function PhotoReviewPanel({ onClose, onApplied }: { onClose: () => void; onAppli
                     <span className={`text-[10px] font-bold px-1.5 rounded-full border ${strong ? 'text-green-700 bg-green-50 border-green-200' : 'text-amber-700 bg-amber-50 border-amber-200'}`}>
                       {Math.round((p.proposed_score ?? 0) * 100)}% match
                     </span>
+                    {/* Sinclair's has no photo of their OWN listing for this item
+                        (loose produce, hand-cut meat), so this picture is from a
+                        different listing in the same department. Usually right —
+                        a lime looks like a lime — but the reviewer has to know,
+                        because a lime-JUICE photo scores nearly as high. */}
+                    {p.proposed_image_borrowed && (
+                      <span className="text-[10px] font-bold px-1.5 rounded-full border text-orange-700 bg-orange-50 border-orange-200"
+                        title="Sinclair's has no photo of this exact item — this picture is from a similar product in the same department. Check it matches before approving.">
+                        similar item&apos;s photo
+                      </span>
+                    )}
                   </div>
                 </div>
                 <label className={`flex items-start gap-2 w-52 shrink-0 text-xs cursor-pointer ${pick.keep ? '' : 'pointer-events-none'}`}>
