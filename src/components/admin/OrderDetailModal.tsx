@@ -12,6 +12,7 @@ import { Order, OrderItem, OrderStatus, Product } from '@/types';
 import { formatCurrency, formatDate, ORDER_STATUSES } from '@/lib/utils';
 import { ShoppingModeModal } from '@/components/admin/ShoppingModeModal';
 import { adminFetch, isGtsRole, getAdminRole } from '@/lib/admin-auth';
+import { codFeeLabel, codPersonTotal, codTotalWithFee } from '@/lib/cod-fee';
 import { PickSheetOverlay } from '@/components/admin/PickSheetOverlay';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 
@@ -157,6 +158,16 @@ export function OrderDetailModal({
   const codSubtotal = codItems
     .filter(i => i.shopping_status !== 'out_of_stock')
     .reduce((s, i) => s + (i.actual_total ?? i.unit_price * i.quantity), 0);
+  // COD lines grouped per crew member. Hoisted because a FLAT handling fee has
+  // to be apportioned across these people — the split needs to know how many
+  // there are, and the per-person figures must add up to the header total.
+  const codGroups = Array.from(codItems.reduce((acc, i) => {
+    const name = (i.cod_name || '').trim() || 'Crew member';
+    if (!acc.has(name)) acc.set(name, [] as typeof codItems);
+    acc.get(name)!.push(i);
+    return acc;
+  }, new Map<string, typeof codItems>()).entries())
+    .sort((a, b) => a[0].localeCompare(b[0]));
   // Deck lines — company-billed but listed separately from the grocery allowance
   const deckItems = groceryItems.filter(i => i.paid_by === 'deck');
   const deckSubtotal = deckItems
@@ -170,15 +181,40 @@ export function OrderDetailModal({
   // COD handling fee — defaults to 5%, editable per order (big-ticket externals
   // may warrant more or less; Dave: "default 5%, but we can edit it ourselves").
   const [feePct, setFeePct] = useState<string>(String(order.cod_fee_percent ?? 5));
+  // Flat mode is remembered from the order itself: if an amount was keyed, that
+  // IS the fee, so reopening shows the dollar field rather than a percentage
+  // that no longer applies.
+  const [feeMode, setFeeMode] = useState<'pct' | 'flat'>(
+    order.cod_fee_amount != null ? 'flat' : 'pct'
+  );
+  const [feeFlat, setFeeFlat] = useState<string>(
+    order.cod_fee_amount != null ? String(order.cod_fee_amount) : ''
+  );
   const [savingFee, setSavingFee] = useState(false);
+
   const feeNum = Math.max(0, parseFloat(feePct) || 0);
+  const feeFlatNum = feeFlat.trim() === '' ? null : Math.max(0, parseFloat(feeFlat) || 0);
+  // What the crew is actually charged, under whichever mode is selected.
+  const effectiveFee = feeMode === 'flat'
+    ? (feeFlatNum ?? 0)
+    : Math.round(codSubtotal * feeNum) / 100;
+  const feeDirty =
+    feeMode === 'flat'
+      ? feeFlatNum !== (order.cod_fee_amount ?? null)
+      : order.cod_fee_amount != null || feeNum !== Number(order.cod_fee_percent ?? 5);
+
   async function saveFee() {
     setSavingFee(true);
     try {
+      // Switching back to % must CLEAR the flat amount — leaving it set would
+      // silently keep overriding the percentage the user just chose.
+      const payload = feeMode === 'flat'
+        ? { cod_fee_amount: feeFlatNum, cod_fee_percent: feeNum }
+        : { cod_fee_amount: null, cod_fee_percent: feeNum };
       await adminFetch(`/api/orders/${order.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cod_fee_percent: feeNum }),
+        body: JSON.stringify(payload),
       });
       onRefresh();
     } finally {
@@ -416,23 +452,16 @@ export function OrderDetailModal({
             {codItems.length > 0 && (
               <div className="bg-purple-50 border-2 border-purple-300 rounded-lg p-3">
                 <p className="text-xs font-bold text-purple-700 uppercase tracking-wide mb-2">
-                  $ COD Items — collect {formatCurrency(codSubtotal * (1 + feeNum / 100))}{feeNum > 0 ? ` incl. ${feeNum}% fee` : ''} · separated by crew member (not on the company invoice)
+                  $ COD Items — collect {formatCurrency(codSubtotal + effectiveFee)}{effectiveFee > 0 ? ` incl. ${codFeeLabel(order, codSubtotal)}` : ''} · separated by crew member (not on the company invoice)
                 </p>
                 <div className="space-y-2 mb-2">
-                  {Array.from(codItems.reduce((acc, i) => {
-                    const name = (i.cod_name || '').trim() || 'Crew member';
-                    if (!acc.has(name)) acc.set(name, [] as typeof codItems);
-                    acc.get(name)!.push(i);
-                    return acc;
-                  }, new Map<string, typeof codItems>()).entries())
-                    .sort((a, b) => a[0].localeCompare(b[0]))
-                    .map(([name, list]) => (
+                  {codGroups.map(([name, list]) => (
                       <div key={name} className="bg-white/60 rounded-lg px-2.5 py-1.5">
                         <p className="text-sm font-bold text-purple-800 flex justify-between">
                           <span>{name}</span>
                           <span>
-                            {formatCurrency(list.reduce((s, i) => s + Number(i.actual_total ?? i.unit_price * i.quantity), 0) * (1 + feeNum / 100))}
-                            {feeNum > 0 && <span className="font-normal text-purple-500 text-xs"> incl. fee</span>}
+                            {formatCurrency(codPersonTotal(order, list.reduce((s, i) => s + Number(i.actual_total ?? i.unit_price * i.quantity), 0), codSubtotal, codGroups.length))}
+                            {effectiveFee > 0 && <span className="font-normal text-purple-500 text-xs"> incl. fee</span>}
                           </span>
                         </p>
                         {list.map(i => (
@@ -458,18 +487,46 @@ export function OrderDetailModal({
                       {order.cod_contact_time && <> · <strong>Best time (around):</strong> {order.cod_contact_time}</>}
                     </p>
                   )}
-                  <p className="flex items-center gap-2">
+                  {/* HANDLING FEE — percentage by default, flat amount when the
+                      percentage can't work. Off-catalog runs (a Walmart TV) have
+                      no price until Sinclair's has bought the thing, so 5% of a
+                      $0 line is $0 and the real cost of the trip is absorbed.
+                      A keyed dollar amount overrides the percentage entirely. */}
+                  <div className="flex flex-wrap items-center gap-2">
                     <strong>Handling fee:</strong>
                     {canEdit ? (
                       <>
-                        <input
-                          type="number" min="0" max="100" step="0.5"
-                          className="w-16 border border-purple-300 rounded px-1.5 py-0.5 text-center font-bold bg-white"
-                          value={feePct}
-                          onChange={e => setFeePct(e.target.value)}
-                        />
-                        <span>%</span>
-                        {feeNum !== Number(order.cod_fee_percent ?? 5) && (
+                        <div className="inline-flex rounded-md border border-purple-300 overflow-hidden">
+                          {([['pct', '%'], ['flat', '$']] as const).map(([m, sym]) => (
+                            <button key={m} type="button"
+                              onClick={() => setFeeMode(m)}
+                              className={`px-2 py-0.5 text-xs font-bold ${
+                                feeMode === m ? 'bg-purple-600 text-white' : 'bg-white text-purple-700 hover:bg-purple-50'
+                              }`}>{sym}</button>
+                          ))}
+                        </div>
+                        {feeMode === 'pct' ? (
+                          <>
+                            <input
+                              type="number" min="0" max="100" step="0.5"
+                              className="w-16 border border-purple-300 rounded px-1.5 py-0.5 text-center font-bold bg-white"
+                              value={feePct}
+                              onChange={e => setFeePct(e.target.value)}
+                            />
+                            <span>%</span>
+                          </>
+                        ) : (
+                          <>
+                            <span>$</span>
+                            <input
+                              type="number" min="0" step="0.01" placeholder="0.00"
+                              className="w-24 border border-purple-300 rounded px-1.5 py-0.5 text-right font-bold bg-white"
+                              value={feeFlat}
+                              onChange={e => setFeeFlat(e.target.value)}
+                            />
+                          </>
+                        )}
+                        {feeDirty && (
                           <button onClick={saveFee} disabled={savingFee}
                             className="text-[10px] font-bold uppercase bg-purple-600 text-white px-2 py-0.5 rounded hover:bg-purple-700 disabled:opacity-50">
                             {savingFee ? 'Saving…' : 'Save'}
@@ -477,10 +534,15 @@ export function OrderDetailModal({
                         )}
                       </>
                     ) : (
-                      <span>{feeNum}%</span>
+                      <span>{codFeeLabel(order, codSubtotal)}</span>
                     )}
-                    <span>= {formatCurrency(codSubtotal * feeNum / 100)} on {formatCurrency(codSubtotal)}</span>
-                  </p>
+                    <span className="text-purple-700">
+                      = {formatCurrency(effectiveFee)} on {formatCurrency(codSubtotal)}
+                      {feeMode === 'flat' && (
+                        <span className="text-purple-500"> · split across crew by what each spent</span>
+                      )}
+                    </span>
+                  </div>
                 </div>
               </div>
             )}
@@ -769,8 +831,12 @@ export function OrderDetailModal({
                           ? 'bg-amber-50'
                           : 'bg-white'
                       }`}>
-                        <td colSpan={canEdit ? 5 : 5} className="px-3 py-2">
-                          <div className="flex items-center gap-2">
+                        {/* ONE full-width cell, wrapping. This was split across
+                            a label cell and the narrow price column, so the
+                            input + Save button + confirmation text overflowed
+                            and were clipped by the table edge. */}
+                        <td colSpan={canEdit ? 7 : 6} className="px-3 py-2">
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                             <span className="text-sm font-bold text-brand-navy">REGISTER TOTAL</span>
                             <span className="text-xs text-gray-400">(actual amount rung at Sinclair's register)</span>
                             {registerTotal && Math.abs(parseFloat(registerTotal) - subtotal) > 1 && (
@@ -778,10 +844,7 @@ export function OrderDetailModal({
                                 ⚠ {parseFloat(registerTotal) > subtotal ? '+' : ''}{formatCurrency(parseFloat(registerTotal) - subtotal)} vs system
                               </span>
                             )}
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 text-right">
-                          <div className="flex items-center justify-end gap-1.5">
+                            <div className="flex flex-wrap items-center gap-1.5 sm:ml-auto">
                             <span className="text-sm font-bold text-gray-500">$</span>
                             <input
                               type="number"
@@ -816,13 +879,13 @@ export function OrderDetailModal({
                                   : <><Check className="w-3 h-3" /> Save final total</>}
                             </button>
                           </div>
+                          </div>
                           {registerSaved && (
-                            <p className="text-[11px] text-green-700 font-semibold mt-1">
+                            <p className="w-full text-[11px] text-green-700 font-semibold">
                               Shopping complete — this is the amount the order bills from.
                             </p>
                           )}
                         </td>
-                        {canEdit && <td />}
                       </tr>
                     </tfoot>
                   </table>

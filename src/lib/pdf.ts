@@ -2,6 +2,7 @@
 // Generates a clean, branded, print-ready HTML order sheet for Sinclair Foods
 import { Order } from '@/types';
 import { formatCurrency, formatDate } from './utils';
+import { codFeePercent, codFeeLabel, codTotalWithFee, codPersonTotal } from '@/lib/cod-fee';
 
 export function generateOrderHTML(order: Order): string {
   const outOfStockMap = new Map<string, string>(
@@ -30,7 +31,7 @@ export function generateOrderHTML(order: Order): string {
     : order.cod_payment_method === 'venmo' ? 'Venmo — send a payment request'
     : order.cod_payment_method === 'cashapp' ? 'Cash App — send a payment request'
     : order.cod_payment_method === 'cash' ? 'Cash (legacy)' : null;
-  const codFeePct = Number(order.cod_fee_percent ?? 5);
+  const codFeePct = codFeePercent(order);
   const isFulfilled       = order.status === 'fulfilled';
   const itemCount         = groceryItems.reduce((s, i) => s + i.quantity, 0);
   const isCrewChangeOnly  = order.crew_change !== 'no' && groceryItems.length === 0;
@@ -263,13 +264,13 @@ ${order.crew_change === 'maybe' ? `
 <!-- ===== COD ITEMS (per-line paid_by) ===== -->
 ${codItems.length > 0 ? `
 <div style="border:3px solid #9333ea;padding:14px 20px;background:#faf5ff;border-radius:4px;margin-bottom:16px;">
-  <div style="font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:#9333ea;margin-bottom:6px;">&#36; COD Items &mdash; Collect ${formatCurrency(codSubtotal * (1 + codFeePct / 100))}${codFeePct > 0 ? ` incl. ${codFeePct}% Fee` : ''} &middot; Separated by Crew Member</div>
-  <div style="font-size:11px;color:#555;">Each crew member pays their own total personally — NOT part of the company invoice.${codFeePct > 0 ? ` The ${codFeePct}% handling fee covers payment processing.` : ''}</div>
+  <div style="font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:#9333ea;margin-bottom:6px;">&#36; COD Items &mdash; Collect ${formatCurrency(codTotalWithFee(order, codSubtotal))}${codFeeLabel(order, codSubtotal) !== 'no handling fee' ? ` incl. ${codFeeLabel(order, codSubtotal)}` : ''} &middot; Separated by Crew Member</div>
+  <div style="font-size:11px;color:#555;">Each crew member pays their own total personally — NOT part of the company invoice.${codFeeLabel(order, codSubtotal) !== 'no handling fee' ? ` The ${codFeeLabel(order, codSubtotal)} covers payment processing.` : ''}</div>
   <div style="margin-top:6px;font-size:12px;color:#333;">
     ${codByName.map(([name, list]) => {
       const personTotal = list.reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0);
       return `<div style="margin-bottom:5px;">
-        <div style="font-weight:800;color:#6b21a8;">${name} &mdash; ${formatCurrency(personTotal * (1 + codFeePct / 100))}${codFeePct > 0 ? ' <span style="font-weight:400;">incl. fee</span>' : ''}</div>
+        <div style="font-weight:800;color:#6b21a8;">${name} &mdash; ${formatCurrency(codPersonTotal(order, personTotal, codSubtotal, codByName.length))}${codFeePct > 0 ? ' <span style="font-weight:400;">incl. fee</span>' : ''}</div>
         ${list.map(i => `<div style="padding-left:12px;font-size:11px;color:#444;">${i.quantity}&times; ${i.description} &middot; ${formatCurrency(i.actual_total ?? i.line_total)}</div>`).join('')}
       </div>`;
     }).join('')}

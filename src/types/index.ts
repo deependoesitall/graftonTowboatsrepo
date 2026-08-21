@@ -215,6 +215,10 @@ export interface Order {
   cod_contact_time: string | null;
   /** COD handling fee % (default 5 — offsets Venmo/Cash App/card fees). Admin-editable per order. */
   cod_fee_percent: number | null;
+  /** Hand-keyed handling fee in dollars. NULL = derive from cod_fee_percent.
+   *  Exists because off-catalog items have no price until they're bought,
+   *  so a percentage of them is meaningless. See src/lib/cod-fee.ts. */
+  cod_fee_amount?: number | null;
   items: OrderItem[];
   /** Estimated digital-coupon savings snapshot (0 when none applied). */
   discount_total: number;

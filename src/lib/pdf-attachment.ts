@@ -4,6 +4,7 @@
 
 import type { Order } from '@/types';
 import { formatCurrency, formatDate } from './utils';
+import { codFeePercent, codTotalWithFee } from '@/lib/cod-fee';
 
 // ─── Colours / brand ─────────────────────────────────────────
 const DARK_GREEN = '#1E3D1E';
@@ -136,8 +137,8 @@ export async function generateOrderPdfBuffer(order: Order): Promise<Buffer> {
     const codItems = order.items.filter(i => i.item_type !== 'service' && i.paid_by === 'cod');
     if (codItems.length > 0) {
       const codBase = codItems.reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0);
-      const codFeePct = Number(order.cod_fee_percent ?? 5);
-      const codTotal = codBase * (1 + codFeePct / 100);
+      const codFeePct = codFeePercent(order);
+      const codTotal = codTotalWithFee(order, codBase);
       const methodLabel = order.cod_payment_method === 'credit_card' ? 'CREDIT CARD — CALL TO COLLECT'
         : order.cod_payment_method === 'venmo' ? `VENMO — REQUEST TO ${order.cod_payment_handle || 'ACCOUNT ON FILE'}`
         : order.cod_payment_method === 'cashapp' ? `CASH APP — REQUEST TO ${order.cod_payment_handle || 'ACCOUNT ON FILE'}`
@@ -151,7 +152,7 @@ export async function generateOrderPdfBuffer(order: Order): Promise<Buffer> {
       doc.rect(MARGIN, y, CONTENT_W, blockH).fill('#faf5ff');
       doc.rect(MARGIN, y, 3, blockH).fill('#9333ea');
       doc.fillColor('#9333ea').fontSize(8).font('Helvetica-Bold')
-         .text(`COD ITEMS — COLLECT $${codTotal.toFixed(2)}${codFeePct > 0 ? ` INCL. ${codFeePct}% FEE` : ''} (NOT INVOICED)`, MARGIN + 8, y + 5, { characterSpacing: 0.5 });
+         .text(`COD ITEMS — COLLECT $${codTotal.toFixed(2)}${codFeePct > 0 || (order.cod_fee_amount ?? null) != null ? ` INCL. FEE` : ''} (NOT INVOICED)`, MARGIN + 8, y + 5, { characterSpacing: 0.5 });
       doc.fillColor('#444444').fontSize(8).font('Helvetica')
          .text(detail, MARGIN + 8, y + 16, { width: CONTENT_W - 16 });
       y += blockH + 6;

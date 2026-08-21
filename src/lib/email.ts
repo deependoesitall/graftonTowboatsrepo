@@ -3,6 +3,7 @@ import { Resend } from 'resend';
 import { Order } from '@/types';
 import { formatCurrency, formatDate } from './utils';
 import { generateOrderPdfBuffer } from './pdf-attachment';
+import { codFeePercent, codFeeLabel, codTotalWithFee, codPersonTotal } from '@/lib/cod-fee';
 
 // Lazily construct the Resend client so importing this module (e.g. during
 // `next build` page-data collection) doesn't require RESEND_API_KEY to be set.
@@ -130,7 +131,8 @@ export function buildOrderEmailHtml(
     : order.cod_payment_method === 'venmo' ? 'Venmo — we’ll send a payment request'
     : order.cod_payment_method === 'cashapp' ? 'Cash App — we’ll send a payment request'
     : order.cod_payment_method === 'cash' ? 'Cash' : null;
-  const codFeePct = Number(order.cod_fee_percent ?? 5);
+  const codFeePct = codFeePercent(order);
+  const codFeeLbl = (sub: number) => codFeeLabel(order, sub);
 
   const itemRows = groceryItems.map(item => `
     <tr style="border-bottom:1px solid #f0f0f0;">
@@ -265,11 +267,11 @@ export function buildOrderEmailHtml(
     </div>` : ''}
 
     ${codItems.length > 0 ? `<div style="background:#faf5ff;border:1px solid #9333ea;padding:10px 14px;border-radius:4px;margin-bottom:20px;">
-      <div style="font-size:9px;font-weight:800;color:#9333ea;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">COD Items — ${formatCurrency(codSubtotal * (1 + codFeePct / 100))}${codFeePct > 0 ? ` incl. ${codFeePct}% handling fee` : ''} (not invoiced) · paid personally, separated by crew member</div>
+      <div style="font-size:9px;font-weight:800;color:#9333ea;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">COD Items — ${formatCurrency(codTotalWithFee(order, codSubtotal))}${codFeePct > 0 || codFeeLbl(codSubtotal) !== 'no handling fee' ? ` incl. ${codFeeLbl(codSubtotal)}` : ''} (not invoiced) · paid personally, separated by crew member</div>
       ${codByName.map(([name, list]) => {
         const personTotal = list.reduce((s, i) => s + Number(i.line_total), 0);
         return `<div style="margin-bottom:6px;">
-          <div style="font-size:12px;font-weight:800;color:#6b21a8;">${name} — ${formatCurrency(personTotal * (1 + codFeePct / 100))}${codFeePct > 0 ? ' <span style="font-weight:400;color:#9d7bd8;">incl. fee</span>' : ''}</div>
+          <div style="font-size:12px;font-weight:800;color:#6b21a8;">${name} — ${formatCurrency(codPersonTotal(order, personTotal, codSubtotal, codByName.length))}${codFeePct > 0 ? ' <span style="font-weight:400;color:#9d7bd8;">incl. fee</span>' : ''}</div>
           ${list.map(i => `<div style="font-size:11px;color:#444;padding-left:10px;">${i.quantity}× ${i.description} · ${formatCurrency(Number(i.line_total))}</div>`).join('')}
         </div>`;
       }).join('')}
