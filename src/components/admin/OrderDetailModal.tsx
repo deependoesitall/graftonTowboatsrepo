@@ -86,17 +86,45 @@ export function OrderDetailModal({
     order.register_total != null ? String(order.register_total) : ''
   );
   const [registerTotalSaving, setRegisterTotalSaving] = useState(false);
+  // Already-saved totals come back confirmed, so reopening a shopped order
+  // shows "Final total saved" rather than an unsaved-looking button.
+  const [registerSaved, setRegisterSaved] = useState(order.register_total != null);
 
-  async function saveRegisterTotal(raw: string) {
+  /**
+   * Confirm the register total — Sinclair's "we're done shopping" action.
+   *
+   * This is the number the order bills from: the email, the invoice and the
+   * billing packet all prefer register_total over the system estimate. It used
+   * to save on blur, which meant the most consequential figure in the whole
+   * flow was committed by an accident of focus, with no confirmation that it
+   * had landed. Now it takes a deliberate click (or Enter) and says so.
+   */
+  async function confirmRegisterTotal() {
+    const raw = registerTotal;
     const val = raw.trim() === '' ? null : parseFloat(raw.replace(/[^0-9.]/g, ''));
     if (raw.trim() !== '' && (isNaN(val!) || val! < 0)) return;
     setRegisterTotalSaving(true);
     try {
-      await adminFetch(`/api/orders/${order.id}`, {
+      const res = await adminFetch(`/api/orders/${order.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ register_total: val }),
       });
+      if (!res.ok) return;               // leave it unsaved so it can be retried
+      setRegisterSaved(true);
+
+      // ── SHOPPED ── confirming the register total IS the end of Sinclair's
+      // involvement, so the order moves to 'shopped' in the same action rather
+      // than relying on someone remembering a second dropdown.
+      //
+      // Only from new/in_progress. An order already 'fulfilled' has been
+      // delivered — walking it backwards would drop it out of GTS's completed
+      // work — and 'cancelled' must stay cancelled.
+      if (val != null && (order.status === 'new' || order.status === 'in_progress')) {
+        onStatusChange('shopped');
+      }
+
+      onRefresh();                       // pull the new total through to the queue
     } finally {
       setRegisterTotalSaving(false);
     }
@@ -751,12 +779,38 @@ export function OrderDetailModal({
                               min="0"
                               placeholder="0.00"
                               value={registerTotal}
-                              onChange={e => setRegisterTotal(e.target.value)}
-                              onBlur={e => saveRegisterTotal(e.target.value)}
+                              onChange={e => { setRegisterTotal(e.target.value); setRegisterSaved(false); }}
+                              onKeyDown={e => { if (e.key === 'Enter') confirmRegisterTotal(); }}
                               className="w-24 text-right font-display text-base font-bold text-brand-navy border border-gray-200 rounded px-2 py-0.5 focus:outline-none focus:ring-2 focus:ring-brand-gold/40"
                             />
-                            {registerTotalSaving && <Loader2 className="w-3 h-3 animate-spin text-gray-400" />}
+                            {/* Explicit confirm, not a blur-save. Keying the
+                                register total is the moment Sinclair's is done
+                                shopping — it's the number everything downstream
+                                bills from, so it deserves a deliberate action
+                                and visible confirmation rather than silently
+                                saving when focus happens to leave the field. */}
+                            <button
+                              type="button"
+                              onClick={confirmRegisterTotal}
+                              disabled={registerTotalSaving || registerTotal.trim() === '' || registerSaved}
+                              className={`flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-lg border transition-colors whitespace-nowrap ${
+                                registerSaved
+                                  ? 'bg-green-50 text-green-700 border-green-200 cursor-default'
+                                  : 'bg-brand-navy text-white border-brand-navy hover:bg-brand-navy/90 disabled:opacity-40 disabled:cursor-not-allowed'
+                              }`}
+                            >
+                              {registerTotalSaving
+                                ? <><Loader2 className="w-3 h-3 animate-spin" /> Saving…</>
+                                : registerSaved
+                                  ? <><CheckCircle2 className="w-3 h-3" /> Final total saved</>
+                                  : <><Check className="w-3 h-3" /> Save final total</>}
+                            </button>
                           </div>
+                          {registerSaved && (
+                            <p className="text-[11px] text-green-700 font-semibold mt-1">
+                              Shopping complete — this is the amount the order bills from.
+                            </p>
+                          )}
                         </td>
                         {canEdit && <td />}
                       </tr>
@@ -914,8 +968,8 @@ export function OrderDetailModal({
                               <IB
                                 label="Paid By"
                                 value={d.paid_by === 'cod'
-                                  ? `COD${d.cod_name ? ` — ${d.cod_name}` : ' (no name given)'}`
-                                  : 'Grocery — company invoice'}
+                                  ? `COD — ${d.cod_name || '(no name given)'}`
+                                  : 'COD — to the boat'}
                               />
                               <IB label="Handled By" value="Sinclair's Foods" />
                             </>)}

@@ -35,6 +35,9 @@ export function generateOrderNumber(): string {
 export const ORDER_STATUSES = [
   { value: 'new', label: 'New', color: 'bg-blue-100 text-blue-800' },
   { value: 'in_progress', label: 'In Progress', color: 'bg-yellow-100 text-yellow-800' },
+  // Sinclair's is done: rung up at the register and the total confirmed.
+  // Grafton still has to deliver it — that's 'fulfilled'.
+  { value: 'shopped', label: 'Shopped', color: 'bg-purple-100 text-purple-800' },
   { value: 'fulfilled', label: 'Fulfilled', color: 'bg-green-100 text-green-800' },
   { value: 'cancelled', label: 'Cancelled', color: 'bg-red-100 text-red-800' },
 ] as const;

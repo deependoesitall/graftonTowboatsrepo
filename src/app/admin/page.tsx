@@ -360,10 +360,23 @@ function FinalEmailQueue() {
   const { confirm: confirmDialog, dialog: confirmDialogEl } = useConfirm();
 
   async function load() {
-    const res = await adminFetch('/api/orders?status=fulfilled&per_page=50');
-    if (!res.ok) { setOrders([]); return; }
-    const data = await res.json();
-    setOrders(((data.orders || []) as QueueOrder[]).filter(o => !o.shopped_email_sent_at));
+    // BOTH states on purpose. 'shopped' is the new signal (Sinclair's confirmed
+    // the register total), but orders already sitting at 'fulfilled' from before
+    // this existed must not silently drop out of the queue.
+    const [a, b] = await Promise.all([
+      adminFetch('/api/orders?status=shopped&per_page=50'),
+      adminFetch('/api/orders?status=fulfilled&per_page=50'),
+    ]);
+    if (!a.ok && !b.ok) { setOrders([]); return; }
+    const rows: QueueOrder[] = [];
+    for (const res of [a, b]) {
+      if (!res.ok) continue;
+      const data = await res.json();
+      rows.push(...((data.orders || []) as QueueOrder[]));
+    }
+    setOrders(rows
+      .filter(o => !o.shopped_email_sent_at)
+      .sort((x, y) => (x.order_number > y.order_number ? 1 : -1)));
   }
   useEffect(() => { load(); }, []);
 

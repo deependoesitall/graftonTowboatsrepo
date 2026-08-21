@@ -200,7 +200,7 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
   .tick { width: 13px; height: 13px; border: 1.5px solid #333; border-radius: 3px; flex: 0 0 auto; margin-top: 1px; }
   .cod-pill { background:#f3e8ff; color:#5b21b6; border:1px solid #c4a7f5; font-weight:700;
               font-size:9.5px; padding:2px 6px; border-radius:9px; white-space:nowrap; flex:0 0 auto; }
-  .grocery-pill { background:#eef4ee; color:#2f5d3a; border:1px solid #c9dbcd; font-weight:700;
+  .boat-pill { background:#eef4ee; color:#2f5d3a; border:1px solid #c9dbcd; font-weight:700;
                   font-size:9.5px; padding:2px 6px; border-radius:9px; white-space:nowrap; flex:0 0 auto; }
   .svc-src { margin: 4px 0 0 20px; font-size: 10.5px; font-weight: 700; color: #333; }
   .svc-note { margin: 2px 0 0 20px; font-size: 10px; color: #444; }
@@ -262,14 +262,18 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
         <div class="svc-top">
           <span class="tick"></span>
           <b>${esc(heading)}</b>
+          ${/* EVERY outside pickup is COD — collected at delivery, never on the
+                monthly invoice. The only question is who settles it: a named
+                crew member, or the boat. "On boat's bill" read like it went on
+                the company account, which is the opposite of what happens. */''}
           ${isCod
-            ? `<span class="cod-pill">COD${who ? ` &mdash; ${esc(who)}` : ' &mdash; NAME MISSING'}</span>`
-            : `<span class="grocery-pill">On boat's bill</span>`}
+            ? `<span class="cod-pill">COD &mdash; ${who ? esc(who) : 'NAME MISSING'}</span>`
+            : `<span class="boat-pill">COD &mdash; to the boat</span>`}
         </div>
         ${link.host ? `<div class="svc-src">${esc(link.host)}${link.label ? ` &middot; ${esc(link.label)}` : ''}</div>` : ''}
         ${d.notes && link.label && d.notes.trim() !== link.label ? `<div class="svc-note">Note: ${esc(d.notes)}</div>` : ''}
         ${link.path ? `<div class="svc-url">${esc(link.path)}</div>` : ''}
-        ${isCod ? `<div class="svc-warn">&#9888; Crew member's own purchase &mdash; pay separately, keep the receipt.</div>` : ''}
+        ${isCod ? `<div class="svc-warn">&#9888; Crew member's own purchase &mdash; collect from them, keep the receipt.</div>` : ''}
       </div>`;
     }).join('')}
   </section>` : ''}

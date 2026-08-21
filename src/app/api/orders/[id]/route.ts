@@ -97,7 +97,11 @@ export async function PATCH(
     // by Sinclair's often isn't the end of the job (CODs, crew changes,
     // pickups). A GTS owner fires the final email manually from the dashboard
     // (POST /api/orders/[id]/send-shopped-email) after everything checks out.
-    if (body.status === 'fulfilled') {
+    // Recalculate at SHOPPED as well as fulfilled. Shopping is when
+    // out-of-stock lines and actual weights become known, so that is when
+    // the subtotal stops being an estimate. Running it again on delivery is
+    // harmless — the sum is idempotent.
+    if (body.status === 'shopped' || body.status === 'fulfilled') {
       const { data: finalItems } = await supabase
         .from('order_items')
         .select('shopping_status, line_total, actual_total')

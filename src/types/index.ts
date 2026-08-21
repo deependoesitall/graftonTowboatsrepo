@@ -272,7 +272,8 @@ export interface OrderItem {
   image_url: string | null;
 }
 
-export type OrderStatus = 'new' | 'in_progress' | 'fulfilled' | 'cancelled';
+/** new → in_progress → shopped (Sinclair's rang it up) → fulfilled (GTS delivered) */
+export type OrderStatus = 'new' | 'in_progress' | 'shopped' | 'fulfilled' | 'cancelled';
 
 /** A digital coupon automatically applied to an order (estimate until rung up). */
 export interface OrderDiscount {

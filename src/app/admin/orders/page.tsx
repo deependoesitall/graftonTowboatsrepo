@@ -31,9 +31,11 @@ function StatusBadge({ status, onClick }: { status: string; onClick?: () => void
 }
 
 // Pipeline: next status after current
+// new → in_progress → shopped (Sinclair's rang it up) → fulfilled (GTS delivered)
 const NEXT_STATUS: Record<string, OrderStatus | null> = {
   new: 'in_progress',
-  in_progress: 'fulfilled',
+  in_progress: 'shopped',
+  shopped: 'fulfilled',
   fulfilled: null,
   cancelled: null,
 };

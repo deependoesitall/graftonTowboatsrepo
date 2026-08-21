@@ -1201,14 +1201,20 @@ function ItemRow({
                     rather than on the item row, so the badge above misses them.
                     Sinclair's is driving to Walmart for these — the shopper needs
                     to know it's someone's personal purchase BEFORE they pay. */}
-                {item.service_type === 'other_pickup'
-                  && (item.service_details as Record<string, string> | null)?.paid_by === 'cod' && (
-                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-purple-700 bg-purple-50 border border-purple-200 rounded-md px-1.5 py-0.5"
-                    title="Crew member's own purchase — pay for it separately, not on the boat's bill">
-                    $ COD{(item.service_details as Record<string, string>).cod_name
-                      ? ` — ${(item.service_details as Record<string, string>).cod_name}` : ''} · buy separately
-                  </span>
-                )}
+                {/* EVERY outside pickup is COD — collected at delivery, never on
+                    the monthly invoice. Only the payer differs: a named crew
+                    member, or the boat. Both get a badge so the shopper is never
+                    left guessing who to collect from. */}
+                {item.service_type === 'other_pickup' && (() => {
+                  const d = (item.service_details as Record<string, string> | null) || {};
+                  const named = d.paid_by === 'cod';
+                  return (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-bold text-purple-700 bg-purple-50 border border-purple-200 rounded-md px-1.5 py-0.5"
+                      title="Collected at delivery — never on the company invoice">
+                      $ COD — {named ? (d.cod_name || 'crew member') : 'to the boat'}
+                    </span>
+                  );
+                })()}
               </div>
 
               {/* The link IS the instruction for an outside pickup — without it

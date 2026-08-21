@@ -67,7 +67,9 @@ export function OtherPickupCard() {
           </p>
           <p className="text-xs text-gray-400 mt-0.5">
             Paste links to items from other stores (Walmart, anywhere) and they&apos;ll come with your
-            groceries. Add as many as you need — these aren&apos;t included in your estimated total.
+            groceries. Add as many as you need. These are <strong>COD</strong> — we can&apos;t know the
+            price until it&apos;s bought, so they aren&apos;t in your estimated total and are collected at
+            delivery (plus the same handling fee as other COD items) rather than on your monthly invoice.
           </p>
         </div>
         {other.enabled && (
@@ -108,15 +110,13 @@ export function OtherPickupCard() {
                 onChange={e => patchEntry(idx, { notes: e.target.value })} />
             </div>
 
-            {/* WHO PAYS. Off-catalog requests are often personal — a crew
-                member's own TV or cables — and those must not land on the
-                company invoice. Same three-tier thinking as the cart lines,
-                but only two options here: an outside purchase is either the
-                boat's or somebody's own. Defaults to Grocery, matching how
-                every request behaved before this existed. */}
             <div className="flex flex-wrap items-center gap-2 pt-1">
-              <span className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Paid by</span>
-              {([['grocery', 'Grocery'], ['cod', 'COD']] as const).map(([val, lbl]) => {
+              <span className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Who pays</span>
+              {/* These are ALWAYS COD — bought elsewhere and settled at
+                  delivery, never on the monthly invoice. The only question is
+                  whether the boat covers it or one crew member does. Stored
+                  values stay 'grocery'/'cod' so existing orders keep working. */}
+              {([['grocery', 'The boat'], ['cod', 'A crew member']] as const).map(([val, lbl]) => {
                 const on = (entry.paid_by ?? 'grocery') === val;
                 return (
                   <button key={val} type="button"
@@ -135,14 +135,14 @@ export function OtherPickupCard() {
               {entry.paid_by === 'cod' && (
                 <input type="text"
                   className="input-base text-sm py-1 flex-1 min-w-[140px]"
-                  placeholder="Whose is it? e.g. Andy"
+                  placeholder="Which crew member? e.g. Andy"
                   value={entry.cod_name ?? ''}
                   onChange={e => patchEntry(idx, { cod_name: e.target.value })} />
               )}
             </div>
             {entry.paid_by === 'cod' && !((entry.cod_name ?? '').trim()) && (
               <p className="text-[11px] text-amber-600 font-semibold">
-                Add a name so this gets billed to the right person.
+                Add a name so we know who to collect from.
               </p>
             )}
           </div>
@@ -162,7 +162,7 @@ export function OtherPickupCard() {
             : <p className="text-xs text-gray-400 text-center pt-1">Add a link or details above to include this with your order.</p>
         )}
         <p className="text-[11px] text-gray-400 text-center">
-          Handled by Sinclair&apos;s Foods · final cost confirmed after purchase and billed on your monthly invoice
+          Handled by Sinclair&apos;s Foods · COD — final cost confirmed after purchase and collected at delivery, not on your monthly invoice
         </p>
       </div>
     </div>
