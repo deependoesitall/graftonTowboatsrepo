@@ -39,6 +39,7 @@ const BATCH_SIZE = 4;               // concurrent page fetches
 const PAGES_PER_RUN = 40;           // per invocation (~10 batches)
 const BATCH_DELAY_MS = 250;         // breath between batches
 const TIME_BUDGET_MS = 45_000;      // leave headroom under maxDuration
+const MAX_DEPT_PAGES = 500;         // runaway guard for page-until-empty growth
 
 interface DeptProgress {
   id: string;
@@ -275,6 +276,29 @@ async function handle(req: NextRequest) {
       const items = results[bi];
       if (!items) { rateLimited = true; continue; }  // back off — next invocation retries
       const { dept, pageIdx } = batch[bi];
+
+      // ── GROW THE DEPARTMENT ── never trust Freshop's `total`.
+      //
+      // NCR answers datacenter IPs differently. Sized from Vercel, Bakery came
+      // back as 72 items and Pantry as 23; the very same URL from elsewhere
+      // reports 1,820 and 500. The sweep therefore computed one page per
+      // department, imported a sliver of the store, and reported itself
+      // complete — silently, because a short `total` looks exactly like a small
+      // department.
+      //
+      // So `total` is now only a STARTING GUESS. The authoritative signal is the
+      // data itself: a FULL page means there is probably another page behind it,
+      // so extend this department by one and keep walking. Enumeration stops
+      // only when a page comes back short — which is the real end of the list,
+      // whatever Freshop claims the count is.
+      // MAX_DEPT_PAGES is a runaway guard, not a real limit — 500 pages is
+      // 50,000 items in one department, far beyond anything Sinclair's stocks.
+      if (items.length >= FRESHOP_PAGE_SIZE
+          && pageIdx + 1 >= dept.pages
+          && dept.pages < MAX_DEPT_PAGES) {
+        dept.pages = pageIdx + 2;
+        dept.total = Math.max(dept.total, dept.pages * FRESHOP_PAGE_SIZE);
+      }
 
       // Index THIS page by Freshop keys, then walk our barge catalog (same
       // matching semantics as the manual enrich, just page by page).

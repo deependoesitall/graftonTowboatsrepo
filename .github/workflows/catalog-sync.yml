@@ -13,11 +13,18 @@ name: Nightly catalog sync
 
 on:
   schedule:
-    # Every 15 min, 05:00–09:45 UTC (≈ midnight–5am Central) — ~20 chunks at
-    # 12 pages each covers the ~208 storefront pages. The very first sweep
-    # (full-store import, ~19k inserts) may take two nights; the checkpoint
-    # carries over automatically.
-    - cron: '*/15 5-9 * * *'
+    # Every 15 min, 07:00–11:45 UTC (≈ 2am–6:45am Central).
+    #
+    # DO NOT MOVE EARLIER. Sinclair's rebuilds their catalog between midnight
+    # and ~12:15 AM Central. This used to start at 05:00 UTC (midnight Central),
+    # straight into the rebuild — the sweep sized departments off half-built
+    # data, locked those short totals into the session, and imported a slice of
+    # the store while reporting success. Observed: store sized at 775 when
+    # Bakery alone reports 1,820.
+    #
+    # The very first sweep (full-store import) may take two nights; the
+    # checkpoint carries over automatically.
+    - cron: '*/15 7-11 * * *'
   workflow_dispatch: {}   # manual "Run workflow" button for testing
 
 jobs:
