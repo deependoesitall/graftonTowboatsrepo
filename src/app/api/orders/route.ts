@@ -405,7 +405,44 @@ export async function POST(req: NextRequest) {
     }
 
     if (allOrderItems.length > 0) {
-      await supabase.from('order_items').insert(allOrderItems);
+      // ── NORMALISE KEYS BEFORE INSERTING ──
+      // PostgREST builds ONE statement from the FIRST row's keys and rejects
+      // the entire batch if later rows differ. Grocery rows carry location,
+      // location_seq, image_url, paid_by and cod_name; service rows never set
+      // them. So any order mixing groceries with a parts pickup, package
+      // delivery or outside pickup had its WHOLE item list rejected — and
+      // because the result was never checked, the order still saved, the
+      // confirmation email still sent, and both showed "0 items" with a
+      // correct dollar total. Silent, total data loss on the order's contents.
+      //
+      // Filling every key on every row makes the batch uniform. paid_by
+      // defaults to 'vessel' because service lines bill to the company.
+      const ITEM_COLUMNS = [
+        'order_id', 'product_id', 'description', 'category', 'pkg_size', 'uom', 'upc',
+        'location', 'location_seq', 'image_url', 'unit_price', 'quantity', 'line_total',
+        'item_type', 'service_type', 'service_details', 'paid_by', 'cod_name',
+      ] as const;
+      const normalisedItems = allOrderItems.map(row =>
+        Object.fromEntries(ITEM_COLUMNS.map(col => [
+          col,
+          col === 'paid_by' ? (row[col] ?? 'vessel') : (row[col] ?? null),
+        ])),
+      );
+
+      const { error: itemsErr } = await supabase.from('order_items').insert(normalisedItems);
+      if (itemsErr) {
+        // An order with no items is worse than no order at all: the customer
+        // gets a confirmation for nothing and Sinclair's never sees it (their
+        // view is scoped to orders that HAVE items). Fail loudly instead.
+        console.error('order_items insert failed:', itemsErr, {
+          order_id: order.id, count: normalisedItems.length,
+        });
+        await supabase.from('orders').delete().eq('id', order.id);
+        return NextResponse.json(
+          { error: `Could not save the order's items (${itemsErr.message}). Nothing was charged — please try again.` },
+          { status: 500 },
+        );
+      }
     }
 
     // ── Digital coupons — auto-applied like Sinclair's own site ──
