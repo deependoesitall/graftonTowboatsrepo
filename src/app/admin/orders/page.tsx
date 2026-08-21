@@ -8,7 +8,7 @@ import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { formatCurrency, formatDate, ORDER_STATUSES } from '@/lib/utils';
 import { Order, OrderStatus } from '@/types';
 import { OrderDetailModal } from '@/components/admin/OrderDetailModal';
-import { fetchAdminSession, getAdminRole, canEdit, adminFetch, hasAdminPermission } from '@/lib/admin-auth';
+import { fetchAdminSession, getAdminRole, canEdit, adminFetch, hasAdminPermission, isGtsRole } from '@/lib/admin-auth';
 
 const STATUS_CONFIG = {
   new:         { label: 'New',         bg: 'bg-blue-50',   text: 'text-blue-700',   border: 'border-blue-200',  dot: 'bg-blue-500',  edge: 'border-l-blue-500'  },
@@ -57,7 +57,9 @@ function OrdersContent() {
     setRoleFlags({
       canEditOrders: canEdit(getAdminRole(), 'orders'),
       isOwner: getAdminRole() === 'owner',
-      isSinclair: hasAdminPermission('sinclair'),
+      // Mirrors the server's isSinclairScoped(): every Sinclair's role is
+      // grocery-scoped by definition, never by opt-in checkbox.
+      isSinclair: !isGtsRole(getAdminRole()) || hasAdminPermission('sinclair'),
     });
   }, []);
   const { canEditOrders, isOwner, isSinclair } = roleFlags;

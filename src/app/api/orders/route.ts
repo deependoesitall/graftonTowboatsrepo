@@ -22,7 +22,7 @@ import { generateOrderNumber } from '@/lib/utils';
 import { fetchActiveDeals, computeDiscounts } from '@/lib/sinclair-offers';
 import { sendOrderReceivedEmail } from '@/lib/email';
 import { Order } from '@/types';
-import { requireAdmin, hasPermission } from '@/lib/admin-auth-server';
+import { requireAdmin, isSinclairScoped } from '@/lib/admin-auth-server';
 import { z } from 'zod';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -490,7 +490,8 @@ export async function GET(req: NextRequest) {
 
   const supabase = createServiceClient();
 
-  const isSinclair = hasPermission(session, 'sinclair');
+  // Sinclair's roles are scoped by definition — see isSinclairScoped().
+  const isSinclair = isSinclairScoped(session);
 
   let query = supabase
     .from('orders')
