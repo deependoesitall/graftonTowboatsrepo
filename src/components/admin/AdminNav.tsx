@@ -17,7 +17,9 @@ const NAV: Array<{ href: string; label: string; icon: any; area: 'orders' | 'pro
   { href: '/admin/settings', label: 'Settings',  icon: Settings,        area: 'settings' },
 ];
 
-const ROLE_LABELS: Record<AdminRole, string> = { owner: 'Owner', manager: 'Manager', staff: 'Staff' };
+const ROLE_LABELS: Record<AdminRole, string> = {
+  owner: 'Owner', gts_manager: 'GTS Manager', manager: "Sinclair's Manager", staff: 'Staff',
+};
 
 export function AdminNav() {
   const path = usePathname();

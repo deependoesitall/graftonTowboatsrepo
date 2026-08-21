@@ -15,7 +15,28 @@
 // src/lib/admin-auth-server.ts), so this token grants exactly what the
 // server allows for that role — nothing client-side tampering can expand.
 
-export type AdminRole = 'owner' | 'manager' | 'staff';
+/**
+ * Roles span TWO ORGANISATIONS, not one ladder.
+ *
+ *   owner        — Grafton Towboat. Everything.
+ *   gts_manager  — Grafton Towboat. Orders, products, settings, PLUS the
+ *                  delivery rate cards, barge lines and customer billing
+ *                  terms GTS negotiates with the boat companies.
+ *   manager      — SINCLAIR'S Manager. Products, orders, weekly ad, coupons.
+ *                  Unchanged, and deliberately so: this is the existing store
+ *                  role and Dave's team already uses it.
+ *   staff        — Sinclair's floor staff. Orders only.
+ *
+ * gts_manager is NOT "manager plus extras" — the split is a confidentiality
+ * boundary between two businesses, not a seniority ladder. What Sinclair's
+ * must never see is what GTS charges its own customers to deliver.
+ */
+export type AdminRole = 'owner' | 'gts_manager' | 'manager' | 'staff';
+
+/** Grafton Towboat side? Gates GTS-only commercial UI (delivery terms, rates). */
+export function isGtsRole(role: AdminRole | null): boolean {
+  return role === 'owner' || role === 'gts_manager';
+}
 export type AdminPermission = 'sinclair';
 
 const ADMIN_TOKEN_KEY = 'grafton_admin_token';
@@ -33,7 +54,7 @@ export function getAdminToken(): string | null {
 export function getAdminRole(): AdminRole | null {
   if (typeof window === 'undefined') return null;
   const r = sessionStorage.getItem(ADMIN_ROLE_KEY);
-  if (r === 'owner' || r === 'manager' || r === 'staff') return r;
+  if (r === 'owner' || r === 'gts_manager' || r === 'manager' || r === 'staff') return r;
   return null;
 }
 
@@ -87,6 +108,9 @@ export function clearAdminUiState() {
 export function canAccess(role: AdminRole | null, area: 'orders' | 'products' | 'settings' | 'reports' | 'logs'): boolean {
   if (!role) return false;
   if (role === 'owner') return true;
+  // GTS manager: everything the Sinclair's manager gets, plus 'reports' —
+  // the Deliveries ledger and rate cards live there.
+  if (role === 'gts_manager') return area !== 'logs';
   if (role === 'manager') return area === 'orders' || area === 'products' || area === 'settings';
   if (role === 'staff') return area === 'orders';
   return false;
@@ -95,6 +119,7 @@ export function canAccess(role: AdminRole | null, area: 'orders' | 'products' | 
 export function canEdit(role: AdminRole | null, area: 'orders' | 'products' | 'settings'): boolean {
   if (!role) return false;
   if (role === 'owner') return true;
+  if (role === 'gts_manager') return area === 'orders' || area === 'products' || area === 'settings';
   if (role === 'manager') return area === 'orders' || area === 'products';
   if (role === 'staff') return area === 'orders';
   return false;

@@ -77,7 +77,9 @@ interface ActivityLog {
   created_at: string;
 }
 
-const ROLE_LABELS = { owner: 'Owner', manager: 'Manager', staff: 'Staff' };
+const ROLE_LABELS = {
+  owner: 'Owner', gts_manager: 'GTS Manager', manager: "Sinclair's Manager", staff: 'Staff',
+};
 const ROLE_COLORS = {
   owner: 'bg-brand-orange/10 text-brand-orange border-brand-orange/20',
   manager: 'bg-blue-50 text-blue-700 border-blue-200',
@@ -974,6 +976,7 @@ export default function AdminSettingsPage() {
                         }));
                       }}>
                       <option value="owner">Owner — Full access</option>
+                      <option value="gts_manager">GTS Manager — everything except admin logs (incl. delivery rates &amp; billing)</option>
                       <option value="manager">Sinclair&apos;s Manager — products, orders, weekly ad, coupons</option>
                       <option value="staff">Staff — Orders only</option>
                     </select>

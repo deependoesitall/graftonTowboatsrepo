@@ -16,7 +16,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import jwt from 'jsonwebtoken';
 
-export type AdminRole = 'owner' | 'manager' | 'staff';
+export type AdminRole = 'owner' | 'gts_manager' | 'manager' | 'staff';
 export type AdminPermission = 'sinclair';
 export type Area = 'orders' | 'products' | 'settings' | 'reports' | 'logs';
 
@@ -62,7 +62,7 @@ export function verifyAdminSession(token: string): AdminSessionPayload | null {
       typeof username === 'string' &&
       typeof role === 'string' &&
       typeof display_name === 'string' &&
-      (role === 'owner' || role === 'manager' || role === 'staff')
+      (role === 'owner' || role === 'gts_manager' || role === 'manager' || role === 'staff')
     ) {
       // permissions may be absent in tokens issued before this migration — default to []
       const perms: AdminPermission[] = Array.isArray(permissions)
@@ -123,6 +123,7 @@ export function clearedCookieOptions() {
 
 export function canAccess(role: AdminRole, area: Area): boolean {
   if (role === 'owner') return true;
+  if (role === 'gts_manager') return area !== 'logs';
   if (role === 'manager') return area === 'orders' || area === 'products' || area === 'settings';
   if (role === 'staff') return area === 'orders';
   return false;
@@ -130,6 +131,7 @@ export function canAccess(role: AdminRole, area: Area): boolean {
 
 export function canEdit(role: AdminRole, area: 'orders' | 'products' | 'settings'): boolean {
   if (role === 'owner') return true;
+  if (role === 'gts_manager') return area === 'orders' || area === 'products' || area === 'settings';
   if (role === 'manager') return area === 'orders' || area === 'products';
   if (role === 'staff') return area === 'orders';
   return false;

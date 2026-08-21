@@ -9,7 +9,7 @@ import {
   Mail, Send, X, FileText, AlertTriangle, Truck,
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
-import { AdminRole, AdminPermission, setAdminSession, setAdminUiState, fetchAdminSession, adminFetch } from '@/lib/admin-auth';
+import { AdminRole, AdminPermission, setAdminSession, setAdminUiState, fetchAdminSession, adminFetch, isGtsRole, getAdminRole } from '@/lib/admin-auth';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 
 export default function AdminDashboard() {
@@ -218,7 +218,10 @@ export default function AdminDashboard() {
               job (CODs, crew changes, pickups). GTS fires the final email when
               everything's truly done — with a preview step to catch errors
               (e.g. a substitution Sinclair's forgot to record). ── */}
-          {adminRole === 'owner' && <FinalEmailQueue />}
+          {/* GTS only. The final email carries delivery charges and customer
+              billing terms, so this is Grafton Towboat's step — not Sinclair's.
+              Was owner-only; GTS Manager needs it too. */}
+          {isGtsRole(adminRole) && <FinalEmailQueue />}
 
           {/* ── RECENT ORDERS ── */}
           <div className="card-base overflow-hidden">
@@ -460,6 +463,12 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
   const [fee, setFee] = useState('');
   const [billGroceries, setBillGroceries] = useState(true);
   const [rateHint, setRateHint] = useState('');
+  // Delivery terms are GTS's business, not Sinclair's. Same gate as the
+  // Deliveries page ('reports'), which staff don't have. Read after mount so
+  // the server and client first render agree (localStorage isn't available
+  // during SSR — reading it in useState caused hydration errors before).
+  const [isGts, setIsGts] = useState(false);
+  useEffect(() => { setIsGts(isGtsRole(getAdminRole())); }, []);
   // Grocery billing: Sinclair's actual receipt total + the receipt PDF itself.
   const [groceryTotal, setGroceryTotal] = useState(order.register_total != null ? String(order.register_total) : '');
   const [receiptUrl, setReceiptUrl] = useState<string | null>(order.sinclairs_receipt_url);
@@ -589,8 +598,15 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
             </div>
           )}
 
-          {/* GTS delivery charge — goes on this final email as a line item */}
-          {!preview && (
+          {/* GTS delivery charge — goes on this final email as a line item.
+              GTS-ONLY. Delivery service types, barge lines and rate cards are
+              Grafton Towboat's commercial terms with the boat company —
+              Sinclair's has no part in setting them and must not see them.
+              The Dashboard is visible to every role (area: null in AdminNav),
+              so this block gates on the same permission as the Deliveries
+              page: 'reports', which staff do not have. Sinclair's still gets
+              the grocery total and receipt upload below — their actual job. */}
+          {!preview && isGts && (
             <div className="border border-brand-navy/20 rounded-xl p-3 mb-4">
               <p className="text-xs font-bold text-brand-navy uppercase tracking-wide mb-2 flex items-center gap-1.5">
                 <Truck className="w-3.5 h-3.5" /> Delivery charge on this bill
