@@ -23,6 +23,7 @@ import { useToast } from '@/hooks/use-toast';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/lib/auth-context';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
+import { OtherPickupCard } from '@/components/catalog/OtherPickupCard';
 
 const ESTIMATED_EXPLANATION =
   'Some orders may display an estimated total at checkout. This is because certain items are sold by weight, market prices may change, or substitutions may be necessary if an item is unavailable. Your final invoice will reflect the actual items delivered, including any approved substitutions, quantity adjustments, or weighted products. We make every effort to keep pricing accurate and will contact you if there are any significant changes to your order. If you have any questions, please contact us at (618) 556-0290 or GraftonTowboatServices@gmail.com.';
@@ -694,6 +695,19 @@ export default function OrderPage() {
             </span>
             <span className="text-teal-600 font-bold group-hover:translate-x-0.5 transition-transform">&rarr;</span>
           </Link>
+        )}
+
+        {/* Off-catalog requests, right after "shop the rest of the store".
+            This is the moment a cook has actually discovered Sinclair's doesn't
+            carry what they need — putting it here means they can ask for it
+            without leaving the order. It was previously only on /catalog, so a
+            crew that came straight to their cart never saw it.
+            Self-contained: reads and persists its own additional-services
+            state, so it works identically wherever it's rendered. */}
+        {items.length > 0 && (
+          <div className="mb-4">
+            <OtherPickupCard />
+          </div>
         )}
 
         {/* COD payment method — shown only when the cart has COD lines */}
