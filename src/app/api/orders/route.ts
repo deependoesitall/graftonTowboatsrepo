@@ -338,7 +338,13 @@ export async function POST(req: NextRequest) {
       const p = services.parts_pickup;
       allOrderItems.push({
         order_id: order.id,
-        product_id: 'service-parts-pickup',
+        // product_id is a UUID with an FK to products. Service lines have no
+        // product, so it MUST be null — a sentinel string like
+        // 'service-parts-pickup' fails with
+        // "invalid input syntax for type uuid" and, because the batch is one
+        // statement, takes every grocery line down with it. Service lines are
+        // identified by item_type/service_type; nothing reads product_id.
+        product_id: null,
         description: 'Parts Pickup',
         category: 'Additional Services',
         pkg_size: null, uom: null, upc: null,
@@ -358,7 +364,7 @@ export async function POST(req: NextRequest) {
       const d = services.package_delivery;
       allOrderItems.push({
         order_id: order.id,
-        product_id: 'service-package-delivery',
+        product_id: null,   // see note above — UUID column, no product
         description: 'Package Delivery',
         category: 'Additional Services',
         pkg_size: null, uom: null, upc: null,
@@ -385,7 +391,7 @@ export async function POST(req: NextRequest) {
       entries.forEach((entry, idx) => {
         allOrderItems.push({
           order_id: order.id,
-          product_id: 'service-other-pickup',
+          product_id: null, // see note above — UUID column, no product
           description: entries.length > 1
             ? `Other Third-Party Item ${idx + 1} of ${entries.length} (Sinclair's)`
             : 'Other Third-Party Item (Sinclair\'s)',
