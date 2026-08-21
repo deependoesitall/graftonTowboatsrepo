@@ -15,6 +15,10 @@ export const DEFAULT_ZONE_ORDER: string[] = [
 ];
 
 export const NO_LOCATION_LABEL = 'No location — find manually';
+/** Off-catalog requests Sinclair's buys elsewhere (Walmart etc.). NOT an
+ *  aisle and NOT a misplaced grocery item — it's a separate trip, so it
+ *  gets its own group and sits last, after everything in the store. */
+export const OUTSIDE_PICKUP_LABEL = 'Outside pickup — buy at another store';
 
 export type ParsedLocation =
   | { kind: 'aisle'; num: number; sub: string }   // "Aisle 10b" → num 10, sub "b"
@@ -64,7 +68,10 @@ export interface LocationGroup<T> {
  *      within an aisle) → zones after "Aisles" → unlisted zones alphabetical.
  *   3. Items with no location always last.
  */
-export function groupByWalkingOrder<T extends { location: string | null; description: string; location_seq?: number | null }>(
+export function groupByWalkingOrder<T extends {
+  location: string | null; description: string; location_seq?: number | null;
+  item_type?: string | null; service_type?: string | null;
+}>(
   items: T[],
   zoneOrder: string[] = DEFAULT_ZONE_ORDER,
 ): LocationGroup<T>[] {
@@ -76,8 +83,15 @@ export function groupByWalkingOrder<T extends { location: string | null; descrip
   const zoneGroups = new Map<string, { label: string; items: T[] }>(); // key: matched configured zone (or raw name)
   const aisleGroups = new Map<number, T[]>();
   const noLocation: T[] = [];
+  const outsidePickup: T[] = [];
 
   for (const item of items) {
+    // Sinclair's drives to Walmart for these. Grouping them with items whose
+    // aisle we simply don't know made a separate errand look like a data gap.
+    if (item.item_type === 'service' && item.service_type === 'other_pickup') {
+      outsidePickup.push(item);
+      continue;
+    }
     const parsed = parseLocation(item.location);
     if (!parsed) { noLocation.push(item); continue; }
     if (parsed.kind === 'aisle') {
@@ -140,6 +154,10 @@ export function groupByWalkingOrder<T extends { location: string | null; descrip
 
   if (noLocation.length) {
     ranked.push({ key: 'no-location', label: NO_LOCATION_LABEL, items: noLocation.sort(byDescription) });
+  }
+  // Dead last on purpose: finish the store, then make the extra trip.
+  if (outsidePickup.length) {
+    ranked.push({ key: 'outside-pickup', label: OUTSIDE_PICKUP_LABEL, items: outsidePickup.sort(byDescription) });
   }
   return ranked;
 }

@@ -907,6 +907,16 @@ export function OrderDetailModal({
                                 </div>
                               )}
                               {d.notes && <IB label="Details (size, color, qty)" value={d.notes} />}
+                              {/* Who pays. A COD outside pickup is a crew
+                                  member's personal purchase and gets rung up
+                                  separately — the picker must see this before
+                                  the register, not after. */}
+                              <IB
+                                label="Paid By"
+                                value={d.paid_by === 'cod'
+                                  ? `COD${d.cod_name ? ` — ${d.cod_name}` : ' (no name given)'}`
+                                  : 'Grocery — company invoice'}
+                              />
                               <IB label="Handled By" value="Sinclair's Foods" />
                             </>)}
                           </div>

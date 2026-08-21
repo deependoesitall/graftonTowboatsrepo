@@ -244,6 +244,9 @@ function CartItemRow({ item, onUpdate, onRemove, onPatch, codNameError }: {
 // ─── Main page component ───────────────────────────────────────
 export default function OrderPage() {
   const [step, setStep] = useState<1 | 2 | 3>(1);
+  // Off-catalog requests edit IN PLACE. Sending people to /catalog to
+  // change a Walmart link threw away where they were in the order.
+  const [editOther, setEditOther] = useState(false);
   const [items, setItems] = useState<CartItem[]>([]);
   const [services, setServices] = useState<AdditionalServices>({
     parts_pickup:     { enabled: false, pickup_location: '', order_number: '', contact_name: '', contact_phone: '' },
@@ -697,19 +700,6 @@ export default function OrderPage() {
           </Link>
         )}
 
-        {/* Off-catalog requests, right after "shop the rest of the store".
-            This is the moment a cook has actually discovered Sinclair's doesn't
-            carry what they need — putting it here means they can ask for it
-            without leaving the order. It was previously only on /catalog, so a
-            crew that came straight to their cart never saw it.
-            Self-contained: reads and persists its own additional-services
-            state, so it works identically wherever it's rendered. */}
-        {items.length > 0 && (
-          <div className="mb-4">
-            <OtherPickupCard />
-          </div>
-        )}
-
         {/* COD payment method — shown only when the cart has COD lines */}
         {hasCod && (
           <section className="card-base mb-4 p-5 border-2 border-purple-200">
@@ -840,7 +830,18 @@ export default function OrderPage() {
                       ) : null
                     ))}
                   </div>
-                  <Link href="/catalog?tab=groceries" className="text-xs text-brand-river hover:underline shrink-0">Edit</Link>
+                  <button type="button" onClick={() => setEditOther(v => !v)}
+                    className="text-xs text-brand-river hover:underline shrink-0">
+                    {editOther ? 'Done' : 'Edit'}
+                  </button>
+                </div>
+              )}
+              {/* Expands in place — no navigation, nothing lost. The card
+                  persists its own state on every keystroke, so "Done" is just
+                  a collapse, not a save. */}
+              {services.other_pickup?.enabled && editOther && (
+                <div className="mt-2">
+                  <OtherPickupCard />
                 </div>
               )}
             </div>

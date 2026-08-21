@@ -1197,7 +1197,38 @@ function ItemRow({
                     $ COD{item.cod_name ? ` — ${item.cod_name}` : ''} · ring separately
                   </span>
                 )}
+                {/* Outside pickups carry paid_by/cod_name inside service_details
+                    rather than on the item row, so the badge above misses them.
+                    Sinclair's is driving to Walmart for these — the shopper needs
+                    to know it's someone's personal purchase BEFORE they pay. */}
+                {item.service_type === 'other_pickup'
+                  && (item.service_details as Record<string, string> | null)?.paid_by === 'cod' && (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-purple-700 bg-purple-50 border border-purple-200 rounded-md px-1.5 py-0.5"
+                    title="Crew member's own purchase — pay for it separately, not on the boat's bill">
+                    $ COD{(item.service_details as Record<string, string>).cod_name
+                      ? ` — ${(item.service_details as Record<string, string>).cod_name}` : ''} · buy separately
+                  </span>
+                )}
               </div>
+
+              {/* The link IS the instruction for an outside pickup — without it
+                  the row just says "Other Third-Party Item" and the shopper has
+                  no idea what to buy. */}
+              {item.service_type === 'other_pickup' && (() => {
+                const d = (item.service_details as Record<string, string> | null) || {};
+                return (
+                  <div className="mt-1.5 space-y-1">
+                    {d.url && (
+                      <a href={d.url} target="_blank" rel="noopener noreferrer"
+                        onClick={e => e.stopPropagation()}
+                        className="block text-xs text-brand-river underline break-all">
+                        {d.url}
+                      </a>
+                    )}
+                    {d.notes && <p className="text-xs text-gray-600">{d.notes}</p>}
+                  </div>
+                );
+              })()}
               <p className="text-[11px] text-gray-400 mt-1">
                 {item.upc && <span className="font-mono mr-2">{item.upc}</span>}
                 {item.pkg_size && <span>{item.pkg_size}</span>}

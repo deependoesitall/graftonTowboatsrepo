@@ -517,13 +517,25 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // Sinclair users only see orders that have at least one grocery item
-  if (isSinclair) {
-    const { data: groceryOrderIds } = await supabase
+  // Which orders is Sinclair's allowed to see?
+  //
+  // Anything they actually fulfil: grocery lines, OR an off-catalog "other
+  // pickup" request — the order form tells the customer those are "handled by
+  // Sinclair's Foods", so filtering on grocery alone hid work that is theirs.
+  // A crew ordering nothing but a Walmart TV pickup produced an order Sinclair's
+  // could never see, while the customer had been told Sinclair's would get it.
+  //
+  // Crew changes and service-only jobs stay hidden — those are GTS's work.
+  const sinclairFulfilledIds = async () => {
+    const { data } = await supabase
       .from('order_items')
       .select('order_id')
-      .eq('item_type', 'grocery');
-    const ids = (groceryOrderIds || []).map((r: { order_id: string }) => r.order_id);
+      .or('item_type.eq.grocery,service_type.eq.other_pickup');
+    return (data || []).map((r: { order_id: string }) => r.order_id);
+  };
+
+  if (isSinclair) {
+    const ids = await sinclairFulfilledIds();
     query = ids.length > 0 ? query.in('id', ids) : query.eq('id', 'no-match');
   }
 
@@ -532,8 +544,7 @@ export async function GET(req: NextRequest) {
     // Status counts: apply same filter so tab numbers match what Sinclair sees
     isSinclair
       ? (async () => {
-          const { data: ids } = await supabase.from('order_items').select('order_id').eq('item_type', 'grocery');
-          const filtered = (ids || []).map((r: { order_id: string }) => r.order_id);
+          const filtered = await sinclairFulfilledIds();
           if (!filtered.length) return { data: [] };
           return supabase.from('orders').select('status').in('id', filtered);
         })()

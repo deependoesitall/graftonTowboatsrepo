@@ -351,8 +351,17 @@ export default async function CatalogPage({ searchParams }: PageProps) {
 
       {/* ── ADDITIONAL SERVICES TAB ── */}
       {tab === 'services' && (
-        <div className="mt-5 max-w-2xl">
+        <div className="mt-5 max-w-2xl space-y-4">
           <AdditionalServicesTab />
+          {/* Off-catalog requests ARE an additional service — they're stored in
+              services.other_pickup and counted by the Additional Services
+              badge. Rendering it only on the groceries tab meant the badge
+              said "1" while the tab showed nothing that could account for it,
+              and Edit sent people to a tab where the card sat below the entire
+              product grid. Also rendered on the groceries tab so the sidebar's
+              "Need something we don't carry?" anchor still works; the two never
+              mount at once, and the card persists its own state either way. */}
+          <OtherPickupCard />
         </div>
       )}
 
