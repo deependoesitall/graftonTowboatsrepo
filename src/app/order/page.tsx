@@ -65,13 +65,18 @@ function Field({
   label: string; required?: boolean; error?: string;
   hint?: string; children: React.ReactNode; col2?: boolean;
 }) {
+  // flex-col + mt-auto on the control: side-by-side fields where only ONE has a
+  // hint used to sit at different heights, because the hint pushed that input
+  // down ("Best Phone Number to Call" vs "Best Time to Call"). Grid cells in a
+  // row are equal height, so pinning the control to the bottom of the cell
+  // lines the inputs up regardless of how much label/hint text sits above.
   return (
-    <div className={col2 ? 'sm:col-span-2' : ''}>
+    <div className={`flex flex-col ${col2 ? 'sm:col-span-2' : ''}`}>
       <label className="block text-xs font-bold text-gray-600 mb-1">
         {label}{required && <span className="text-red-400 ml-0.5">*</span>}
       </label>
       {hint && <p className="text-xs text-gray-400 mb-1">{hint}</p>}
-      {children}
+      <div className="mt-auto">{children}</div>
       {error && <p className="text-red-500 text-xs mt-1">{error}</p>}
     </div>
   );
