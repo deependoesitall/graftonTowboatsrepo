@@ -13,6 +13,7 @@ import { fetchAdminSession, getAdminRole, canEdit, adminFetch, hasAdminPermissio
 const STATUS_CONFIG = {
   new:         { label: 'New',         bg: 'bg-blue-50',   text: 'text-blue-700',   border: 'border-blue-200',  dot: 'bg-blue-500',  edge: 'border-l-blue-500'  },
   in_progress: { label: 'In Progress', bg: 'bg-amber-50',  text: 'text-amber-700',  border: 'border-amber-200', dot: 'bg-amber-500', edge: 'border-l-amber-500' },
+  shopped:     { label: 'Shopped',     bg: 'bg-purple-50', text: 'text-purple-700', border: 'border-purple-200',dot: 'bg-purple-500',edge: 'border-l-purple-500'},
   fulfilled:   { label: 'Fulfilled',   bg: 'bg-green-50',  text: 'text-green-700',  border: 'border-green-200', dot: 'bg-green-500', edge: 'border-l-green-500' },
   cancelled:   { label: 'Cancelled',   bg: 'bg-red-50',    text: 'text-red-600',    border: 'border-red-200',   dot: 'bg-red-400',   edge: 'border-l-red-400'   },
 } as const;
@@ -194,9 +195,16 @@ function OrdersContent() {
         </div>
 
         {/* Pipeline status tabs */}
-        <div className="grid grid-cols-4 gap-3 mb-6">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
           {ORDER_STATUSES.map(s => {
-            const cfg = STATUS_CONFIG[s.value as keyof typeof STATUS_CONFIG];
+            // Fallback, not decoration: this crashed the production build when
+            // 'shopped' was added to ORDER_STATUSES without a matching entry
+            // here ("Cannot read properties of undefined (reading 'dot')").
+            // Any future status now degrades to grey instead of failing to build.
+            const cfg = STATUS_CONFIG[s.value as keyof typeof STATUS_CONFIG] ?? {
+              label: s.label, bg: 'bg-gray-50', text: 'text-gray-600',
+              border: 'border-gray-200', dot: 'bg-gray-400', edge: 'border-l-gray-400',
+            };
             const count = statusCounts[s.value] ?? 0;
             return (
               <button
