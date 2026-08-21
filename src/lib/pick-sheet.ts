@@ -79,6 +79,39 @@ function sectionHtml(title: string, note: string, groups: LocationGroup<OrderIte
   </section>`;
 }
 
+/**
+ * Turn a raw shopping URL into something usable on PAPER.
+ *
+ * A Walmart link is ~200 characters of tracking query string. Printed in full
+ * it wraps over four lines, buries the actual instruction, and still can't be
+ * typed by hand. But the readable product slug is right there in the path
+ * ("/ip/VIZIO-55-Mini-LED-Quantum-4K-QLED-HDR-Smart-TV-NEW-VQM55C-10/7751017286"),
+ * so we surface that as the heading and keep a trimmed, query-free path as a
+ * small reference line for anyone cross-checking on a phone.
+ */
+function readableLink(raw: string): { host: string; label: string; path: string } {
+  const url = (raw || '').trim();
+  if (!url) return { host: '', label: '', path: '' };
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./i, '');
+    const segs = u.pathname.split('/').filter(Boolean);
+    // The slug is the long hyphenated segment; ids are short or all digits.
+    const slug = segs
+      .filter(seg => seg.includes('-') && /[a-z]/i.test(seg) && seg.length > 10)
+      .sort((a, b) => b.length - a.length)[0] || '';
+    const label = slug
+      .replace(/-/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 90);
+    return { host, label, path: `${host}${u.pathname}`.slice(0, 160) };
+  } catch {
+    // Not a parseable URL — show it verbatim, trimmed.
+    return { host: '', label: '', path: url.slice(0, 160) };
+  }
+}
+
 export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_ORDER): string {
   const grocery = order.items.filter(i => i.item_type !== 'service');
   const services = order.items.filter(i => i.item_type === 'service' && i.service_type === 'other_pickup');
@@ -160,8 +193,23 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
   .oos-note { font-size: 8.5px; font-weight: bold; color: #999; text-transform: uppercase; }
   .check { margin-left: auto; font-size: 13px; color: #667; }
 
-  .svc { border: 1px dashed #888; border-radius: 6px; padding: 6px 10px; margin-top: 8px; font-size: 10.5px; }
-  .svc b { display: block; margin-bottom: 3px; }
+  .svc { border: 1px solid #444; border-radius: 6px; padding: 8px 10px; margin-top: 8px; font-size: 11px;
+         break-inside: avoid; page-break-inside: avoid; }
+  .svc-top { display: flex; align-items: flex-start; gap: 7px; }
+  .svc b { font-size: 13px; line-height: 1.25; flex: 1; }
+  .tick { width: 13px; height: 13px; border: 1.5px solid #333; border-radius: 3px; flex: 0 0 auto; margin-top: 1px; }
+  .cod-pill { background:#f3e8ff; color:#5b21b6; border:1px solid #c4a7f5; font-weight:700;
+              font-size:9.5px; padding:2px 6px; border-radius:9px; white-space:nowrap; flex:0 0 auto; }
+  .grocery-pill { background:#eef4ee; color:#2f5d3a; border:1px solid #c9dbcd; font-weight:700;
+                  font-size:9.5px; padding:2px 6px; border-radius:9px; white-space:nowrap; flex:0 0 auto; }
+  .svc-src { margin: 4px 0 0 20px; font-size: 10.5px; font-weight: 700; color: #333; }
+  .svc-note { margin: 2px 0 0 20px; font-size: 10px; color: #444; }
+  /* Reference only — a shopper is not typing this. Small, grey, last. */
+  .svc-url { margin: 3px 0 0 20px; font-size: 8px; color: #888; word-break: break-all; font-family: monospace; }
+  .svc-warn { margin: 5px 0 0 20px; font-size: 9.5px; font-weight: 700; color: #6b21a8; }
+  /* Separate errand — start it on its own page so it can't be missed at the
+     bottom of the meat section. */
+  .outside { page-break-before: always; break-before: page; }
   footer { margin-top: 6px; border-top: 1px solid #ccc; padding-top: 3px; font-size: 8px; color: #777;
            display: flex; justify-content: space-between; }
 </style></head>
@@ -183,6 +231,7 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
     <span><b>Lines:</b> ${totalLines}</span>
     <span><b>Units:</b> ${totalUnits}${weighCount ? ` + ${weighCount} by weight` : ''}</span>
     ${codCount ? `<span style="color:#7c3aed"><b>COD lines:</b> ${codCount}</span>` : ''}
+    ${services.length ? `<span style="color:#b45309"><b>Outside pickups:</b> ${services.length} (separate trip)</span>` : ''}
   </div>
 
   ${weighCount || noBarcodeCount ? `<div class="warn">
@@ -196,22 +245,32 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
   ${sectionHtml('Produce', 'Hand to Produce dept', produceGroups)}
   ${sectionHtml('Meat & Seafood', 'Hand to Meat dept', meatGroups)}
 
-  ${services.length ? `<section class="dept">
-    <div class="dept-head"><h2>Outside Pickups</h2><span class="dept-note">Items the customer linked from other stores — Sinclair's handles these</span></div>
+  ${services.length ? `<section class="dept outside">
+    <div class="dept-head"><h2>Outside Pickups &mdash; separate trip</h2><span class="dept-note">Not in the store. Sinclair's buys these elsewhere and they ride with the order.</span></div>
     ${services.map(s => {
       const d = (s.service_details || {}) as Record<string, string>;
-      // COD outside pickups are a crew member's personal purchase and are rung
-      // up separately from the boat's order — the picker has to know BEFORE
-      // reaching the register, so the name goes on the line itself.
       const isCod = d.paid_by === 'cod';
       const who = (d.cod_name || '').trim();
-      return `<div class="svc"><b>${esc(s.description)}</b>${
-        isCod
-          ? ` <span style="background:#f3e8ff;color:#6b21a8;font-weight:700;font-size:10px;padding:1px 5px;border-radius:8px;">COD${who ? ` — ${esc(who)}` : ''}</span>`
-          : ''
-      }
-        ${d.url ? `Link: ${esc(d.url)}<br/>` : ''}
-        ${d.notes ? `Details: ${esc(d.notes)}` : ''}</div>`;
+      const link = readableLink(d.url || '');
+      // WHAT TO BUY leads. The stored description is "Other Third-Party Item
+      // 1 of 2", which tells a shopper nothing — the customer's own note, or
+      // the product slug out of the URL, is the actual instruction. The raw
+      // link is reference only: nobody is typing 200 characters of Walmart
+      // query string off a printed page.
+      const heading = (d.notes || '').trim() || link.label || esc(s.description);
+      return `<div class="svc">
+        <div class="svc-top">
+          <span class="tick"></span>
+          <b>${esc(heading)}</b>
+          ${isCod
+            ? `<span class="cod-pill">COD${who ? ` &mdash; ${esc(who)}` : ' &mdash; NAME MISSING'}</span>`
+            : `<span class="grocery-pill">On boat's bill</span>`}
+        </div>
+        ${link.host ? `<div class="svc-src">${esc(link.host)}${link.label ? ` &middot; ${esc(link.label)}` : ''}</div>` : ''}
+        ${d.notes && link.label && d.notes.trim() !== link.label ? `<div class="svc-note">Note: ${esc(d.notes)}</div>` : ''}
+        ${link.path ? `<div class="svc-url">${esc(link.path)}</div>` : ''}
+        ${isCod ? `<div class="svc-warn">&#9888; Crew member's own purchase &mdash; pay separately, keep the receipt.</div>` : ''}
+      </div>`;
     }).join('')}
   </section>` : ''}
 
