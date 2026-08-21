@@ -173,8 +173,18 @@ async function handle(req: NextRequest) {
   // department's count is captured once at session start and held for the
   // whole session (progress math stays stable).
   if (!state.depts || state.depts.length === 0) {
-    // Size all 9 departments in parallel — one round-trip instead of nine.
-    const totals = await Promise.all(FRESHOP_DEPARTMENTS.map(d => fetchFreshopTotal(d.id)));
+    // Size departments SEQUENTIALLY, paced. This used to be a Promise.all —
+    // eight simultaneous requests to an API this file already documents as
+    // rate-limiting bursts. Throttled sizing answers come back short, and a
+    // short size is silent: the sweep computes too few pages, imports a
+    // fraction of the store, then reports itself complete. Observed live —
+    // the store sized at 775 when Bakery alone reports 1,820.
+    // Eight paced calls cost ~3s once per session. Worth every millisecond.
+    const totals: Array<number | null> = [];
+    for (const d of FRESHOP_DEPARTMENTS) {
+      if (totals.length) await sleep(300);
+      totals.push(await fetchFreshopTotal(d.id));
+    }
     const missing = FRESHOP_DEPARTMENTS.filter((_, i) => totals[i] == null);
     if (missing.length) {
       state.lastError = `Freshop unreachable sizing ${missing.map(d => d.name).join(', ')} — will retry on next invocation`;

@@ -250,19 +250,39 @@ export async function fetchFreshopPages(
   return Promise.all(reqs.map(r => fetchFreshopPage(r.departmentId, r.skip)));
 }
 
-/** Item count for one department subtree — null when Freshop won't answer / looks broken. */
+/**
+ * Item count for one department subtree — null when Freshop won't answer.
+ *
+ * RETRIES, DELIBERATELY. Sizing is the single most consequential call in the
+ * whole sync: whatever it returns becomes `pages`, and the sweep never looks
+ * beyond that. A short answer here doesn't fail loudly — it silently imports a
+ * fraction of the store and then reports itself "done".
+ *
+ * That is exactly what happened: eight departments sized concurrently, NCR
+ * throttled the burst, and the store sized at 775 when Bakery alone reports
+ * 1,820. So: retry with backoff, and take the LARGEST answer across attempts —
+ * a throttled response can come back short, but it can never come back too big.
+ */
 export async function fetchFreshopTotal(departmentId: string): Promise<number | null> {
-  try {
-    const res = await fetch(
-      `https://api.freshop.ncrcloud.com/1/products?app_key=${FRESHOP_APP_KEY}&store_id=${FRESHOP_STORE_ID}&department_id=${departmentId}&limit=1`,
-      { cache: 'no-store' },
-    );
-    if (!res.ok) return null;
-    const data = await res.json();
-    return typeof data?.total === 'number' && data.total > 0 ? data.total : null;
-  } catch {
-    return null;
+  let best: number | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 600 * attempt));
+    try {
+      const res = await fetch(
+        `https://api.freshop.ncrcloud.com/1/products?app_key=${FRESHOP_APP_KEY}&store_id=${FRESHOP_STORE_ID}&department_id=${departmentId}&limit=1`,
+        { cache: 'no-store' },
+      );
+      if (!res.ok) continue;                       // 429/5xx — back off and try again
+      const data = await res.json();
+      const total = typeof data?.total === 'number' && data.total > 0 ? data.total : null;
+      if (total != null && (best == null || total > best)) best = total;
+      // Two consecutive agreeing reads is enough; don't burn requests needlessly.
+      if (attempt >= 1 && best != null) break;
+    } catch {
+      /* network blip — retry */
+    }
   }
+  return best;
 }
 
 // ── Full-store import helpers ────────────────────────────────────────────
