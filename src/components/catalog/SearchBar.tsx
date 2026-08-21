@@ -34,7 +34,12 @@ export function SearchBar({ initialSearch }: SearchBarProps) {
   const [index, setIndex] = useState<IndexedProduct[] | null>(null);
   const [indexError, setIndexError] = useState(false);
   const [open, setOpen] = useState(false);
-  const [active, setActive] = useState(0);
+  // -1 = NOTHING SELECTED. Starting at 0 meant the first result was always
+  // "selected" without the user ever choosing it, so pressing Enter after
+  // typing silently added that item to the cart — searching "soap" put Dawn
+  // Dish Soap in the order. Enter now searches; it only adds once you have
+  // deliberately moved onto a row with the arrow keys or the mouse.
+  const [active, setActive] = useState(-1);
   const [added, setAdded] = useState<string | null>(null);
 
   const boxRef = useRef<HTMLDivElement>(null);
@@ -116,12 +121,14 @@ export function SearchBar({ initialSearch }: SearchBarProps) {
   function onKeyDown(e: React.KeyboardEvent) {
     if (!open && (e.key === 'ArrowDown' || e.key === 'Enter') && results.length) { setOpen(true); return; }
     if (e.key === 'ArrowDown') { e.preventDefault(); setActive(i => Math.min(i + 1, results.length - 1)); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(i => Math.max(i - 1, 0)); }
-    else if (e.key === 'Escape') { setOpen(false); inputRef.current?.blur(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(i => Math.max(i - 1, -1)); }
+    else if (e.key === 'Escape') { setOpen(false); setActive(-1); inputRef.current?.blur(); }
     else if (e.key === 'Enter') {
-      const hit = results[active];
+      // Only add when a row is genuinely selected (active > -1). Otherwise
+      // Enter does what Enter in a search box should do: search.
+      const hit = active >= 0 ? results[active] : undefined;
       if (open && hit) { e.preventDefault(); quickAdd(hit); }
-      else submitToServer(value);
+      else { setOpen(false); submitToServer(value); }
     }
   }
 
@@ -134,11 +141,17 @@ export function SearchBar({ initialSearch }: SearchBarProps) {
           ? <Loader2 className="w-4 h-4 text-gray-300 animate-spin" />
           : <Search className="w-4 h-4 text-gray-400" />}
       </div>
+      {/* type="text", NOT "search": type="search" makes the browser render its
+          OWN clear button, which sat next to our custom X below — two × icons
+          side by side, one of which we can't style or control. */}
       <input
         ref={inputRef}
-        type="search"
+        type="text"
         value={value}
-        onChange={e => { setValue(e.target.value); setActive(0); setOpen(true); }}
+        // setActive(-1) on every keystroke: arrowing to a row and then typing
+        // more would otherwise leave a stale row armed, and Enter would add
+        // something the user is no longer looking at.
+        onChange={e => { setValue(e.target.value); setActive(-1); setOpen(true); }}
         onFocus={() => setOpen(true)}
         onKeyDown={onKeyDown}
         placeholder="Search groceries & supplies (beef, coffee, paper towels…)"
@@ -199,7 +212,7 @@ export function SearchBar({ initialSearch }: SearchBarProps) {
               </ul>
               <div className="flex items-center justify-between gap-2 px-3 py-2 bg-gray-50 border-t border-gray-100">
                 <span className="text-[10px] text-gray-400 flex items-center gap-1">
-                  <CornerDownLeft className="w-3 h-3" /> Enter adds · ↑↓ to move
+                  <CornerDownLeft className="w-3 h-3" /> Enter searches · ↑↓ then Enter adds
                 </span>
                 <button onClick={() => submitToServer(value)}
                   className="text-[11px] font-bold text-brand-river hover:underline">
