@@ -18,7 +18,6 @@
   "crons": [
     {
       "path": "/api/cron/catalog-sync",
-      "_comment": "07:00 UTC = 2:00 AM CDT / 1:00 AM CST. Sinclair's rebuilds their catalog between midnight and ~12:15 AM Central. This used to run at 05:05 UTC (12:05 AM CDT) — INSIDE that window — so the sweep sized the store mid-rebuild, got short department totals, locked them into the session and imported a fraction of the catalog before reporting itself done. Observed: store sized at 775 when Bakery alone reports 1,820. Do not move this earlier.",
       "schedule": "0 7 * * *"
     }
   ]
