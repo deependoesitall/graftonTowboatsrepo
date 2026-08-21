@@ -117,6 +117,12 @@ const submitSchema = z.object({
       items: z.array(z.object({
         url: z.string().optional().default(''),
         notes: z.string().optional().default(''),
+        // Off-catalog requests can be a crew member's personal purchase rather
+        // than the boat's. Zod strips unknown keys, so these MUST be declared
+        // here or they'd be silently dropped and the picker would ring a
+        // personal TV up on the company invoice.
+        paid_by: z.enum(['grocery', 'cod']).optional().default('grocery'),
+        cod_name: z.string().optional().default(''),
       })).optional(),
       url: z.string().optional().default(''),
       notes: z.string().optional().default(''),
@@ -372,7 +378,10 @@ export async function POST(req: NextRequest) {
       const o = services.other_pickup;
       // Multi-item form → one service line per entry; fall back to legacy url/notes.
       const entries = (o.items && o.items.length > 0 ? o.items : [{ url: o.url || '', notes: o.notes || '' }])
-        .filter(e => (e.url || '').trim() || (e.notes || '').trim());
+        .filter(e => (e.url || '').trim() || (e.notes || '').trim())
+        .map(e => ({ url: e.url || '', notes: e.notes || '',
+                     paid_by: ('paid_by' in e ? e.paid_by : 'grocery') || 'grocery',
+                     cod_name: ('cod_name' in e ? e.cod_name : '') || '' }));
       entries.forEach((entry, idx) => {
         allOrderItems.push({
           order_id: order.id,
@@ -388,6 +397,8 @@ export async function POST(req: NextRequest) {
           service_details: {
             url: entry.url || '',
             notes: entry.notes || '',
+            paid_by: entry.paid_by || 'grocery',
+            cod_name: (entry.cod_name || '').trim(),
           },
         });
       });

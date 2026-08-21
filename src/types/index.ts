@@ -148,6 +148,15 @@ export interface PackageDelivery {
 export interface OtherPickupItem {
   url: string;
   notes: string; // size, color, quantity, etc.
+  /** Who pays. 'grocery' rides the company invoice like everything else;
+   *  'cod' is a crew member buying something personally (a TV, HDMI cables)
+   *  and settling for it themselves. OPTIONAL — absent means 'grocery', which
+   *  is how every request placed before this field existed was treated. */
+  paid_by?: 'grocery' | 'cod';
+  /** Which crew member owes for a COD request. Mirrors the per-person COD
+   *  names already used on cart lines, so one order can carry several people's
+   *  personal purchases without them being merged. */
+  cod_name?: string;
 }
 export interface OtherPickup {
   enabled: boolean;

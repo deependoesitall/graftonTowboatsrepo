@@ -107,6 +107,44 @@ export function OtherPickupCard() {
                 value={entry.notes}
                 onChange={e => patchEntry(idx, { notes: e.target.value })} />
             </div>
+
+            {/* WHO PAYS. Off-catalog requests are often personal — a crew
+                member's own TV or cables — and those must not land on the
+                company invoice. Same three-tier thinking as the cart lines,
+                but only two options here: an outside purchase is either the
+                boat's or somebody's own. Defaults to Grocery, matching how
+                every request behaved before this existed. */}
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <span className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Paid by</span>
+              {([['grocery', 'Grocery'], ['cod', 'COD']] as const).map(([val, lbl]) => {
+                const on = (entry.paid_by ?? 'grocery') === val;
+                return (
+                  <button key={val} type="button"
+                    onClick={() => patchEntry(idx, { paid_by: val, ...(val === 'grocery' ? { cod_name: '' } : {}) })}
+                    className={`px-2.5 py-1 rounded-md text-xs font-bold border transition-colors ${
+                      on
+                        ? (val === 'cod'
+                            ? 'bg-purple-600 text-white border-purple-600'
+                            : 'bg-brand-navy text-white border-brand-navy')
+                        : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'
+                    }`}>
+                    {lbl}
+                  </button>
+                );
+              })}
+              {entry.paid_by === 'cod' && (
+                <input type="text"
+                  className="input-base text-sm py-1 flex-1 min-w-[140px]"
+                  placeholder="Whose is it? e.g. Andy"
+                  value={entry.cod_name ?? ''}
+                  onChange={e => patchEntry(idx, { cod_name: e.target.value })} />
+              )}
+            </div>
+            {entry.paid_by === 'cod' && !((entry.cod_name ?? '').trim()) && (
+              <p className="text-[11px] text-amber-600 font-semibold">
+                Add a name so this gets billed to the right person.
+              </p>
+            )}
           </div>
         ))}
 

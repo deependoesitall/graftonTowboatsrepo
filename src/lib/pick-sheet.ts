@@ -200,7 +200,16 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
     <div class="dept-head"><h2>Outside Pickups</h2><span class="dept-note">Items the customer linked from other stores — Sinclair's handles these</span></div>
     ${services.map(s => {
       const d = (s.service_details || {}) as Record<string, string>;
-      return `<div class="svc"><b>${esc(s.description)}</b>
+      // COD outside pickups are a crew member's personal purchase and are rung
+      // up separately from the boat's order — the picker has to know BEFORE
+      // reaching the register, so the name goes on the line itself.
+      const isCod = d.paid_by === 'cod';
+      const who = (d.cod_name || '').trim();
+      return `<div class="svc"><b>${esc(s.description)}</b>${
+        isCod
+          ? ` <span style="background:#f3e8ff;color:#6b21a8;font-weight:700;font-size:10px;padding:1px 5px;border-radius:8px;">COD${who ? ` — ${esc(who)}` : ''}</span>`
+          : ''
+      }
         ${d.url ? `Link: ${esc(d.url)}<br/>` : ''}
         ${d.notes ? `Details: ${esc(d.notes)}` : ''}</div>`;
     }).join('')}
