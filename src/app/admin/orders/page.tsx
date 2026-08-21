@@ -33,13 +33,20 @@ function StatusBadge({ status, onClick }: { status: string; onClick?: () => void
 
 // Pipeline: next status after current
 // new → in_progress → shopped (Sinclair's rang it up) → fulfilled (GTS delivered)
-const NEXT_STATUS: Record<string, OrderStatus | null> = {
-  new: 'in_progress',
-  in_progress: 'shopped',
-  shopped: 'fulfilled',
-  fulfilled: null,
-  cancelled: null,
-};
+//
+// Sinclair's pipeline STOPS at 'shopped'. 'fulfilled' means Grafton delivered
+// and sent the customer their final email — which carries GTS's delivery fee
+// and billing terms. Sinclair's never sees that email and doesn't control the
+// delivery, so the chain simply ends for them. The server rejects it too; this
+// only stops the button existing.
+function nextStatus(current: string, isGts: boolean): OrderStatus | null {
+  switch (current) {
+    case 'new':         return 'in_progress';
+    case 'in_progress': return 'shopped';
+    case 'shopped':     return isGts ? 'fulfilled' : null;
+    default:            return null;
+  }
+}
 
 function OrdersContent() {
   const router = useRouter();
@@ -55,11 +62,13 @@ function OrdersContent() {
 
   // Role-gated UI is resolved AFTER mount — reading localStorage during render
   // makes the client's first paint differ from the server HTML (hydration #418).
-  const [roleFlags, setRoleFlags] = useState({ canEditOrders: false, isOwner: false, isSinclair: false });
+  const [roleFlags, setRoleFlags] = useState({ canEditOrders: false, isOwner: false, isSinclair: false, isGts: false });
   useEffect(() => {
     setRoleFlags({
       canEditOrders: canEdit(getAdminRole(), 'orders'),
       isOwner: getAdminRole() === 'owner',
+      // Only GTS may advance an order to 'fulfilled' — see nextStatus().
+      isGts: isGtsRole(getAdminRole()),
       // Mirrors the server's isSinclairScoped(): every Sinclair's role is
       // grocery-scoped by definition, never by opt-in checkbox.
       isSinclair: !isGtsRole(getAdminRole()) || hasAdminPermission('sinclair'),
@@ -107,7 +116,7 @@ function OrdersContent() {
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
 
   async function advanceStatus(order: Order) {
-    const next = NEXT_STATUS[order.status];
+    const next = nextStatus(order.status, roleFlags.isGts);
     if (!next) return;
     setUpdatingId(order.id);
     await adminFetch(`/api/orders/${order.id}`, {
@@ -270,7 +279,7 @@ function OrdersContent() {
                 const groceryCount = groceryItems.reduce((s, i) => s + i.quantity, 0);
                 const itemCount = items.reduce((s, i) => s + i.quantity, 0);
                 const cfg = STATUS_CONFIG[order.status as keyof typeof STATUS_CONFIG] ?? STATUS_CONFIG.new;
-                const nextStatus = NEXT_STATUS[order.status];
+                const nextSt = nextStatus(order.status, roleFlags.isGts);
                 const isUpdating = updatingId === order.id;
                 const hasCod = items.some(i => i.paid_by === 'cod') || !!order.extended_info?.personal_cod_notes;
                 return (
@@ -302,13 +311,13 @@ function OrdersContent() {
                       {hasCod && (
                         <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 border border-purple-200">$ COD</span>
                       )}
-                      {nextStatus && canEditOrders && (
+                      {nextSt && canEditOrders && (
                         <button
                           onClick={e => { e.stopPropagation(); advanceStatus(order); }}
                           disabled={isUpdating}
                           className="ml-auto flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold bg-brand-steel/10 text-brand-steel disabled:opacity-50">
                           {isUpdating ? <Loader2 className="w-3 h-3 animate-spin" /> : <ArrowRight className="w-3 h-3" />}
-                          {STATUS_CONFIG[nextStatus]?.label}
+                          {STATUS_CONFIG[nextSt]?.label}
                         </button>
                       )}
                     </div>
@@ -341,7 +350,7 @@ function OrdersContent() {
                     const hasPartsPickup = items.some(i => i.item_type === 'service' && i.service_type === 'parts_pickup');
                     const hasPkgDelivery = items.some(i => i.item_type === 'service' && i.service_type === 'package_delivery');
                     const hasOtherPickup = items.some(i => i.item_type === 'service' && i.service_type === 'other_pickup');
-                    const nextStatus = NEXT_STATUS[order.status];
+                    const nextSt = nextStatus(order.status, roleFlags.isGts);
                     const isUpdating = updatingId === order.id;
 
                     return (
@@ -411,15 +420,15 @@ function OrdersContent() {
                         <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
                           <div className="flex items-center gap-1.5">
                             {/* Advance pipeline button — owner/manager only */}
-                            {nextStatus && canEditOrders && (
+                            {nextSt && canEditOrders && (
                               <button
                                 onClick={() => advanceStatus(order)}
                                 disabled={isUpdating}
-                                title={`Move to ${STATUS_CONFIG[nextStatus]?.label}`}
+                                title={`Move to ${STATUS_CONFIG[nextSt]?.label}`}
                                 className="flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold bg-brand-steel/10 text-brand-steel hover:bg-brand-steel hover:text-white transition-colors disabled:opacity-50"
                               >
                                 {isUpdating ? <Loader2 className="w-3 h-3 animate-spin" /> : <ArrowRight className="w-3 h-3" />}
-                                {STATUS_CONFIG[nextStatus]?.label}
+                                {STATUS_CONFIG[nextSt]?.label}
                               </button>
                             )}
                             <button

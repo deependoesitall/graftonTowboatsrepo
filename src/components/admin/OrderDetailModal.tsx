@@ -11,7 +11,7 @@ import {
 import { Order, OrderItem, OrderStatus, Product } from '@/types';
 import { formatCurrency, formatDate, ORDER_STATUSES } from '@/lib/utils';
 import { ShoppingModeModal } from '@/components/admin/ShoppingModeModal';
-import { adminFetch } from '@/lib/admin-auth';
+import { adminFetch, isGtsRole, getAdminRole } from '@/lib/admin-auth';
 import { PickSheetOverlay } from '@/components/admin/PickSheetOverlay';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 
@@ -526,13 +526,23 @@ export function OrderDetailModal({
                 <div className="flex flex-wrap items-center gap-2">
                   <select className="border border-gray-200 rounded px-3 py-1.5 text-sm font-semibold bg-white"
                     value={order.status} onChange={e => onStatusChange(e.target.value as OrderStatus)}>
-                    {ORDER_STATUSES.map(s => (
-                      <option key={s.value} value={s.value}>{s.label}</option>
-                    ))}
+                    {/* Sinclair's cannot select Fulfilled — that means Grafton
+                        delivered AND sent the customer their final email, which
+                        carries GTS's delivery fee. The server rejects it too;
+                        this just avoids showing an option that would 403. The
+                        CURRENT status always stays listed so an order already
+                        fulfilled still renders its own value correctly. */}
+                    {ORDER_STATUSES
+                      .filter(s => s.value !== 'fulfilled' || isGtsRole(getAdminRole()) || order.status === 'fulfilled')
+                      .map(s => (
+                        <option key={s.value} value={s.value}>{s.label}</option>
+                      ))}
                   </select>
                   {order.status !== 'fulfilled' && (
                     <span className="text-xs text-gray-400">
-                      Fulfilled = shopped. The final customer email is sent separately from the GTS dashboard.
+                      {isGtsRole(getAdminRole())
+                        ? 'Shopped = Sinclair\'s rang it up. Fulfilled = delivered; the final customer email is sent separately from the GTS dashboard.'
+                        : 'Confirm the register total to mark this Shopped — that completes it on Sinclair\'s side.'}
                     </span>
                   )}
                 </div>

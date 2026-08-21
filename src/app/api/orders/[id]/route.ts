@@ -1,7 +1,7 @@
 // src/app/api/orders/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
-import { requireAdmin } from '@/lib/admin-auth-server';
+import { requireAdmin, isGtsRole } from '@/lib/admin-auth-server';
 
 export async function GET(
   req: NextRequest,
@@ -53,6 +53,20 @@ export async function PATCH(
 
   const { id } = await params;
   const body = await req.json();
+
+  // ── SINCLAIR'S PIPELINE ENDS AT 'SHOPPED' ──
+  // 'fulfilled' means Grafton delivered to the vessel AND sent the customer
+  // their final email — which carries GTS's delivery fee and billing terms.
+  // Sinclair's neither sees that email nor controls the delivery, so they must
+  // not be able to declare it happened. Enforced HERE rather than by hiding a
+  // button: the client can be edited, this cannot.
+  if (body.status === 'fulfilled' && !isGtsRole(session.role)) {
+    return NextResponse.json(
+      { error: "Only Grafton Towboat can mark an order fulfilled — that happens on delivery. Confirm the register total to mark it Shopped." },
+      { status: 403 },
+    );
+  }
+
   const supabase = createServiceClient();
 
   // Fetch current order so we can log the status transition and trigger emails
