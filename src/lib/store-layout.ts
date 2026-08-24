@@ -39,7 +39,7 @@ export function parseLocation(raw: string | null | undefined): ParsedLocation {
 export function locationGroupLabel(raw: string | null | undefined): string {
   const parsed = parseLocation(raw);
   if (!parsed) return NO_LOCATION_LABEL;
-  if (parsed.kind === 'aisle') return `Aisle ${parsed.num}`;
+  if (parsed.kind === 'aisle') return `Aisle ${parsed.num}${parsed.sub || ''}`;
   return parsed.name;
 }
 
@@ -81,7 +81,11 @@ export function groupByWalkingOrder<T extends {
   const postZones = aislesAt < 0 ? [] : order.slice(aislesAt + 1).filter(z => z.toLowerCase() !== AISLES_TOKEN.toLowerCase());
 
   const zoneGroups = new Map<string, { label: string; items: T[] }>(); // key: matched configured zone (or raw name)
-  const aisleGroups = new Map<number, T[]>();
+  // Keyed by the FULL aisle designation (10a is not 10b) — they're opposite
+  // sides of the store, and Sinclair's own Freshop sheet lists them as
+  // separate headers. Grouping on the number alone merged them and threw
+  // the letter away, sending a shopper to the wrong side of an aisle.
+  const aisleGroups = new Map<string, { num: number; sub: string; items: T[] }>();
   const noLocation: T[] = [];
   const outsidePickup: T[] = [];
 
@@ -95,8 +99,10 @@ export function groupByWalkingOrder<T extends {
     const parsed = parseLocation(item.location);
     if (!parsed) { noLocation.push(item); continue; }
     if (parsed.kind === 'aisle') {
-      if (!aisleGroups.has(parsed.num)) aisleGroups.set(parsed.num, []);
-      aisleGroups.get(parsed.num)!.push(item);
+      const sub = (parsed.sub || '').toLowerCase();
+      const key = `${parsed.num}${sub}`;
+      if (!aisleGroups.has(key)) aisleGroups.set(key, { num: parsed.num, sub, items: [] });
+      aisleGroups.get(key)!.items.push(item);
       continue;
     }
     // Zone: bucket under the configured zone name when one matches, else raw name
@@ -124,9 +130,17 @@ export function groupByWalkingOrder<T extends {
   };
 
   preZones.forEach(takeZone);
-  Array.from(aisleGroups.keys()).sort((a, b) => a - b).forEach(num => {
-    result.push({ key: `aisle-${num}`, label: `Aisle ${num}`, items: aisleGroups.get(num)!.sort(aisleItemSort) });
-  });
+  // Numeric first, THEN the letter. A lexical sort would put "Aisle 10a"
+  // before "Aisle 2", which is exactly backwards for someone walking the store.
+  Array.from(aisleGroups.values())
+    .sort((a, b) => a.num - b.num || a.sub.localeCompare(b.sub))
+    .forEach(g => {
+      result.push({
+        key: `aisle-${g.num}${g.sub}`,
+        label: `Aisle ${g.num}${g.sub}`,
+        items: g.items.sort(aisleItemSort),
+      });
+    });
   postZones.forEach(takeZone);
   // Zones the manager hasn't listed yet — alphabetical, before the no-location bucket
   Array.from(zoneGroups.keys()).sort((a, b) => a.localeCompare(b)).forEach(takeZone);

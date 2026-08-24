@@ -153,8 +153,12 @@ async function handle(req: NextRequest) {
       // backlog and self-chain until it's empty, so Photo Review fills up in
       // ONE night instead of only during the sweep's handful of runs.
       const selfUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : process.env.NEXT_PUBLIC_APP_URL;
-      let backfill = { processed: 0, hasMore: false };
+      let backfill: { processed: number; hasMore: boolean; error?: string } = { processed: 0, hasMore: false };
       try { backfill = await runPhotoBackfill(supabase, started + TIME_BUDGET_MS - 5000); } catch { /* never break */ }
+      if (backfill.error) {
+        state.lastError = `Photo backfill write failed: ${backfill.error}`;
+        await saveState(supabase, state);
+      }
       if (backfill.hasMore) chainSelf(secret, selfUrl);
       return NextResponse.json({
         status: 'done', day: today, completedAt: state.completedAt,
@@ -406,8 +410,17 @@ async function handle(req: NextRequest) {
       const rows = Array.from(seenThisBatch, id => ({ freshop_id: id, seen_day: day }));
       for (let i = 0; i < rows.length; i += 500) {
         // Duplicates across pages are expected and harmless — ignore conflicts.
-        await supabase.from('catalog_sync_seen')
+        const { error: seenErr } = await supabase.from('catalog_sync_seen')
           .upsert(rows.slice(i, i + 500), { onConflict: 'freshop_id,seen_day', ignoreDuplicates: true });
+        // CHECKED, deliberately. This was unchecked, and when the table didn't
+        // exist (migration not applied) every batch failed in silence — the
+        // sweep reported success while the reconcile could never run. A missing
+        // table is migration drift, and the operator has to be told.
+        if (seenErr) {
+          state.lastError = `Roster write failed — store reconcile cannot run: ${seenErr.message}`;
+          console.error('catalog_sync_seen upsert FAILED:', seenErr.message);
+          break;
+        }
       }
     }
 
@@ -433,6 +446,7 @@ async function handle(req: NextRequest) {
     try {
       const r = await runPhotoBackfill(supabase, started + TIME_BUDGET_MS - 2000);
       backfillHasMore = r.hasMore;
+      if (r.error) state.lastError = `Photo backfill write failed: ${r.error}`;
     } catch { /* never let backfill break the sync */ }
   }
 
@@ -447,11 +461,21 @@ async function handle(req: NextRequest) {
     // Sinclair's, and they aren't synced. The RPC's own safety cap aborts the
     // whole thing if an implausible share would disappear.
     try {
-      const { data: rec } = await supabase.rpc('reconcile_store_availability', {
+      const { data: rec, error: recErr } = await supabase.rpc('reconcile_store_availability', {
         p_day: state.day || today, p_max_pct: 15,
       });
-      state.reconcile = (rec ?? undefined) as SyncState['reconcile'];
-    } catch { /* never let reconcile break the sweep */ }
+      if (recErr) {
+        // Was a bare catch that discarded this. A missing function means the
+        // migration hasn't been applied and delisted items will sit on the site
+        // indefinitely — silence is the wrong answer.
+        state.lastError = `Store reconcile failed: ${recErr.message}`;
+        console.error('reconcile_store_availability FAILED:', recErr.message);
+      } else {
+        state.reconcile = (rec ?? undefined) as SyncState['reconcile'];
+      }
+    } catch (e) {
+      state.lastError = `Store reconcile threw: ${e instanceof Error ? e.message : 'unknown'}`;
+    }
 
     try {
       const layout = await applyFormLayout(supabase);
@@ -500,10 +524,22 @@ async function handle(req: NextRequest) {
   });
 }
 
-async function saveState(supabase: ReturnType<typeof createServiceClient>, state: SyncState) {
-  await supabase.from('catalog_sync_state')
+/**
+ * Persist the checkpoint. RETURNS the error rather than swallowing it.
+ *
+ * This was unchecked. If the write ever failed, the sweep would re-fetch the
+ * same pages on every invocation forever, reporting healthy progress the whole
+ * time — the single worst silent failure in the file.
+ */
+async function saveState(
+  supabase: ReturnType<typeof createServiceClient>,
+  state: SyncState,
+): Promise<string | null> {
+  const { error } = await supabase.from('catalog_sync_state')
     .update({ state, updated_at: new Date().toISOString() })
     .eq('id', 1);
+  if (error) console.error('catalog_sync_state save FAILED:', error.message);
+  return error?.message ?? null;
 }
 
 /**
@@ -516,7 +552,8 @@ async function saveState(supabase: ReturnType<typeof createServiceClient>, state
 async function runPhotoBackfill(
   supabase: ReturnType<typeof createServiceClient>,
   deadline: number,
-): Promise<{ processed: number; hasMore: boolean }> {
+): Promise<{ processed: number; hasMore: boolean; error?: string }> {
+  let photoError: string | null = null;
   const staleBefore = new Date(Date.now() - 14 * 864e5).toISOString();
   // BARGE ORDER FORM ONLY, and EVERY imageless one — including items that DID
   // match a UPC but whose Sinclair's listing simply has no photo (a similar
@@ -550,11 +587,19 @@ async function runPhotoBackfill(
         // department, so the reviewer must see that before approving.
         upd.proposed_image_borrowed = candidate.borrowed_photo;
       }
-      await supabase.from('products').update(upd).eq('id', p.id);
+      const { error: updErr } = await supabase.from('products').update(upd).eq('id', p.id);
+      if (updErr) {
+        // A column that doesn't exist (proposed_image_borrowed before its
+        // migration ran) would otherwise fail here on every single item while
+        // the run reported items "processed".
+        photoError = updErr.message;
+        console.error('photo backfill update FAILED:', updErr.message);
+        break;
+      }
       processed++;
     } catch { /* skip this item, keep going */ }
   }
-  return { processed, hasMore: rows.length > processed };
+  return { processed, hasMore: rows.length > processed, error: photoError ?? undefined };
 }
 
 /** Fire another invocation of this route (self-driving chain). */

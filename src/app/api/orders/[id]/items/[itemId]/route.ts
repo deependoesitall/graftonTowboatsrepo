@@ -22,11 +22,15 @@ const bodySchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('shopped') }),
   z.object({
     action: z.literal('out_of_stock'),
+    // OPTIONAL. Dave, at the demo: "let's say you wanted to do substitutions of
+    // something's completely out of stock". Sometimes there's nothing to swap
+    // in — the line is simply unavailable and drops off the bill. Requiring a
+    // replacement forced staff to invent one.
     substitution: z.object({
       product_id: z.string().uuid(),
       // Decimals allowed: by-weight subs are in lb increments
       quantity: z.number().positive().max(999),
-    }),
+    }).optional(),
   }),
   z.object({
     action: z.literal('set_weight'),
@@ -39,6 +43,15 @@ const bodySchema = z.discriminatedUnion('action', [
   // Undo a shopped / out-of-stock mark (fat-finger fix): back to pending,
   // clears weight, and removes any substitution children.
   z.object({ action: z.literal('reset') }),
+  // Price an OUTSIDE PICKUP once Sinclair's has actually bought it. A Walmart
+  // link has no price at order time, so the line sits at $0 — which means it
+  // contributes nothing to the COD total and the handling fee comes out short.
+  // Dave: "because the TV isn't the price of it, it's just a link... you're
+  // able to add in your manual charge."
+  z.object({
+    action: z.literal('set_price'),
+    unit_price: z.number().min(0).max(100000),
+  }),
 ]);
 
 /** If the order is still 'new', advance it to 'in_progress' (first item action). */
@@ -126,6 +139,20 @@ export async function PATCH(
   if (action === 'out_of_stock') {
     const { substitution } = parsed.data;
 
+    // No replacement — the line is just unavailable. Marked out_of_stock, which
+    // every total already excludes and the pick sheet prints without a barcode.
+    if (!substitution) {
+      const { data: updated, error } = await supabase
+        .from('order_items')
+        .update({ shopping_status: 'out_of_stock' })
+        .eq('id', itemId)
+        .select()
+        .single();
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      await maybeAdvanceToInProgress(supabase, orderId);
+      return NextResponse.json({ item: updated });
+    }
+
     // Look up the replacement product
     const { data: product, error: prodErr } = await supabase
       .from('products')
@@ -164,6 +191,18 @@ export async function PATCH(
         shopping_status: 'shopped',
         is_substitution: true,
         substitutes_item_id: itemId,
+        // INHERIT THE BILLING from the line being replaced. Without this the
+        // substitute defaulted to 'vessel', so swapping Andy's COD Tylenol put
+        // the replacement on the company invoice and Andy was never charged.
+        // Same for deck lines, which must stay off the grocery allowance.
+        paid_by: item.paid_by ?? 'vessel',
+        cod_name: item.cod_name ?? null,
+        // Carry the shelf location too, or the substitute sorts into the
+        // "no location" bucket at the end of the walk instead of next to the
+        // item it replaces.
+        location: product.location ?? item.location ?? null,
+        location_seq: product.location_seq ?? item.location_seq ?? null,
+        image_url: product.image_url ?? null,
       })
       .select()
       .single();
@@ -180,6 +219,29 @@ export async function PATCH(
       .single();
 
     return NextResponse.json({ item: originalUpdated, substitution: subItem });
+  }
+
+  // ── SET PRICE (outside pickups) ───────────────────────────────────────────
+  if (action === 'set_price') {
+    const { unit_price } = parsed.data;
+    // Guard the concept, not just the type: pricing a grocery line here would
+    // silently overwrite Sinclair's own shelf price.
+    if (item.service_type !== 'other_pickup') {
+      return NextResponse.json(
+        { error: 'Only outside pickups can be priced by hand — grocery prices come from the catalogue.' },
+        { status: 400 },
+      );
+    }
+    const qty = Number(item.quantity) || 1;
+    const { data: updated, error } = await supabase
+      .from('order_items')
+      .update({ unit_price, line_total: unit_price * qty, shopping_status: 'shopped' })
+      .eq('id', itemId)
+      .select()
+      .single();
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    await maybeAdvanceToInProgress(supabase, orderId);
+    return NextResponse.json({ item: updated });
   }
 
   // ── RESET (undo shopped / out-of-stock) ───────────────────────────────────

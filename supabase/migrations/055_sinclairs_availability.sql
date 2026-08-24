@@ -1,9 +1,0 @@
--- Superseded by 055_store_reconcile.sql — do not run this file.
---
--- This version added sinclairs_status / sinclairs_seen_at to BARGE items so the
--- nightly job could verify them against Sinclair's catalog. That was the wrong
--- model: barge items come from Jen's curated order form, they are known-good,
--- and they are never synced. Their photos are set once and then left alone.
---
--- Nightly reconciliation belongs to STORE items only, which is what
--- 055_store_reconcile.sql does.

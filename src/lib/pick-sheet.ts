@@ -5,8 +5,11 @@
 // Layout decisions from the July 10 in-store demo + Dave's July 19 texts:
 //  - Compact grid ("the smaller the best") — more items per page, less paper.
 //  - Sorted in STORE WALK ORDER (walkpath/zone order), not order-form order.
-//  - Meat and Produce print as their own pages — those departments get their
-//    section handed to them and fill it separately.
+//  - ONE continuous walk in the order set in Settings → Store Layout. Meat and
+//    Produce used to print as separate pages AFTER everything else, which
+//    silently overrode that setting; they now appear at their configured point.
+//  - Grocery / Deck / COD print as three separate blocks — different people
+//    shop them, they're bagged separately, and deck is invoiced on its own.
 //  - Fixed-price items: scannable UPC-A barcode + "Scan N times".
 //  - Weighable items (price-embedded UPCs): NO barcode — the catalog UPC would
 //    scan $0.00. Picker scans the package's own scale label and writes the
@@ -20,6 +23,29 @@ import { upcASvg, isWeighableUpc, normalizeUpcA } from '@/lib/barcode';
 
 function esc(s: string | null | undefined): string {
   return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/**
+ * Sale line in Sinclair's own Freshop format:  $8.53 (08/10/26 - 09/06/26) $9.19
+ *
+ * Dave, comparing our sheet to his: "on ours, it will actually show if there is
+ * a price reduction, how long it's good for... Ideally, on the pick sheet on
+ * the barcodes like this."
+ *
+ * The dates matter more than the saving: they're the answer when a boat asks
+ * why Wednesday's price differs from what they saw on Monday.
+ */
+function salePriceHtml(i: OrderItem): string {
+  const regular = Number(i.regular_price ?? 0);
+  if (!regular || regular <= Number(i.unit_price)) return '';
+  const end = (i.sale_finish_date || '').slice(0, 10);
+  const short = (d: string) => {
+    const [y, m, day] = d.split('-');
+    return y && m && day ? `${m}/${day}/${y.slice(2)}` : '';
+  };
+  return `<span class="sale">${formatCurrency(i.unit_price)}${
+    end ? ` <span class="sale-dates">(thru ${short(end)})</span>` : ''
+  } <s>${formatCurrency(regular)}</s></span>`;
 }
 
 /** Is this line billed by weight? (LB uom, fractional qty, or price-embedded UPC) */
@@ -57,9 +83,19 @@ function itemCard(i: OrderItem): string {
   // row holding barcode · scan count · picked box. No dead rows — Deepen
   // (July 19): "as many scannable barcodes on a single piece of paper as
   // possible, minimize the dead spaces."
+  // Thumbnail on every line. Dave: "I do think that every item needs a picture...
+  // you shop pictures, you don't shop words." Freshop puts one left of the
+  // department on each row; a blank box is itself useful — it tells whoever is
+  // walking the store that this line has no photo to match against.
+  const thumb = i.image_url
+    ? `<img class="thumb" src="${esc(i.image_url)}" alt=""/>`
+    : `<span class="thumb thumb-empty"></span>`;
+
   return `<div class="item${cod ? ' cod' : ''}${oos ? ' oos' : ''}">
-    <div class="line1"><span class="qty">${esc(qtyLabel)}</span><span class="desc">${esc(i.description)}</span></div>
-    <div class="sub">${esc(i.pkg_size || '')}${i.pkg_size ? ' · ' : ''}${formatCurrency(i.unit_price)}${i.uom === 'LB' ? '/lb' : ''}${i.location ? ` · <b>${esc(i.location)}</b>` : ''}</div>
+    <div class="line1">${thumb}<span class="qty">${esc(qtyLabel)}</span><span class="desc">${esc(i.description)}</span></div>
+    <div class="sub">${esc(i.pkg_size || '')}${i.pkg_size ? ' · ' : ''}${
+      salePriceHtml(i) || formatCurrency(i.unit_price)
+    }${i.uom === 'LB' ? '/lb' : ''}${i.location ? ` · <b>${esc(i.location)}</b>` : ''}</div>
     ${cod ? `<div class="cod-tag">$ COD — ${esc(i.cod_name || 'crew member')} · ring separately</div>` : ''}
     ${i.paid_by === 'deck' ? `<div class="deck-tag">DECK — separate invoice line</div>` : ''}
     ${i.is_substitution ? `<div class="sub-tag">SUB</div>` : ''}
@@ -67,10 +103,19 @@ function itemCard(i: OrderItem): string {
   </div>`;
 }
 
-function sectionHtml(title: string, note: string, groups: LocationGroup<OrderItem>[]): string {
+function sectionHtml(
+  title: string,
+  note: string,
+  groups: LocationGroup<OrderItem>[],
+  opts: { subtotal?: number; tone?: 'grocery' | 'deck' | 'cod'; newPage?: boolean } = {},
+): string {
   if (!groups.some(g => g.items.length)) return '';
-  return `<section class="dept">
-    <div class="dept-head"><h2>${esc(title)}</h2><span class="dept-note">${esc(note)}</span></div>
+  const lines = groups.reduce((s, g) => s + g.items.length, 0);
+  return `<section class="dept${opts.tone ? ` tone-${opts.tone}` : ''}${opts.newPage ? ' newpage' : ''}">
+    <div class="dept-head"><h2>${esc(title)}</h2><span class="dept-note">${esc(note)}</span>
+      <span class="dept-total">${lines} line${lines === 1 ? '' : 's'}${
+        opts.subtotal != null ? ` &middot; <b>${formatCurrency(opts.subtotal)}</b>` : ''
+      }</span></div>
     ${groups.map(g => `
       <div class="loc-group">
         <div class="loc-head">${esc(g.label)} <span class="loc-count">${g.items.length} line${g.items.length === 1 ? '' : 's'}</span></div>
@@ -113,25 +158,65 @@ function readableLink(raw: string): { host: string; label: string; path: string 
 }
 
 export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_ORDER): string {
-  const grocery = order.items.filter(i => i.item_type !== 'service');
+  const allStock = order.items.filter(i => i.item_type !== 'service');
   const services = order.items.filter(i => i.item_type === 'service' && i.service_type === 'other_pickup');
 
-  // Partition: Meat + Produce are handed to their departments as their own pages.
-  const isMeat = (i: OrderItem) => /meat|seafood/i.test(i.location || '') || /^meat|seafood/i.test(i.category || '');
-  const isProduce = (i: OrderItem) => /produce/i.test(i.location || '') || /^produce/i.test(i.category || '');
-  const meat = grocery.filter(isMeat);
-  const produce = grocery.filter(i => !isMeat(i) && isProduce(i));
-  const rest = grocery.filter(i => !isMeat(i) && !isProduce(i));
+  // ── THREE SEPARATE JOBS, THREE SEPARATE BLOCKS ──
+  // Dave, at the August demo: "we typically have somebody else work on the CODs,
+  // somebody else works on the grocery list" — and the CODs get bagged and
+  // labelled per person. Mixed into the walk order they were unfindable, so:
+  //
+  //   GROCERY — the boat's order, billed to the company monthly
+  //   DECK    — company-billed but invoiced SEPARATELY (doesn't hit the boat's
+  //             grocery allowance), so it's bagged and totalled on its own
+  //   COD     — dead last, grouped by crew member, each person paying their own
+  //
+  // Each block carries its own subtotal, which is what makes keying two register
+  // totals (grocery + deck) straightforward at the till.
+  const grocery = allStock.filter(i => i.paid_by !== 'deck' && i.paid_by !== 'cod');
+  const deck    = allStock.filter(i => i.paid_by === 'deck');
+  const cod     = allStock.filter(i => i.paid_by === 'cod');
 
-  const restGroups = groupByWalkingOrder(rest, zoneOrder);
-  const meatGroups = groupByWalkingOrder(meat, zoneOrder);
-  const produceGroups = groupByWalkingOrder(produce, zoneOrder);
+  // ── ONE WALK, IN THE ORDER THE MANAGER CONFIGURED ──
+  // This used to pull Meat and Produce out into their own sections printed
+  // AFTER everything else. That silently overrode Settings → Store Layout: a
+  // manager who put Produce first still got it printed last, and the sheet no
+  // longer matched the route a shopper actually walks. Dave, describing his own
+  // sheet: "this is just going in order of the actual walking layout."
+  //
+  // So the grocery block is now a single continuous run and groupByWalkingOrder
+  // places every department exactly where the configured zone order says. Meat
+  // and Produce still print as their own labelled groups — they just appear at
+  // the right point in the walk instead of at the end.
+  const groceryGroups = groupByWalkingOrder(grocery, zoneOrder);
+  const deckGroups = groupByWalkingOrder(deck, zoneOrder);
 
-  const totalLines = grocery.length;
-  const totalUnits = grocery.reduce((s, i) => s + (Number.isInteger(i.quantity) ? i.quantity : 1), 0);
-  const codCount = grocery.filter(i => i.paid_by === 'cod').length;
-  const weighCount = grocery.filter(isWeighable).length;
-  const noBarcodeCount = grocery.filter(i => !isWeighable(i) && !normalizeUpcA(i.upc)).length;
+  // COD grouped by crew member — the bagging unit. Walk order applies WITHIN a
+  // person, because whoever pulls the CODs still walks the store to do it.
+  const codByPerson = Array.from(
+    cod.reduce((acc, i) => {
+      const name = (i.cod_name || '').trim() || 'Unnamed crew member';
+      if (!acc.has(name)) acc.set(name, [] as OrderItem[]);
+      acc.get(name)!.push(i);
+      return acc;
+    }, new Map<string, OrderItem[]>()).entries()
+  ).sort((a, b) => a[0].localeCompare(b[0]));
+
+  const lineTotal = (i: OrderItem) => Number(i.actual_total ?? i.line_total ?? 0);
+  const sumOf = (list: OrderItem[]) =>
+    list.filter(i => i.shopping_status !== 'out_of_stock').reduce((s, i) => s + lineTotal(i), 0);
+  const grocerySubtotal = sumOf(grocery);
+  const deckSubtotal = sumOf(deck);
+  const codSubtotal = sumOf(cod);
+
+  // Freshop's header counts: distinct lines vs units in the basket.
+  const uniqueItemCount = allStock.length;
+  const totalItemCount = allStock.reduce((s, i) => s + (Number.isInteger(i.quantity) ? i.quantity : 1), 0);
+  const totalLines = uniqueItemCount;
+  const totalUnits = totalItemCount;
+  const codCount = cod.length;
+  const weighCount = allStock.filter(isWeighable).length;
+  const noBarcodeCount = allStock.filter(i => !isWeighable(i) && !normalizeUpcA(i.upc)).length;
 
   const placed = new Date(order.created_at);
 
@@ -141,7 +226,10 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: Arial, Helvetica, sans-serif; color: #111; font-size: 10px; padding: 14px; }
-  @page { margin: 8mm; }
+  /* LANDSCAPE. Dave, on the portrait sheet I brought: "this should have been
+     landscaped, so that there's more barcodes on it." Wider page = 4 cards
+     per row instead of 3, which is ~25% fewer pages per order. */
+  @page { size: letter landscape; margin: 8mm; }
   @media print { body { padding: 0; } }
 
   /* Dense layout — max scannable barcodes per page, minimal dead space */
@@ -169,7 +257,7 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
               padding: 2px 6px; margin-top: 3px; }
   .loc-count { font-weight: normal; color: #667; font-size: 8.5px; margin-left: 5px; }
 
-  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; padding: 3px 0; }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; padding: 3px 0; }
   .item { border: 1px solid #c9d2dc; border-radius: 4px; padding: 3px 5px;
           break-inside: avoid; page-break-inside: avoid; }
   .item.cod { border: 1.5px solid #7c3aed; background: #faf6ff; }
@@ -180,6 +268,36 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
   .sub { color: #556; font-size: 8px; }
   .cod-tag { color: #7c3aed; font-weight: bold; font-size: 8px; text-transform: uppercase; }
   .deck-tag { color: #0f766e; font-weight: bold; font-size: 8px; text-transform: uppercase; }
+  .sale { color: #b91c1c; font-weight: 700; }
+  .sale s { color: #888; font-weight: 400; }
+  .sale-dates { color: #b91c1c; font-weight: 400; font-size: 7.5px; }
+
+  /* ── Thumbnails ── small enough to keep the grid dense, big enough to
+     recognise a package at arm's length on a moving cart. */
+  .thumb { width: 22px; height: 22px; object-fit: contain; flex: 0 0 auto;
+           border: 1px solid #e3e3e3; border-radius: 3px; background: #fff; margin-right: 4px; }
+  .thumb-empty { display: inline-block; background: repeating-linear-gradient(
+                   45deg, #f4f4f4, #f4f4f4 3px, #e9e9e9 3px, #e9e9e9 6px); }
+
+  /* ── Section tones ── a shopper holding three stapled blocks needs to know
+     which one they're in without reading the header. */
+  .dept-total { margin-left: auto; font-size: 9px; color: #e8eef7; white-space: nowrap; }
+  .counts { display: flex; gap: 26px; margin: 6px 0 2px; }
+  .count-label { display: block; font-size: 9.5px; font-weight: 800; color: #333; line-height: 1.15; }
+  .count-value { display: block; font-size: 12px; color: #111; margin-top: 2px; }
+  .tone-deck  .dept-head { background: #0f766e; }
+  .tone-cod   .dept-head { background: #6b21a8; }
+  /* Deck and COD start on their own page — different people, different bags,
+     different totals. Grocery flows continuously as before. */
+  .newpage { page-break-before: always; break-before: page; }
+
+  .cod-person { border: 1.5px solid #6b21a8; border-radius: 6px; margin-top: 8px;
+                break-inside: avoid; page-break-inside: avoid; }
+  .cod-person-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+                     background: #f3e8ff; border-bottom: 1px solid #d8b4fe; padding: 5px 8px; }
+  .cod-name { font-size: 13px; font-weight: 900; color: #5b21b6; text-transform: uppercase; letter-spacing: 0.5px; }
+  .cod-person-total { font-size: 10px; color: #6b21a8; }
+  .cod-bag { margin-left: auto; font-size: 9.5px; color: #6b21a8; }
   .sub-tag { color: #c2410c; font-weight: bold; font-size: 8px; }
 
   .scanrow { display: flex; align-items: center; gap: 5px; margin-top: 2px; }
@@ -228,10 +346,17 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
     ${order.company_name && order.vessel_name ? `<span><b>Company:</b> ${esc(order.company_name)}</span>` : ''}
     ${order.arrival_date ? `<span><b>Arrival:</b> ${esc(order.arrival_date)}${order.arrival_time ? ` ${esc(order.arrival_time)}` : ''}</span>` : ''}
     ${order.terminal_name ? `<span><b>Deliver to:</b> ${esc(order.terminal_name)}</span>` : ''}
-    <span><b>Lines:</b> ${totalLines}</span>
-    <span><b>Units:</b> ${totalUnits}${weighCount ? ` + ${weighCount} by weight` : ''}</span>
     ${codCount ? `<span style="color:#7c3aed"><b>COD lines:</b> ${codCount}</span>` : ''}
     ${services.length ? `<span style="color:#b45309"><b>Outside pickups:</b> ${services.length} (separate trip)</span>` : ''}
+  </div>
+
+  ${/* Counts in Sinclair's own Freshop layout — stacked label over value. Dave
+        says he never reads them, but they're the record-keeping figure that
+        reconciles a picked order against what was ordered. */''}
+  <div class="counts">
+    <div><span class="count-label">Unique Item<br/>Count</span><span class="count-value">${uniqueItemCount}</span></div>
+    <div><span class="count-label">Total Item<br/>Count</span><span class="count-value">${totalItemCount}</span></div>
+    ${weighCount ? `<div><span class="count-label">By Weight<br/>Count</span><span class="count-value">${weighCount}</span></div>` : ''}
   </div>
 
   ${weighCount || noBarcodeCount ? `<div class="warn">
@@ -241,9 +366,47 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
 
   ${order.notes ? `<div class="notes"><b>Customer notes:</b> ${esc(order.notes)}</div>` : ''}
 
-  ${sectionHtml('Grocery', 'Walk order — start here', restGroups)}
-  ${sectionHtml('Produce', 'Hand to Produce dept', produceGroups)}
-  ${sectionHtml('Meat & Seafood', 'Hand to Meat dept', meatGroups)}
+  ${sectionHtml(
+    'Grocery',
+    'Walk order — start here · boat allowance · billed monthly',
+    groceryGroups,
+    { subtotal: grocerySubtotal, tone: 'grocery' },
+  )}
+
+  ${/* DECK — company-billed but invoiced separately, so it is bagged and rung
+        on its own. Its own page: the boat wants to see the deck total apart
+        from the grocery total, and that means a second register total. */''}
+  ${sectionHtml(
+    'Deck Supplies',
+    'Bag & ring SEPARATELY — not part of the boat’s grocery allowance',
+    deckGroups,
+    { subtotal: deckSubtotal, tone: 'deck', newPage: true },
+  )}
+
+  ${/* COD — dead last, grouped by the person paying. Dave: "we typically have
+        somebody else work on the CODs, somebody else works on the grocery
+        list", and each person's items get bagged and labelled with their name.
+        Mixed into the walk order these were effectively unfindable. */''}
+  ${codByPerson.length ? `<section class="dept tone-cod newpage">
+    <div class="dept-head"><h2>COD &mdash; collect from each crew member</h2>
+      <span class="dept-note">Paid personally &middot; NEVER on the company invoice &middot; bag &amp; label per person</span>
+      <span class="dept-total">${cod.length} line${cod.length === 1 ? '' : 's'} &middot; <b>${formatCurrency(codSubtotal)}</b></span></div>
+    ${codByPerson.map(([name, list]) => {
+      const personTotal = list
+        .filter(i => i.shopping_status !== 'out_of_stock')
+        .reduce((s, i) => s + lineTotal(i), 0);
+      return `<div class="cod-person">
+        <div class="cod-person-head">
+          <span class="cod-name">${esc(name)}</span>
+          <span class="cod-person-total">${list.length} line${list.length === 1 ? '' : 's'} &middot; <b>${formatCurrency(personTotal)}</b></span>
+          <span class="cod-bag">Bag &amp; label: <b>${esc(name)}</b></span>
+        </div>
+        <div class="grid">${groupByWalkingOrder(list, zoneOrder)
+          .flatMap(g => g.items)
+          .map(itemCard).join('')}</div>
+      </div>`;
+    }).join('')}
+  </section>` : ''}
 
   ${services.length ? `<section class="dept outside">
     <div class="dept-head"><h2>Outside Pickups &mdash; separate trip</h2><span class="dept-note">Not in the store. Sinclair's buys these elsewhere and they ride with the order.</span></div>

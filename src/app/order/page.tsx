@@ -262,7 +262,6 @@ export default function OrderPage() {
   const { confirm: confirmDialog, dialog: confirmDialogEl } = useConfirm();
   const [authOpen, setAuthOpen] = useState(false);
   const [emailHasAccount, setEmailHasAccount] = useState(false);
-  const [cutoffs, setCutoffs] = useState({ grocery_cutoff_hours: 4, service_cutoff_hours: 2 });
   // Effective COD handling fee % (0 when the feature is toggled off in admin)
   const [codFeePct, setCodFeePct] = useState(5);
   // Digital coupons — same rules Sinclair's own site applies (no clipping).
@@ -288,11 +287,9 @@ export default function OrderPage() {
     const sync = () => setItems(getCart());
     window.addEventListener('cart-updated', sync);
 
-    // Order cutoff buffers (manager-configured)
     fetch('/api/order-config')
       .then(r => r.ok ? r.json() : null)
       .then(cfg => {
-        if (cfg) setCutoffs(cfg);
         if (cfg?.cod_fee_percent !== undefined) setCodFeePct(Number(cfg.cod_fee_percent) || 0);
       })
       .catch(() => {});
@@ -409,17 +406,12 @@ export default function OrderPage() {
     if (!vessel.terminal_name.trim())  errs.terminal_name   = 'Terminal / location name is required';
     if (!vessel.arrival_date.trim())   errs.arrival_date    = 'Estimated arrival date is required';
     if (!vessel.arrival_time.trim())   errs.arrival_time    = 'Estimated arrival time is required';
-    // Cutoff timer: block ETAs inside the manager-configured buffer
+    // No cutoff buffer — a towboat's ETA moves constantly and crews order when
+    // they get signal, so a late order is a phone call, not a blocked submit.
+    // A PAST arrival time is still almost certainly a typo, so that stays.
     const eta = parseEta(vessel.arrival_date, vessel.arrival_time);
-    if (eta) {
-      const bufferHours = items.length > 0 ? cutoffs.grocery_cutoff_hours : cutoffs.service_cutoff_hours;
-      if (bufferHours > 0) {
-        if (eta.getTime() < Date.now()) {
-          errs.arrival_date = 'Arrival time is in the past — please pick a future date and time';
-        } else if ((eta.getTime() - Date.now()) / 3_600_000 < bufferHours) {
-          errs.arrival_date = `Orders need at least ${bufferHours} hour${bufferHours === 1 ? '' : 's'} before your arrival so we can shop and deliver. Pick a later ETA, or call us at (618) 556-0290 for rush requests.`;
-        }
-      }
+    if (eta && eta.getTime() < Date.now()) {
+      errs.arrival_date = 'Arrival time is in the past — please pick a future date and time';
     }
     if (!vessel.delivery_method)       errs.delivery_method = 'Delivery method is required';
     if (vessel.delivery_method === 'boat' && !vessel.approach_side) errs.approach_side = 'Please select an approach side';
@@ -1033,10 +1025,7 @@ export default function OrderPage() {
                 value={vessel.arrival_date}
                 onChange={e => setV('arrival_date', e.target.value)} />
             </Field>
-            <Field label="Estimated Arrival Time" required error={errors.arrival_time}
-              hint={items.length > 0 && cutoffs.grocery_cutoff_hours > 0
-                ? `Grocery orders need at least ${cutoffs.grocery_cutoff_hours} hours before arrival`
-                : undefined}>
+            <Field label="Estimated Arrival Time" required error={errors.arrival_time}>
               <input type="time" className={`input-base w-full ${errors.arrival_time ? 'border-red-400' : ''}`}
                 value={vessel.arrival_time}
                 onChange={e => setV('arrival_time', e.target.value)} />

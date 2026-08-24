@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/admin-auth-server';
+import { checkSchemaHealth } from '@/lib/schema-health';
 
 export async function GET(req: NextRequest) {
   const session = requireAdmin(req, { area: 'products' });
@@ -32,7 +33,13 @@ export async function GET(req: NextRequest) {
   const pagesTotal = (state.depts || []).reduce((s, d) => s + (d.pages || 0), 0);
   const sizedItems = (state.depts || []).reduce((s, d) => s + ((d as { total?: number }).total || 0), 0);
 
+  // Migration drift check. Surfaced right beside sync progress because that is
+  // where someone looks when the sync "worked" but nothing changed.
+  const schema = await checkSchemaHealth(supabase);
+
   return NextResponse.json({
+    schema_ok: schema.ok,
+    schema_issues: schema.issues,
     completed_at: state.completedAt || null,
     session_day: state.day || null,
     in_progress: !state.completedAt && pagesTotal > 0,

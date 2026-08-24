@@ -163,18 +163,6 @@ const submitSchema = z.object({
 .refine(data => !!data.vessel.vessel_email?.trim() || !!data.vessel.email?.trim(),
   { message: 'Please add the vessel email address so we can send the order confirmation.' });
 
-/**
- * Parse the structured ETA (date picker YYYY-MM-DD + time picker HH:MM) into
- * a Date. Returns null when unparseable (e.g. legacy free-text values), in
- * which case cutoff enforcement is skipped rather than blocking the order.
- */
-function parseEta(arrivalDate: string, arrivalTime: string): Date | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(arrivalDate)) return null;
-  const time = /^\d{2}:\d{2}/.test(arrivalTime) ? arrivalTime.slice(0, 5) : '23:59';
-  const d = new Date(`${arrivalDate}T${time}:00`);
-  return isNaN(d.getTime()) ? null : d;
-}
-
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -186,27 +174,13 @@ export async function POST(req: NextRequest) {
     const { vessel, items, services } = parsed.data;
     const supabase = createServiceClient();
 
-    // ── Order cutoff enforcement (manager-configured buffer before ETA) ──
-    const eta = parseEta(vessel.arrival_date, vessel.arrival_time);
-    if (eta) {
-      const { data: cfg } = await supabase
-        .from('admin_settings')
-        .select('grocery_cutoff_hours, service_cutoff_hours')
-        .single();
-      const hasGroceries = items.length > 0;
-      const bufferHours = hasGroceries
-        ? Number(cfg?.grocery_cutoff_hours ?? 4)
-        : Number(cfg?.service_cutoff_hours ?? 2);
-      if (bufferHours > 0) {
-        const hoursUntilEta = (eta.getTime() - Date.now()) / 3_600_000;
-        if (hoursUntilEta < bufferHours) {
-          return NextResponse.json({
-            error: `Orders must be placed at least ${bufferHours} hour${bufferHours === 1 ? '' : 's'} before your arrival time so we can shop and deliver. Your ETA is too soon — please adjust it, or call Grafton Towboat Services at (618) 556-0290 and we'll do our best to help.`,
-            code: 'cutoff',
-          }, { status: 400 });
-        }
-      }
-    }
+    // NO ORDER CUTOFF. There used to be a manager-configured buffer that
+    // rejected orders placed too close to the vessel's ETA. Removed: a towboat's
+    // ETA moves constantly, crews order when they get signal, and Sinclair's
+    // would rather see a late order and phone the boat than have the system
+    // refuse it outright. If it's genuinely too tight, that's a conversation,
+    // not a validation error.
+
     const orderNumber = generateOrderNumber();
     const userId = await getUserIdFromToken(req);
     // Combined estimate (vessel + COD). Billing reports split these out and
@@ -297,17 +271,23 @@ export async function POST(req: NextRequest) {
 
     if (items.length > 0) {
       const productIds = items.map(i => i.product_id).filter(Boolean);
-      const { data: products } = await supabase.from('products').select('id, upc, location, location_seq, image_url, freshop_id').in('id', productIds);
+      const { data: products } = await supabase.from('products').select('id, upc, location, location_seq, image_url, freshop_id, regular_price, sale_finish_date').in('id', productIds);
       const upcMap: Record<string, string | null> = {};
       const locationMap: Record<string, string | null> = {};
       const locationSeqMap: Record<string, number | null> = {};
       const imageMap: Record<string, string | null> = {};
-      (products || []).forEach((p: { id: string; upc: string | null; location: string | null; location_seq: number | null; image_url: string | null; freshop_id?: string | null }) => {
+      // Sale snapshot — what the crew was quoted, frozen onto the line.
+      const saleMap: Record<string, { regular_price: number | null; sale_finish_date: string | null }> = {};
+      (products || []).forEach((p: { id: string; upc: string | null; location: string | null; location_seq: number | null; image_url: string | null; freshop_id?: string | null; regular_price?: number | null; sale_finish_date?: string | null }) => {
         upcMap[p.id] = p.upc;
         locationMap[p.id] = p.location;
         locationSeqMap[p.id] = p.location_seq;
         imageMap[p.id] = p.image_url;
         freshopMap[p.id] = p.freshop_id ?? null;
+        saleMap[p.id] = {
+          regular_price: (p as { regular_price?: number | null }).regular_price ?? null,
+          sale_finish_date: (p as { sale_finish_date?: string | null }).sale_finish_date ?? null,
+        };
       });
 
       items.forEach(item => {
@@ -330,6 +310,8 @@ export async function POST(req: NextRequest) {
           service_details: null,
           paid_by: item.paid_by === 'cod' ? 'cod' : item.paid_by === 'deck' ? 'deck' : 'vessel',
           cod_name: item.paid_by === 'cod' ? (item.cod_name || null) : null,
+          regular_price: saleMap[item.product_id]?.regular_price ?? null,
+          sale_finish_date: saleMap[item.product_id]?.sale_finish_date ?? null,
         });
       });
     }
@@ -427,6 +409,7 @@ export async function POST(req: NextRequest) {
         'order_id', 'product_id', 'description', 'category', 'pkg_size', 'uom', 'upc',
         'location', 'location_seq', 'image_url', 'unit_price', 'quantity', 'line_total',
         'item_type', 'service_type', 'service_details', 'paid_by', 'cod_name',
+        'regular_price', 'sale_finish_date',
       ] as const;
       const normalisedItems = allOrderItems.map(row =>
         Object.fromEntries(ITEM_COLUMNS.map(col => [

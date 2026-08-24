@@ -311,13 +311,22 @@ export function buildOrderEmailHtml(
           <td colspan="5" style="padding:6px 10px;font-size:11px;font-weight:700;color:#15803d;">🏷 ${d.name}${d.description ? ` <span style="font-weight:400;color:#4d7c5f;">— ${d.description}</span>` : ''}</td>
           <td style="padding:6px 10px;text-align:right;font-size:12px;font-weight:800;color:#15803d;">−${formatCurrency(Number(d.amount))}</td>
         </tr>`).join('')}
+        ${/* Prefer what Sinclair's ACTUALLY rang for deck. Dave asked for the
+              two figures separately because most vessels don't charge the boat
+              for deck items — "the boat really needs to see, this is how much
+              the deck order was, and this is how much the grocery order was."
+              Falls back to the estimate when the deck total hasn't been keyed. */''}
         ${deckItems.length > 0 ? `<tr style="background:#f0fdfa;">
-          <td colspan="5" style="padding:6px 10px;font-size:11px;font-weight:700;color:#0f766e;">Deck subtotal — company-billed, listed separately (not part of the grocery allowance)</td>
-          <td style="padding:6px 10px;text-align:right;font-size:12px;font-weight:800;color:#0f766e;">${formatCurrency(deckSubtotal)}</td>
+          <td colspan="5" style="padding:6px 10px;font-size:11px;font-weight:700;color:#0f766e;">Deck order — company-billed, invoiced separately (not part of the grocery allowance)${
+            order.deck_register_total == null ? ' <span style="font-weight:400;">· estimated</span>' : ''
+          }</td>
+          <td style="padding:6px 10px;text-align:right;font-size:12px;font-weight:800;color:#0f766e;">${
+            formatCurrency(order.deck_register_total ?? deckSubtotal)
+          }</td>
         </tr>` : ''}
         ${order.register_total != null ? `
         <tr style="background:#D9E84A;">
-          <td colspan="5" style="padding:10px;font-size:14px;font-weight:900;color:#1E3D1E;text-transform:uppercase;">TOTAL</td>
+          <td colspan="5" style="padding:10px;font-size:14px;font-weight:900;color:#1E3D1E;text-transform:uppercase;">${deckItems.length > 0 ? 'Grocery Total' : 'Total'}</td>
           <td style="padding:10px;text-align:right;font-size:16px;font-weight:900;color:#1E3D1E;">${formatCurrency(order.register_total)}</td>
         </tr>
         <tr style="background:#f5f5f5;">

@@ -1,12 +1,13 @@
 'use client';
 // src/components/admin/OrderDetailModal.tsx
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, Fragment } from 'react';
 import { createPortal } from 'react-dom';
 import {
   X, Download, FileText, Printer, Trash2, Loader2, ShoppingCart,
   Ship, MapPin, Users, Package, Wrench, CheckCircle2, Eye,
   Pencil, Plus, Search, Check, Receipt, FileSignature,
+  Scale, Replace, CornerDownRight, PackageX, AlertTriangle,
 } from 'lucide-react';
 import { Order, OrderItem, OrderStatus, Product } from '@/types';
 import { formatCurrency, formatDate, ORDER_STATUSES } from '@/lib/utils';
@@ -90,6 +91,12 @@ export function OrderDetailModal({
   // Already-saved totals come back confirmed, so reopening a shopped order
   // shows "Final total saved" rather than an unsaved-looking button.
   const [registerSaved, setRegisterSaved] = useState(order.register_total != null);
+  // Deck rings separately: Dave — "the boat really needs to see, this is how
+  // much the deck order was, and this is how much the grocery order was."
+  const [deckTotal, setDeckTotal] = useState<string>(
+    order.deck_register_total != null ? String(order.deck_register_total) : ''
+  );
+  const [deckSaved, setDeckSaved] = useState(order.deck_register_total != null);
 
   /**
    * Confirm the register total — Sinclair's "we're done shopping" action.
@@ -106,13 +113,16 @@ export function OrderDetailModal({
     if (raw.trim() !== '' && (isNaN(val!) || val! < 0)) return;
     setRegisterTotalSaving(true);
     try {
+      const deckVal = deckTotal.trim() === '' ? null : parseFloat(deckTotal.replace(/[^0-9.]/g, ''));
+      if (deckTotal.trim() !== '' && (isNaN(deckVal!) || deckVal! < 0)) return;
       const res = await adminFetch(`/api/orders/${order.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ register_total: val }),
+        body: JSON.stringify({ register_total: val, deck_register_total: deckVal }),
       });
       if (!res.ok) return;               // leave it unsaved so it can be retried
       setRegisterSaved(true);
+      if (deckVal != null) setDeckSaved(true);
 
       // ── SHOPPED ── confirming the register total IS the end of Sinclair's
       // involvement, so the order moves to 'shopped' in the same action rather
@@ -139,6 +149,144 @@ export function OrderDetailModal({
   // Delete item
   const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
 
+  // ── LINE-BY-LINE SHOPPING ──────────────────────────────────────────────────
+  // Everything the shopper needs while standing in the aisle, on the row itself.
+  const [rowBusy, setRowBusy] = useState<string | null>(null);
+  const [weighId, setWeighId] = useState<string | null>(null);
+  const [weighVal, setWeighVal] = useState('');
+  const [subFor, setSubFor] = useState<OrderItem | null>(null);
+  const [subSearch, setSubSearch] = useState('');
+  const [subResults, setSubResults] = useState<Product[]>([]);
+  const [subSearching, setSubSearching] = useState(false);
+  const [subPick, setSubPick] = useState<Product | null>(null);
+  const [subQty, setSubQty] = useState('1');
+  const [fillingAll, setFillingAll] = useState(false);
+  const [priceId, setPriceId] = useState<string | null>(null);
+  const [priceVal, setPriceVal] = useState('');
+
+  async function savePickupPrice(item: OrderItem) {
+    const v = parseFloat(priceVal);
+    if (isNaN(v) || v < 0) { setItemError('Enter what it actually cost.'); return; }
+    const r = await itemAction(item.id, { action: 'set_price', unit_price: v });
+    if (r) { setPriceId(null); setPriceVal(''); }
+  }
+
+  /** Substitutions rendered under the line they replace. */
+  const subsByParent = localItems
+    .filter(i => i.is_substitution && i.substitutes_item_id)
+    .reduce((acc, i) => {
+      const k = i.substitutes_item_id as string;
+      (acc[k] ||= []).push(i);
+      return acc;
+    }, {} as Record<string, OrderItem[]>);
+
+  /** By-weight lines: LB uom, a fractional quantity, or a price-embedded UPC. */
+  function isWeighable(i: OrderItem): boolean {
+    if ((i.uom || '').toUpperCase() === 'LB') return true;
+    if (!Number.isInteger(Number(i.quantity))) return true;
+    const upc = (i.upc || '').replace(/\D/g, '');
+    return upc.length === 12 && upc.startsWith('2') && upc.endsWith('00000');
+  }
+
+  /** Apply an item action and fold the response back into local state. */
+  async function itemAction(itemId: string, body: Record<string, unknown>) {
+    setRowBusy(itemId); setItemError('');
+    try {
+      const res = await adminFetch(`/api/orders/${order.id}/items/${itemId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const r = await res.json();
+      if (!res.ok) { setItemError(r?.error || 'Could not update that line'); return null; }
+      setLocalItems(prev => {
+        let next = prev.map(i => (r.item && i.id === r.item.id ? { ...i, ...r.item } : i));
+        if (r.substitution) next = [...next, r.substitution as OrderItem];
+        // 'reset' removes any substitution children server-side.
+        if (body.action === 'reset') next = next.filter(i => i.substitutes_item_id !== itemId);
+        return next;
+      });
+      return r;
+    } finally {
+      setRowBusy(null);
+    }
+  }
+
+  /** Tick = shopped. Clicking an already-shopped line undoes it (fat-finger fix). */
+  async function markShopped(item: OrderItem) {
+    await itemAction(item.id, { action: item.shopping_status === 'shopped' ? 'reset' : 'shopped' });
+  }
+
+  async function saveWeight(item: OrderItem) {
+    const w = parseFloat(weighVal);
+    if (!w || w <= 0) { setItemError('Enter a weight greater than zero.'); return; }
+    const r = await itemAction(item.id, { action: 'set_weight', actual_weight: w });
+    if (r) { setWeighId(null); setWeighVal(''); }
+  }
+
+  /** Out of stock — with a replacement, or without one if there's nothing to swap. */
+  async function applySubstitution(withProduct: boolean) {
+    if (!subFor) return;
+    const body: Record<string, unknown> = { action: 'out_of_stock' };
+    if (withProduct) {
+      if (!subPick) { setItemError('Pick a replacement, or choose "No replacement".'); return; }
+      const q = parseFloat(subQty);
+      if (!q || q <= 0) { setItemError('Enter a quantity for the replacement.'); return; }
+      body.substitution = { product_id: subPick.id, quantity: q };
+    }
+    const r = await itemAction(subFor.id, body);
+    if (r) { setSubFor(null); setSubPick(null); setSubSearch(''); setSubResults([]); }
+  }
+
+  /**
+   * FILL ITEMS — accept the whole order exactly as ordered, in one click.
+   *
+   * Straight from Freshop, which Dave leans on hard: "if I just okay up here,
+   * this just okays everything they order. And then I go through, and it's
+   * easier to just change the things I had to change." Marking ~90 lines
+   * individually to find the three that changed is the slow path.
+   *
+   * By-weight lines are deliberately SKIPPED — their real weight isn't known
+   * until the package is on the scale, and auto-shopping them at the estimated
+   * weight would bill the boat for a guess.
+   */
+  async function fillAllItems() {
+    const pending = groceryItems.filter(
+      i => i.shopping_status === 'pending' && !isWeighable(i) && !i.is_substitution,
+    );
+    if (!pending.length) return;
+    if (!(await confirmDialog({
+      title: `Mark ${pending.length} item${pending.length === 1 ? '' : 's'} as shopped?`,
+      message: 'Accepts everything as ordered so you only have to touch the exceptions. By-weight items are left alone — enter their actual weight as you pick them.',
+      actions: [{ id: 'go', label: 'Fill items' }],
+    }))) return;
+    setFillingAll(true);
+    try {
+      for (const i of pending) {
+        await adminFetch(`/api/orders/${order.id}/items/${i.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'shopped' }),
+        });
+      }
+      setLocalItems(prev => prev.map(i =>
+        pending.some(p => p.id === i.id) ? { ...i, shopping_status: 'shopped' } : i));
+      onRefresh();
+    } finally {
+      setFillingAll(false);
+    }
+  }
+
+  /** Product search for the substitution picker. */
+  const searchSubs = useCallback(async (q: string) => {
+    if (q.trim().length < 2) { setSubResults([]); return; }
+    setSubSearching(true);
+    try {
+      const res = await adminFetch(`/api/products?search=${encodeURIComponent(q)}&status=active&per_page=12`);
+      if (res.ok) { const d = await res.json(); setSubResults(d.products || []); }
+    } finally { setSubSearching(false); }
+  }, []);
+
   // Add item panel
   const [addingItem, setAddingItem] = useState(false);
   const [addSearch, setAddSearch] = useState('');
@@ -155,9 +303,21 @@ export function OrderDetailModal({
     .filter(i => i.shopping_status !== 'out_of_stock')
     .reduce((s, i) => s + (i.actual_total ?? i.unit_price * i.quantity), 0);
   const codItems = groceryItems.filter(i => i.paid_by === 'cod');
+  // OUTSIDE PICKUPS ARE COD TOO — every one of them, whether the boat settles
+  // it or a named crew member does. They have to be in the COD subtotal or the
+  // handling fee is computed on the wrong base. Dave: "the handling fee is for
+  // all of them combined, not per item... You got TV, you got a carton of
+  // cigarettes, you got all this. What's the total? We add in handling fee."
+  const outsidePickups = serviceItems.filter(i => i.service_type === 'other_pickup');
+  const outsideSubtotal = outsidePickups
+    .filter(i => i.shopping_status !== 'out_of_stock')
+    .reduce((s, i) => s + Number(i.actual_total ?? i.unit_price * i.quantity), 0);
   const codSubtotal = codItems
     .filter(i => i.shopping_status !== 'out_of_stock')
-    .reduce((s, i) => s + (i.actual_total ?? i.unit_price * i.quantity), 0);
+    .reduce((s, i) => s + (i.actual_total ?? i.unit_price * i.quantity), 0)
+    + outsideSubtotal;
+  /** Outside pickups still waiting on a price — the fee is wrong until they're keyed. */
+  const unpricedPickups = outsidePickups.filter(i => !Number(i.unit_price));
   // COD lines grouped per crew member. Hoisted because a FLAT handling fee has
   // to be apportioned across these people — the split needs to know how many
   // there are, and the per-person figures must add up to the header total.
@@ -492,6 +652,16 @@ export function OrderDetailModal({
                       no price until Sinclair's has bought the thing, so 5% of a
                       $0 line is $0 and the real cost of the trip is absorbed.
                       A keyed dollar amount overrides the percentage entirely. */}
+                  {unpricedPickups.length > 0 && (
+                    <p className="flex items-start gap-1.5 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
+                      <span>
+                        {unpricedPickups.length} outside pickup{unpricedPickups.length === 1 ? '' : 's'} still unpriced —
+                        the handling fee is calculated on the COD total, so enter what they cost under
+                        Additional Services before collecting.
+                      </span>
+                    </p>
+                  )}
                   <div className="flex flex-wrap items-center gap-2">
                     <strong>Handling fee:</strong>
                     {canEdit ? (
@@ -694,7 +864,8 @@ export function OrderDetailModal({
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                       {groceryItems.map(item => (
-                        <tr key={item.id} className={item.shopping_status === 'out_of_stock' ? 'opacity-40' : ''}>
+                        <Fragment key={item.id}>
+                        <tr className={item.shopping_status === 'out_of_stock' ? 'opacity-40' : ''}>
                           <td className="px-3 py-2 text-xs text-gray-400 font-mono">{item.upc || '—'}</td>
                           <td className="px-3 py-2">
                             {item.is_substitution && (
@@ -765,15 +936,51 @@ export function OrderDetailModal({
                           </td>
                           {canEdit && (
                             <td className="px-3 py-2">
-                              <div className="flex items-center justify-end gap-1">
+                              {/* EVERY ACTION ON THE ROW ITSELF. Dave: "what's
+                                  gonna happen is, we're gonna go pick this item.
+                                  And if we don't have it, I want to be able to
+                                  fix it right now. Right there." Substituting
+                                  used to mean deleting the line and re-adding a
+                                  different one from a search panel. */}
+                              <div className="flex items-center justify-end gap-0.5">
                                 {editingId !== item.id && (
-                                  <button
-                                    onClick={() => { setEditingId(item.id); setEditQty(String(item.quantity)); setItemError(''); }}
-                                    className="p-1 text-gray-400 hover:text-brand-navy transition-colors"
-                                    title="Edit quantity"
-                                  >
-                                    <Pencil className="w-3.5 h-3.5" />
-                                  </button>
+                                  <>
+                                    <button
+                                      onClick={() => markShopped(item)}
+                                      disabled={rowBusy === item.id}
+                                      className={`p-1 transition-colors ${
+                                        item.shopping_status === 'shopped'
+                                          ? 'text-green-600'
+                                          : 'text-gray-300 hover:text-green-600'
+                                      }`}
+                                      title={item.shopping_status === 'shopped' ? 'Shopped — click to undo' : 'Mark shopped'}
+                                    >
+                                      <Check className="w-3.5 h-3.5" />
+                                    </button>
+                                    {isWeighable(item) && (
+                                      <button
+                                        onClick={() => { setWeighId(item.id); setWeighVal(item.actual_weight != null ? String(item.actual_weight) : ''); setItemError(''); }}
+                                        className={`p-1 transition-colors ${item.actual_weight != null ? 'text-brand-orange' : 'text-gray-400 hover:text-brand-orange'}`}
+                                        title={item.actual_weight != null ? `Weighed ${item.actual_weight} lb — click to change` : 'Enter actual weight'}
+                                      >
+                                        <Scale className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
+                                    <button
+                                      onClick={() => { setEditingId(item.id); setEditQty(String(item.quantity)); setItemError(''); }}
+                                      className="p-1 text-gray-400 hover:text-brand-navy transition-colors"
+                                      title="Edit quantity"
+                                    >
+                                      <Pencil className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      onClick={() => { setSubFor(item); setSubSearch(''); setSubResults([]); setSubPick(null); setSubQty(String(item.quantity)); setItemError(''); }}
+                                      className="p-1 text-gray-400 hover:text-amber-600 transition-colors"
+                                      title="Out of stock / substitute"
+                                    >
+                                      <Replace className="w-3.5 h-3.5" />
+                                    </button>
+                                  </>
                                 )}
                                 <button
                                   onClick={() => deleteItem(item.id)}
@@ -790,6 +997,70 @@ export function OrderDetailModal({
                             </td>
                           )}
                         </tr>
+
+                        {/* Inline weight entry — opens under the row it belongs
+                            to, so the shopper never loses their place. */}
+                        {canEdit && weighId === item.id && (
+                          <tr className="bg-orange-50/60">
+                            <td colSpan={canEdit ? 7 : 6} className="px-3 py-2">
+                              <div className="flex flex-wrap items-center gap-2 text-xs">
+                                <Scale className="w-4 h-4 text-brand-orange shrink-0" />
+                                <span className="font-bold text-brand-navy">Actual weight for {item.description}</span>
+                                <input type="number" step="0.01" min="0.01" autoFocus
+                                  className="w-24 border border-orange-300 rounded px-2 py-1 text-right font-bold"
+                                  placeholder="0.00"
+                                  value={weighVal}
+                                  onChange={e => setWeighVal(e.target.value)}
+                                  onKeyDown={e => { if (e.key === 'Enter') saveWeight(item); if (e.key === 'Escape') setWeighId(null); }} />
+                                <span>lb</span>
+                                <span className="text-gray-500">
+                                  × {formatCurrency(item.unit_price)}/lb =
+                                  <b className="text-brand-navy ml-1">
+                                    {formatCurrency((parseFloat(weighVal) || 0) * item.unit_price)}
+                                  </b>
+                                </span>
+                                <button onClick={() => saveWeight(item)} disabled={rowBusy === item.id || !weighVal}
+                                  className="btn-primary text-xs px-3 py-1 disabled:opacity-40">
+                                  {rowBusy === item.id ? 'Saving…' : 'Confirm weight'}
+                                </button>
+                                <button onClick={() => setWeighId(null)} className="text-gray-400 hover:text-gray-600">Cancel</button>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* The substitution shows INDENTED UNDER the original,
+                            which stays visible and struck through. Dave, on his
+                            own system: "this one's not available, and we gave
+                            you this one... Right underneath it. I like that." */}
+                        {subsByParent[item.id]?.map(sub => (
+                          <tr key={sub.id} className="bg-amber-50/50">
+                            <td className="px-3 py-1.5 text-xs text-gray-400 font-mono">{sub.upc || '—'}</td>
+                            <td className="px-3 py-1.5" colSpan={2}>
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-amber-700">
+                                <CornerDownRight className="w-3 h-3" /> Substituted with
+                              </span>
+                              <p className="font-medium text-brand-navy text-xs">{sub.description}</p>
+                              <p className="text-xs text-gray-400">
+                                {sub.pkg_size || ''}{sub.location ? ` · 📍 ${sub.location}` : ''}
+                              </p>
+                            </td>
+                            <td className="px-3 py-1.5 text-center font-bold text-xs">{sub.quantity}</td>
+                            <td className="px-3 py-1.5 text-right text-xs">{formatCurrency(sub.unit_price)}</td>
+                            <td className="px-3 py-1.5 text-right font-bold text-xs">
+                              {formatCurrency(sub.actual_total ?? sub.unit_price * sub.quantity)}
+                            </td>
+                            {canEdit && (
+                              <td className="px-3 py-1.5 text-right">
+                                <button onClick={() => deleteItem(sub.id)}
+                                  className="p-1 text-gray-400 hover:text-red-500" title="Remove substitution">
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </td>
+                            )}
+                          </tr>
+                        ))}
+                        </Fragment>
                       ))}
                     </tbody>
                     <tfoot>
@@ -887,20 +1158,156 @@ export function OrderDetailModal({
                           )}
                         </td>
                       </tr>
+
+                      {/* DECK RINGS SEPARATELY. Only shown when the order
+                          actually has deck lines — asking for a deck total on a
+                          grocery-only order is a field nobody should have to
+                          skip past. Dave, on typing two: "No. Only in the event
+                          we have grocery versus deck. Yeah, we have to do that." */}
+                      {deckItems.length > 0 && (
+                        <tr className="border-t border-gray-200 bg-teal-50/40">
+                          <td colSpan={canEdit ? 7 : 6} className="px-3 py-2">
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                              <span className="text-sm font-bold text-teal-800">DECK REGISTER TOTAL</span>
+                              <span className="text-xs text-gray-400">
+                                (rung separately · {deckItems.length} line{deckItems.length === 1 ? '' : 's'} · system {formatCurrency(deckSubtotal)})
+                              </span>
+                              {deckTotal && Math.abs(parseFloat(deckTotal) - deckSubtotal) > 1 && (
+                                <span className="text-xs font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+                                  ⚠ {parseFloat(deckTotal) > deckSubtotal ? '+' : ''}{formatCurrency(parseFloat(deckTotal) - deckSubtotal)} vs system
+                                </span>
+                              )}
+                              <div className="flex flex-wrap items-center gap-1.5 sm:ml-auto">
+                                <span className="text-sm font-bold text-gray-500">$</span>
+                                <input
+                                  type="number" step="0.01" min="0" placeholder="0.00"
+                                  value={deckTotal}
+                                  onChange={e => { setDeckTotal(e.target.value); setDeckSaved(false); }}
+                                  onKeyDown={e => { if (e.key === 'Enter') confirmRegisterTotal(); }}
+                                  className="w-24 text-right font-display text-base font-bold text-teal-900 border border-teal-200 rounded px-2 py-0.5 focus:outline-none focus:ring-2 focus:ring-teal-400/40"
+                                />
+                                {deckSaved && (
+                                  <span className="flex items-center gap-1 text-xs font-bold text-green-700">
+                                    <CheckCircle2 className="w-3 h-3" /> Saved
+                                  </span>
+                                )}
+                              </div>
+                              <p className="w-full text-[11px] text-teal-800">
+                                Billed apart from the grocery allowance — the vessel receipt shows both figures.
+                                Saved together with the grocery total.
+                              </p>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
                     </tfoot>
                   </table>
                 </div>
 
+                {/* ── SUBSTITUTION PANEL ── opens from a row's Replace icon and
+                    names the line it's replacing, so there's no doubt which
+                    item is being swapped when several are out at once. */}
+                {canEdit && subFor && (
+                  <div className="mt-3 border-2 border-amber-300 rounded-lg bg-amber-50/60 p-3 space-y-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-bold text-amber-800 uppercase tracking-wide">Out of stock</p>
+                        <p className="text-sm font-bold text-brand-navy">{subFor.description}</p>
+                        <p className="text-xs text-gray-500">
+                          {subFor.pkg_size || ''}{subFor.pkg_size ? ' · ' : ''}{formatCurrency(subFor.unit_price)}
+                          {subFor.paid_by === 'cod' && <span className="ml-2 text-purple-700 font-bold">COD · {subFor.cod_name || 'crew member'}</span>}
+                          {subFor.paid_by === 'deck' && <span className="ml-2 text-teal-700 font-bold">DECK</span>}
+                        </p>
+                      </div>
+                      <button onClick={() => { setSubFor(null); setSubPick(null); }}
+                        className="text-gray-400 hover:text-gray-600"><X className="w-4 h-4" /></button>
+                    </div>
+
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                      <input autoFocus type="text" placeholder="Search a replacement…"
+                        className="input-base text-sm pl-8 w-full"
+                        value={subSearch}
+                        onChange={e => { setSubSearch(e.target.value); setSubPick(null); searchSubs(e.target.value); }} />
+                    </div>
+
+                    {subSearching && <p className="text-xs text-gray-400">Searching…</p>}
+                    {!!subResults.length && !subPick && (
+                      <div className="max-h-44 overflow-y-auto border border-amber-200 rounded bg-white divide-y divide-gray-100">
+                        {subResults.map(p => (
+                          <button key={p.id} onClick={() => setSubPick(p)}
+                            className="w-full text-left px-2.5 py-1.5 hover:bg-amber-50 flex items-center gap-2">
+                            <span className="flex-1 min-w-0">
+                              <span className="block text-xs font-semibold text-brand-navy truncate">{p.description}</span>
+                              <span className="block text-[11px] text-gray-400">
+                                {p.pkg_size || ''}{p.location ? ` · 📍 ${p.location}` : ''}
+                              </span>
+                            </span>
+                            <span className="text-xs font-bold text-brand-navy shrink-0">{formatCurrency(p.price)}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {subPick && (
+                      <div className="flex flex-wrap items-center gap-2 bg-white border border-amber-200 rounded px-2.5 py-2">
+                        <CornerDownRight className="w-4 h-4 text-amber-600 shrink-0" />
+                        <span className="text-xs font-bold text-brand-navy flex-1 min-w-0 truncate">{subPick.description}</span>
+                        <input type="number" min="0.25" step="0.25"
+                          className="w-16 border border-gray-200 rounded px-1.5 py-0.5 text-center text-xs font-bold"
+                          value={subQty} onChange={e => setSubQty(e.target.value)} />
+                        <span className="text-xs font-bold text-brand-navy">
+                          {formatCurrency(subPick.price * (parseFloat(subQty) || 0))}
+                        </span>
+                        <button onClick={() => setSubPick(null)} className="text-xs text-gray-400 hover:text-gray-600">change</button>
+                      </div>
+                    )}
+
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      <button onClick={() => applySubstitution(true)}
+                        disabled={!subPick || rowBusy === subFor.id}
+                        className="btn-primary text-xs px-3 py-1.5 disabled:opacity-40">
+                        {rowBusy === subFor.id ? 'Saving…' : 'Substitute'}
+                      </button>
+                      {/* Sometimes there is simply nothing to swap in. */}
+                      <button onClick={() => applySubstitution(false)}
+                        disabled={rowBusy === subFor.id}
+                        className="flex items-center gap-1 text-xs font-bold text-amber-800 border border-amber-300 bg-white rounded px-3 py-1.5 hover:bg-amber-100 disabled:opacity-40">
+                        <PackageX className="w-3.5 h-3.5" /> No replacement — drop the line
+                      </button>
+                      <span className="text-[11px] text-gray-500">
+                        Either way the original stays on the sheet, struck through, so the boat can see what happened.
+                      </span>
+                    </div>
+                  </div>
+                )}
+
                 {/* Add Item */}
                 {canEdit && (
-                  <div className="mt-2">
+                  <div className="mt-2 flex flex-wrap items-center gap-3">
                     {!addingItem ? (
+                      <>
                       <button
                         onClick={() => { setAddingItem(true); setItemError(''); }}
                         className="flex items-center gap-1.5 text-xs font-bold text-brand-river hover:text-brand-navy transition-colors py-1"
                       >
                         <Plus className="w-3.5 h-3.5" /> Add Item
                       </button>
+                      {/* FILL ITEMS — Freshop's OK-all. Accept the order as
+                          placed, then only touch what actually changed. */}
+                      {groceryItems.some(i => i.shopping_status === 'pending' && !isWeighable(i) && !i.is_substitution) && (
+                        <button
+                          onClick={fillAllItems}
+                          disabled={fillingAll}
+                          className="flex items-center gap-1.5 text-xs font-bold text-white bg-brand-green rounded-lg px-3 py-1.5 hover:bg-brand-green/90 disabled:opacity-50"
+                          title="Mark everything as shopped exactly as ordered — then just fix the exceptions"
+                        >
+                          {fillingAll
+                            ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Filling…</>
+                            : <><CheckCircle2 className="w-3.5 h-3.5" /> Fill items (accept as ordered)</>}
+                        </button>
+                      )}
+                      </>
                     ) : (
                       <div className="mt-3 border border-brand-sky/30 rounded-lg bg-blue-50/40 p-3 space-y-2">
                         <p className="text-xs font-bold text-brand-navy uppercase tracking-wide">Add Item to Order</p>
@@ -1034,6 +1441,43 @@ export function OrderDetailModal({
                                 </div>
                               )}
                               {d.notes && <IB label="Details (size, color, qty)" value={d.notes} />}
+                              {/* WHAT IT ACTUALLY COST. Unknown until Sinclair's
+                                  has bought it, and until it's keyed this line
+                                  sits at $0 — so the COD handling fee is
+                                  computed on a total that's missing the TV. */}
+                              <div className="col-span-2">
+                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Price paid</p>
+                                {canEdit && priceId === item.id ? (
+                                  <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                                    <span className="text-sm font-bold text-gray-500">$</span>
+                                    <input type="number" step="0.01" min="0" autoFocus placeholder="0.00"
+                                      className="w-28 border border-purple-300 rounded px-2 py-0.5 text-right font-bold text-sm"
+                                      value={priceVal}
+                                      onChange={e => setPriceVal(e.target.value)}
+                                      onKeyDown={e => { if (e.key === 'Enter') savePickupPrice(item); if (e.key === 'Escape') setPriceId(null); }} />
+                                    <button onClick={() => savePickupPrice(item)} disabled={rowBusy === item.id}
+                                      className="btn-primary text-xs px-2.5 py-1 disabled:opacity-40">
+                                      {rowBusy === item.id ? 'Saving…' : 'Save'}
+                                    </button>
+                                    <button onClick={() => setPriceId(null)} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-2 mt-0.5">
+                                    <span className={`text-sm font-bold ${Number(item.unit_price) ? 'text-brand-navy' : 'text-amber-700'}`}>
+                                      {Number(item.unit_price)
+                                        ? formatCurrency(Number(item.unit_price) * Number(item.quantity || 1))
+                                        : 'Not priced yet'}
+                                    </span>
+                                    {canEdit && (
+                                      <button
+                                        onClick={() => { setPriceId(item.id); setPriceVal(Number(item.unit_price) ? String(item.unit_price) : ''); setItemError(''); }}
+                                        className="text-xs font-bold text-brand-river hover:underline">
+                                        {Number(item.unit_price) ? 'Change' : 'Enter price'}
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
                               {/* Who pays. A COD outside pickup is a crew
                                   member's personal purchase and gets rung up
                                   separately — the picker must see this before

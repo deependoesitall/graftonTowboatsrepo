@@ -33,8 +33,6 @@ interface Settings {
   email_button_text: string;
   email_button_url: string;
   weekly_ad_url: string;
-  grocery_cutoff_hours: number;
-  service_cutoff_hours: number;
   show_digital_coupons: boolean;
   cod_fee_enabled: boolean;
   cod_fee_percent: number;
@@ -103,8 +101,6 @@ export default function AdminSettingsPage() {
     email_button_text: 'Order Dashboard',
     email_button_url: '/admin/orders',
     weekly_ad_url: '',
-    grocery_cutoff_hours: 4,
-    service_cutoff_hours: 2,
     show_digital_coupons: true,
     cod_fee_enabled: true,
     cod_fee_percent: 5,
@@ -312,8 +308,6 @@ export default function AdminSettingsPage() {
     // this too, but sending owner-only fields would 403 the whole request.
     const payload = sessionRole === 'manager'
       ? {
-          grocery_cutoff_hours: settings.grocery_cutoff_hours,
-          service_cutoff_hours: settings.service_cutoff_hours,
           show_digital_coupons: settings.show_digital_coupons,
           store_zone_order: settings.store_zone_order,
           cod_fee_enabled: settings.cod_fee_enabled,
@@ -696,34 +690,12 @@ export default function AdminSettingsPage() {
         </div>
       )}
 
-      {/* ── SINCLAIR'S (weekly ad, order cutoff, coupons) ── */}
+      {/* ── SINCLAIR'S (weekly ad, coupons, walk order) ──
+           The Order Cutoff Timer lived here and was removed: a towboat's ETA
+           moves constantly and crews order when they get signal, so refusing a
+           late order created more phone calls than it prevented. */}
       {tab === 'sinclair' && (
         <div className="space-y-6">
-          <div className="card-base p-6 space-y-4">
-            <h2 className="font-bold text-brand-navy">Order Cutoff Timer</h2>
-            <p className="text-xs text-gray-400 -mt-2">
-              Blocks new orders placed too close to the vessel&apos;s ETA so there&apos;s time to shop and
-              deliver. We recommend at least 4 hours for grocery orders. Set to 0 to disable.
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="label-base">Grocery Orders — hours before ETA</label>
-                <input type="number" min="0" step="0.5" className="input-base w-32"
-                  value={settings.grocery_cutoff_hours}
-                  onChange={e => setSettings(s => ({ ...s, grocery_cutoff_hours: parseFloat(e.target.value) || 0 }))} />
-                {settings.grocery_cutoff_hours > 0 && settings.grocery_cutoff_hours < 4 && (
-                  <p className="text-xs text-amber-600 mt-1">Below the recommended 4-hour minimum.</p>
-                )}
-              </div>
-              <div>
-                <label className="label-base">Crew Change / Services Only — hours before ETA</label>
-                <input type="number" min="0" step="0.5" className="input-base w-32"
-                  value={settings.service_cutoff_hours}
-                  onChange={e => setSettings(s => ({ ...s, service_cutoff_hours: parseFloat(e.target.value) || 0 }))} />
-              </div>
-            </div>
-          </div>
-
           <div className="card-base p-6 space-y-3">
             <div className="flex items-start justify-between gap-4">
               <div>

@@ -54,6 +54,8 @@ function CatalogSyncStatus({ isOwner }: { isOwner: boolean }) {
     pages_done: number; pages_total: number; sized_items: number;
     departments: string[]; products_updated: number; store_items_imported: number;
     last_error: string | null; checkpoint_updated_at: string | null;
+    schema_ok?: boolean;
+    schema_issues?: Array<{ table: string; missing: string[]; migration: string; breaks: string }>;
   }>(null);
   const [kicking, setKicking] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -152,6 +154,28 @@ function CatalogSyncStatus({ isOwner }: { isOwner: boolean }) {
           </button>
         )}
       </div>
+      {/* MIGRATION DRIFT — loud, red, and above everything else.
+          A migration applied out of order once left the code calling a table
+          that didn't exist; the sync reported success for days while the store
+          reconcile silently never ran. It was caught by a human reading SQL.
+          The app knew the whole time — now it says so. */}
+      {status?.schema_ok === false && (status.schema_issues?.length ?? 0) > 0 && (
+        <div className="mt-1 mb-1 rounded-lg border-2 border-red-300 bg-red-50 px-3 py-2">
+          <p className="text-[11px] font-bold text-red-700 uppercase tracking-wide">
+            ⚠ Database is behind the code — run the missing migrations
+          </p>
+          <ul className="mt-1 space-y-0.5">
+            {status.schema_issues!.map(i => (
+              <li key={i.table} className="text-[10px] text-red-800 leading-snug">
+                <span className="font-mono font-bold">{i.table}</span>
+                {' '}missing <span className="font-mono">{i.missing.join(', ')}</span>
+                {' — '}{i.breaks}
+                <span className="block text-red-600">Run: {i.migration}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {status?.last_error && (
         <p className="text-[10px] text-amber-600 mt-0.5">{status.last_error}</p>
       )}

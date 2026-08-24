@@ -58,6 +58,11 @@ export interface FreshopProduct {
   fulfillment_walkpath?: { name?: string; sequence?: number };
   base_price?: number;
   unit_price?: number;
+  /** Sale fields — present only while an offer runs. offer_sale_price is what
+   *  it actually rings at; base_price stays the regular shelf price. */
+  offer_sale_price?: number;
+  sale_start_date?: string;   // "2026-07-29"
+  sale_finish_date?: string;  // "2026-08-25"
   quantity_step?: number;
   quantity_label?: string;
   quantity_size_ratio?: number;
@@ -154,10 +159,51 @@ function locationSeqFrom(p: FreshopProduct): number | null {
   const seq = p.fulfillment_walkpath?.sequence;
   return typeof seq === 'number' && isFinite(seq) ? seq : null;
 }
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** Is the advertised sale live today? Freshop keeps finished offers on the
+ *  record, so the dates have to be checked rather than trusted by presence. */
+export function saleIsActive(p: FreshopProduct, today = new Date()): boolean {
+  if (typeof p.offer_sale_price !== 'number' || !isFinite(p.offer_sale_price)) return false;
+  const day = today.toISOString().slice(0, 10);
+  if (p.sale_start_date && day < p.sale_start_date) return false;
+  if (p.sale_finish_date && day > p.sale_finish_date) return false;
+  return true;
+}
+
+/**
+ * The price we CHARGE — the sale price while a sale runs, else the shelf price.
+ *
+ * Storing the effective price in products.price means every existing
+ * calculation (cart totals, estimates, invoices, the COD handling fee) keeps
+ * working untouched and simply gets the sale number. regular_price carries the
+ * struck-through figure for display only.
+ */
 function priceFrom(p: FreshopProduct): number | null {
-  const raw = p.base_price ?? p.unit_price;
+  const raw = saleIsActive(p)
+    ? p.offer_sale_price
+    : (p.base_price ?? p.unit_price);
   if (typeof raw !== 'number' || !isFinite(raw) || raw <= 0) return null;
-  return Math.round(raw * 100) / 100;
+  return round2(raw);
+}
+
+/** Display-only sale fields. All null when nothing is on sale, so
+ *  "regular_price IS NOT NULL" is the single test for "on sale right now". */
+export function saleFieldsFrom(p: FreshopProduct): {
+  regular_price: number | null; sale_start_date: string | null; sale_finish_date: string | null;
+} {
+  if (!saleIsActive(p)) return { regular_price: null, sale_start_date: null, sale_finish_date: null };
+  const regular = p.base_price ?? p.unit_price;
+  // A "sale" that isn't cheaper isn't a sale — don't print a struck-through
+  // price that matches the one beside it.
+  if (typeof regular !== 'number' || !isFinite(regular) || regular <= (p.offer_sale_price ?? 0)) {
+    return { regular_price: null, sale_start_date: null, sale_finish_date: null };
+  }
+  return {
+    regular_price: round2(regular),
+    sale_start_date: p.sale_start_date ?? null,
+    sale_finish_date: p.sale_finish_date ?? null,
+  };
 }
 
 export interface SyncStats {
@@ -202,6 +248,17 @@ export function computeFields(
   if (!locked.has('price') && newPrice != null && Math.abs(newPrice - Number(product.price)) >= 0.005) {
     fields.price = newPrice;
     stats.prices++;
+  }
+  // Sale display fields ride along with price. ALWAYS written — including back
+  // to null — because a finished sale has to stop showing a struck-through
+  // price the moment it expires. Sinclair's ad turns over at midnight Tuesday.
+  if (!locked.has('price')) {
+    const sale = saleFieldsFrom(hit);
+    if (sale.regular_price !== (product as { regular_price?: number | null }).regular_price) {
+      fields.regular_price = sale.regular_price;
+      fields.sale_start_date = sale.sale_start_date;
+      fields.sale_finish_date = sale.sale_finish_date;
+    }
   }
   const newStep = typeof hit.quantity_step === 'number' && isFinite(hit.quantity_step) && hit.quantity_step > 0 ? hit.quantity_step : null;
   const newLabel = stripZzz((hit.quantity_label || '').trim()) || null;
@@ -356,6 +413,7 @@ export function isWeighableUpcDigits(upc: string | null | undefined): boolean {
 export function buildStoreProduct(p: FreshopProduct, deptCategory: string): Record<string, unknown> | null {
   const name = (p.name || '').trim();
   const price = priceFrom(p);
+  const sale = saleFieldsFrom(p);
   if (!name || price == null) return null;
   if (isAlcohol(p)) return null;
   if (isFloral(p)) return null;
@@ -375,6 +433,9 @@ export function buildStoreProduct(p: FreshopProduct, deptCategory: string): Reco
     pkg_size: isRealSize(cleanSize) ? cleanSize : null,
     uom: weighable ? 'LB' : 'EA',
     price,
+    regular_price: sale.regular_price,
+    sale_start_date: sale.sale_start_date,
+    sale_finish_date: sale.sale_finish_date,
     image_url: imageFrom(p),
     image_source: imageFrom(p) ? 'sinclair_sync' : null,
     location: locationFrom(p),

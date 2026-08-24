@@ -3,7 +3,7 @@
 // Role scoping:
 //   Owner   — full settings access.
 //   Manager — sees/edits ONLY the Sinclair-owned fields: weekly_ad_url and
-//             the order cutoff buffers. Everything else (business email, tax,
+//             Everything else (business email, tax,
 //             feature toggles, email config) is owner-only, enforced here —
 //             not just hidden in the UI.
 import { NextRequest, NextResponse } from 'next/server';
@@ -15,7 +15,7 @@ import { sanitizeZoneOrder } from '@/lib/store-layout';
 // Fields a manager may read and write. (weekly_ad_url moved to owner-only —
 // the ad auto-syncs; the manual override is a safety valve Sinclair's staff
 // shouldn't have to think about.)
-const MANAGER_FIELDS = ['grocery_cutoff_hours', 'service_cutoff_hours', 'show_digital_coupons', 'store_zone_order', 'cod_fee_enabled', 'cod_fee_percent'] as const;
+const MANAGER_FIELDS = ['show_digital_coupons', 'store_zone_order', 'cod_fee_enabled', 'cod_fee_percent'] as const;
 
 export async function GET(req: NextRequest) {
   const session = requireAdmin(req, { area: 'settings' });
@@ -52,8 +52,6 @@ export async function PATCH(req: NextRequest) {
   const updates: Record<string, any> = {};
 
   // Manager-editable fields (Sinclair owns these)
-  if (body.grocery_cutoff_hours !== undefined) updates.grocery_cutoff_hours = Math.max(0, Number(body.grocery_cutoff_hours) || 0);
-  if (body.service_cutoff_hours !== undefined) updates.service_cutoff_hours = Math.max(0, Number(body.service_cutoff_hours) || 0);
   if (body.show_digital_coupons !== undefined) updates.show_digital_coupons = !!body.show_digital_coupons;
   if (body.store_zone_order !== undefined) updates.store_zone_order = sanitizeZoneOrder(body.store_zone_order);
   if (body.cod_fee_enabled !== undefined) updates.cod_fee_enabled = !!body.cod_fee_enabled;

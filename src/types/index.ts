@@ -26,6 +26,11 @@ export interface Product {
   pkg_size: string | null;
   uom: string | null;
   price: number;
+  /** Shelf price before the current sale. NULL = not on sale — `price` already
+   *  IS the effective price, so every calculation works untouched. */
+  regular_price?: number | null;
+  sale_start_date?: string | null;
+  sale_finish_date?: string | null;
   tags: string[];
   is_active: boolean;
   is_available: boolean;
@@ -226,6 +231,9 @@ export interface Order {
   discounts?: OrderDiscount[];
   subtotal: number;
   register_total?: number | null;
+  /** DECK total rung at the register — invoiced separately from the
+   *  grocery allowance. NULL = no deck lines, or not yet keyed. */
+  deck_register_total?: number | null;
   /** GTS delivery billing — rides on the final email as a line item. */
   delivery_fee?: number | null;
   delivery_service_type?: string | null;
@@ -261,6 +269,9 @@ export interface OrderItem {
   /** Sinclair's walkpath stop number — snapshot at order time (may be null on old orders). */
   location_seq: number | null;
   unit_price: number;
+  /** Sale snapshot, as quoted at order time. NULL = wasn't on sale then. */
+  regular_price?: number | null;
+  sale_finish_date?: string | null;
   quantity: number;
   line_total: number;
   shopping_status: 'pending' | 'shopped' | 'out_of_stock';
