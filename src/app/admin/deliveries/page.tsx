@@ -3,7 +3,7 @@
 // The delivery ledger — Mary/Jen's "DELIVERIES" spreadsheet, in the app.
 // Monthly view, add/edit a delivery with rate auto-fill from the company's
 // rate card, and an editable rate-card manager. No more Google Drive.
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Truck, Plus, Pencil, Trash2, X, Loader2, DollarSign, Check, SlidersHorizontal, FileText, Search } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
@@ -45,7 +45,6 @@ export default function DeliveriesPage() {
   // 'all' = whole-year list (default); otherwise a specific 'YYYY-MM'.
   const [month, setMonth] = useState<string>('all');
   const [rows, setRows] = useState<Delivery[]>([]);
-  const [totals, setTotals] = useState({ count: 0, delivery_fees: 0, groceries: 0, driver_pay: 0 });
   const [loading, setLoading] = useState(true);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
@@ -67,18 +66,53 @@ export default function DeliveriesPage() {
 
   // "Which delivery was that?" — vessel first, since a company can run 15+
   // boats and the boat is how everyone actually refers to a delivery.
+  //
+  // Three of the searched fields aren't columns in the table (location, GTS
+  // contact, notes). A Reliant row surfacing in an "ingram" search is CORRECT
+  // when the Ingram fleet is the delivery location — but it reads as a broken
+  // filter, so rows matched only on a hidden field say which one.
   const q = search.trim().toLowerCase();
-  const visibleRows = !q ? rows : rows.filter(d =>
-    [d.vessel_name, d.company?.name, d.service_type, d.location_delivered,
-     d.delivery_driver, d.gts_correspondent, d.delivery_date, d.issues_comments]
-      .some(v => (v || '').toString().toLowerCase().includes(q)));
+  const matches = useMemo(() => {
+    if (!q) return rows.map(d => ({ d, via: null as string | null }));
+    const hidden: [keyof Delivery, string][] = [
+      ['location_delivered', 'location'],
+      ['gts_correspondent', 'GTS contact'],
+      ['issues_comments', 'notes'],
+    ];
+    const out: { d: Delivery; via: string | null }[] = [];
+    for (const d of rows) {
+      const onScreen = [d.vessel_name, d.company?.name, d.service_type, d.delivery_driver, d.delivery_date]
+        .some(v => (v || '').toString().toLowerCase().includes(q));
+      const hit = hidden.find(([f]) => (d[f] || '').toString().toLowerCase().includes(q));
+      if (onScreen) out.push({ d, via: null });
+      else if (hit) out.push({ d, via: hit[1] });
+    }
+    return out;
+  }, [rows, q]);
+  const visibleRows = useMemo(() => matches.map(m => m.d), [matches]);
+
+  // TOTALS ARE DERIVED FROM WHAT'S ON SCREEN — never fetched separately.
+  //
+  // They used to come straight from the API, which only knows about the month
+  // filter. Searching "Ingram" filtered the table but left the cards showing
+  // the whole year: 132 deliveries for every search term, which is how this got
+  // caught in front of Jen. The API returns every row for the period (no
+  // pagination), so summing the visible rows is exactly the same arithmetic —
+  // with one source of truth instead of two that can disagree.
+  const totals = useMemo(() => ({
+    count: visibleRows.length,
+    delivery_fees: visibleRows.reduce((s, r) => s + Number(r.delivery_fee || 0), 0),
+    groceries: visibleRows.reduce((s, r) => s + Number(r.sinclairs_grocery_total || 0), 0),
+    driver_pay: visibleRows.reduce((s, r) => s + Number(r.amount_paid_driver || 0), 0),
+  }), [visibleRows]);
+
   const { confirm, dialog } = useConfirm();
 
   const load = useCallback(async () => {
     setLoading(true);
     const q = month === 'all' ? `year=${LEDGER_YEAR}` : `month=${month}`;
     const res = await adminFetch(`/api/admin/deliveries?${q}`);
-    if (res.ok) { const d = await res.json(); setRows(d.deliveries); setTotals(d.totals); }
+    if (res.ok) { const d = await res.json(); setRows(d.deliveries); }
     setLoading(false);
   }, [month]);
 
@@ -151,7 +185,8 @@ export default function DeliveriesPage() {
         </div>
       </div>
 
-      {/* Month summary */}
+      {/* Summary — always reflects the rows below, search included. The label
+          says so out loud, so nobody has to wonder which number is real. */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
         {[
           { label: 'Deliveries', val: totals.count, money: false },
@@ -159,12 +194,30 @@ export default function DeliveriesPage() {
           { label: "Sinclair's Groceries", val: totals.groceries, money: true },
           { label: 'Driver Pay', val: totals.driver_pay, money: true },
         ].map(s => (
-          <div key={s.label} className="card-base p-4">
-            <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide">{s.label}</p>
+          <div key={s.label} className={`card-base p-4 ${q ? 'border-brand-gold/50 bg-brand-sand/20' : ''}`}>
+            <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide flex items-center gap-1.5">
+              {s.label}
+              {q && (
+                <span className="text-[9px] font-bold text-brand-navy bg-brand-gold/40 rounded px-1 py-0.5 normal-case tracking-normal">
+                  filtered
+                </span>
+              )}
+            </p>
             <p className="text-xl font-bold text-brand-navy mt-1">{s.money ? formatCurrency(s.val) : s.val}</p>
           </div>
         ))}
       </div>
+      {q && (
+        <p className="-mt-3 mb-4 text-xs text-gray-500">
+          Showing <span className="font-bold text-brand-navy">{totals.count}</span> of{' '}
+          <span className="font-semibold">{rows.length}</span> deliveries matching{' '}
+          &ldquo;<span className="font-semibold text-brand-navy">{search}</span>&rdquo;
+          {month === 'all' ? ` in ${LEDGER_YEAR}` : ''}.{' '}
+          <button onClick={() => setSearch('')} className="text-brand-river font-semibold hover:underline">
+            Clear search
+          </button>
+        </p>
+      )}
 
       {/* Ledger table */}
       <div className="card-base overflow-x-auto">
@@ -193,11 +246,20 @@ export default function DeliveriesPage() {
               </tr>
             </thead>
             <tbody>
-              {visibleRows.map(d => (
+              {matches.map(({ d, via }) => (
                 <tr key={d.id} className="border-b border-gray-100 hover:bg-gray-50">
                   <td className="px-3 py-2.5 whitespace-nowrap">{d.delivery_date || '—'}</td>
                   <td className="px-3 py-2.5 font-medium text-brand-navy">{d.company?.name || '—'}</td>
-                  <td className="px-3 py-2.5">{d.vessel_name || '—'}</td>
+                  <td className="px-3 py-2.5">
+                    {d.vessel_name || '—'}
+                    {/* Why this row is here when nothing on screen says so. */}
+                    {via && (
+                      <span className="block text-[10px] text-amber-700 font-semibold mt-0.5"
+                        title={`This row matched your search in its ${via} field, which isn't shown as a column.`}>
+                        matched in {via}
+                      </span>
+                    )}
+                  </td>
                   <td className="px-3 py-2.5 text-gray-600">{d.service_type || '—'}</td>
                   <td className="px-3 py-2.5 text-right font-semibold">{d.delivery_fee != null ? formatCurrency(d.delivery_fee) : '—'}</td>
                   <td className="px-3 py-2.5 text-right">{d.sinclairs_grocery_total != null ? formatCurrency(d.sinclairs_grocery_total) : '—'}</td>
