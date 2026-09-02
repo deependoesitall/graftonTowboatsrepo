@@ -41,6 +41,13 @@ export interface Product {
   form_seq: number | null;        // global position on the form; NULL = not on the order form
   /** TRUE = full-store import (hidden from default browse; reachable via "browse the whole store" flows). */
   store_only: boolean;
+  /** Size-variant grouping (migration 061). The order form lists one row per
+   *  weight/pack of the same cut; these let the storefront draw ONE card with a
+   *  size chooser while every size keeps its own row, price and register SKU.
+   *  NULL = this product renders as its own card. */
+  variant_group?: string | null;
+  variant_label?: string | null;   // chip text: "3 lb", "8 pk", "16 oz"
+  variant_rank?: number | null;    // numeric size, ascending
   /** Sinclair's internal product id — set when the item is matched to their website. */
   freshop_id?: string | null;
   /** Freshop store-wide popularity rank (1 = most popular, NULL = unranked).

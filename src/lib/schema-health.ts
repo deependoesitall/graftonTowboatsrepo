@@ -40,6 +40,12 @@ const REQUIRED: Requirement[] = [
     breaks: 'Photo review and sale prices stop updating during the nightly sync.',
   },
   {
+    table: 'products',
+    columns: ['variant_group', 'variant_label', 'variant_rank'],
+    migration: '061_variant_groups.sql',
+    breaks: 'Repeated meat sizes show as separate cards instead of one card with a size chooser.',
+  },
+  {
     table: 'orders',
     columns: ['register_total', 'deck_register_total', 'cod_fee_percent', 'cod_fee_amount'],
     migration: '058_cod_fee_amount.sql / 059_deck_register_total.sql',

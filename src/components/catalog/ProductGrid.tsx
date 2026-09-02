@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Product } from '@/types';
-import { formatCurrency, formatLb, lbStepsFor, usesLbSteps, productDisplayName } from '@/lib/utils';
+import { formatCurrency, formatLb, lbStepsFor, usesLbSteps, productDisplayName, buildVariantSet } from '@/lib/utils';
 import { addToCart } from '@/lib/cart';
 import { Plus, Minus, ShoppingCart, Package, Check, Star, X, Scale, Tag } from 'lucide-react';
 import Link from 'next/link';
@@ -27,7 +27,9 @@ interface ProductGridProps {
 export function ProductGrid({ products, totalCount, page, totalPages, search, category, storeAll }: ProductGridProps) {
   const { user } = useAuth();
   const [favIds, setFavIds] = useState<Set<string>>(new Set());
-  const [detailProduct, setDetailProduct] = useState<Product | null>(null);
+  // Detail modal carries the whole variant set, so the size chooser survives
+  // the jump from card to modal instead of silently dropping to one size.
+  const [detailProduct, setDetailProduct] = useState<{ product: Product; variants?: Product[] } | null>(null);
 
   useEffect(() => {
     if (!user) { setFavIds(new Set()); return; }
@@ -68,7 +70,27 @@ export function ProductGrid({ products, totalCount, page, totalPages, search, ca
         {(() => {
           const out: ReactNode[] = [];
           let lastHeader: string | null = null;
+
+          // SIZE VARIANTS (migration 061): the order form lists the same cut
+          // once per weight/pack. Bucket those rows so the grid draws ONE card
+          // with a size chooser instead of three photos of the same steak.
+          // The group renders at the position of its FIRST row, so the paper
+          // form's sequence — which the barges shop top to bottom — is intact.
+          const byGroup = new Map<string, Product[]>();
+          for (const p of products) {
+            if (!p.variant_group) continue;
+            const bucket = byGroup.get(p.variant_group);
+            if (bucket) bucket.push(p);
+            else byGroup.set(p.variant_group, [p]);
+          }
+          const drawnGroups = new Set<string>();
+
           for (const product of products) {
+            // Later rows of an already-drawn group fold into its chooser.
+            if (product.variant_group) {
+              if (drawnGroups.has(product.variant_group)) continue;
+              drawnGroups.add(product.variant_group);
+            }
             if (product.form_subsection && product.form_subsection !== lastHeader) {
               lastHeader = product.form_subsection;
               out.push(
@@ -93,11 +115,13 @@ export function ProductGrid({ products, totalCount, page, totalPages, search, ca
                 </div>
               );
             }
+            const variants = product.variant_group ? byGroup.get(product.variant_group) : undefined;
             out.push(
               <ProductCard key={product.id} product={product}
+                variants={variants && variants.length > 1 ? variants : undefined}
                 isLoggedIn={!!user}
-                isFavorite={favIds.has(product.id)}
-                onOpenDetail={() => setDetailProduct(product)} />
+                favIds={favIds}
+                onOpenDetail={(p, v) => setDetailProduct({ product: p, variants: v })} />
             );
           }
           return out;
@@ -107,9 +131,10 @@ export function ProductGrid({ products, totalCount, page, totalPages, search, ca
       {/* Product detail modal */}
       {detailProduct && (
         <ProductDetailModal
-          product={detailProduct}
+          product={detailProduct.product}
+          variants={detailProduct.variants}
           onClose={() => setDetailProduct(null)}
-          onSelectProduct={p => setDetailProduct(p)} />
+          onSelectProduct={p => setDetailProduct({ product: p })} />
       )}
 
       {/* Pagination */}
@@ -164,38 +189,60 @@ function PaginationLink({ href, label }: { href: string; label: string }) {
   );
 }
 
-function ProductCard({ product, isLoggedIn, isFavorite, onOpenDetail }: {
-  product: Product; isLoggedIn: boolean; isFavorite: boolean; onOpenDetail: () => void;
+function ProductCard({ product, variants, isLoggedIn, favIds, onOpenDetail }: {
+  product: Product; variants?: Product[]; isLoggedIn: boolean;
+  favIds: Set<string>; onOpenDetail: (p: Product, variants?: Product[]) => void;
 }) {
+  // ── Size chooser ────────────────────────────────────────────
+  // When this card stands for a group, `active` is the size the cook has
+  // picked and everything below — price, photo, cart line — follows it. The
+  // other sizes stay real rows in the database; we're only choosing which one
+  // this card is currently offering.
+  const set = variants ? buildVariantSet(variants, p => productDisplayName(p)) : null;
+  const [selectedId, setSelectedId] = useState<string>(set ? set.options[0].id : product.id);
+  const active = set ? (set.options.find(o => o.id === selectedId) ?? set.options[0]) : product;
+
   const [qty, setQty] = useState(1);
   const [justAdded, setJustAdded] = useState(false);
   const { toast } = useToast();
-  const byWeight = !!product.billed_by_weight;
+  const byWeight = !!active.billed_by_weight;
+  const isFavorite = favIds.has(active.id);
   // lb dropdown ONLY for items Sinclair's own site sells in fractional-lb
   // steps (deli scale items). Produce counts whole units even when billed
   // by weight — bananas are "3 bananas", not "3 lb".
-  const lbSteps = usesLbSteps(product.quantity_step) ? lbStepsFor(product.quantity_step!) : null;
+  const lbSteps = usesLbSteps(active.quantity_step) ? lbStepsFor(active.quantity_step!) : null;
+
+  // Photo fallback across the group. The barge list is still 23% short on
+  // photos; when the 8 lb roast has no picture but the 5 lb does, they are
+  // literally the same cut of meat, so show it rather than a grey band.
+  const image = active.image_url || set?.options.find(o => o.image_url)?.image_url || null;
+
+  // Cart lines carry the CHOSEN size's name, so the pick sheet and the
+  // register still see the exact SKU Sinclair's has to ring up.
+  const cartName = set
+    ? `${set.baseName} — ${active.variant_label}`
+    : productDisplayName(product);
 
   const handleAdd = useCallback(() => {
     addToCart({
-      product_id: product.id,
+      product_id: active.id,
       // Customers see the full website name everywhere (cart, emails,
       // receipts) — not the POS abbreviation ("YOP STRWBRY YOG").
-      description: productDisplayName(product),
-      category: product.category,
-      pkg_size: product.pkg_size,
-      uom: product.uom,
-      price: product.price,
+      description: cartName,
+      category: active.category,
+      pkg_size: active.pkg_size,
+      uom: active.uom,
+      price: active.price,
       quantity: qty,
-      billed_by_weight: !!product.billed_by_weight,
-      quantity_step: product.quantity_step,
-      image_url: product.image_url,
+      billed_by_weight: !!active.billed_by_weight,
+      quantity_step: active.quantity_step,
+      image_url: image,
       paid_by: 'vessel',
     });
     setJustAdded(true);
     toast({
       title: 'Added to cart',
-      description: `${lbSteps ? formatLb(qty) : `${qty}×`} ${productDisplayName(product)}`,
+      description: `${lbSteps ? formatLb(qty) : `${qty}×`} ${cartName}`,
       variant: 'success',
       duration: 2000,
     });
@@ -203,7 +250,7 @@ function ProductCard({ product, isLoggedIn, isFavorite, onOpenDetail }: {
       setJustAdded(false);
       setQty(1);
     }, 1800);
-  }, [product, qty, toast]);
+  }, [active, cartName, image, lbSteps, qty, toast]);
 
   async function toggleFavorite(e: React.MouseEvent) {
     e.preventDefault(); e.stopPropagation();
@@ -211,8 +258,8 @@ function ProductCard({ product, isLoggedIn, isFavorite, onOpenDetail }: {
       toast({ title: 'Sign in to save favorites', description: 'Create a free account to star items', duration: 2500 });
       return;
     }
-    if (isFavorite) { await removeFavorite(product.id); }
-    else { await addFavorite(product.id); }
+    if (isFavorite) { await removeFavorite(active.id); }
+    else { await addFavorite(active.id); }
   }
 
   return (
@@ -228,44 +275,76 @@ function ProductCard({ product, isLoggedIn, isFavorite, onOpenDetail }: {
         <Star className={`w-4 h-4 ${isFavorite ? 'fill-brand-orange' : ''}`} />
       </button>
       {/* Product image or category color band — click opens detail modal */}
-      <button type="button" onClick={onOpenDetail} className="block w-full text-left cursor-pointer" aria-label={`View details for ${product.description}`}>
-        {product.image_url ? (
+      <button type="button" onClick={() => onOpenDetail(active, set?.options)} className="block w-full text-left cursor-pointer" aria-label={`View details for ${active.description}`}>
+        {image ? (
           <div className="relative w-full aspect-square bg-gray-50 overflow-hidden">
             <Image
-              src={product.image_url}
-              alt={product.description}
+              src={image}
+              alt={active.description}
               fill
               className="object-contain p-2"
               unoptimized
             />
-            <div className={`absolute bottom-0 left-0 right-0 h-0.5 ${getCategoryColor(product.category)}`} />
+            <div className={`absolute bottom-0 left-0 right-0 h-0.5 ${getCategoryColor(active.category)}`} />
           </div>
         ) : (
-          <div className={`h-1.5 w-full ${getCategoryColor(product.category)}`} />
+          <div className={`h-1.5 w-full ${getCategoryColor(active.category)}`} />
         )}
       </button>
 
       <div className="p-3 flex flex-col gap-2 flex-1">
         {/* Clickable info area — opens detail modal */}
-        <button type="button" onClick={onOpenDetail} className="text-left flex flex-col gap-2 cursor-pointer">
+        <button type="button" onClick={() => onOpenDetail(active, set?.options)} className="text-left flex flex-col gap-2 cursor-pointer">
           {/* Category label — show main category only, not internal Sinclair sub-category */}
           <span className="text-[10px] font-bold text-brand-river uppercase tracking-wide leading-none truncate">
-            {product.category}
+            {active.category}
           </span>
 
           {/* Product name — the FULL website name, like Sinclair's own site
-              ("Yoplait Low Fat Strawberry Yogurt"), never the POS abbreviation */}
+              ("Yoplait Low Fat Strawberry Yogurt"), never the POS abbreviation.
+              Grouped cards drop the size token; the chips below carry it. */}
           <h3 className="font-body font-semibold text-brand-navy text-sm leading-tight line-clamp-2 min-h-[2.5rem]">
-            {productDisplayName(product)}
+            {set ? set.baseName : productDisplayName(product)}
           </h3>
 
-          {/* Pack size */}
-          {product.pkg_size && (
+          {/* Pack size — redundant once the size chips are showing */}
+          {!set && active.pkg_size && (
             <p className="text-[11px] text-gray-400 -mt-1">
-              {product.pkg_size}{product.uom ? ` / ${product.uom}` : ''}
+              {active.pkg_size}{active.uom ? ` / ${active.uom}` : ''}
             </p>
           )}
         </button>
+
+        {/* ── Size chips ──────────────────────────────────────────
+            Replaces N near-identical cards. Two taps to order 8 lb of
+            ground chuck instead of hunting the right row in a wall of
+            repeats — the whole point of the exercise for a cook who is
+            doing this on a phone with the boat moving. */}
+        {set && (
+          <div className="-mt-0.5">
+            <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Size</p>
+            <div className="flex flex-wrap gap-1">
+              {set.options.map(opt => {
+                const on = opt.id === active.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => { setSelectedId(opt.id); setQty(1); }}
+                    aria-pressed={on}
+                    className={`px-2 py-1 rounded text-[11px] font-bold border transition-colors ${
+                      on
+                        ? 'bg-brand-navy text-white border-brand-navy'
+                        : 'bg-white text-gray-600 border-gray-200 hover:border-brand-steel'
+                    }`}
+                  >
+                    {opt.variant_label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Price + controls */}
         <div className="border-t border-gray-100 pt-2 mt-auto">
@@ -276,7 +355,7 @@ function ProductCard({ product, isLoggedIn, isFavorite, onOpenDetail }: {
           )}
           <div className="flex items-center justify-between gap-1 mb-2">
             <span className="text-base font-bold text-brand-navy font-body">
-              {formatCurrency(product.price)}{byWeight && <span className="text-[10px] font-semibold text-gray-400"> /lb</span>}
+              {formatCurrency(active.price)}{byWeight && <span className="text-[10px] font-semibold text-gray-400"> /lb</span>}
             </span>
             {/* Qty stepper (count items) — fractional-lb items pick pounds below */}
             {!lbSteps && (
@@ -332,12 +411,12 @@ function ProductCard({ product, isLoggedIn, isFavorite, onOpenDetail }: {
           )}
           {lbSteps && qty > 0 && (
             <p className="text-[10px] text-gray-400 mb-1.5 -mt-1">
-              {formatLb(qty)} · ~{formatCurrency(product.price * qty)} est. — billed at actual weight
+              {formatLb(qty)} · ~{formatCurrency(active.price * qty)} est. — billed at actual weight
             </p>
           )}
-          {!lbSteps && byWeight && product.quantity_size_ratio && (
+          {!lbSteps && byWeight && active.quantity_size_ratio && (
             <p className="text-[10px] text-gray-400 mb-1.5 -mt-1">
-              ≈{product.quantity_size_ratio} lb each · billed at actual weight
+              ≈{active.quantity_size_ratio} lb each · billed at actual weight
             </p>
           )}
 
@@ -364,35 +443,43 @@ function ProductCard({ product, isLoggedIn, isFavorite, onOpenDetail }: {
 }
 
 // ─── Product detail modal ─────────────────────────────────────
-function ProductDetailModal({ product, onClose, onSelectProduct }: {
-  product: Product; onClose: () => void; onSelectProduct: (p: Product) => void;
+function ProductDetailModal({ product, variants, onClose, onSelectProduct }: {
+  product: Product; variants?: Product[]; onClose: () => void; onSelectProduct: (p: Product) => void;
 }) {
+  const set = variants && variants.length > 1
+    ? buildVariantSet(variants, p => productDisplayName(p))
+    : null;
+  const [selectedId, setSelectedId] = useState<string>(product.id);
+  const active = set ? (set.options.find(o => o.id === selectedId) ?? set.options[0]) : product;
+
   const [qty, setQty] = useState(1);
   const [justAdded, setJustAdded] = useState(false);
   const { toast } = useToast();
-  const byWeight = !!product.billed_by_weight;
-  const lbSteps = usesLbSteps(product.quantity_step) ? lbStepsFor(product.quantity_step!) : null;
+  const byWeight = !!active.billed_by_weight;
+  const lbSteps = usesLbSteps(active.quantity_step) ? lbStepsFor(active.quantity_step!) : null;
+  const image = active.image_url || set?.options.find(o => o.image_url)?.image_url || null;
+  const cartName = set ? `${set.baseName} — ${active.variant_label}` : productDisplayName(product);
 
   // Reset the stepper whenever the modal swaps to a different product
   // (tapping through the also-bought row keeps the modal open).
-  useEffect(() => { setQty(1); setJustAdded(false); }, [product.id]);
+  useEffect(() => { setQty(1); setJustAdded(false); setSelectedId(product.id); }, [product.id]);
 
   function handleAdd() {
     addToCart({
-      product_id: product.id,
-      description: productDisplayName(product),
-      category: product.category,
-      pkg_size: product.pkg_size,
-      uom: product.uom,
-      price: product.price,
+      product_id: active.id,
+      description: cartName,
+      category: active.category,
+      pkg_size: active.pkg_size,
+      uom: active.uom,
+      price: active.price,
       quantity: qty,
       billed_by_weight: byWeight,
-      quantity_step: product.quantity_step,
-      image_url: product.image_url,
+      quantity_step: active.quantity_step,
+      image_url: image,
       paid_by: 'vessel',
     });
     setJustAdded(true);
-    toast({ title: 'Added to cart', description: `${lbSteps ? formatLb(qty) : `${qty}×`} ${productDisplayName(product)}`, variant: 'success', duration: 2000 });
+    toast({ title: 'Added to cart', description: `${lbSteps ? formatLb(qty) : `${qty}×`} ${cartName}`, variant: 'success', duration: 2000 });
     setTimeout(() => { setJustAdded(false); }, 1500);
   }
 
@@ -404,12 +491,12 @@ function ProductDetailModal({ product, onClose, onSelectProduct }: {
         onClick={e => e.stopPropagation()}>
         {/* Image */}
         <div className="relative">
-          {product.image_url ? (
+          {image ? (
             <div className="relative w-full aspect-square bg-gray-50">
-              <Image src={product.image_url} alt={product.description} fill className="object-contain p-4" unoptimized />
+              <Image src={image} alt={active.description} fill className="object-contain p-4" unoptimized />
             </div>
           ) : (
-            <div className={`h-2 w-full ${getCategoryColor(product.category)} rounded-t-xl`} />
+            <div className={`h-2 w-full ${getCategoryColor(active.category)} rounded-t-xl`} />
           )}
           <button onClick={onClose} aria-label="Close"
             className="absolute top-3 right-3 w-8 h-8 bg-white/90 border border-gray-200 rounded-full flex items-center justify-center text-gray-500 hover:text-brand-navy shadow-sm">
@@ -419,22 +506,54 @@ function ProductDetailModal({ product, onClose, onSelectProduct }: {
 
         <div className="p-5 space-y-3">
           <div>
-            <p className="text-[11px] font-bold text-brand-river uppercase tracking-wide">{product.category}</p>
-            <h2 className="font-display text-lg font-bold text-brand-navy leading-snug mt-0.5">{productDisplayName(product)}</h2>
+            <p className="text-[11px] font-bold text-brand-river uppercase tracking-wide">{active.category}</p>
+            <h2 className="font-display text-lg font-bold text-brand-navy leading-snug mt-0.5">
+              {set ? set.baseName : productDisplayName(product)}
+            </h2>
           </div>
 
-          {product.details && product.details.trim() !== productDisplayName(product) && (
-            <p className="text-sm text-gray-600 leading-relaxed">{product.details}</p>
+          {/* Size chooser — same options as the card, bigger tap targets */}
+          {set && (
+            <div>
+              <p className="text-[10px] font-bold text-gray-400 uppercase mb-1.5">Choose a size</p>
+              <div className="flex flex-wrap gap-1.5">
+                {set.options.map(opt => {
+                  const on = opt.id === active.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => { setSelectedId(opt.id); setQty(1); }}
+                      aria-pressed={on}
+                      className={`px-3 py-2 rounded-lg text-sm font-bold border transition-colors ${
+                        on
+                          ? 'bg-brand-navy text-white border-brand-navy'
+                          : 'bg-white text-gray-600 border-gray-200 hover:border-brand-steel'
+                      }`}
+                    >
+                      {opt.variant_label}
+                      <span className={`block text-[10px] font-semibold ${on ? 'text-white/70' : 'text-gray-400'}`}>
+                        {formatCurrency(opt.price)}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {active.details && active.details.trim() !== productDisplayName(active) && (
+            <p className="text-sm text-gray-600 leading-relaxed">{active.details}</p>
           )}
 
           <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-gray-500">
-            {product.pkg_size && <span><strong className="text-gray-600">Pack:</strong> {product.pkg_size}</span>}
-            {product.uom && <span><strong className="text-gray-600">Unit:</strong> {product.uom}</span>}
+            {active.pkg_size && <span><strong className="text-gray-600">Pack:</strong> {active.pkg_size}</span>}
+            {active.uom && <span><strong className="text-gray-600">Unit:</strong> {active.uom}</span>}
           </div>
 
-          {product.tags && product.tags.length > 0 && (
+          {active.tags && active.tags.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
-              {product.tags.map(tag => (
+              {active.tags.map(tag => (
                 <span key={tag} className="inline-flex items-center gap-1 text-[10px] font-semibold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
                   <Tag className="w-2.5 h-2.5" /> {tag}
                 </span>
@@ -451,7 +570,7 @@ function ProductDetailModal({ product, onClose, onSelectProduct }: {
 
           <div className="flex items-center justify-between border-t border-gray-100 pt-3">
             <span className="text-xl font-bold text-brand-navy">
-              {formatCurrency(product.price)}{byWeight && <span className="text-xs font-semibold text-gray-400"> /lb</span>}
+              {formatCurrency(active.price)}{byWeight && <span className="text-xs font-semibold text-gray-400"> /lb</span>}
             </span>
             {!lbSteps && (
               <div className="flex items-center border border-gray-200 rounded overflow-hidden">
@@ -491,12 +610,12 @@ function ProductDetailModal({ product, onClose, onSelectProduct }: {
 
           {lbSteps && qty > 0 && (
             <p className="text-xs text-gray-400 -mt-1">
-              {formatLb(qty)} · ~{formatCurrency(product.price * qty)} est. — final price by actual weight
+              {formatLb(qty)} · ~{formatCurrency(active.price * qty)} est. — final price by actual weight
             </p>
           )}
-          {!lbSteps && byWeight && product.quantity_size_ratio && (
+          {!lbSteps && byWeight && active.quantity_size_ratio && (
             <p className="text-xs text-gray-400 -mt-1">
-              ≈{product.quantity_size_ratio} lb each · billed at actual weight
+              ≈{active.quantity_size_ratio} lb each · billed at actual weight
             </p>
           )}
 

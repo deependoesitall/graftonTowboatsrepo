@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Grafton Towboat Services — Website Changes for Review</title>
+<style>
+  :root{
+    --green:#1E3D1E; --gmed:#2F5D3A; --lime:#D9E84A; --lime2:#E8F070;
+    --orange:#E8622A; --ink:#12200F; --muted:#6b7669; --line:#e4e8dd;
+    --paper:#FAFBF3; --add:#2f7d3a; --warn:#b45309; --del:#b91c1c;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+       background:#eceee4;color:var(--ink);line-height:1.55}
+
+  /* ── Review chrome (NOT part of the website) ───────────────────── */
+  .bar{position:sticky;top:0;z-index:100;background:var(--green);color:#fff;
+       padding:10px 20px;display:flex;align-items:center;gap:18px;flex-wrap:wrap;
+       box-shadow:0 2px 10px rgba(0,0,0,.18)}
+  .bar h1{font-size:14px;font-weight:800;letter-spacing:.06em;text-transform:uppercase}
+  .bar .sub{font-size:12px;color:#cfe0c4}
+  .tabs{display:flex;gap:4px;margin-left:auto;flex-wrap:wrap}
+  .tab{background:rgba(255,255,255,.10);color:#fff;border:0;padding:7px 13px;border-radius:99px;
+       font-size:12px;font-weight:700;cursor:pointer;letter-spacing:.02em}
+  .tab:hover{background:rgba(255,255,255,.2)}
+  .tab.on{background:var(--lime);color:var(--green)}
+  .toggle{display:flex;background:rgba(0,0,0,.25);border-radius:99px;padding:3px}
+  .toggle button{background:none;border:0;color:#cfe0c4;padding:6px 15px;border-radius:99px;
+       font-size:12px;font-weight:800;cursor:pointer}
+  .toggle button.on{background:#fff;color:var(--green)}
+
+  .wrap{max-width:1120px;margin:26px auto 80px;padding:0 20px}
+  .note{background:#fff;border-left:4px solid var(--lime);padding:14px 18px;border-radius:0 10px 10px 0;
+        margin-bottom:22px;font-size:13.5px;color:#333}
+  .note b{color:var(--green)}
+
+  /* ── Browser frame ─────────────────────────────────────────────── */
+  .frame{background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 10px 34px rgba(20,35,20,.14);
+         border:1px solid #d8ddd0}
+  .chrome{background:#e9ece3;padding:9px 14px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #d8ddd0}
+  .dot{width:10px;height:10px;border-radius:50%}
+  .url{flex:1;background:#fff;border-radius:99px;padding:4px 12px;font-size:11.5px;color:#5a6356;
+       font-family:ui-monospace,Menlo,monospace}
+
+  /* ── The website itself ────────────────────────────────────────── */
+  .site{background:linear-gradient(135deg,#D9E84A 0%,#E8F070 45%,#F3F8C4 100%)}
+  nav{background:rgba(255,255,255,.72);backdrop-filter:blur(8px);border-bottom:1px solid rgba(30,61,30,.10);
+      padding:0 26px;height:74px;display:flex;align-items:center;gap:22px}
+  .logo{width:52px;height:52px;border-radius:50%;background:var(--green);color:var(--lime);
+        display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;
+        text-align:center;line-height:1.15;letter-spacing:.03em;flex:0 0 auto}
+  .navlinks{display:flex;gap:22px;margin-left:8px}
+  .navlinks a{color:var(--green);text-decoration:none;font-size:13px;font-weight:700;letter-spacing:.02em}
+  .navcta{margin-left:auto;display:flex;gap:9px;align-items:center}
+  .btn{display:inline-flex;align-items:center;gap:8px;border-radius:99px;text-decoration:none;
+       font-weight:800;letter-spacing:.06em;text-transform:uppercase;font-size:11.5px;padding:10px 20px}
+  .btn-green{background:var(--green);color:#fff}
+  .btn-orange{background:var(--orange);color:#fff}
+  .btn-ghost{background:transparent;color:var(--green);border:1.5px solid rgba(30,61,30,.3)}
+  .btn-lg{font-size:14px;padding:15px 30px}
+
+  section{padding:52px 34px}
+  .hero{text-align:center;padding:66px 34px 54px}
+  .hero h2{font-size:40px;line-height:1.12;color:var(--green);font-weight:800;max-width:760px;margin:0 auto 16px}
+  .hero p{color:#3d5a3d;font-size:15px;max-width:620px;margin:0 auto 26px}
+  .band{background:#fff}
+  .band-green{background:var(--green);color:#fff}
+  h3.sec{font-size:26px;color:var(--green);font-weight:800;text-align:center;margin-bottom:8px}
+  .band-green h3.sec{color:var(--lime)}
+  .sec-sub{text-align:center;color:var(--muted);font-size:13.5px;max-width:620px;margin:0 auto 30px}
+  .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;max-width:960px;margin:0 auto}
+  .card{background:var(--paper);border:1px solid var(--line);border-radius:14px;overflow:hidden;display:flex;flex-direction:column}
+  .card .ph{height:118px;background:linear-gradient(135deg,#c8d6b8,#9fb58c);display:flex;align-items:center;
+            justify-content:center;color:#4a5c42;font-size:10.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
+  .card .body{padding:16px 17px 18px;display:flex;flex-direction:column;flex:1}
+  .card h4{font-size:16px;color:var(--green);margin-bottom:7px;font-weight:800}
+  .card p{font-size:13px;color:#4a5548;flex:1;margin-bottom:14px}
+  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;max-width:900px;margin:0 auto}
+  .step{background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px 18px;text-align:center}
+  .step .n{width:34px;height:34px;border-radius:50%;background:var(--green);color:var(--lime);
+           display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;margin:0 auto 11px}
+  .step h5{color:var(--green);font-size:15px;margin-bottom:6px;font-weight:800}
+  .step p{font-size:12.5px;color:var(--muted)}
+  .footer{background:var(--green);color:#cfe0c4;padding:34px;display:grid;
+          grid-template-columns:1.4fr 1fr 1fr;gap:26px;font-size:12.5px}
+  .footer h6{color:var(--lime);font-size:11px;text-transform:uppercase;letter-spacing:.12em;margin-bottom:9px}
+  .footer .brand{color:#fff;font-weight:800;font-size:16px;margin-bottom:8px}
+  .contact-row{display:flex;gap:22px;flex-wrap:wrap;justify-content:center;margin-top:8px}
+  .owner{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:14px 20px;text-align:center;min-width:170px}
+  .owner b{display:block;color:var(--green);font-size:14px}
+  .owner span{font-size:13px;color:var(--muted)}
+
+  /* ── Change annotations ────────────────────────────────────────── */
+  .pin{display:inline-flex;align-items:center;justify-content:center;width:21px;height:21px;border-radius:50%;
+       background:var(--orange);color:#fff;font-size:11px;font-weight:800;vertical-align:middle;margin-left:7px;
+       cursor:default;box-shadow:0 0 0 3px rgba(232,98,42,.22)}
+  .changed{outline:2px dashed rgba(232,98,42,.75);outline-offset:5px;border-radius:8px}
+  .only-after,.only-before{display:none}
+  body[data-view="after"] .only-after{display:revert}
+  body[data-view="before"] .only-before{display:revert}
+  body[data-view="before"] .pin,body[data-view="before"] .changed{outline:none;box-shadow:none}
+  body[data-view="before"] .pin{display:none}
+
+  .page{display:none}
+  .page.on{display:block}
+
+  /* ── Change log ────────────────────────────────────────────────── */
+  .log{margin-top:26px;background:#fff;border-radius:12px;border:1px solid #d8ddd0;overflow:hidden}
+  .log h4{background:var(--green);color:#fff;padding:12px 18px;font-size:12px;text-transform:uppercase;letter-spacing:.1em}
+  .item{display:flex;gap:14px;padding:15px 18px;border-bottom:1px solid var(--line)}
+  .item:last-child{border-bottom:0}
+  .num{flex:0 0 auto;width:22px;height:22px;border-radius:50%;background:var(--orange);color:#fff;
+       font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center}
+  .item .txt{font-size:13.5px}
+  .item .txt b{display:block;color:var(--green);margin-bottom:3px;font-size:13.5px}
+  .item .txt .why{color:var(--muted);font-size:12.5px;margin-top:4px}
+  .tag{display:inline-block;font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.09em;
+       padding:2px 7px;border-radius:4px;margin-left:7px;vertical-align:1px}
+  .t-fix{background:#fde8e8;color:var(--del)}
+  .t-need{background:#e8f3e8;color:var(--add)}
+  .t-idea{background:#fdf0dd;color:var(--warn)}
+  code{background:#f1f3ea;padding:1px 6px;border-radius:4px;font-size:12px;
+       font-family:ui-monospace,Menlo,monospace;color:#3f4a3c}
+  del{color:var(--del);text-decoration-thickness:1.5px}
+  ins{color:var(--add);text-decoration:none;background:#e8f5e9;padding:0 3px;border-radius:3px}
+
+  @media(max-width:860px){
+    .cards,.steps,.footer{grid-template-columns:1fr}
+    .navlinks{display:none}
+    .hero h2{font-size:28px}
+  }
+</style>
+</head>
+<body data-view="after">
+
+<div class="bar">
+  <div>
+    <h1>Website Changes — for Jen</h1>
+    <div class="sub">graftontowboatservices.com &middot; mockup only, nothing published</div>
+  </div>
+  <div class="toggle">
+    <button id="bBefore" onclick="setView('before')">Site today</button>
+    <button id="bAfter" class="on" onclick="setView('after')">Proposed</button>
+  </div>
+  <div class="tabs">
+    <button class="tab on" onclick="go('home',this)">Home</button>
+    <button class="tab" onclick="go('services',this)">Services</button>
+    <button class="tab" onclick="go('about',this)">About</button>
+    <button class="tab" onclick="go('contact',this)">Contact</button>
+    <button class="tab" onclick="go('found',this)">What I found</button>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <div class="note">
+    <b>How to read this.</b> Toggle <b>Site today</b> / <b>Proposed</b> to compare. Orange dashed outlines and
+    numbered pins mark every change; each one is explained in the list under the page. Jen&rsquo;s existing words are
+    kept as-is unless a change is listed. Nothing here is live &mdash; this is for approval first.
+  </div>
+
+  <!-- ══════════════════════════ HOME ══════════════════════════ -->
+  <div class="page on" id="home">
+    <div class="frame">
+      <div class="chrome">
+        <span class="dot" style="background:#f0685f"></span><span class="dot" style="background:#f6c151"></span>
+        <span class="dot" style="background:#61c556"></span>
+        <span class="url">https://www.graftontowboatservices.com</span>
+      </div>
+      <div class="site">
+
+        <nav>
+          <div class="logo">GTS</div>
+          <div class="navlinks">
+            <a href="#">Home</a><a href="#">Services</a><a href="#">About</a><a href="#">Contact</a>
+          </div>
+          <div class="navcta">
+            <span class="only-before"><a class="btn btn-green" href="#">Call or Email Now</a></span>
+            <span class="only-after changed">
+              <a class="btn btn-ghost" href="#">Call or Email</a>
+              <a class="btn btn-orange" href="#">Order Now</a><span class="pin">1</span>
+            </span>
+          </div>
+        </nav>
+
+        <div class="hero">
+          <h2>Groceries, Supplies and Crew Change<br/>When You Need It.</h2>
+          <p class="only-after changed">
+            Order online from Sinclair&rsquo;s full store and we&rsquo;ll deliver straight to your vessel &mdash;
+            by boat or refrigerated van. Mile Marker 219 Mississippi &middot; Mile Marker 0 Illinois.<span class="pin">2</span>
+          </p>
+          <span class="only-after">
+            <a class="btn btn-green btn-lg" href="#">Order Groceries &amp; Supplies &rarr;</a><span class="pin">3</span>
+          </span>
+        </div>
+
+        <!-- HOW IT WORKS — new -->
+        <section class="band only-after changed">
+          <h3 class="sec">How It Works<span class="pin">4</span></h3>
+          <p class="sec-sub">Three steps, no login required, and your order history saves for next time.</p>
+          <div class="steps">
+            <div class="step"><div class="n">1</div><h5>Browse &amp; Build</h5>
+              <p>Your everyday barge list, plus Sinclair&rsquo;s whole store if you need something else.</p></div>
+            <div class="step"><div class="n">2</div><h5>Tell Us Where</h5>
+              <p>Vessel, ETA, and how you want it delivered &mdash; boat or refrigerated van.</p></div>
+            <div class="step"><div class="n">3</div><h5>We Deliver</h5>
+              <p>We shop it, pack it and bring it to your boat. Cold goods ride refrigerated.</p></div>
+          </div>
+        </section>
+
+        <section>
+          <h3 class="sec">Exclusive Services</h3>
+          <div class="cards">
+            <div class="card">
+              <div class="ph">Grocery Delivery</div>
+              <div class="body">
+                <h4>Grocery Delivery</h4>
+                <p>Partnered with Sinclair&rsquo;s Foods to get you the best meat and produce you can find.
+                   Small town, fresh products. If they don&rsquo;t have it, they get it for you.</p>
+                <p class="only-after changed" style="font-size:12px;color:#3d5a3d">
+                  Orders are placed and delivered <b>through Grafton Towboat Services</b>.<span class="pin">5</span></p>
+                <span class="only-before"><a class="btn btn-green" href="#">Book now</a></span>
+                <span class="only-after"><a class="btn btn-orange" href="#">Order Now</a><span class="pin">6</span></span>
+              </div>
+            </div>
+            <div class="card">
+              <div class="ph">Crew Change</div>
+              <div class="body">
+                <h4><span class="only-before">Crew CHange &amp; 24/7 Support Access</span><span
+                    class="only-after changed">Crew Change &amp; 24/7 Support<span class="pin">7</span></span></h4>
+                <p>We are here for you when you need it. Crew change, last minute issues, we&rsquo;ve got you covered!</p>
+                <a class="btn btn-green" href="#">Schedule Now</a>
+              </div>
+            </div>
+            <div class="card">
+              <div class="ph">Towboat Supplies</div>
+              <div class="body">
+                <h4><span class="only-before">Tow Boat SUpplies</span><span
+                    class="only-after changed">Towboat Supplies<span class="pin">7</span></span></h4>
+                <p>We stock a large variety of items and if we don&rsquo;t have it, we will get it quickly and have
+                   it in stock going forward.</p>
+                <span class="only-before"><a class="btn btn-green" href="#">Coming Soon!</a></span>
+                <span class="only-after"><a class="btn btn-green" href="#">Browse Supplies</a><span class="pin">8</span></span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="band">
+          <h3 class="sec">Small Town and Family Owned</h3>
+          <p class="sec-sub">We are a small town and family owned business with big business inventory. Our family has
+            been in the Marina Business for 20 years and has worked on the river for generations. We have a deep love
+            and respect for the river and a great understanding for why it is so important for our world.</p>
+          <div style="text-align:center"><a class="btn btn-ghost" href="#">Learn more</a></div>
+        </section>
+
+        <div class="footer">
+          <div>
+            <div class="brand">Grafton Towboat Services</div>
+            <div>Monitor Channel 68 via Grafton Harbor</div>
+            <div class="only-after changed" style="margin-top:10px">
+              <a class="btn btn-orange" href="#" style="font-size:10.5px;padding:8px 15px">Order Now</a><span class="pin">9</span>
+            </div>
+          </div>
+          <div><h6>Location</h6>
+            25 Dagget Hollow<br/>Grafton, IL 62037<br/>
+            <span class="only-before">Mississippi Mile Marker: 218<br/>Illinois Mile Marker: 0.7</span>
+            <span class="only-after changed">Mississippi Mile Marker: 219<br/>Illinois Mile Marker: 0<span class="pin">10</span></span>
+          </div>
+          <div><h6>Contact</h6>GraftonTowboatServices@gmail.com<br/>(618) 556-0290</div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="log">
+      <h4>Home &mdash; changes</h4>
+      <div class="item"><div class="num">1</div><div class="txt"><b>&ldquo;Order Now&rdquo; added to the nav<span class="tag t-need">Needed</span></b>
+        Sits beside &ldquo;Call or Email&rdquo; rather than replacing it, and follows you on every page.
+        <div class="why">Ordering is now the main thing a boat wants to do here. Phone stays for everything else.</div></div></div>
+      <div class="item"><div class="num">2</div><div class="txt"><b>One line under the headline<span class="tag t-idea">Suggestion</span></b>
+        The headline promises groceries and crew change but never says you can order online.
+        <div class="why">Also the only place a captain learns the vans are refrigerated &mdash; a real differentiator.</div></div></div>
+      <div class="item"><div class="num">3</div><div class="txt"><b>Main hero button<span class="tag t-need">Needed</span></b>
+        The big one, above the fold, for people who never scroll.</div></div>
+      <div class="item"><div class="num">4</div><div class="txt"><b>&ldquo;How It Works&rdquo; section<span class="tag t-idea">Suggestion</span></b>
+        Three steps, entirely new content.
+        <div class="why">Dave&rsquo;s point at the demo: cooks avoid online grocery because it feels like a chore.
+        Showing it&rsquo;s three steps removes that fear before they click.</div></div></div>
+      <div class="item"><div class="num">5</div><div class="txt"><b>&ldquo;Through Grafton Towboat Services&rdquo;<span class="tag t-need">Needed</span></b>
+        One sentence added to the grocery card.
+        <div class="why">Dave, at the demo: <i>&ldquo;an Ingram boat wants to turn that into me and pick it up somewhere
+        else &mdash; I need to be able to say, no, this is Grafton&rsquo;s thing.&rdquo;</i> Right now the card only says
+        &ldquo;Partnered with Sinclair&rsquo;s,&rdquo; which invites exactly that. <b>Worth Dave&rsquo;s eyes before publishing.</b></div></div></div>
+      <div class="item"><div class="num">6</div><div class="txt"><b>&ldquo;Book now&rdquo; &rarr; &ldquo;Order Now&rdquo;<span class="tag t-fix">Fix</span></b>
+        Today it points at <code>/appointments</code> &mdash; a booking page, not groceries.
+        <div class="why">Anyone clicking it expecting to order is sent somewhere confusing.</div></div></div>
+      <div class="item"><div class="num">7</div><div class="txt"><b>Typos<span class="tag t-fix">Fix</span></b>
+        <del>Crew CHange</del> <ins>Crew Change</ins> &nbsp;&middot;&nbsp; <del>Tow Boat SUpplies</del> <ins>Towboat Supplies</ins>
+        <div class="why">Both appear on Home and Services. Small, but it&rsquo;s the first impression on a $100k service.</div></div></div>
+      <div class="item"><div class="num">8</div><div class="txt"><b>&ldquo;Coming Soon!&rdquo; retired<span class="tag t-fix">Fix</span></b>
+        Supplies are orderable now &mdash; they&rsquo;re in the catalog under Boat Supplies.</div></div>
+      <div class="item"><div class="num">9</div><div class="txt"><b>Footer order button<span class="tag t-idea">Suggestion</span></b>
+        Catches people who read to the bottom instead of scrolling back up.</div></div>
+      <div class="item"><div class="num">10</div><div class="txt"><b>Mile markers corrected<span class="tag t-fix">Fix</span></b>
+        Footer says <del>Mississippi 218 / Illinois 0.7</del>; everywhere else &mdash; the ordering site, the emails,
+        the PDFs &mdash; says <ins>Mississippi 219 / Illinois 0</ins>.
+        <div class="why">A wrong mile marker on a delivery site is worth ten minutes of Jen&rsquo;s certainty.
+        <b>Please confirm which is right</b> and I&rsquo;ll make everything match.</div></div></div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════ SERVICES ══════════════════════════ -->
+  <div class="page" id="services">
+    <div class="frame">
+      <div class="chrome">
+        <span class="dot" style="background:#f0685f"></span><span class="dot" style="background:#f6c151"></span>
+        <span class="dot" style="background:#61c556"></span>
+        <span class="url">https://www.graftontowboatservices.com/services</span>
+      </div>
+      <div class="site">
+        <nav>
+          <div class="logo">GTS</div>
+          <div class="navlinks"><a href="#">Home</a><a href="#">Services</a><a href="#">About</a><a href="#">Contact</a></div>
+          <div class="navcta">
+            <span class="only-before"><a class="btn btn-green" href="#">Call or Email Now</a></span>
+            <span class="only-after"><a class="btn btn-ghost" href="#">Call or Email</a>
+              <a class="btn btn-orange" href="#">Order Now</a></span>
+          </div>
+        </nav>
+
+        <div class="hero" style="padding:52px 34px 34px">
+          <h2 style="font-size:34px">Our Services</h2>
+          <p>We are an ever growing company with a variety of services. We provide grocery delivery, crew change and
+             supplies. Need something more? We will be happy to work with you to get it done.</p>
+        </div>
+
+        <section class="band">
+          <div class="cards">
+            <div class="card">
+              <div class="ph">Grocery Delivery</div>
+              <div class="body">
+                <h4>Grocery Delivery</h4>
+                <p>Partnered with Sinclair&rsquo;s Foods to get you the best meat and produce you can find.
+                   Small town, fresh products. If they don&rsquo;t have it, they get it for you.</p>
+                <p class="only-after changed" style="font-size:12px;color:#3d5a3d">
+                  Order online any time &mdash; your everyday barge list plus Sinclair&rsquo;s whole store.
+                  Placed and delivered through Grafton Towboat Services.<span class="pin">11</span></p>
+                <span class="only-before"><a class="btn btn-green" href="#">Book now</a></span>
+                <span class="only-after"><a class="btn btn-orange" href="#">Order Now</a><span class="pin">12</span></span>
+              </div>
+            </div>
+            <div class="card">
+              <div class="ph">Crew Change</div>
+              <div class="body">
+                <h4><span class="only-before">Crew CHange &amp; 24/7 Support Access</span><span
+                    class="only-after changed">Crew Change &amp; 24/7 Support<span class="pin">13</span></span></h4>
+                <p>We are here for you when you need it. Crew change, last minute issues, we&rsquo;ve got you covered!</p>
+                <a class="btn btn-green" href="#">Schedule Now</a>
+              </div>
+            </div>
+            <div class="card">
+              <div class="ph">Towboat Supplies</div>
+              <div class="body">
+                <h4><span class="only-before">Tow Boat SUpplies</span><span
+                    class="only-after changed">Towboat Supplies<span class="pin">13</span></span></h4>
+                <p>We stock a large variety of items and if we don&rsquo;t have it, we will get it quickly and have it
+                   in stock going forward.</p>
+                <span class="only-before"><a class="btn btn-green" href="#">Coming Soon!</a></span>
+                <span class="only-after"><a class="btn btn-green" href="#">Browse Supplies</a></span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div class="footer">
+          <div><div class="brand">Grafton Towboat Services</div><div>Monitor Channel 68 via Grafton Harbor</div></div>
+          <div><h6>Location</h6>25 Dagget Hollow<br/>Grafton, IL 62037</div>
+          <div><h6>Contact</h6>GraftonTowboatServices@gmail.com<br/>(618) 556-0290</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="log">
+      <h4>Services &mdash; changes</h4>
+      <div class="item"><div class="num">11</div><div class="txt"><b>Two sentences on the grocery card<span class="tag t-need">Needed</span></b>
+        Says you can order online, and who you order through.</div></div>
+      <div class="item"><div class="num">12</div><div class="txt"><b>&ldquo;Book now&rdquo; &rarr; &ldquo;Order Now&rdquo;<span class="tag t-fix">Fix</span></b>
+        Same wrong <code>/appointments</code> link as Home.</div></div>
+      <div class="item"><div class="num">13</div><div class="txt"><b>Same two typos<span class="tag t-fix">Fix</span></b>
+        They appear on this page as well.</div></div>
+      <div class="item"><div class="num" style="background:var(--del)">!</div><div class="txt">
+        <b>Broken link &mdash; found while reviewing<span class="tag t-fix">Fix</span></b>
+        The &ldquo;24/7 Support Access&rdquo; heading links to
+        <code>gerbil-lily-pyjz.squarespace.com</code>.
+        <div class="why">That&rsquo;s Squarespace&rsquo;s temporary preview address from when the site was built. It
+        leaked into a live link. Anyone clicking it leaves the real website. This one I&rsquo;d fix regardless of
+        anything else.</div></div></div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════ ABOUT ══════════════════════════ -->
+  <div class="page" id="about">
+    <div class="frame">
+      <div class="chrome">
+        <span class="dot" style="background:#f0685f"></span><span class="dot" style="background:#f6c151"></span>
+        <span class="dot" style="background:#61c556"></span>
+        <span class="url">https://www.graftontowboatservices.com/about</span>
+      </div>
+      <div class="site">
+        <nav>
+          <div class="logo">GTS</div>
+          <div class="navlinks"><a href="#">Home</a><a href="#">Services</a><a href="#">About</a><a href="#">Contact</a></div>
+          <div class="navcta">
+            <span class="only-before"><a class="btn btn-green" href="#">Call or Email Now</a></span>
+            <span class="only-after"><a class="btn btn-ghost" href="#">Call or Email</a>
+              <a class="btn btn-orange" href="#">Order Now</a></span>
+          </div>
+        </nav>
+
+        <div class="hero" style="padding:56px 34px 34px">
+          <h2 style="font-size:34px">Small Town and Family Owned</h2>
+          <p>We are a small town and family owned business with big business inventory. Our family has been in the
+             Marina Business for 20 years and has worked on the river for generations. We have a deep love and respect
+             for the river and a great understanding for why it is so important for our world.</p>
+        </div>
+
+        <section class="band" style="padding-top:26px">
+          <div class="card" style="max-width:560px;margin:0 auto"><div class="ph" style="height:200px">Family photo &mdash; existing</div></div>
+        </section>
+
+        <section class="band-green only-after changed" style="text-align:center">
+          <h3 class="sec">Order From Us Online<span class="pin">14</span></h3>
+          <p class="sec-sub" style="color:#cfe0c4">
+            Same family, same river &mdash; now with your grocery order two minutes away instead of a phone call
+            and a paper list.</p>
+          <a class="btn btn-orange btn-lg" href="#">Order Groceries &amp; Supplies &rarr;</a>
+        </section>
+
+        <div class="footer">
+          <div><div class="brand">Grafton Towboat Services</div><div>Monitor Channel 68 via Grafton Harbor</div></div>
+          <div><h6>Location</h6>25 Dagget Hollow<br/>Grafton, IL 62037</div>
+          <div><h6>Contact</h6>GraftonTowboatServices@gmail.com<br/>(618) 556-0290</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="log">
+      <h4>About &mdash; changes</h4>
+      <div class="item"><div class="num">14</div><div class="txt"><b>One closing section<span class="tag t-idea">Suggestion</span></b>
+        The About page currently ends with nowhere to go.
+        <div class="why">This is the page that sells the family story &mdash; the moment someone decides they like you
+        is the moment to offer the next step. Everything above it stays exactly as Jen wrote it.</div></div></div>
+      <div class="item"><div class="num" style="background:var(--muted)">&ndash;</div><div class="txt">
+        <b>Otherwise untouched</b>
+        <div class="why">The copy and the photo are good. No changes suggested.</div></div></div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════ CONTACT ══════════════════════════ -->
+  <div class="page" id="contact">
+    <div class="frame">
+      <div class="chrome">
+        <span class="dot" style="background:#f0685f"></span><span class="dot" style="background:#f6c151"></span>
+        <span class="dot" style="background:#61c556"></span>
+        <span class="url">https://www.graftontowboatservices.com/contact</span>
+      </div>
+      <div class="site">
+        <nav>
+          <div class="logo">GTS</div>
+          <div class="navlinks"><a href="#">Home</a><a href="#">Services</a><a href="#">About</a><a href="#">Contact</a></div>
+          <div class="navcta">
+            <span class="only-before"><a class="btn btn-green" href="#">Call or Email Now</a></span>
+            <span class="only-after"><a class="btn btn-ghost" href="#">Call or Email</a>
+              <a class="btn btn-orange" href="#">Order Now</a></span>
+          </div>
+        </nav>
+
+        <div class="hero" style="padding:52px 34px 26px">
+          <h2 style="font-size:34px">Contact Us</h2>
+          <p>Let us know how we can help you!</p>
+          <p style="font-size:16px;color:var(--green);font-weight:700">
+            GraftonTowboatServices@gmail.com &nbsp;&middot;&nbsp; 618-556-0290</p>
+        </div>
+
+        <!-- Who to call for what — new -->
+        <section class="band only-after changed">
+          <h3 class="sec">Who To Call<span class="pin">15</span></h3>
+          <div class="cards" style="max-width:700px">
+            <div class="card" style="grid-column:span 1"><div class="body">
+              <h4>Questions about groceries</h4>
+              <p>Item availability, substitutions, what&rsquo;s in stock.</p>
+              <div style="font-weight:800;color:var(--green)">Sinclair&rsquo;s Foods &middot; (618) 498-6856</div>
+            </div></div>
+            <div class="card" style="grid-column:span 2"><div class="body">
+              <h4>Everything else</h4>
+              <p>Delivery, timing, crew change, billing, or anything about your order.</p>
+              <div style="font-weight:800;color:var(--green)">Grafton Towboat Services &middot; (618) 556-0290</div>
+            </div></div>
+          </div>
+        </section>
+
+        <section>
+          <h3 class="sec">Owners</h3>
+          <div class="contact-row">
+            <div class="owner"><b>MaryKaren</b><span>314-809-0853</span></div>
+            <div class="owner"><b>Laura</b><span>618-779-2592</span></div>
+            <div class="owner"><b>Jennifer</b><span>618-946-4377</span></div>
+          </div>
+        </section>
+
+        <div class="footer">
+          <div><div class="brand">Grafton Towboat Services</div><div>Monitor Channel 68 via Grafton Harbor</div></div>
+          <div><h6>Location</h6>25 Dagget Hollow<br/>Grafton, IL 62037</div>
+          <div><h6>Contact</h6>GraftonTowboatServices@gmail.com<br/>(618) 556-0290</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="log">
+      <h4>Contact &mdash; changes</h4>
+      <div class="item"><div class="num">15</div><div class="txt"><b>&ldquo;Who To Call&rdquo; split<span class="tag t-idea">Suggestion</span></b>
+        Groceries &rarr; Sinclair&rsquo;s. Everything else &rarr; Grafton.
+        <div class="why">This mirrors exactly what the ordering site already tells crews after they submit, so the two
+        stay consistent. It also protects Dave from delivery and billing calls that aren&rsquo;t his.</div></div></div>
+      <div class="item"><div class="num" style="background:var(--muted)">&ndash;</div><div class="txt">
+        <b>Owner numbers kept as-is</b>
+        <div class="why">Unchanged. Worth Jen confirming she still wants three personal mobiles public now that
+        boats will find this page more often &mdash; her call entirely, not a recommendation.</div></div></div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════ FINDINGS ══════════════════════════ -->
+  <div class="page" id="found">
+    <div class="log">
+      <h4>Problems found on the live site</h4>
+      <div class="item"><div class="num" style="background:var(--del)">1</div><div class="txt">
+        <b>A link points at Squarespace&rsquo;s temporary preview address</b>
+        On Services, &ldquo;24/7 Support Access&rdquo; links to <code>gerbil-lily-pyjz.squarespace.com</code> instead of
+        the real site.
+        <div class="why">Left over from when the site was built. Anyone who clicks it lands on a stray copy of the
+        website. Highest priority of anything here.</div></div></div>
+      <div class="item"><div class="num" style="background:var(--del)">2</div><div class="txt">
+        <b>Mile markers disagree with everything else</b>
+        Footer: Mississippi <b>218</b>, Illinois <b>0.7</b>. The ordering site, emails and PDFs all say
+        Mississippi <b>219</b>, Illinois <b>0</b>.
+        <div class="why">One of the two is wrong. Needs Jen to say which.</div></div></div>
+      <div class="item"><div class="num" style="background:var(--del)">3</div><div class="txt">
+        <b>&ldquo;Book now&rdquo; goes to an appointments page</b>
+        The grocery buttons on Home and Services both point at <code>/appointments</code>.
+        <div class="why">Nothing about groceries is there.</div></div></div>
+      <div class="item"><div class="num" style="background:var(--warn)">4</div><div class="txt">
+        <b>An empty shopping cart exists</b>
+        Every page carries a Squarespace cart showing <code>0</code>.
+        <div class="why">Squarespace Commerce is switched on but unused. Now that a real ordering site exists, two
+        different carts is a confusing thing to hand a boat crew. Suggest turning it off.</div></div></div>
+      <div class="item"><div class="num" style="background:var(--warn)">5</div><div class="txt">
+        <b>No page descriptions anywhere</b>
+        All four pages have an empty meta description.
+        <div class="why">Google writes its own snippet from whatever it finds. Four sentences would control how
+        the business appears in search &mdash; cheap, and useful once boats start looking you up.</div></div></div>
+      <div class="item"><div class="num" style="background:var(--warn)">6</div><div class="txt">
+        <b>Two capitalisation typos, repeated</b>
+        &ldquo;Crew CHange&rdquo; and &ldquo;Tow Boat SUpplies&rdquo; appear on both Home and Services.</div></div>
+      <div class="item"><div class="num" style="background:var(--add)">&#10003;</div><div class="txt">
+        <b>What&rsquo;s already good &mdash; and staying</b>
+        The family story, the Sinclair&rsquo;s partnership framing, the photography, Channel 68, the owner contacts,
+        and the overall look.
+        <div class="why">None of that needs changing. The whole proposal is one button, a few corrections, and
+        three small sections.</div></div></div>
+    </div>
+
+    <div class="log" style="margin-top:20px">
+      <h4>If Jen only approves three things</h4>
+      <div class="item"><div class="num">1</div><div class="txt"><b>The &ldquo;Order Now&rdquo; nav button</b>
+        Without it the ordering site is invisible to anyone who doesn&rsquo;t already have the link.</div></div>
+      <div class="item"><div class="num">2</div><div class="txt"><b>Fix the preview-domain link</b>
+        It&rsquo;s broken today and has nothing to do with the launch.</div></div>
+      <div class="item"><div class="num">3</div><div class="txt"><b>&ldquo;Through Grafton Towboat Services&rdquo; on the grocery card</b>
+        This is Dave&rsquo;s boundary. Worth getting right before boats start asking Sinclair&rsquo;s directly.</div></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  function go(id, el){
+    document.querySelectorAll('.page').forEach(p=>p.classList.remove('on'));
+    document.getElementById(id).classList.add('on');
+    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
+    el.classList.add('on');
+    window.scrollTo({top:0,behavior:'smooth'});
+  }
+  function setView(v){
+    document.body.dataset.view = v;
+    document.getElementById('bBefore').classList.toggle('on', v==='before');
+    document.getElementById('bAfter').classList.toggle('on', v==='after');
+  }
+</script>
+</body>
+</html>

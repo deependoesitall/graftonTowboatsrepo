@@ -90,6 +90,58 @@ export function formatLb(n: number): string {
   return `${n} lb`;
 }
 
+// ── Size variants ─────────────────────────────────────────────
+// The paper order form lists the same cut once per size:
+//   CAB RIBEYE STEAK  2 PK / 4 PK / 8 PK
+//   GROUND CHUCK 80% LEAN  (pkg 3#) / (pkg 5#)
+// Migration 061 tags those rows with a shared variant_group so the storefront
+// can draw one card with a size chooser. Rows are never merged — each size
+// keeps its own id, price and register SKU for the pick sheet.
+
+/** Strip the trailing size token from a name so the card title reads "Cab Ribeye Steak", not "Cab Ribeye Steak 4 PK". */
+export function variantBaseName(name: string): string {
+  return name
+    .replace(/\s+/g, ' ')
+    .replace(/\s*~\s*[\d.]+\s*lb\.?$/i, '')
+    .replace(/\s+[\d.]+\s*#$/, '')
+    .replace(/\s+[\d.]+\s*(pk|ct)$/i, '')
+    .trim();
+}
+
+export interface VariantSet<T> {
+  /** Chips in ascending size order, one per distinct label. */
+  options: T[];
+  /** Title with the size token removed. */
+  baseName: string;
+}
+
+/**
+ * Collapse a group's rows into the chips a customer actually picks from.
+ *
+ * Jen's spreadsheet contains literal duplicate rows (GARLIC, SLEEVE 4 oz is in
+ * there three times with the same UPC). Deduping by label here means those show
+ * as ONE chip instead of three identical ones — without deleting her rows,
+ * which stay visible in the admin Duplicates tab where they can be cleaned up
+ * properly.
+ */
+export function buildVariantSet<T extends { variant_label?: string | null; variant_rank?: number | null; price: number }>(
+  rows: T[],
+  nameOf: (row: T) => string,
+): VariantSet<T> {
+  const byLabel = new Map<string, T>();
+  for (const r of rows) {
+    const key = r.variant_label || '';
+    const existing = byLabel.get(key);
+    // Deterministic pick among duplicates: cheapest wins, so a stale duplicate
+    // row can never quote a customer a higher price than the real one.
+    if (!existing || r.price < existing.price) byLabel.set(key, r);
+  }
+  const options = [...byLabel.values()].sort(
+    (a, b) => (a.variant_rank ?? 0) - (b.variant_rank ?? 0),
+  );
+  return { options, baseName: variantBaseName(nameOf(options[0] ?? rows[0])) };
+}
+
 /** Show a quantity as pounds when it's clearly a pounds quantity (LB unit or fractional). */
 export function isPoundQty(uom: string | null | undefined, quantity: number): boolean {
   return (uom || '').toUpperCase() === 'LB' || quantity % 1 !== 0;
