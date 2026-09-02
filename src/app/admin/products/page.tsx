@@ -8,7 +8,7 @@ import { Upload, Package, AlertCircle, CheckCircle2, Loader2,
          Download, Trash2, Layers, PackageX, PackageCheck, Filter,
          ImagePlus, Tag, Moon } from 'lucide-react';
 import Image from 'next/image';
-import { formatCurrency, MAIN_CATEGORIES } from '@/lib/utils';
+import { formatCurrency, MAIN_CATEGORIES, variantBaseName } from '@/lib/utils';
 import { Product } from '@/types';
 import { useRouter } from 'next/navigation';
 import { fetchAdminSession, canAccess, adminFetch } from '@/lib/admin-auth';
@@ -883,8 +883,92 @@ function AddProductRow({ onAdded }: {
   );
 }
 
-function EditableRow({ product, selected, onSelect, onSaved, onToggleActive, onToggleAvailable }: {
+// ─── Size-variant group header ────────────────────────────────
+// The storefront collapses "CAB CHUCK ROAST ~5lb / ~8lb" into one card with a
+// size chooser (migration 061). Admin deliberately does NOT collapse — Dave and
+// Jen have to price, stock and photograph each size on its own. So the rows all
+// stay; this band just makes it obvious they're one product, and adds the one
+// action that only makes sense at the group level: pushing a photo to siblings.
+function VariantGroupHeader({ siblings, onSaved }: {
+  siblings: Product[];
+  onSaved: (p: Product) => void;
+}) {
+  const [applying, setApplying] = useState(false);
+  const [done, setDone] = useState(false);
+
+  const withPhoto = siblings.filter(s => s.image_url);
+  const without   = siblings.filter(s => !s.image_url && s.is_active);
+  const donor     = withPhoto[0];
+  const baseName  = variantBaseName(siblings[0].description);
+
+  // Same cut of meat, different weight — one photo is honestly correct for all
+  // of them. This is the cheapest lever on the barge-list photo backlog: fix
+  // ribeye once, three rows go green.
+  async function applyToAll() {
+    if (!donor?.image_url) return;
+    setApplying(true);
+    for (const target of without) {
+      const res = await adminFetch('/api/products', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        // One call per sibling rather than the bulk path: the single-row
+        // handler records the manual-edit lock, so the nightly sync can never
+        // wipe a photo a human deliberately shared across sizes.
+        body: JSON.stringify({ id: target.id, image_url: donor.image_url }),
+      });
+      if (res.ok) {
+        const { product: updated } = await res.json();
+        onSaved(updated);
+      }
+    }
+    setApplying(false);
+    setDone(true);
+  }
+
+  return (
+    <tr className="bg-brand-sand/40 border-t-2 border-brand-gold/30">
+      <td colSpan={10} className="px-3 py-1.5">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Layers className="w-3.5 h-3.5 text-brand-navy/50 shrink-0" />
+          <span className="text-xs font-bold text-brand-navy uppercase tracking-wide">{baseName}</span>
+          <span className="text-[10px] font-bold uppercase tracking-wide text-brand-navy/60 bg-white border border-brand-gold/40 rounded px-1.5 py-0.5">
+            {siblings.length} sizes
+          </span>
+          <span className="text-[10px] text-gray-400">
+            shows as one card with a size picker
+          </span>
+
+          {without.length > 0 && donor && !done && (
+            <button
+              onClick={applyToAll}
+              disabled={applying}
+              title={`Copy the ${donor.variant_label} photo onto the ${without.length} size${without.length > 1 ? 's' : ''} with none. Same cut, different weight.`}
+              className="ml-auto inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-white bg-brand-river hover:bg-brand-navy rounded px-2 py-1 transition-colors disabled:opacity-50">
+              {applying
+                ? <><Loader2 className="w-3 h-3 animate-spin" /> Applying…</>
+                : <><ImagePlus className="w-3 h-3" /> Use {donor.variant_label} photo for all {siblings.length}</>}
+            </button>
+          )}
+          {done && (
+            <span className="ml-auto inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-green-700">
+              <CheckCircle2 className="w-3 h-3" /> Photo applied to all sizes
+            </span>
+          )}
+          {without.length > 0 && !donor && (
+            <span className="ml-auto text-[10px] font-bold uppercase tracking-wide text-orange-700">
+              No photo on any size
+            </span>
+          )}
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+function EditableRow({ product, siblings, selected, onSelect, onSaved, onToggleActive, onToggleAvailable }: {
   product: Product;
+  /** Every size in this product's group, when it belongs to one. */
+  siblings?: Product[];
   selected: boolean;
   onSelect: (id: string, checked: boolean) => void;
   onSaved: (p: Product) => void;
@@ -1025,7 +1109,17 @@ function EditableRow({ product, selected, onSelect, onSaved, onToggleActive, onT
         )}
       </td>
       <td className="px-3 py-2.5 text-sm font-medium text-brand-navy max-w-xs">
-        <span className="line-clamp-1">{product.description}</span>
+        <div className="flex items-start gap-2">
+          {/* Size chip — in a group, the size IS the distinguishing fact, so
+              lead with it instead of making staff read to the end of four
+              near-identical names to find the one they want. */}
+          {siblings && product.variant_label && (
+            <span className="shrink-0 mt-0.5 inline-block text-[10px] font-bold uppercase tracking-wide text-white bg-brand-navy rounded px-1.5 py-0.5">
+              {product.variant_label}
+            </span>
+          )}
+          <span className="line-clamp-1">{product.description}</span>
+        </div>
         <div className="flex flex-wrap items-center gap-1 mt-0.5">
           {!product.is_active && (
             <span className="inline-block text-[10px] font-bold uppercase tracking-wide text-gray-400 bg-gray-100 rounded px-1.5 py-0.5">Inactive</span>
@@ -1042,8 +1136,16 @@ function EditableRow({ product, selected, onSelect, onSaved, onToggleActive, onT
             </span>
           )}
           {/* Missing-image reason — WHY there's no photo, so staff know
-              whether to grab a camera or shrug (Sinclair's has none either) */}
-          {product.is_active && !product.image_url && (
+              whether to grab a camera or shrug (Sinclair's has none either).
+              GROUPED ITEMS FIRST: the storefront borrows a sibling size's photo,
+              so a bare "needs a photo" here would contradict what the customer
+              is actually looking at. Say what's really on screen. */}
+          {product.is_active && !product.image_url && siblings?.some(s => s.image_url) ? (
+            <span className="inline-block text-[10px] font-bold uppercase tracking-wide text-blue-700 bg-blue-50 rounded px-1.5 py-0.5"
+              title="This size has no photo of its own, so the catalog shows another size's photo — same cut, different weight. Upload one here to override it.">
+              Using {siblings.find(s => s.image_url)?.variant_label} photo
+            </span>
+          ) : product.is_active && !product.image_url && (
             product.freshop_id ? (
               <span className="inline-block text-[10px] font-bold uppercase tracking-wide text-gray-500 bg-gray-100 rounded px-1.5 py-0.5"
                 title="This item is matched to Sinclair's website, but their site has no photo for it either.">
@@ -1107,6 +1209,9 @@ export default function AdminProductsPage() {
 
   // Catalog state
   const [products, setProducts] = useState<Product[]>([]);
+  /** All sizes per variant_group, keyed by group — from the API, so it stays
+   *  complete even when a filter hides some of them. */
+  const [variantSiblings, setVariantSiblings] = useState<Record<string, Product[]>>({});
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -1165,6 +1270,9 @@ export default function AdminProductsPage() {
       const data = await res.json();
       setProducts(data.products || []);
       setTotal(data.total || 0);
+      // Every size in each group on this page — including ones filtered out of
+      // the page itself, so "No image" still knows a sibling has a photo.
+      setVariantSiblings(data.variantSiblings || {});
     }
     setLoading(false);
   }, [search, page, category, status, storeFilter]);
@@ -1203,6 +1311,16 @@ export default function AdminProductsPage() {
 
   function handleSaved(updated: Product) {
     setProducts(ps => ps.map(p => p.id === updated.id ? updated : p));
+    // Keep the sibling map in step, or a photo just applied to a group would
+    // keep reporting "no photo" until the next refetch. The saved row may not
+    // be on this page at all (filters), which is exactly why this map exists.
+    if (updated.variant_group) {
+      setVariantSiblings(m => {
+        const group = m[updated.variant_group!];
+        if (!group) return m;
+        return { ...m, [updated.variant_group!]: group.map(s => s.id === updated.id ? { ...s, ...updated } : s) };
+      });
+    }
   }
 
   function handleAdded(newProduct: Product) {
@@ -1545,17 +1663,46 @@ export default function AdminProductsPage() {
                 </thead>
                 <tbody>
                   <AddProductRow onAdded={handleAdded} />
-                  {products.map(product => (
-                    <EditableRow
-                      key={product.id}
-                      product={product}
-                      selected={selected.has(product.id)}
-                      onSelect={toggleSelect}
-                      onSaved={handleSaved}
-                      onToggleActive={toggleActive}
-                      onToggleAvailable={toggleAvailable}
-                    />
-                  ))}
+                  {(() => {
+                    // Size-variant grouping. Siblings come from the API rather
+                    // than from `products`, so a filter like "No image" — which
+                    // deliberately hides the sizes that HAVE photos — still
+                    // knows a photo exists to copy from.
+                    // Every row still renders: admin prices, stocks and
+                    // photographs each size on its own.
+                    const headed = new Set<string>();
+                    const out: React.ReactNode[] = [];
+
+                    for (const product of products) {
+                      const group = product.variant_group ? variantSiblings[product.variant_group] : undefined;
+                      const siblings = group && group.length > 1 ? group : undefined;
+
+                      if (siblings && product.variant_group && !headed.has(product.variant_group)) {
+                        headed.add(product.variant_group);
+                        out.push(
+                          <VariantGroupHeader
+                            key={`vh-${product.variant_group}`}
+                            siblings={[...siblings].sort((a, b) => (a.variant_rank ?? 0) - (b.variant_rank ?? 0))}
+                            onSaved={handleSaved}
+                          />
+                        );
+                      }
+
+                      out.push(
+                        <EditableRow
+                          key={product.id}
+                          product={product}
+                          siblings={siblings}
+                          selected={selected.has(product.id)}
+                          onSelect={toggleSelect}
+                          onSaved={handleSaved}
+                          onToggleActive={toggleActive}
+                          onToggleAvailable={toggleAvailable}
+                        />
+                      );
+                    }
+                    return out;
+                  })()}
                 </tbody>
               </table>
             </div>

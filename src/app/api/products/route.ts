@@ -58,7 +58,39 @@ export async function GET(req: NextRequest) {
   const { data, count, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  return NextResponse.json({ products: data, total: count });
+  // SIZE-VARIANT SIBLINGS (migration 061).
+  //
+  // The admin grid groups sizes of one product ("CAB CHUCK ROAST ~5lb / ~8lb")
+  // and needs to know about EVERY size in a group, not just the ones on this
+  // page. Two cases break if we only look at `data`:
+  //
+  //   1. status=no_image — the filter returns only the sizes MISSING a photo,
+  //      so the page can't see that a sibling has one. Without this the grid
+  //      would say "needs a photo" for an item the customer already sees a
+  //      (borrowed) photo for, and would offer no donor to copy from.
+  //   2. a group straddling a page boundary.
+  //
+  // One extra round trip, only for admins, only when the page has groups.
+  let variantSiblings: Record<string, unknown[]> | undefined;
+  if (isAdmin && data?.length) {
+    const groupKeys = [...new Set(
+      data.map((p: { variant_group?: string | null }) => p.variant_group).filter(Boolean),
+    )] as string[];
+    if (groupKeys.length) {
+      const { data: sibs } = await supabase
+        .from('products')
+        .select('id, description, variant_group, variant_label, variant_rank, image_url, is_active')
+        .in('variant_group', groupKeys);
+      if (sibs) {
+        variantSiblings = {};
+        for (const s of sibs as { variant_group: string }[]) {
+          (variantSiblings[s.variant_group] ||= []).push(s);
+        }
+      }
+    }
+  }
+
+  return NextResponse.json({ products: data, total: count, variantSiblings });
 }
 
 interface ImportRow {
