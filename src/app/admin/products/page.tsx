@@ -20,6 +20,12 @@ import { useConfirm } from '@/components/ui/ConfirmDialog';
 // so a reviewer can eyeball the actual photo before approving a match.
 function ZoomableThumb({ src, alt }: { src: string; alt: string }) {
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
   return (
     <>
       <button type="button" onClick={() => setOpen(true)}
@@ -587,14 +593,17 @@ function PhotoReviewPanel({ onClose, onApplied }: { onClose: () => void; onAppli
 }
 
 // -- Shared image upload cell
-function ProductImageCell({ productId, imageUrl, onUploaded }: {
+function ProductImageCell({ productId, imageUrl, onUploaded, alt }: {
   productId: string | null;
   imageUrl: string | null;
   onUploaded: (url: string | null) => void;
+  /** Product name — labels the full-size preview so you know what you're looking at. */
+  alt?: string;
 }) {
   const [uploading, setUploading] = useState(false);
   const [preview, setPreview] = useState<string | null>(imageUrl);
   const [error, setError] = useState<string | null>(null);
+  const [zoomed, setZoomed] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { setPreview(imageUrl); }, [imageUrl]);
@@ -629,6 +638,16 @@ function ProductImageCell({ productId, imageUrl, onUploaded }: {
     setUploading(false);
   }
 
+  // Escape closes the preview, like every other overlay in the app.
+  useEffect(() => {
+    if (!zoomed) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setZoomed(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [zoomed]);
+
+  const pickFile = () => inputRef.current?.click();
+
   return (
     <div className="relative w-12 h-12 flex-shrink-0 group">
       <input
@@ -638,18 +657,29 @@ function ProductImageCell({ productId, imageUrl, onUploaded }: {
         className="hidden"
         onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ''; }}
       />
+      {/* Clicking a photo shows the PHOTO. A 48px thumbnail is far too small to
+          judge whether an auto-matched image is actually the right cut of meat,
+          which is the single most common reason to click it. Replace and Remove
+          both live inside the preview; an empty cell still opens the picker
+          straight away, since there's nothing to look at. */}
       <button
         type="button"
-        title={preview ? 'Replace image' : 'Upload image'}
-        onClick={() => inputRef.current?.click()}
+        title={preview ? 'Click to view full size' : 'Upload image'}
+        onClick={() => (preview ? setZoomed(true) : pickFile())}
         disabled={uploading}
-        className={`w-12 h-12 rounded border-2 overflow-hidden flex items-center justify-center transition-colors
-          ${preview ? 'border-gray-200 hover:border-brand-river' : 'border-dashed border-gray-300 hover:border-brand-river bg-gray-50'}`}
+        className={`w-12 h-12 rounded border-2 overflow-hidden flex items-center justify-center transition-colors relative
+          ${preview ? 'border-gray-200 hover:border-brand-river cursor-zoom-in' : 'border-dashed border-gray-300 hover:border-brand-river bg-gray-50'}`}
       >
         {uploading ? (
           <Loader2 className="w-4 h-4 animate-spin text-brand-river" />
         ) : preview ? (
-          <Image src={preview} alt="product" width={48} height={48} className="object-cover w-full h-full" unoptimized />
+          <>
+            <Image src={preview} alt="product" width={48} height={48} className="object-cover w-full h-full" unoptimized />
+            {/* Hover hint so the zoom is discoverable without a tooltip */}
+            <span className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+              <Search className="w-4 h-4 text-white" />
+            </span>
+          </>
         ) : (
           <ImagePlus className="w-5 h-5 text-gray-300 group-hover:text-brand-river" />
         )}
@@ -668,6 +698,48 @@ function ProductImageCell({ productId, imageUrl, onUploaded }: {
         <div className="absolute top-full left-0 mt-1 z-20 bg-red-50 border border-red-200 rounded text-[10px] text-red-600 px-2 py-1 whitespace-nowrap max-w-[180px] shadow-md">
           {error}
         </div>
+      )}
+
+      {/* ── Full-size preview ────────────────────────────────────
+          PORTAL to <body> — house rule for every fixed overlay here. */}
+      {zoomed && preview && createPortal(
+        <div className="fixed inset-0 z-[100] bg-black/80 flex flex-col items-center justify-center p-6"
+          onClick={() => setZoomed(false)}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={preview}
+            alt={alt || 'Product photo'}
+            onClick={e => e.stopPropagation()}
+            className="max-w-full max-h-[calc(100vh-11rem)] object-contain rounded-lg shadow-2xl bg-white cursor-default"
+          />
+
+          <div onClick={e => e.stopPropagation()}
+            className="mt-4 flex items-center gap-2 bg-white/95 rounded-xl px-3 py-2.5 shadow-2xl max-w-full">
+            {alt && (
+              <span className="text-xs font-bold text-brand-navy truncate max-w-[16rem] mr-1">{alt}</span>
+            )}
+            <button
+              type="button"
+              onClick={() => { setZoomed(false); pickFile(); }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-brand-river text-white hover:bg-brand-navy transition-colors">
+              <Upload className="w-3.5 h-3.5" /> Replace image
+            </button>
+            <button
+              type="button"
+              onClick={e => { setZoomed(false); handleRemove(e); }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 transition-colors">
+              <Trash2 className="w-3.5 h-3.5" /> Remove
+            </button>
+            <button
+              type="button"
+              onClick={() => setZoomed(false)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-gray-500 hover:bg-gray-100 transition-colors">
+              Close
+            </button>
+          </div>
+          <p className="mt-2 text-[11px] text-white/50">Click anywhere or press Esc to close</p>
+        </div>,
+        document.body
       )}
     </div>
   );
@@ -821,6 +893,7 @@ function AddProductRow({ onAdded }: {
         <ProductImageCell
           productId={newProductId}
           imageUrl={form.image_url}
+          alt={form.description}
           onUploaded={url => setForm(f => ({ ...f, image_url: url }))}
         />
       </td>
@@ -1025,6 +1098,7 @@ function EditableRow({ product, siblings, selected, onSelect, onSaved, onToggleA
           <ProductImageCell
             productId={product.id}
             imageUrl={form.image_url}
+            alt={form.description || product.description}
             onUploaded={url => setForm(f => ({ ...f, image_url: url }))}
           />
         </td>
@@ -1097,6 +1171,7 @@ function EditableRow({ product, siblings, selected, onSelect, onSaved, onToggleA
           <ProductImageCell
             productId={product.id}
             imageUrl={product.image_url ?? null}
+            alt={product.description}
             onUploaded={url => onSaved({ ...product, image_url: url })}
           />
         </div>
