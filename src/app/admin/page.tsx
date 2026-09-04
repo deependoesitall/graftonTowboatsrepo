@@ -96,7 +96,7 @@ export default function AdminDashboard() {
           </div>
           <div className="space-y-4">
             <div>
-              <label className="label-base">Username <span className="text-gray-400 font-normal normal-case">(leave blank for default login)</span></label>
+              <label className="label-base">Username</label>
               <input
                 type="text"
                 className="input-base"

@@ -14,6 +14,11 @@ import { vesselKey, canonicalVesselName, vesselSuggestions } from '@/lib/vessel'
 interface Company { id: string; name: string; is_active: boolean; }
 interface ServiceType { id: string; name: string; default_rate: number; sort: number; }
 interface Override { company_id: string; service_type_id: string; rate: number; }
+/** One boat's own rate — beats the company rate. See migration 062. */
+interface VesselRate {
+  company_id: string; service_type_id: string;
+  vessel_key: string; vessel_label: string; rate: number;
+}
 interface Delivery {
   id: string;
   delivery_date: string | null;
@@ -286,7 +291,9 @@ export default function DeliveriesPage() {
           serviceTypes={serviceTypes}
           knownVessels={vesselSuggestions(rows)}
           onClose={() => setEditing(null)}
-          onSaved={() => { setEditing(null); load(); }}
+          // loadMeta too: saving may have created a new barge line, and it has
+          // to appear in the pick list and rate cards straight away.
+          onSaved={() => { setEditing(null); load(); loadMeta(); }}
         />
       )}
       {showQb && (
@@ -296,7 +303,7 @@ export default function DeliveriesPage() {
         />
       )}
       {showRates && (
-        <RateCardEditor companies={companies} serviceTypes={serviceTypes}
+        <RateCardEditor companies={companies} serviceTypes={serviceTypes} deliveries={rows}
           onClose={() => setShowRates(false)} onChanged={loadMeta} />
       )}
     </div>
@@ -555,6 +562,11 @@ function DeliveryEditor({ delivery, companies, serviceTypes, knownVessels = [], 
     amount_paid_driver: delivery?.amount_paid_driver ?? '',
     vessel_name: delivery?.vessel_name || '',
     company_id: delivery?.company_id || '',
+    // Typed company text, kept alongside the id. The ledger has to be able to
+    // log a barge line that has never used the ordering site — the old
+    // spreadsheet way still runs in parallel, so a new company can show up on
+    // the dock before it exists anywhere in this system.
+    company_name: delivery?.company?.name || '',
     service_type: delivery?.service_type || '',
     location_delivered: delivery?.location_delivered || '',
     delivery_fee: delivery?.delivery_fee ?? '',
@@ -568,6 +580,7 @@ function DeliveryEditor({ delivery, companies, serviceTypes, knownVessels = [], 
     incentive: delivery?.incentive || '',
   }));
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [rateHint, setRateHint] = useState<string>('');
   const set = (k: string, v: any) => setF(p => ({ ...p, [k]: v }));
 
@@ -588,30 +601,80 @@ function DeliveryEditor({ delivery, companies, serviceTypes, knownVessels = [], 
     }
   }
 
-  // When company + service type are both chosen, auto-fill the fee from the
-  // rate card (default, or that company's override). Editable afterward.
+  // Auto-fill the fee from the rate card once company + service are chosen,
+  // and re-check when the BOAT changes.
+  //
+  // The boat matters: Ingram's Daytime Van Delivery is $350 for most of the
+  // fleet but $225 for Scott Noble and Mike Schmeng (migration 062). Before
+  // this, auto-fill offered $350 on nearly every Ingram order and someone
+  // corrected it by hand — the red note at the top of Jen's spreadsheet was
+  // the only place that rule existed.
+  //
+  // The hint says WHICH rate was used, so an unexpected number is explainable
+  // instead of just wrong-looking.
   const svcId = serviceTypes.find(s => s.name === f.service_type)?.id;
   useEffect(() => {
     if (!f.company_id || !svcId) { setRateHint(''); return; }
     let cancelled = false;
-    adminFetch(`/api/admin/service-rates?company_id=${f.company_id}&service_type_id=${svcId}`)
+    const params = new URLSearchParams({ company_id: f.company_id, service_type_id: svcId });
+    if (f.vessel_name?.trim()) params.set('vessel', f.vessel_name.trim());
+    adminFetch(`/api/admin/service-rates?${params}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => {
         if (cancelled || !d || d.rate == null) return;
-        setRateHint(`${d.is_override ? "this company's rate" : 'default rate'}: ${formatCurrency(d.rate)}`);
-        // Only prefill when the fee is still empty (don't clobber an edit)
+        const label =
+          d.source === 'vessel' ? `${d.vessel_label || f.vessel_name}’s rate`
+          : d.source === 'company' ? "this company’s rate"
+          : 'default rate';
+        setRateHint(`${label}: ${formatCurrency(d.rate)}`);
+        // Only prefill when the fee is still empty (don't clobber an edit).
         setF(p => (p.delivery_fee === '' || p.delivery_fee == null) ? { ...p, delivery_fee: d.rate } : p);
       });
     return () => { cancelled = true; };
-  }, [f.company_id, svcId]);
+  }, [f.company_id, svcId, f.vessel_name]);
+
+  // Typed company → existing row (case-insensitive), or a brand-new one.
+  const typedCompany = (f.company_name || '').trim();
+  const matchedCompany = companies.find(
+    c => c.name.trim().toLowerCase() === typedCompany.toLowerCase(),
+  );
+  const isNewCompany = typedCompany.length > 0 && !matchedCompany;
 
   async function save() {
     setSaving(true);
+    setSaveError('');
+
+    // Resolve the company BEFORE writing the delivery. A name nobody has used
+    // yet gets created here, so it's immediately available for rate cards,
+    // filters and next month's deliveries instead of being a dead string.
+    let companyId: string | null = matchedCompany?.id ?? null;
+    if (isNewCompany) {
+      const res = await adminFetch('/api/admin/companies', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: typedCompany }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Could not add that company' }));
+        setSaveError(err.error || 'Could not add that company');
+        setSaving(false);
+        return;
+      }
+      companyId = (await res.json()).company?.id ?? null;
+    }
+
+    // company_name is UI-only — the deliveries table stores company_id.
+    const { company_name: _omit, ...rest } = f;
+    const payload = { ...rest, company_id: companyId };
     const method = delivery ? 'PATCH' : 'POST';
-    const body = delivery ? { id: delivery.id, ...f } : f;
+    const body = delivery ? { id: delivery.id, ...payload } : payload;
     const res = await adminFetch('/api/admin/deliveries', { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     setSaving(false);
     if (res.ok) onSaved();
+    else {
+      const err = await res.json().catch(() => ({ error: 'Could not save this delivery' }));
+      setSaveError(err.error || 'Could not save this delivery');
+    }
   }
 
   const field = (label: string, k: string, type = 'text') => (
@@ -631,13 +694,34 @@ function DeliveryEditor({ delivery, companies, serviceTypes, knownVessels = [], 
         </div>
         <div className="p-5 overflow-y-auto grid grid-cols-2 gap-3">
           {field('Date', 'delivery_date', 'date')}
+          {/* Free text, same as Vessel. Not every barge line will move onto the
+              ordering site at once — the spreadsheet way keeps running beside
+              it — so a company that has never touched this system still has to
+              be loggable the day it shows up. Picking an existing name from the
+              list keeps the rate-card autofill working; a new name is created
+              on save so it's a real company from then on. */}
           <label className="block">
             <span className="text-xs font-semibold text-gray-500">Company (barge line)</span>
-            <select value={f.company_id} onChange={e => set('company_id', e.target.value)}
-              className="mt-0.5 w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm">
-              <option value="">—</option>
-              {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            <input
+              list="known-companies"
+              value={f.company_name ?? ''}
+              onChange={e => {
+                const v = e.target.value;
+                const hit = companies.find(c => c.name.trim().toLowerCase() === v.trim().toLowerCase());
+                // Keep the id in step as they type, so choosing a known company
+                // still triggers the rate-card lookup below.
+                setF(p => ({ ...p, company_name: v, company_id: hit?.id || '' }));
+              }}
+              placeholder="Type any company — new ones welcome"
+              className="mt-0.5 w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-green/30" />
+            <datalist id="known-companies">
+              {companies.map(c => <option key={c.id} value={c.name} />)}
+            </datalist>
+            {isNewCompany && (
+              <span className="block mt-1 text-[11px] font-semibold text-amber-700">
+                New company — &ldquo;{typedCompany}&rdquo; will be added on save. No rate card yet, so enter the fee manually.
+              </span>
+            )}
           </label>
           {/* Free text on purpose — a brand-new boat must be able to order and
               be logged the same day. The datalist just offers spellings already
@@ -710,6 +794,14 @@ function DeliveryEditor({ delivery, companies, serviceTypes, knownVessels = [], 
               className="mt-0.5 w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm" />
           </label>
         </div>
+        {/* Save failures used to be silent — the modal just sat there. */}
+        {saveError && (
+          <div className="px-5 pt-3">
+            <p className="text-xs font-semibold text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              {saveError}
+            </p>
+          </div>
+        )}
         <div className="px-5 py-4 border-t border-gray-100 flex gap-3">
           <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50">Cancel</button>
           <button onClick={save} disabled={saving} className="flex-1 py-2.5 rounded-xl bg-brand-green text-white text-sm font-bold flex items-center justify-center gap-1.5 hover:bg-brand-gmed disabled:opacity-50">
@@ -723,97 +815,213 @@ function DeliveryEditor({ delivery, companies, serviceTypes, knownVessels = [], 
 }
 
 // ── Rate card editor: default rates + per-company overrides ───────────────
-function RateCardEditor({ companies, serviceTypes, onClose, onChanged }: {
-  companies: Company[]; serviceTypes: ServiceType[]; onClose: () => void; onChanged: () => void;
+// ── Rate cards: shared default → company → boat ───────────────────────────
+//
+// The third tier exists because of the red note at the top of Jen's
+// spreadsheet: "Ingram $225 rate is for Mike Schmeng and Scott Noble Only".
+// Until now that rule lived only in her head, so auto-fill offered $350 on
+// nearly every Ingram order and someone corrected it by hand every time.
+//
+// The whole design goal is that you can never be unsure WHICH rate you're
+// editing. You pick a scope at the top — everyone / one company / one boat —
+// and the list below belongs to exactly that scope, with each row saying what
+// it would fall back to if you cleared it.
+function RateCardEditor({ companies, serviceTypes, deliveries, onClose, onChanged }: {
+  companies: Company[]; serviceTypes: ServiceType[]; deliveries: Delivery[];
+  onClose: () => void; onChanged: () => void;
 }) {
-  const [companyId, setCompanyId] = useState<string>(''); // '' = shared defaults
+  const [companyId, setCompanyId] = useState<string>('');   // '' = shared defaults
+  const [vessel, setVessel] = useState<string>('');         // '' = all boats at this company
   const [overrides, setOverrides] = useState<Override[]>([]);
+  const [vesselRates, setVesselRates] = useState<VesselRate[]>([]);
   const [saving, setSaving] = useState<string | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
 
-  const loadOverrides = useCallback(async () => {
+  const load = useCallback(async () => {
     const res = await adminFetch('/api/admin/service-rates');
-    if (res.ok) setOverrides((await res.json()).overrides);
+    if (res.ok) {
+      const d = await res.json();
+      setOverrides(d.overrides || []);
+      setVesselRates(d.vessel_rates || []);
+    }
   }, []);
-  useEffect(() => { loadOverrides(); }, [loadOverrides]);
+  useEffect(() => { load(); }, [load]);
+  // Switching company drops you back to that company's own rates — carrying a
+  // boat name across companies would be meaningless.
+  useEffect(() => { setVessel(''); }, [companyId]);
+
+  const vKey = vessel.trim() ? vesselKey(vessel) : '';
+  const scope: 'default' | 'company' | 'vessel' = !companyId ? 'default' : vKey ? 'vessel' : 'company';
+  const companyName = companies.find(c => c.id === companyId)?.name || '';
+
+  const companyRate = (stId: string) =>
+    overrides.find(o => o.company_id === companyId && o.service_type_id === stId)?.rate;
+  const boatRate = (stId: string) =>
+    vesselRates.find(v => v.company_id === companyId && v.vessel_key === vKey && v.service_type_id === stId)?.rate;
+
+  // Boats at this company that already carry their own price — the answer to
+  // "who's on the $225 rate?" without reading a red note.
+  const boatsWithRates = Array.from(
+    new Map(vesselRates.filter(v => v.company_id === companyId).map(v => [v.vessel_key, v])).values(),
+  ).sort((a, b) => a.vessel_label.localeCompare(b.vessel_label));
+
+  // Every boat this company has actually had a delivery for, so the picker
+  // suggests real spellings instead of inviting a new one.
+  const knownBoats = vesselSuggestions(
+    deliveries.filter(d => d.company_id === companyId), companyId,
+  );
 
   function flagSaved(id: string) {
     setSavedId(id);
     setTimeout(() => setSavedId(s => (s === id ? null : s)), 2000);
   }
-  async function saveDefault(st: ServiceType, val: string) {
-    if (String(parseFloat(val) || 0) === String(st.default_rate)) return; // unchanged
+
+  async function save(st: ServiceType, val: string) {
+    const next = val === '' ? null : parseFloat(val);
+    const current = scope === 'default' ? st.default_rate : scope === 'company' ? companyRate(st.id) : boatRate(st.id);
+    if (String(current ?? '') === String(next ?? '')) return;   // nothing changed
     setSaving(st.id);
-    const res = await adminFetch('/api/admin/service-rates', { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode: 'default', id: st.id, default_rate: parseFloat(val) || 0 }) });
+    const payload =
+      scope === 'default'
+        ? { mode: 'default', id: st.id, default_rate: next ?? 0 }
+        : scope === 'company'
+        ? { mode: 'override', company_id: companyId, service_type_id: st.id, rate: next }
+        : { mode: 'vessel', company_id: companyId, service_type_id: st.id, vessel: vessel.trim(), rate: next };
+    const res = await adminFetch('/api/admin/service-rates', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+    await load();
     setSaving(null);
     if (res.ok) { flagSaved(st.id); onChanged(); }
   }
-  async function saveOverride(st: ServiceType, val: string) {
-    const current = overrideFor(st.id);
-    const next = val === '' ? null : parseFloat(val);
-    if (String(current ?? '') === String(next ?? '')) return; // unchanged
-    setSaving(st.id);
-    const res = await adminFetch('/api/admin/service-rates', { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode: 'override', company_id: companyId, service_type_id: st.id, rate: next }) });
-    await loadOverrides(); setSaving(null);
-    if (res.ok) flagSaved(st.id);
-  }
-  const overrideFor = (stId: string) => overrides.find(o => o.company_id === companyId && o.service_type_id === stId)?.rate;
 
   return createPortal(
     <div className="fixed inset-0 z-[95] bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[92vh] flex flex-col">
+      <div onClick={e => e.stopPropagation()} className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[92vh] flex flex-col">
         <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-          <h3 className="font-display text-lg font-bold text-brand-navy flex items-center gap-2"><DollarSign className="w-5 h-5 text-brand-green" /> Delivery Rate Cards</h3>
+          <h3 className="font-display text-lg font-bold text-brand-navy flex items-center gap-2">
+            <DollarSign className="w-5 h-5 text-brand-green" /> Delivery Rate Cards
+          </h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
         </div>
-        <div className="px-5 py-3 border-b border-gray-100">
-          <label className="text-xs font-semibold text-gray-500">Editing rates for</label>
-          <select value={companyId} onChange={e => setCompanyId(e.target.value)}
-            className="mt-1 w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm">
-            <option value="">Shared default (applies to any company without its own rate)</option>
-            {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+
+        {/* ── Scope ─────────────────────────────────────────────── */}
+        <div className="px-5 py-3 border-b border-gray-100 bg-gray-50/60 space-y-2.5">
+          <div>
+            <label className="text-xs font-semibold text-gray-500">Barge line</label>
+            <select value={companyId} onChange={e => setCompanyId(e.target.value)}
+              className="mt-1 w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm bg-white">
+              <option value="">Everyone — shared default rates</option>
+              {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+
+          {companyId && (
+            <div>
+              <label className="text-xs font-semibold text-gray-500">
+                Boat <span className="font-normal text-gray-400">— leave blank for all {companyName} boats</span>
+              </label>
+              <input list="rate-boats" value={vessel} onChange={e => setVessel(e.target.value)}
+                placeholder={`All ${companyName} boats`}
+                className="mt-1 w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm bg-white" />
+              <datalist id="rate-boats">
+                {knownBoats.map(b => <option key={b} value={b} />)}
+              </datalist>
+              {vessel.trim() && (
+                <button type="button" onClick={() => setVessel('')}
+                  className="mt-1 text-[11px] font-semibold text-brand-river hover:underline">
+                  ← back to all {companyName} boats
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Who already has their own price — the red note, made visible */}
+          {companyId && boatsWithRates.length > 0 && (
+            <div className="pt-0.5">
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">
+                Boats with their own rate
+              </p>
+              <div className="flex flex-wrap gap-1">
+                {boatsWithRates.map(b => (
+                  <button key={b.vessel_key} type="button" onClick={() => setVessel(b.vessel_label)}
+                    className={`px-2 py-0.5 rounded-full text-[11px] font-semibold border transition-colors ${
+                      b.vessel_key === vKey
+                        ? 'bg-brand-navy text-white border-brand-navy'
+                        : 'bg-white text-brand-navy border-brand-gold/50 hover:border-brand-navy'
+                    }`}>
+                    {b.vessel_label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
-        <div className="p-5 overflow-y-auto space-y-1.5">
+
+        {/* ── Rates for the chosen scope ────────────────────────── */}
+        <div className="p-5 overflow-y-auto space-y-1">
+          <p className="text-xs font-bold text-brand-navy mb-2">
+            {scope === 'default' ? 'Rates for every barge line without its own price'
+              : scope === 'company' ? `${companyName} — all boats`
+              : `${companyName} — ${vessel.trim()} only`}
+          </p>
+
           {serviceTypes.map(st => {
-            const ov = overrideFor(st.id);
+            const co = companyRate(st.id);
+            const bt = boatRate(st.id);
+            // What this row is worth right now, and where that came from.
+            const effective = scope === 'default' ? st.default_rate
+              : scope === 'company' ? (co ?? st.default_rate)
+              : (bt ?? co ?? st.default_rate);
+            const source = scope === 'default' ? 'default'
+              : scope === 'company' ? (co != null ? 'company' : 'default')
+              : (bt != null ? 'boat' : co != null ? 'company' : 'default');
+            const own = scope === 'default' ? st.default_rate : scope === 'company' ? co : bt;
+            const fallback = scope === 'company' ? st.default_rate : (co ?? st.default_rate);
+
             return (
               <div key={st.id} className="flex items-center gap-3 py-1">
                 <span className="flex-1 text-sm text-brand-navy">{st.name}</span>
-                {companyId === '' ? (
-                  <div className="flex items-center gap-1">
-                    <span className="text-gray-400 text-sm">$</span>
-                    {/* key re-mounts the input per service type so defaultValue is fresh */}
-                    <input key={`def-${st.id}`} type="number" step="0.01" defaultValue={st.default_rate}
-                      onBlur={e => saveDefault(st, e.target.value)}
-                      className="w-24 text-right border border-gray-200 rounded px-2 py-1 text-sm" />
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-1">
-                    <span className="text-gray-400 text-sm">$</span>
-                    {/* key includes companyId so switching companies re-mounts with that company's value */}
-                    <input key={`${companyId}-${st.id}`} type="number" step="0.01" defaultValue={ov ?? ''} placeholder={String(st.default_rate)}
-                      onBlur={e => saveOverride(st, e.target.value)}
-                      className="w-24 text-right border border-gray-200 rounded px-2 py-1 text-sm" />
-                    {ov == null && <span className="text-[10px] text-gray-400 w-14">default</span>}
-                    {ov != null && <span className="text-[10px] text-brand-green font-bold w-14">custom</span>}
-                  </div>
-                )}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-gray-400 text-sm">$</span>
+                  {/* key includes the scope so switching company or boat re-mounts with that scope's value */}
+                  <input
+                    key={`${scope}-${companyId}-${vKey}-${st.id}`}
+                    type="number" step="0.01"
+                    defaultValue={own ?? ''}
+                    placeholder={scope === 'default' ? '0.00' : String(fallback)}
+                    onBlur={e => save(st, e.target.value)}
+                    className="w-24 text-right border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-brand-green/30" />
+                  <span className={`text-[10px] font-bold w-16 ${
+                    source === 'boat' ? 'text-brand-orange'
+                      : source === 'company' ? 'text-brand-green'
+                      : 'text-gray-400'
+                  }`}>
+                    {source === 'boat' ? 'this boat' : source === 'company' ? 'company' : 'default'}
+                  </span>
+                </div>
                 {saving === st.id
                   ? <Loader2 className="w-3.5 h-3.5 animate-spin text-gray-400" />
                   : savedId === st.id
                   ? <Check className="w-3.5 h-3.5 text-green-600" />
                   : <span className="w-3.5" />}
+                <span className="sr-only">{formatCurrency(effective)}</span>
               </div>
             );
           })}
-          <p className="text-xs text-gray-400 pt-3">
-            {companyId === ''
-              ? 'These defaults apply to any company that doesn’t have its own rate set. Changes save when you click away.'
-              : 'Leave a box blank to use the shared default. A number overrides it for this company only.'}
+
+          <p className="text-xs text-gray-400 pt-3 leading-relaxed">
+            {scope === 'default'
+              ? 'These apply to any barge line without its own price. Changes save when you click away.'
+              : scope === 'company'
+              ? `Blank uses the shared default. A number here applies to every ${companyName} boat that doesn’t have its own.`
+              : `Blank falls back to ${companyName}’s rate. A number here applies to ${vessel.trim()} only.`}
           </p>
+          {scope === 'vessel' && (
+            <p className="text-[11px] text-gray-400">
+              Spelling doesn’t matter — “W Scott Noble” and “Scott Noble” share one rate.
+            </p>
+          )}
         </div>
       </div>
     </div>,

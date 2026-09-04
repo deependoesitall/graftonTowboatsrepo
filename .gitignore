@@ -40,3 +40,6 @@ PRELAUNCH_CHECKLIST.md
 # FUSE mount artifacts — never commit
 .fuse_hidden*
 **/.fuse_hidden*
+
+# Internal business notes — never commit
+PRICING_NOTES.md

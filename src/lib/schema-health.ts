@@ -46,6 +46,11 @@ const REQUIRED: Requirement[] = [
     breaks: 'Repeated meat sizes show as separate cards instead of one card with a size chooser.',
   },
   {
+    table: 'vessel_service_rates',
+    migration: '062_vessel_service_rates.sql',
+    breaks: 'Boat-specific delivery rates are ignored — Scott Noble and Mike Schmeng quote $350 instead of $225.',
+  },
+  {
     table: 'orders',
     columns: ['register_total', 'deck_register_total', 'cod_fee_percent', 'cod_fee_amount'],
     migration: '058_cod_fee_amount.sql / 059_deck_register_total.sql',
