@@ -23,23 +23,44 @@ import { findMatchFor } from '@/lib/image-backfill';
 import {
   fetchFreshopPages, fetchFreshopTotal, freshopKeys, ourKeys, computeFields,
   buildStoreProduct, norm,
-  FRESHOP_PAGE_SIZE, FRESHOP_DEPARTMENTS,
+  FRESHOP_PAGE_SIZE, FRESHOP_STOREFRONT_ROOT,
   type FreshopProduct, type SyncableProduct, type SyncStats,
 } from '@/lib/freshop-sync';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-// Throughput: fetch pages in small CONCURRENT batches instead of a serial
-// crawl. The old pacing (1 page every 1.2s) spent ~15s of every 40s budget
-// asleep and needed ~17 invocations for the full store. Batches of 4 with a
-// short breath between them clear the same ground in a fraction of the runs
-// while staying well inside what NCR tolerates.
-const BATCH_SIZE = 4;               // concurrent page fetches
-const PAGES_PER_RUN = 40;           // per invocation (~10 batches)
-const BATCH_DELAY_MS = 250;         // breath between batches
+// PACING — deliberately serial now.
+//
+// This file used to fetch 4 pages concurrently, on the theory that NCR
+// tolerates parallel reads better than a serial crawl. Measured against the
+// live API on Sept 5, 2026, that is not true. A burst gets throttled within
+// roughly 65 requests, and the cooldown then runs for MINUTES, not seconds —
+// probing once every 20s did not clear it after 140s. One page at a time with
+// a real pause between them is slower per run and far faster overall, because
+// it doesn't lose the next several runs to a lockout.
+//
+// The throttle is also disguised: HTTP 400 with a body of {"error_code":429}.
+// fetchFreshopPage reads the body rather than trusting the status.
+const BATCH_SIZE = 1;               // serial — concurrency is what triggers the throttle
+const PAGES_PER_RUN = 15;           // per invocation
+const BATCH_DELAY_MS = 800;         // real breath between pages
 const TIME_BUDGET_MS = 45_000;      // leave headroom under maxDuration
 const MAX_DEPT_PAGES = 500;         // runaway guard for page-until-empty growth
+
+/**
+ * Checkpoint schema version.
+ *
+ * Bumping this invalidates every stored checkpoint. It has to be bumped
+ * whenever the SHAPE of a sweep changes, because a session saved by the old
+ * code can carry `completedAt` for today and make the new code no-op — which
+ * is precisely how a sweep that had only ever seen 775 items kept reporting
+ * itself finished.
+ *
+ * v2: single root walk with department_id_cascade=true, dead stock filtered
+ *     out at build time, no `sort` parameter.
+ */
+const SYNC_VERSION = 2;
 
 interface DeptProgress {
   id: string;
@@ -52,6 +73,8 @@ interface DeptProgress {
 
 interface SyncState {
   day?: string;                     // date the current sync session STARTED (America/Chicago)
+  /** Checkpoint schema version — see SYNC_VERSION. Anything older is discarded. */
+  syncVersion?: number;
   /** Per-department progress — departments are fetched separately so alcohol
    * is never requested and category mapping is authoritative. */
   depts?: DeptProgress[];
@@ -144,6 +167,17 @@ async function handle(req: NextRequest) {
   const { data: row } = await supabase.from('catalog_sync_state').select('state').eq('id', 1).single();
   let state: SyncState = (row?.state as SyncState) || {};
 
+  // VERSION GATE — must run BEFORE the completed-today short-circuit below.
+  //
+  // A checkpoint written by an older sweep shape cannot be trusted even when it
+  // says "completed today". The pre-v2 sweep queried 8 parent departments
+  // WITHOUT department_id_cascade, found ~775 items, and marked itself done. If
+  // that state survives, this route returns 'done' forever and the store never
+  // fills. Discard anything not written by the current sweep.
+  if (state.syncVersion !== SYNC_VERSION) {
+    state = {};
+  }
+
   // Session logic: an UNFINISHED session continues across days (the very first
   // full-store sweep can span multiple nights). A COMPLETED session starts
   // fresh on the next new day; completed-today invocations are no-ops.
@@ -166,11 +200,9 @@ async function handle(req: NextRequest) {
         photo_backfill: backfill, has_more: backfill.hasMore,
       });
     }
-    state = { day: today, stats: emptyStats(), applied: 0, inserted: 0 };
+    state = { day: today, syncVersion: SYNC_VERSION, stats: emptyStats(), applied: 0, inserted: 0 };
   } else if (!state.day || !state.depts) {
-    // !state.depts also catches checkpoints from the pre-department layout —
-    // they restart cleanly under the new per-department structure.
-    state = { day: today, stats: emptyStats(), applied: 0, inserted: 0 };
+    state = { day: today, syncVersion: SYNC_VERSION, stats: emptyStats(), applied: 0, inserted: 0 };
   }
 
   // ── Discover per-department sizes once per session ──
@@ -178,28 +210,31 @@ async function handle(req: NextRequest) {
   // department's count is captured once at session start and held for the
   // whole session (progress math stays stable).
   if (!state.depts || state.depts.length === 0) {
-    // Size departments SEQUENTIALLY, paced. This used to be a Promise.all —
-    // eight simultaneous requests to an API this file already documents as
-    // rate-limiting bursts. Throttled sizing answers come back short, and a
-    // short size is silent: the sweep computes too few pages, imports a
-    // fraction of the store, then reports itself complete. Observed live —
-    // the store sized at 775 when Bakery alone reports 1,820.
-    // Eight paced calls cost ~3s once per session. Worth every millisecond.
-    const totals: Array<number | null> = [];
-    for (const d of FRESHOP_DEPARTMENTS) {
-      if (totals.length) await sleep(300);
-      totals.push(await fetchFreshopTotal(d.id));
-    }
-    const missing = FRESHOP_DEPARTMENTS.filter((_, i) => totals[i] == null);
-    if (missing.length) {
-      state.lastError = `Freshop unreachable sizing ${missing.map(d => d.name).join(', ')} — will retry on next invocation`;
+    // ONE WALK OF THE STOREFRONT ROOT, WITH CASCADE.
+    //
+    // The old sweep asked 8 parent departments for their pages. A department
+    // query without department_id_cascade returns only items pinned directly to
+    // that node — Pantry answers 500 that way and 30,992 with cascade — so the
+    // 1,332 sub-departments where the groceries actually live were never
+    // visited. That is the whole reason the store mirror sat at ~688 rows.
+    //
+    // Walking the root with cascade covers every child in one flat sequence, so
+    // there is no department tree to traverse and nothing to miss. Category no
+    // longer comes from which department we asked; it comes from each item's own
+    // canonical_url (see categoryFrom/refineCategory), which is authoritative.
+    //
+    // Alcohol and floral are excluded per-item by buildStoreProduct rather than
+    // by not asking for their departments.
+    const total = await fetchFreshopTotal(FRESHOP_STOREFRONT_ROOT);
+    if (total == null) {
+      state.lastError = 'Freshop unreachable while sizing the store — will retry on next invocation';
       await saveState(supabase, state);
       return NextResponse.json({ status: 'waiting', reason: state.lastError }, { status: 200 });
     }
-    state.depts = FRESHOP_DEPARTMENTS.map((d, i) => ({
-      id: d.id, name: d.name, category: d.category,
-      total: totals[i]!, pages: Math.ceil(totals[i]! / FRESHOP_PAGE_SIZE), done: [],
-    }));
+    state.depts = [{
+      id: FRESHOP_STOREFRONT_ROOT, name: 'Sinclair’s store', category: 'Pantry & Grocery',
+      total, pages: Math.ceil(total / FRESHOP_PAGE_SIZE), done: [],
+    }];
   }
 
   // ── Load our catalog once per invocation ──
@@ -265,6 +300,7 @@ async function handle(req: NextRequest) {
   // the whole batch instead of per page.
   for (let qi = 0; qi < queue.length; qi += BATCH_SIZE) {
     if (pagesFetched >= PAGES_PER_RUN || Date.now() - started > TIME_BUDGET_MS) break;
+    if (rateLimited) break;   // NCR is refusing — stop for this invocation
 
     const batch = queue.slice(qi, qi + BATCH_SIZE);
     const results = await fetchFreshopPages(
@@ -278,7 +314,13 @@ async function handle(req: NextRequest) {
 
     for (let bi = 0; bi < batch.length; bi++) {
       const items = results[bi];
-      if (!items) { rateLimited = true; continue; }  // back off — next invocation retries
+      // A throttled page is NEVER checkpointed as done — the next invocation
+      // retries it. And once NCR starts refusing, every further request in this
+      // run refuses too and deepens the lockout (measured: still throttling
+      // after 140s of one-request-per-20s probing). So stop asking immediately
+      // and let the next invocation start fresh, rather than burning the rest
+      // of the budget being told no.
+      if (!items) { rateLimited = true; break; }
       const { dept, pageIdx } = batch[bi];
 
       // ── GROW THE DEPARTMENT ── never trust Freshop's `total`.

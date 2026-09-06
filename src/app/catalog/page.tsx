@@ -289,7 +289,12 @@ export default async function CatalogPage({ searchParams }: PageProps) {
               <div className="flex-1 min-w-[220px]">
                 <p className="text-sm font-bold">You&apos;re browsing the full Sinclair&apos;s store</p>
                 <p className="text-xs text-white/75">
-                  Everything Sinclair&apos;s carries — beyond the barge order form. Add anything to your order like normal.
+                  {/* Deliberately not "everything Sinclair's carries". The store
+                      mirror fills in over several nightly sweeps, and a cook who
+                      searches for something we haven't imported yet shouldn't be
+                      told it doesn't exist. Promise more, not all. */}
+                  More from Sinclair&apos;s — beyond the barge order form. Add anything to your order like normal.
+                  Don&apos;t see it? Use &ldquo;Need something we don&apos;t carry?&rdquo; and we&apos;ll get it.
                 </p>
               </div>
               <Link href={bargeHref}

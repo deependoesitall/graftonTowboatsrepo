@@ -40,7 +40,10 @@ export function StoreScopeToggle({ storeAll, bargeHref, storeAllHref, bargeCount
             storeAll ? 'text-white' : 'text-gray-500 hover:text-brand-navy'
           }`}>
           <span className="flex items-center gap-1.5 text-sm font-bold uppercase tracking-wide">
-            <Store className="w-4 h-4" /> Full Sinclair&apos;s Store
+            {/* "More from Sinclair's", not "Full Sinclair's Store" — the mirror
+                fills in over successive nightly sweeps and shouldn't claim
+                completeness it doesn't have. */}
+            <Store className="w-4 h-4" /> More From Sinclair&apos;s
           </span>
           <span className={`text-[11px] ${storeAll ? 'text-white/70' : 'text-gray-400'}`}>
             {fullCount.toLocaleString()} more items

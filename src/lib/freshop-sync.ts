@@ -279,19 +279,70 @@ export function computeFields(
   return Object.keys(fields).length ? fields : null;
 }
 
-/** One Freshop catalog page, scoped to ONE department subtree. Null on rate limit/error. */
+/**
+ * One Freshop catalog page. Null on rate limit/error.
+ *
+ * TWO PARAMETERS DECIDE WHETHER THIS WHOLE SYNC WORKS. Both were measured
+ * against the live API on Sept 5, 2026; neither is guesswork.
+ *
+ * 1. `department_id_cascade=true` — WITHOUT it, a department query returns only
+ *    the items pinned directly to that node, NOT its subtree. Pantry answers
+ *    500 without it and 30,992 with it. That single missing parameter is why
+ *    the store mirror sat at ~688 rows: the sweep asked 8 parent departments
+ *    for their direct children and never saw the 1,332 sub-departments where
+ *    the actual groceries live.
+ *
+ * 2. NO `sort` PARAMETER. This looks harmless and is not. Freshop's DEFAULT
+ *    order returns every live item first, then the dead stock:
+ *
+ *        default sort  → skip 0: 100/100 available · 8,000: 100/100
+ *        sort=name     → skip 0:  10/100 available · 8,000:  57/100
+ *
+ *    Live items run contiguously to roughly skip 12,200 out of 72,056 listings.
+ *    Sorting by name shuffles the ~60,000 delisted SKUs in among them, turning
+ *    a 123-page sweep into a 720-page one. We used to send
+ *    `sort=name&name_sort=asc`. Do not put it back.
+ */
 export async function fetchFreshopPage(departmentId: string, skip: number): Promise<FreshopProduct[] | null> {
   try {
     const res = await fetch(
-      `https://api.freshop.ncrcloud.com/1/products?app_key=${FRESHOP_APP_KEY}&store_id=${FRESHOP_STORE_ID}&department_id=${departmentId}&limit=${FRESHOP_PAGE_SIZE}&skip=${skip}&sort=name&name_sort=asc`,
+      `https://api.freshop.ncrcloud.com/1/products?app_key=${FRESHOP_APP_KEY}&store_id=${FRESHOP_STORE_ID}&department_id=${departmentId}&department_id_cascade=true&limit=${FRESHOP_PAGE_SIZE}&skip=${skip}`,
       { cache: 'no-store' },
     );
-    if (!res.ok) return null;
-    const data = await res.json();
+    // THROTTLE IN DISGUISE: NCR answers a rate limit with HTTP 400 and a body
+    // of {"error_code":429}. Read the body even on a non-OK status — a caller
+    // that trusts the HTTP code alone reads a temporary throttle as a
+    // permanent bad request and gives up on a page that would have succeeded.
+    const data = await res.json().catch(() => null);
+    if (isFreshopThrottled(data) || !res.ok) return null;
     return Array.isArray(data?.items) ? (data.items as FreshopProduct[]) : null;
   } catch {
     return null;
   }
+}
+
+/** NCR signals rate limiting as `{"error_code":429}` inside an HTTP 400. */
+export function isFreshopThrottled(body: unknown): boolean {
+  return !!body && typeof body === 'object' && (body as { error_code?: number }).error_code === 429;
+}
+
+/**
+ * Is this listing actually live on Sinclair's website?
+ *
+ * `available` (status_id 1) = on their storefront.
+ * `no_movement` (status_id 3) = delisted; Freshop still serves it, their site
+ * does not show it. Bakery alone: 1,824 listings, 84 available.
+ *
+ * The API will NOT filter on this — `status=available`, `status_id=1` and
+ * `statuses=available` all return the identical unfiltered total. It has to be
+ * done here.
+ */
+export function isSellableStatus(p: FreshopProduct): boolean {
+  const s = (p.status || '').trim().toLowerCase();
+  if (s) return s === 'available';
+  const id = (p as { status_id?: string | number }).status_id;
+  if (id != null) return String(id) === '1';
+  return true;                       // no signal either way — don't drop it
 }
 
 /**
@@ -326,11 +377,11 @@ export async function fetchFreshopTotal(departmentId: string): Promise<number | 
     if (attempt > 0) await new Promise(r => setTimeout(r, 600 * attempt));
     try {
       const res = await fetch(
-        `https://api.freshop.ncrcloud.com/1/products?app_key=${FRESHOP_APP_KEY}&store_id=${FRESHOP_STORE_ID}&department_id=${departmentId}&limit=1`,
+        `https://api.freshop.ncrcloud.com/1/products?app_key=${FRESHOP_APP_KEY}&store_id=${FRESHOP_STORE_ID}&department_id=${departmentId}&department_id_cascade=true&limit=1`,
         { cache: 'no-store' },
       );
-      if (!res.ok) continue;                       // 429/5xx — back off and try again
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
+      if (isFreshopThrottled(data) || !res.ok) continue;   // throttle/5xx — back off and retry
       const total = typeof data?.total === 'number' && data.total > 0 ? data.total : null;
       if (total != null && (best == null || total > best)) best = total;
       // Two consecutive agreeing reads is enough; don't burn requests needlessly.
@@ -380,12 +431,42 @@ export function isFloral(p: FreshopProduct): boolean {
  * canonical sub-path when present ("pantry/beverages/…" → Beverages).
  * AWG flat-URL items simply keep the department category.
  */
+/**
+ * Sinclair's top-level department (first canonical_url segment) → our category.
+ *
+ * This became load-bearing when the sweep switched to one cascading walk of the
+ * storefront root. Items no longer arrive tagged with the department we asked
+ * for, because we only ask for one — so each item's own URL is the only signal
+ * of what it is. Get this wrong and the entire store files under one heading.
+ *
+ * Verified against live canonical_urls, e.g.
+ *   /shop/pantry/condiments/ketchup/heinz_tomato_ketchup_20_oz
+ *   /shop/meat/packaged_hot_dogs_sausages_lunch_meat/sausages/...
+ */
+const DEPT_TO_CATEGORY: Record<string, string> = {
+  meat: 'Meat & Seafood',
+  seafood: 'Meat & Seafood',
+  dairy: 'Dairy',
+  produce: 'Produce',
+  frozen: 'Frozen Foods',
+  frozen_foods: 'Frozen Foods',
+  bakery: 'Bakery & Deli',
+  deli: 'Bakery & Deli',
+  pantry: 'Pantry & Grocery',
+  home_floral: 'Household & Cleaning',
+  // beer_wine_spirits is absent on purpose — isAlcohol() drops those first.
+};
+
 export function refineCategory(baseCategory: string, p: FreshopProduct): string {
-  if (baseCategory !== 'Pantry & Grocery') return baseCategory;
-  const [, second] = deptPath(p);
+  const [first, second] = deptPath(p);
+  // The item's own URL wins. A flat URL (AWG bulk rows carry no /shop/<dept>/
+  // path) falls back to whatever the caller supplied.
+  const fromUrl = DEPT_TO_CATEGORY[first.toLowerCase()];
+  const base = fromUrl || baseCategory;
+  if (base !== 'Pantry & Grocery') return base;
   if (/beverage|drink|soda|water|juice|coffee|tea/.test(second)) return 'Beverages';
   if (/snack|candy|cookie|chip|sweet|cracker/.test(second)) return 'Snacks & Sweets';
-  return baseCategory;
+  return base;
 }
 
 /** Pretty sub-category from the second path segment: "fresh_fruit" → "Fresh Fruit". */
@@ -415,6 +496,18 @@ export function buildStoreProduct(p: FreshopProduct, deptCategory: string): Reco
   const price = priceFrom(p);
   const sale = saleFieldsFrom(p);
   if (!name || price == null) return null;
+  // DEAD STOCK NEVER BECOMES A ROW.
+  //
+  // Freshop keeps every SKU the store has ever carried and serves them through
+  // the same endpoint: of 72,056 listings under the storefront root, only about
+  // 12,200 are `available`. The rest are `no_movement` — delisted, and absent
+  // from Sinclair's own website.
+  //
+  // These used to be inserted with is_available=false, which meant roughly five
+  // out of every six rows the sweep wrote could never appear on the site, while
+  // consuming the whole nightly budget. Skipping them here is the difference
+  // between a sweep that finishes and one that never has.
+  if (!isSellableStatus(p)) return null;
   if (isAlcohol(p)) return null;
   if (isFloral(p)) return null;
   const upcRaw = (p.upc || '').trim() || norm(p.barcode_upc_a) || null;
