@@ -18,7 +18,7 @@ const COL: Record<string, 'sinclairs_receipt_url' | 'ingram_slip_url'> = {
 };
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const session = requireAdmin(req, { ownerOnly: true });
+  const session = requireAdmin(req, { gtsOnly: true });
   if (session instanceof NextResponse) return session;
 
   const { id: orderId } = await params;
@@ -61,7 +61,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const session = requireAdmin(req, { ownerOnly: true });
+  const session = requireAdmin(req, { gtsOnly: true });
   if (session instanceof NextResponse) return session;
 
   const { id: orderId } = await params;

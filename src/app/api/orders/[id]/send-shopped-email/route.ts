@@ -14,7 +14,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = requireAdmin(req, { ownerOnly: true });
+  const session = requireAdmin(req, { gtsOnly: true });
   if (session instanceof NextResponse) return session;
 
   const { id } = await params;
@@ -40,6 +40,28 @@ export async function POST(
     .eq('id', id)
     .single();
   if (error || !order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+
+  // GROCERY BILLING NEEDS SINCLAIR'S ACTUAL NUMBERS — enforced here, not just
+  // in the dialog.
+  //
+  // Billing a boat for groceries off our ESTIMATE rather than Sinclair's
+  // register total is how a customer gets an invoice that doesn't match the
+  // receipt stapled to it. The dialog has always blocked this; the server never
+  // did, which was fine while only owners could reach this route. GTS Managers
+  // can now run the billing chain (Mary does the invoicing), so the rule has to
+  // live where it can't be skipped.
+  //
+  // The owner override stays — deliberately, and deliberately owner-only.
+  if (order.bill_for_groceries) {
+    const missing: string[] = [];
+    if (order.register_total == null) missing.push('Sinclair’s grocery total');
+    if (!order.sinclairs_receipt_url) missing.push('Sinclair’s receipt');
+    if (missing.length && session.role !== 'owner') {
+      return NextResponse.json({
+        error: `Add ${missing.join(' and ')} before sending a grocery bill, or turn off “Bill groceries.” An owner can override this.`,
+      }, { status: 400 });
+    }
+  }
 
   try {
     const { data: s } = await supabase

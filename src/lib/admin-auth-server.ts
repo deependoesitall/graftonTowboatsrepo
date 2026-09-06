@@ -164,11 +164,26 @@ export function canEdit(role: AdminRole, area: 'orders' | 'products' | 'settings
  */
 export function requireAdmin(
   req: NextRequest,
-  options?: { area?: Area; editRequired?: boolean; ownerOnly?: boolean }
+  options?: { area?: Area; editRequired?: boolean; ownerOnly?: boolean; gtsOnly?: boolean }
 ): AdminSessionPayload | NextResponse {
   const session = getAdminSession(req);
   if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // gtsOnly — GRAFTON'S SIDE OF THE BUSINESS: owner + gts_manager, never
+  // Sinclair's. This exists because billing is a job, not an ownership stake.
+  // Mary does GTS's invoicing and lives in QuickBooks; she needs to send final
+  // emails and pull invoices without also getting user management and the full
+  // activity log, which is what `ownerOnly` would have forced.
+  //
+  // Sinclair's `manager` and `staff` stay locked out — the final email carries
+  // GTS's delivery fee and invoice, which Sinclair's must never see or send.
+  if (options?.gtsOnly && !isGtsRole(session.role)) {
+    return NextResponse.json(
+      { error: 'Only Grafton Towboat staff can do this.' },
+      { status: 403 },
+    );
   }
 
   if (options?.ownerOnly && session.role !== 'owner') {

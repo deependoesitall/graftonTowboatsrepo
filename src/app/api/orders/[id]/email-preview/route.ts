@@ -15,7 +15,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = requireAdmin(req, { ownerOnly: true });
+  const session = requireAdmin(req, { gtsOnly: true });
   if (session instanceof NextResponse) return session;
 
   const { id } = await params;

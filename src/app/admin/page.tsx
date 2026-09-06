@@ -481,7 +481,16 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
   // the server and client first render agree (localStorage isn't available
   // during SSR — reading it in useState caused hydration errors before).
   const [isGts, setIsGts] = useState(false);
-  useEffect(() => { setIsGts(isGtsRole(getAdminRole())); }, []);
+  // The receipt-bypass below is genuinely owner-only, not just labelled that
+  // way. GTS Managers can now run the whole billing chain — which is the point,
+  // Mary does the invoicing — but skipping Sinclair's receipt means billing a
+  // customer off an estimate, and that stays an owner's call. Read after mount
+  // for the same hydration reason as isGts.
+  const [isOwner, setIsOwner] = useState(false);
+  useEffect(() => {
+    setIsGts(isGtsRole(getAdminRole()));
+    setIsOwner(getAdminRole() === 'owner');
+  }, []);
   // Grocery billing: Sinclair's actual receipt total + the receipt PDF itself.
   const [groceryTotal, setGroceryTotal] = useState(order.register_total != null ? String(order.register_total) : '');
   const [receiptUrl, setReceiptUrl] = useState<string | null>(order.sinclairs_receipt_url);
@@ -701,7 +710,7 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
                       Enter the grocery total and attach Sinclair&apos;s receipt before sending, or turn off &ldquo;Bill groceries.&rdquo;
                       {/* Deliberate owner-only override — small on purpose, and it
                           takes an explicit tick so it can't happen by accident. */}
-                      {!showOverride ? (
+                      {!isOwner ? null : !showOverride ? (
                         <button type="button" onClick={() => setShowOverride(true)}
                           className="block mt-1 text-[10px] text-gray-400 underline underline-offset-2 hover:text-gray-600">
                           Owner: send without the receipt

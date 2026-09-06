@@ -35,17 +35,73 @@ function esc(s: string | null | undefined): string {
  * The dates matter more than the saving: they're the answer when a boat asks
  * why Wednesday's price differs from what they saw on Monday.
  */
-function salePriceHtml(i: OrderItem): string {
+const shortDate = (d: string) => {
+  const [y, m, day] = d.split('-');
+  return y && m && day ? `${m}/${day}/${y.slice(2)}` : '';
+};
+
+/** Today in Sinclair's timezone — the sheet is printed and shopped in Jerseyville. */
+function shoppingDay(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago' }).format(new Date());
+}
+
+/**
+ * Did this line's shelf sale lapse between ordering and shopping?
+ *
+ * `regular_price` is only populated when the item was on sale AT ORDER TIME
+ * (migration 060), so its presence means "the boat was quoted a sale price".
+ * If the sale window has since closed, the register will ring the regular
+ * price and the customer's estimate is short.
+ */
+function saleLapsed(i: OrderItem, today: string): boolean {
+  const regular = Number(i.regular_price ?? 0);
+  if (!regular || regular <= Number(i.unit_price)) return false;
+  const end = (i.sale_finish_date || '').slice(0, 10);
+  return !!end && end < today;
+}
+
+function salePriceHtml(i: OrderItem, today: string): string {
   const regular = Number(i.regular_price ?? 0);
   if (!regular || regular <= Number(i.unit_price)) return '';
   const end = (i.sale_finish_date || '').slice(0, 10);
-  const short = (d: string) => {
-    const [y, m, day] = d.split('-');
-    return y && m && day ? `${m}/${day}/${y.slice(2)}` : '';
-  };
-  return `<span class="sale">${formatCurrency(i.unit_price)}${
-    end ? ` <span class="sale-dates">(thru ${short(end)})</span>` : ''
+  const lapsed = saleLapsed(i, today);
+  // A lapsed sale is a decision, not a note — see expiredSaleHtml below. The
+  // price line just stops pretending the sale is still on.
+  const cls = lapsed ? 'sale sale-dead' : 'sale';
+  return `<span class="${cls}">${formatCurrency(i.unit_price)}${
+    end ? ` <span class="sale-dates">(${lapsed ? 'ended' : 'thru'} ${shortDate(end)})</span>` : ''
   } <s>${formatCurrency(regular)}</s></span>`;
+}
+
+/**
+ * THE SALE-EXPIRY CALL — Dave's ask, from the July demo.
+ *
+ * Sinclair's shelf sales auto-apply at their register. They are NOT the digital
+ * coupons (that engine is switched off); these are the red-text reductions on
+ * their own site, and they run on fixed date windows.
+ *
+ * A boat can order Thursday against a sale that ends Saturday and take delivery
+ * Monday. The customer was quoted the sale price; by shopping day the register
+ * will ring the regular one. Dave wanted to SEE that on the sheet so he can
+ * decide, item by item, whether to honour it anyway — sometimes he will, and
+ * sometimes he won't.
+ *
+ * So this doesn't decide anything. It surfaces the fact and the money, and
+ * leaves a box for the human holding the sheet.
+ */
+function expiredSaleHtml(i: OrderItem, today: string): string {
+  if (!saleLapsed(i, today)) return '';
+  const regular = Number(i.regular_price);
+  const quoted = Number(i.unit_price);
+  const qty = Number(i.quantity) || 1;
+  const diff = (regular - quoted) * qty;
+  const end = (i.sale_finish_date || '').slice(0, 10);
+  return `<div class="sale-expired">
+    <b>SALE ENDED ${shortDate(end)}</b> — boat was quoted ${formatCurrency(quoted)},
+    register will ring ${formatCurrency(regular)}
+    <span class="sale-diff">(${formatCurrency(diff)} more${qty > 1 ? ` on ${qty}` : ''})</span>
+    <label class="sale-honor">&#9744; honored anyway</label>
+  </div>`;
 }
 
 /** Is this line billed by weight? (LB uom, fractional qty, or price-embedded UPC) */
@@ -53,7 +109,7 @@ function isWeighable(i: OrderItem): boolean {
   return isPoundQty(i.uom, i.quantity) || isWeighableUpc(i.upc);
 }
 
-function itemCard(i: OrderItem): string {
+function itemCard(i: OrderItem, today: string): string {
   const weighable = isWeighable(i);
   const qtyLabel = formatQty(i.quantity, isPoundQty(i.uom, i.quantity));
   // Sized for first-scan reliability: at print resolution this yields bars
@@ -94,11 +150,12 @@ function itemCard(i: OrderItem): string {
   return `<div class="item${cod ? ' cod' : ''}${oos ? ' oos' : ''}">
     <div class="line1">${thumb}<span class="qty">${esc(qtyLabel)}</span><span class="desc">${esc(i.description)}</span></div>
     <div class="sub">${esc(i.pkg_size || '')}${i.pkg_size ? ' · ' : ''}${
-      salePriceHtml(i) || formatCurrency(i.unit_price)
+      salePriceHtml(i, today) || formatCurrency(i.unit_price)
     }${i.uom === 'LB' ? '/lb' : ''}${i.location ? ` · <b>${esc(i.location)}</b>` : ''}</div>
     ${cod ? `<div class="cod-tag">$ COD — ${esc(i.cod_name || 'crew member')} · ring separately</div>` : ''}
     ${i.paid_by === 'deck' ? `<div class="deck-tag">DECK — separate invoice line</div>` : ''}
     ${i.is_substitution ? `<div class="sub-tag">SUB</div>` : ''}
+    ${expiredSaleHtml(i, today)}
     <div class="scanrow">${barcodeBlock}<span class="check">&#9744;</span></div>
   </div>`;
 }
@@ -107,6 +164,7 @@ function sectionHtml(
   title: string,
   note: string,
   groups: LocationGroup<OrderItem>[],
+  today: string,
   opts: { subtotal?: number; tone?: 'grocery' | 'deck' | 'cod'; newPage?: boolean } = {},
 ): string {
   if (!groups.some(g => g.items.length)) return '';
@@ -119,7 +177,7 @@ function sectionHtml(
     ${groups.map(g => `
       <div class="loc-group">
         <div class="loc-head">${esc(g.label)} <span class="loc-count">${g.items.length} line${g.items.length === 1 ? '' : 's'}</span></div>
-        <div class="grid">${g.items.map(itemCard).join('')}</div>
+        <div class="grid">${g.items.map(i => itemCard(i, today)).join('')}</div>
       </div>`).join('')}
   </section>`;
 }
@@ -158,6 +216,9 @@ function readableLink(raw: string): { host: string; label: string; path: string 
 }
 
 export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_ORDER): string {
+  // Shopping day, not order day — the whole point of the expired-sale flag is
+  // that these two can differ by several days.
+  const today = shoppingDay();
   const allStock = order.items.filter(i => i.item_type !== 'service');
   const services = order.items.filter(i => i.item_type === 'service' && i.service_type === 'other_pickup');
 
@@ -243,6 +304,7 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
   .facts { display: flex; flex-wrap: wrap; gap: 2px 14px; background: #f4f6f8; border: 1px solid #dde3ea;
            border-radius: 4px; padding: 3px 8px; margin-bottom: 5px; font-size: 9.5px; }
   .facts b { color: #0b2545; }
+  .warn-sale { background:#fef3c7 !important; border-color:#d97706 !important; color:#7c2d12 !important; }
   .warn { background: #fdf3d7; border: 1px solid #e8cd7a; border-radius: 4px; padding: 3px 8px; margin-bottom: 5px; font-size: 9.5px; }
   .notes { background: #fff8e6; border: 1px solid #e8cd7a; border-radius: 4px; padding: 3px 8px; margin-bottom: 5px; font-size: 9.5px; }
 
@@ -271,6 +333,17 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
   .sale { color: #b91c1c; font-weight: 700; }
   .sale s { color: #888; font-weight: 400; }
   .sale-dates { color: #b91c1c; font-weight: 400; font-size: 7.5px; }
+  /* A lapsed sale must not read as a live one — the red price is the number
+     the boat was quoted, not the number the register is about to ring. */
+  .sale-dead { color: #92400e; text-decoration: line-through; }
+  .sale-dead s { text-decoration: none; }
+  .sale-expired {
+    margin-top: 2px; padding: 2px 4px; font-size: 7.5px; line-height: 1.35;
+    background: #fef3c7; border: 1px solid #d97706; border-radius: 3px; color: #7c2d12;
+  }
+  .sale-expired b { color: #b45309; }
+  .sale-diff { font-weight: 700; }
+  .sale-honor { display: inline-block; margin-left: 4px; font-weight: 700; white-space: nowrap; }
 
   /* ── Thumbnails ── small enough to keep the grid dense, big enough to
      recognise a package at arm's length on a moving cart. */
@@ -364,12 +437,29 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
     ${noBarcodeCount ? `&#9888; <b>${noBarcodeCount} item${noBarcodeCount === 1 ? '' : 's'} without a usable barcode</b> — key in at the register.` : ''}
   </div>` : ''}
 
+  ${/* Lapsed sales, called out up front. Whoever rings this order needs to know
+        BEFORE they start that there are judgement calls waiting on the sheet,
+        not discover them one at a time at the register. */''}
+  ${(() => {
+    const lapsed = allStock.filter(i => saleLapsed(i, today));
+    if (!lapsed.length) return '';
+    const owed = lapsed.reduce(
+      (s, i) => s + (Number(i.regular_price) - Number(i.unit_price)) * (Number(i.quantity) || 1), 0);
+    return `<div class="warn warn-sale">
+      &#9888; <b>${lapsed.length} sale price${lapsed.length === 1 ? '' : 's'} expired
+      between ordering and today.</b> The boat was quoted the sale price; the register
+      will ring the regular one — <b>${formatCurrency(owed)}</b> more in total.
+      Each is marked on its line with a box to tick if you honour it.
+    </div>`;
+  })()}
+
   ${order.notes ? `<div class="notes"><b>Customer notes:</b> ${esc(order.notes)}</div>` : ''}
 
   ${sectionHtml(
     'Grocery',
     'Walk order — start here · boat allowance · billed monthly',
     groceryGroups,
+    today,
     { subtotal: grocerySubtotal, tone: 'grocery' },
   )}
 
@@ -380,6 +470,7 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
     'Deck Supplies',
     'Bag & ring SEPARATELY — not part of the boat’s grocery allowance',
     deckGroups,
+    today,
     { subtotal: deckSubtotal, tone: 'deck', newPage: true },
   )}
 
@@ -403,7 +494,7 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
         </div>
         <div class="grid">${groupByWalkingOrder(list, zoneOrder)
           .flatMap(g => g.items)
-          .map(itemCard).join('')}</div>
+          .map(i => itemCard(i, today)).join('')}</div>
       </div>`;
     }).join('')}
   </section>` : ''}
