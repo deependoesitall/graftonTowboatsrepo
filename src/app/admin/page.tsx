@@ -352,6 +352,8 @@ interface QueueOrder {
   shopped_email_sent_at: string | null;
   register_total: number | null;
   sinclairs_receipt_url: string | null;
+  /** Signed delivery log / receipt acknowledgement — the clipboard photo. */
+  ingram_slip_url: string | null;
 }
 
 function FinalEmailQueue() {
@@ -495,6 +497,30 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
   const [groceryTotal, setGroceryTotal] = useState(order.register_total != null ? String(order.register_total) : '');
   const [receiptUrl, setReceiptUrl] = useState<string | null>(order.sinclairs_receipt_url);
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
+  // The signed delivery log / receipt acknowledgement — the clipboard the
+  // captain and the driver both sign. Ingram's form says in red that they will
+  // not accept a supplier invoice without it, so it belongs HERE, next to the
+  // Send button, rather than only on the order screen. Making Jen close this
+  // dialog, find the order, upload, and come back is how it ends up forgotten.
+  const [slipUrl, setSlipUrl] = useState<string | null>(order.ingram_slip_url ?? null);
+  const [uploadingSlip, setUploadingSlip] = useState(false);
+
+  async function uploadSlip(file: File) {
+    setUploadingSlip(true); setError('');
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('kind', 'slip');
+      const res = await adminFetch(`/api/orders/${order.id}/documents`, { method: 'POST', body: fd });
+      const r = await res.json();
+      if (!res.ok) throw new Error(r?.error || 'Upload failed');
+      setSlipUrl(r.url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Upload failed');
+    } finally {
+      setUploadingSlip(false);
+    }
+  }
 
   async function uploadReceipt(file: File) {
     setUploadingReceipt(true); setError('');
@@ -727,6 +753,39 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
                   )}
                 </div>
               )}
+
+              {/* ── Signed delivery log ───────────────────────────────
+                  OUTSIDE the billGroceries block on purpose: this is proof of
+                  DELIVERY, not proof of a grocery charge, so it matters even
+                  when the boat pays Sinclair's directly. */}
+              <div className="mt-3 pt-3 border-t border-gray-100">
+                <span className="text-[11px] font-semibold text-gray-500">Signed delivery log / receipt acknowledgement</span>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <label className={`flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg border cursor-pointer transition-colors ${
+                    slipUrl ? 'border-green-300 bg-green-50 text-green-700' : 'border-brand-navy/30 text-brand-navy hover:bg-gray-50'
+                  }`}>
+                    {uploadingSlip ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+                    {slipUrl ? 'Signed log attached — replace' : 'Attach signed log'}
+                    <input type="file" accept="application/pdf,image/*" className="hidden"
+                      onChange={e => { const f = e.target.files?.[0]; if (f) uploadSlip(f); }} />
+                  </label>
+                  {slipUrl && (
+                    <a href={slipUrl} target="_blank" rel="noreferrer" className="text-xs text-brand-river underline">View</a>
+                  )}
+                </div>
+                <p className="text-[10px] text-gray-400 mt-1">
+                  A photo of the clipboard is fine. It rides along with the final email.
+                </p>
+                {/* WARN, never block — communicate state rather than silently
+                    refusing. Some lines genuinely require this to pay; Ingram's
+                    own form says so in red. */}
+                {!slipUrl && (
+                  <p className="mt-1.5 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                    <b>No signed log attached.</b> Some barge lines &mdash; Ingram among them &mdash; won&rsquo;t
+                    process an invoice without it, and it&rsquo;s far easier to send now than to chase later.
+                  </p>
+                )}
+              </div>
             </div>
           )}
 

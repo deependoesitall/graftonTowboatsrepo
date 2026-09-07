@@ -1582,11 +1582,17 @@ export default function AdminProductsPage() {
               <span className="text-[10px] font-bold bg-brand-gold text-brand-navy rounded-full px-1.5">{photoReviewCount}</span>
             </button>
           )}
-          <button onClick={() => setShowBackfill(true)}
-            title="Search Sinclair's site for photos and proper names on items the nightly barcode sync can't match"
-            className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5">
-            <ImagePlus className="w-4 h-4" /> Find Photos
-          </button>
+          {/* OWNER ONLY. This crawls Sinclair's site guessing at photo matches
+              and needs someone to judge the results — that's a maintenance job,
+              not a task Sinclair's staff should be handed. Seeing it would
+              only prompt "what is this and am I supposed to run it?" */}
+          {sessionRole === 'owner' && (
+            <button onClick={() => setShowBackfill(true)}
+              title="Search Sinclair's site for photos and proper names on items the nightly barcode sync can't match"
+              className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5">
+              <ImagePlus className="w-4 h-4" /> Find Photos
+            </button>
+          )}
           <button onClick={exportCatalog} className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5">
             <Download className="w-4 h-4" /> Export CSV
           </button>
@@ -1598,9 +1604,11 @@ export default function AdminProductsPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 bg-white border border-gray-200 rounded-xl p-1 mb-6 w-fit">
+        {/* Duplicates is catalog hygiene — owner's problem, not the store's. */}
         {[{ key: 'catalog', label: 'Browse & Edit', icon: Package },
           { key: 'import', label: 'Import File', icon: Upload },
-          { key: 'duplicates', label: 'Duplicates', icon: Layers }].map(({ key, label, icon: Icon }) => (
+          ...(sessionRole === 'owner' ? [{ key: 'duplicates', label: 'Duplicates', icon: Layers }] : [])
+         ].map(({ key, label, icon: Icon }) => (
           <button key={key} onClick={() => setTab(key as any)}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               tab === key ? 'bg-brand-navy text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
@@ -1660,12 +1668,15 @@ export default function AdminProductsPage() {
               }`}>
               📷 Missing Image
             </button>
-            <button onClick={() => { setStatus('name_matched'); setPage(1); }}
-              className={`text-xs font-semibold px-2.5 py-1 rounded-full border transition-colors ${
-                status === 'name_matched' ? 'bg-purple-600 text-white border-purple-600' : 'border-gray-200 text-gray-600 hover:border-gray-300'
-              }`}>
-              🔍 Auto-matched
-            </button>
+            {/* Owner only — this is the review queue for Find Photos above. */}
+            {sessionRole === 'owner' && (
+              <button onClick={() => { setStatus('name_matched'); setPage(1); }}
+                className={`text-xs font-semibold px-2.5 py-1 rounded-full border transition-colors ${
+                  status === 'name_matched' ? 'bg-purple-600 text-white border-purple-600' : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                }`}>
+                🔍 Auto-matched
+              </button>
+            )}
           </div>
 
           {/* Bulk action bar */}

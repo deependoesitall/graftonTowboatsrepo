@@ -115,17 +115,40 @@ export function buildOrderEmailHtml(
           <td style="padding:8px 12px;color:#333;">Groceries (Sinclair&apos;s)${order.sinclairs_receipt_url ? ` <span style="color:#4d7c5f;font-size:10px;">— itemized receipt attached</span>` : ''}</td>
           <td style="padding:8px 12px;text-align:right;font-weight:700;">${formatCurrency(groceryTotal)}</td>
         </tr>` : `<tr>
-          <td colspan="2" style="padding:8px 12px;color:#666;font-size:11px;font-style:italic;">Groceries are billed to you directly by Sinclair&apos;s — this invoice covers Grafton Towboat Services delivery only.</td>
+          <td colspan="2" style="padding:8px 12px;color:#666;font-size:11px;font-style:italic;">Groceries are billed to you directly by Sinclair&apos;s — these charges cover Grafton Towboat Services delivery only.</td>
         </tr>`}
         <tr>
           <td style="padding:8px 12px;color:#333;">Delivery${order.delivery_service_type ? ` — ${order.delivery_service_type}` : ''}</td>
           <td style="padding:8px 12px;text-align:right;font-weight:700;">${formatCurrency(deliveryFee)}</td>
         </tr>
         <tr style="background:#D9E84A;">
-          <td style="padding:10px 12px;font-size:14px;font-weight:900;color:#1E3D1E;text-transform:uppercase;">Final Total Due</td>
+          <td style="padding:10px 12px;font-size:14px;font-weight:900;color:#1E3D1E;text-transform:uppercase;">Final Total</td>
           <td style="padding:10px 12px;text-align:right;font-size:16px;font-weight:900;color:#1E3D1E;">${formatCurrency(grandTotal)}</td>
         </tr>
       </table>
+      ${/* THIS EMAIL IS NOT THE INVOICE.
+           GTS bills through QuickBooks, addressed to the barge line's accounts
+           payable — a different document to a different recipient. This goes to
+           the BOAT, which needs to know what arrived and what it cost, not to
+           pay anything. Saying "Final Total Due" here invited a captain to
+           think he'd been billed, or worse, to pay twice. It's a summary; the
+           bill follows from the office. */''}
+      <div style="padding:9px 12px;background:#f7f9f1;border-top:1px solid #e4e8da;font-size:11px;color:#4d7c5f;line-height:1.6;">
+        This is your delivery summary, not an invoice &mdash; nothing to pay here.
+        Your invoice comes separately from our office to your company&rsquo;s accounts payable.
+      </div>
+      ${/* Spell out the paperwork. Barge-line accounts payable departments hold
+           invoices that arrive without their supporting documents — Ingram's
+           acknowledgement form states outright that they won't accept a
+           supplier invoice without the signed receipt. Listing what's attached
+           saves a phone call and a fortnight of Net-30 sitting still. */''}
+      ${order.sinclairs_receipt_url || order.ingram_slip_url || order.po_number ? `
+      <div style="padding:9px 12px;background:#f7f9f1;border-top:1px solid #e4e8da;font-size:11px;color:#4d7c5f;line-height:1.7;">
+        <b style="color:#1E3D1E;">Attached for your records:</b>
+        ${order.po_number ? `<br>&bull; Purchase order <b>${order.po_number}</b>` : ''}
+        ${order.sinclairs_receipt_url ? '<br>&bull; Sinclair&rsquo;s itemized register receipt' : ''}
+        ${order.ingram_slip_url ? '<br>&bull; Signed delivery log &amp; receipt acknowledgement' : ''}
+      </div>` : ''}
     </div>` : '';
   const codMethodLabel = order.cod_payment_method === 'credit_card' ? 'Credit Card — we’ll call to collect'
     : order.cod_payment_method === 'venmo' ? 'Venmo — we’ll send a payment request'
@@ -498,20 +521,48 @@ export async function sendOrderShoppedEmail(
     { filename: `order-${order.order_number}-fulfilled.pdf`, content: pdfBuffer2 },
   ];
 
-  // On grocery-billed orders, attach Sinclair's ACTUAL register receipt so the
-  // customer gets their itemized prices line by line (not our estimate).
-  if (order.bill_for_groceries !== false && order.sinclairs_receipt_url) {
+  // ── Supporting documents ──────────────────────────────────────────
+  //
+  // Some barge lines will not pay against an invoice on its own. Ingram's
+  // Receipt Acknowledgement says it in red on the form itself:
+  //
+  //   "THIS RECEIPT MUST BE SUBMITTED WITH SUPPLIER'S INVOICE.
+  //    INGRAM BARGE COMPANY WILL NOT ACCEPT SUPPLIER'S INVOICE WITHOUT IT."
+  //
+  // Jen's real June 30 billing for the Scott Noble went out as four pieces:
+  // the invoice ($4,572.13), Sinclair's 23-page register receipt ($4,347.13),
+  // and a photo of the clipboard — GTS's own Delivery Log plus Ingram's signed
+  // acknowledgement carrying their P.O. number. Any of those missing and the
+  // invoice sits in accounts payable unpaid.
+  //
+  // Both documents were already being uploaded and stored. Only the receipt
+  // ever rode the email; the signed slip was captured and then forgotten,
+  // which meant the one document the customer's AP department actually
+  // requires was the one we didn't send.
+  const attachDoc = async (url: string | null | undefined, name: string, label: string) => {
+    if (!url) return;
     try {
-      const res = await fetch(order.sinclairs_receipt_url);
-      if (res.ok) {
-        const buf = Buffer.from(await res.arrayBuffer());
-        const ext = order.sinclairs_receipt_url.split('.').pop()?.split('?')[0] || 'pdf';
-        attachments.push({ filename: `sinclairs-receipt-${order.order_number}.${ext}`, content: buf });
-      }
+      const res = await fetch(url);
+      if (!res.ok) { console.error(`Could not attach ${label}: HTTP ${res.status}`); return; }
+      const buf = Buffer.from(await res.arrayBuffer());
+      const ext = url.split('.').pop()?.split('?')[0]?.slice(0, 5) || 'pdf';
+      attachments.push({ filename: `${name}-${order.order_number}.${ext}`, content: buf });
     } catch (e) {
-      console.error('Could not attach Sinclair receipt:', e);
+      // Never block the email on a document — a missing attachment is
+      // recoverable by forwarding it; a final email that never sends is not.
+      console.error(`Could not attach ${label}:`, e);
     }
+  };
+
+  // Sinclair's ACTUAL register receipt — the customer's itemized prices line by
+  // line, rather than our estimate.
+  if (order.bill_for_groceries !== false) {
+    await attachDoc(order.sinclairs_receipt_url, 'sinclairs-receipt', 'Sinclair receipt');
   }
+  // The signed delivery log / receipt acknowledgement. Sent whenever it exists,
+  // regardless of who's billed for groceries — it's proof of delivery, not
+  // proof of a grocery charge.
+  await attachDoc(order.ingram_slip_url, 'signed-delivery-log', 'signed delivery log');
 
   const hasGroceryItems = order.items.some(i => i.item_type !== 'service');
   const shoppedHtml = buildOrderShoppedEmailHtml(order);

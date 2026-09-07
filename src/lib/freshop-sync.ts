@@ -396,9 +396,34 @@ export async function fetchFreshopTotal(departmentId: string): Promise<number | 
 // ── Full-store import helpers ────────────────────────────────────────────
 
 /** First two segments of the shop path: "shop/produce/fresh_fruit/…" → ["produce","fresh_fruit"] */
+/**
+ * Sinclair's taxonomy path, from the product URL.
+ *
+ * Shape:  /shop/{dept}/{sub}/{sub2}/…/{product-slug}/p/{id}
+ *
+ * `/p/` is a MARKER, not a category, and the segment right before it is the
+ * product's own slug. Reading the second segment blindly produced two kinds of
+ * junk in sub_category:
+ *
+ *   /shop/pantry/p/3139                      → "P"        (3,481 items)
+ *   /shop/pantry/andys_hot_chic_brdng/p/12   → "Andys Hot Chic Brdng"
+ *
+ * So: take everything before `/p/`, drop the product slug, and only then is
+ * element [1] a real sub-department.
+ *
+ *   pantry/beverages/soft_drinks/cola/pepsi_diet/p/1564  → dept pantry, sub beverages
+ *   pantry/p/3139                                        → dept pantry, sub —
+ */
 function deptPath(p: FreshopProduct): string[] {
-  const m = (p.canonical_url || '').match(/\/shop\/([^/]+)(?:\/([^/]+))?/);
-  return m ? [m[1] || '', m[2] || ''] : ['', ''];
+  const url = p.canonical_url || '';
+  const after = url.split('/shop/')[1];
+  if (!after) return ['', ''];
+  // Everything up to the /p/{id} marker is taxonomy + the product slug.
+  const taxonomy = after.split('/p/')[0].split('/').filter(Boolean);
+  const dept = taxonomy[0] || '';
+  // Fewer than 3 parts means [dept, product-slug] — there is no sub-department.
+  const sub = taxonomy.length >= 3 ? (taxonomy[1] || '') : '';
+  return [dept, sub];
 }
 
 /**
@@ -464,6 +489,24 @@ export function refineCategory(baseCategory: string, p: FreshopProduct): string 
   const fromUrl = DEPT_TO_CATEGORY[first.toLowerCase()];
   const base = fromUrl || baseCategory;
   if (base !== 'Pantry & Grocery') return base;
+
+  // SINCLAIR'S "PANTRY" IS EVERYTHING THAT ISN'T PERISHABLE — bleach, laundry
+  // detergent, shampoo and paper goods all live there, which is surprising
+  // until you realise it's just how they file things in Freshop.
+  //
+  // DELIBERATELY LEFT ALONE (Deepen, Sept 6). It was tempting to split
+  // household and health & personal care out into their own headings — roughly
+  // 1,000 items, and it would shrink Pantry from 62% of the store to 47%.
+  //
+  // We're not doing it, because our categories should MIRROR SINCLAIR'S. Dave,
+  // Gloria and any cook who has browsed their site already know where things
+  // are; a tidier taxonomy of our own invention would match nothing they've
+  // seen and quietly make substitutions and phone calls harder. Consistency
+  // with the store beats being neater than the store.
+  //
+  // The two rules below predate that decision and stay: they only fire on
+  // Sinclair's OWN second-level departments (pantry/beverages, pantry/snacks…),
+  // so they follow their structure rather than overriding it.
   if (/beverage|drink|soda|water|juice|coffee|tea/.test(second)) return 'Beverages';
   if (/snack|candy|cookie|chip|sweet|cracker/.test(second)) return 'Snacks & Sweets';
   return base;

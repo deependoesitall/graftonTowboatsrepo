@@ -10,8 +10,32 @@
 
 export const AISLES_TOKEN = 'Aisles';
 
+/**
+ * FALLBACK walk order — Sinclair's real department names, in their real order.
+ *
+ * THIS IS A SAFETY NET, NOT THE ACTUAL ORDER. Every synced item carries
+ * `location_seq`, Sinclair's own configured walkpath sequence, and that is the
+ * primary sort (see the re-rank at the bottom of groupByWalkingOrder). This
+ * list only decides where a group lands when it has NO sequence at all —
+ * hand-added items, or a sync that hasn't reached them yet.
+ *
+ * It previously read ['Produce','Bakery','Deli','Meat','Aisles','Dairy','Frozen']
+ * — names that don't exist in Sinclair's store. Theirs are "Cold Deli",
+ * "Fresh Meat" and "Freezer Meat", so every one of those fell through to the
+ * alphabetical catch-all.
+ *
+ * Their live walkpath, pulled Sept 6, sequence 1 → 26:
+ *
+ *    1 Produce · 2-6 Aisles 1a-3a · 7 Cold Deli · 8 Bakery · 9-13 Aisles 3b-5b
+ *    14 Fresh Meat · 15 Frozen · 16 Freezer Meat · 17-25 Aisles 6b-10b · 26 Dairy
+ *
+ * Note the named departments are INTERLEAVED with the aisles rather than
+ * bookending them — the single AISLES_TOKEN can't express that, which is
+ * another reason this is only ever a fallback. Dairy last is not a mistake:
+ * it's the biggest department in the store and it's at the end of their walk.
+ */
 export const DEFAULT_ZONE_ORDER: string[] = [
-  'Produce', 'Bakery', 'Deli', 'Meat', AISLES_TOKEN, 'Dairy', 'Frozen',
+  'Produce', 'Cold Deli', 'Bakery', AISLES_TOKEN, 'Fresh Meat', 'Frozen', 'Freezer Meat', 'Dairy',
 ];
 
 export const NO_LOCATION_LABEL = 'No location — find manually';

@@ -781,12 +781,26 @@ export default function AdminSettingsPage() {
           {/* ── Store Layout — walking order for shopping mode ── */}
           <div className="card-base p-6 space-y-4">
             <div>
-              <h2 className="font-bold text-brand-navy">Store Layout — Shopping Walk Order</h2>
-              <p className="text-xs text-gray-400 mt-1 leading-relaxed">
-                Shopping mode groups each order&apos;s items by location (from your website&apos;s item
-                locations, e.g. &ldquo;Aisle 10b&rdquo;) and sorts the groups in the order below — the way a
-                shopper actually walks the store. <strong className="text-brand-navy">&ldquo;{AISLES_TOKEN}&rdquo;</strong> marks
-                where the numbered aisles fall; named departments go before or after it. Drag order with the arrows.
+              <h2 className="font-bold text-brand-navy">
+                Store Layout — Shopping Walk Order
+                <span className="ml-2 text-[11px] font-normal text-gray-400">(safety valve — normally automatic)</span>
+              </h2>
+              {/* HONEST COPY. This list is NOT what orders the walk. Every synced
+                  item carries Sinclair's own walkpath sequence and that drives
+                  the sort; this only catches items with no sequence at all.
+                  The old wording implied otherwise, which invited Dave to
+                  rearrange something that would have had no effect. */}
+              <div className="mt-2 text-xs bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-green-800 leading-relaxed">
+                <strong>✓ Automatic.</strong> Shopping mode already walks the store in Sinclair&apos;s
+                own order — every item carries its aisle and walk position from their website, so the
+                list sorts itself. Nothing to set up here.
+              </div>
+              <p className="text-xs text-gray-400 mt-2 leading-relaxed">
+                The order below is only used for items that arrive with <em>no</em> aisle yet —
+                a hand-added product, or one the nightly sync hasn&apos;t reached.
+                <strong className="text-brand-navy"> &ldquo;{AISLES_TOKEN}&rdquo;</strong> marks where the
+                numbered aisles fall. It&apos;s already set to Sinclair&apos;s departments; you shouldn&apos;t
+                need to touch it.
               </p>
             </div>
             <div className="space-y-1.5 max-w-md">

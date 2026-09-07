@@ -5,11 +5,12 @@
 // rate card, and an editable rate-card manager. No more Google Drive.
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Truck, Plus, Pencil, Trash2, X, Loader2, DollarSign, Check, SlidersHorizontal, FileText, Search } from 'lucide-react';
+import { Truck, Plus, Pencil, Trash2, X, Loader2, DollarSign, Check, SlidersHorizontal, FileText, Search, ClipboardCopy, Download } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import { adminFetch } from '@/lib/admin-auth';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { vesselKey, canonicalVesselName, vesselSuggestions } from '@/lib/vessel';
+import { buildQbHandoff, qbLinesAsTsv } from '@/lib/quickbooks-handoff';
 
 interface Company { id: string; name: string; is_active: boolean; }
 interface ServiceType { id: string; name: string; default_rate: number; sort: number; }
@@ -40,7 +41,15 @@ interface Delivery {
   invoice_sent: string | null;
   incentive: string | null;
   sinclairs_receipt_url: string | null;
-  ingram_slip_url: string | null;
+  /** The signed delivery log photo. NOTE THE NAME — the ledger column is
+   *  `ingram_slip_image_url` (migration 044); only `orders` calls it
+   *  `ingram_slip_url` (047). This was typed as the orders spelling, which
+   *  reads undefined against a ledger row, so the Slip link never rendered
+   *  and every Ingram delivery was permanently stuck in "need attention". */
+  ingram_slip_image_url: string | null;
+  /** Set when this row came from a web order (migration 064). NULL = typed in
+   *  by hand — a phone or paper order. */
+  order_id: string | null;
 }
 
 // Deliveries began January 2026 — never offer a month before that.
@@ -253,7 +262,19 @@ export default function DeliveriesPage() {
             <tbody>
               {matches.map(({ d, via }) => (
                 <tr key={d.id} className="border-b border-gray-100 hover:bg-gray-50">
-                  <td className="px-3 py-2.5 whitespace-nowrap">{d.delivery_date || '—'}</td>
+                  <td className="px-3 py-2.5 whitespace-nowrap">
+                    {d.delivery_date || '—'}
+                    {/* Provenance. Jen needs to know at a glance which rows she
+                        still has to fill in a driver for, and which arrived on
+                        their own — and that editing an auto row is safe, because
+                        the sync never overwrites her driver/pay/hours columns. */}
+                    {d.order_id && (
+                      <span className="block text-[10px] font-semibold text-brand-river mt-0.5"
+                        title="Created automatically from a web order. Deleting the order removes this row. Your driver, hours and pay entries are never overwritten.">
+                        from an online order
+                      </span>
+                    )}
+                  </td>
                   <td className="px-3 py-2.5 font-medium text-brand-navy">{d.company?.name || '—'}</td>
                   <td className="px-3 py-2.5">
                     {d.vessel_name || '—'}
@@ -313,17 +334,30 @@ export default function DeliveriesPage() {
 // ── QuickBooks entry queue ───────────────────────────────────────────────
 // QuickBooks stays the invoice system of record (it owns the numbering and the
 // hosted pay link). What actually costs Mary Karen time is re-deriving each
-// delivery's numbers from three places, then tracking what's keyed in with
-// coloured spreadsheet cells. This is that job, laid out in QuickBooks' own
-// entry order: customer → date → line items → PO, each field copyable, the
-// receipt and signed slip one click away, and a "Mark entered" that replaces
-// the checkmark.
+// delivery's numbers from three places, hunting down two documents, and then
+// tracking what's keyed in with coloured spreadsheet cells.
+//
+// THE UNIT ON SCREEN IS THE INVOICE, NOT THE DELIVERY.
+// GTS bills one invoice per boat, so a boat's whole week is one invoice — and
+// therefore one row of work here. Everything is grouped that way, which is what
+// gets this to three actions per invoice instead of three per delivery:
+//
+//   1. Copy lines     → every line for that boat, tab-separated, straight down
+//                       the QuickBooks line grid. Nothing is retyped.
+//   2. Packet         → ONE PDF: the line summary, the signed logs and
+//                       Sinclair's receipts. One attachment, not two, because
+//                       a single file cannot be half-attached — and Ingram
+//                       rejects an invoice that arrives missing the signed log.
+//   3. Mark entered   → replaces the "Updated QuickBooks" spreadsheet column.
 function QuickBooksQueue({ onClose, onEntered }: {
   onClose: () => void; onEntered: () => void;
 }) {
   const [all, setAll] = useState<Delivery[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [copied, setCopied] = useState<string>('');
+  // Download failures are shown in place, next to the button that failed —
+  // never as a browser dialog, and never swallowed.
+  const [downloadError, setDownloadError] = useState<Record<string, string>>({});
 
   // Loads EVERY unentered delivery, not just the month on screen — being a
   // week behind at a month boundary must never hide work.
@@ -354,14 +388,71 @@ function QuickBooksQueue({ onClose, onEntered }: {
     } finally { setBusy(null); }
   }
 
-  // Ingram won't accept an invoice without the signed slip, and a grocery-billed
+  /** One boat's deliveries → the invoice lines and document set for them. */
+  function handoffFor(ds: Delivery[], company: string, vessel: string) {
+    return buildQbHandoff(
+      ds.map(d => ({
+        id: d.id,
+        deliveryDate: d.delivery_date,
+        vesselName: d.vessel_name,
+        companyName: d.company?.name || null,
+        serviceType: d.service_type,
+        deliveryFee: d.delivery_fee,
+        billForGroceries: d.bill_for_groceries,
+        groceryTotal: d.sinclairs_grocery_total,
+        poNumber: null,             // lives on the order; the packet fetches it
+        locationDelivered: d.location_delivered,
+        receiptUrl: d.sinclairs_receipt_url,
+        slipUrl: d.ingram_slip_image_url,
+      })),
+      { companyLabel: company, vesselLabel: vessel },
+    );
+  }
+
+  /**
+   * The packet download has to go through adminFetch, not a plain link: the
+   * session token lives in sessionStorage and a bare <a href> would arrive
+   * unauthenticated. Fetch → blob → click a synthetic link keeps it one click
+   * for her and zero new windows.
+   */
+  async function downloadPacket(ds: Delivery[], filenameHint: string, key: string) {
+    setBusy(key);
+    setDownloadError(e => { const n = { ...e }; delete n[key]; return n; });
+    try {
+      const res = await adminFetch(`/api/admin/deliveries/packet?ids=${ds.map(d => d.id).join(',')}`);
+      if (!res.ok) {
+        const msg = await res.json().then(j => j.error).catch(() => null);
+        setDownloadError(e => ({ ...e, [key]: msg || `Could not build the packet (${res.status}).` }));
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      // Prefer the filename the server chose; fall back to the boat's name.
+      const cd = res.headers.get('Content-Disposition') || '';
+      a.download = /filename="([^"]+)"/.exec(cd)?.[1] || `${filenameHint}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // Revoke on the next tick — revoking synchronously can cancel the
+      // download in Safari before it starts.
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch {
+      setDownloadError(e => ({ ...e, [key]: 'Could not reach the server. Check the connection and try again.' }));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // Ingram won't accept an invoice without the signed log, and a grocery-billed
   // line can't be keyed without Sinclair's total. Surface both as blockers up
   // front instead of letting her discover them mid-entry.
   function blockersFor(d: Delivery): string[] {
     const b: string[] = [];
     if (!d.company?.name) b.push('no company set');
     if (d.bill_for_groceries && !(Number(d.sinclairs_grocery_total) > 0)) b.push("Sinclair's total missing");
-    if (/ingram/i.test(d.company?.name || '') && !d.ingram_slip_url) b.push('signed Ingram slip missing');
+    if (/ingram/i.test(d.company?.name || '') && !d.ingram_slip_image_url) b.push('signed Ingram log missing');
     return b;
   }
 
@@ -472,65 +563,96 @@ function QuickBooksQueue({ onClose, onEntered }: {
                 {vessels.map(([vessel, ds]) => {
                   const groupTotal = ds.reduce((s, d) => s + lineTotal(d), 0);
                   const key = `grp-${company}-${vessel}`;
+                  const h = handoffFor(ds, company, vessel);
+                  const receipts = ds.filter(d => d.sinclairs_receipt_url).length;
+                  const logs = ds.filter(d => d.ingram_slip_image_url).length;
+                  const groceryRows = ds.filter(d => d.bill_for_groceries).length;
+                  const dateSpan = ds.length === 1
+                    ? (ds[0].delivery_date || '')
+                    : `${ds[ds.length - 1].delivery_date} → ${ds[0].delivery_date}`;
                   return (
-                    <div key={key}>
-                      <div className="flex items-center justify-between gap-3 mb-2">
-                        <p className="text-sm font-semibold text-brand-navy">
-                          {company} — {vessel}
-                          <span className="text-gray-400 font-normal"> · {ds.length} deliver{ds.length === 1 ? 'y' : 'ies'} · {formatCurrency(groupTotal)}</span>
-                        </p>
+                    <div key={key} className="border border-gray-200 rounded-xl bg-gray-50/60 p-3">
+                      {/* ── The invoice ───────────────────────────────── */}
+                      <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-brand-navy">{company} — {vessel}</p>
+                          <p className="text-[11px] text-gray-400">
+                            {ds.length} deliver{ds.length === 1 ? 'y' : 'ies'} · {dateSpan}
+                          </p>
+                        </div>
+                        <p className="text-sm font-bold text-brand-navy shrink-0">{formatCurrency(groupTotal)}</p>
+                      </div>
+
+                      {/* ── The three actions, in the order she does them ── */}
+                      <div className="flex flex-wrap items-center gap-2 mb-3">
+                        <button onClick={() => copy(qbLinesAsTsv(h), `${key}-lines`)}
+                          className={`flex items-center gap-1.5 text-[11px] font-bold px-3 py-1.5 rounded-lg border transition-colors ${
+                            copied === `${key}-lines`
+                              ? 'bg-green-50 border-green-300 text-green-700'
+                              : 'bg-white border-gray-300 text-brand-navy hover:border-brand-navy'}`}
+                          title="Copies every line for this boat — paste into the QuickBooks line grid">
+                          <ClipboardCopy className="w-3.5 h-3.5" />
+                          {copied === `${key}-lines`
+                            ? `Copied ${h.lines.length} line${h.lines.length === 1 ? '' : 's'}`
+                            : `Copy ${h.lines.length} line${h.lines.length === 1 ? '' : 's'}`}
+                        </button>
+
+                        <button onClick={() => downloadPacket(ds, `${company}-${vessel}`, `${key}-pdf`)}
+                          disabled={busy === `${key}-pdf`}
+                          className="flex items-center gap-1.5 bg-white border border-gray-300 text-brand-navy text-[11px] font-bold px-3 py-1.5 rounded-lg hover:border-brand-navy disabled:opacity-50"
+                          title="One PDF: the invoice lines, the signed logs and Sinclair's receipts">
+                          {busy === `${key}-pdf`
+                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            : <Download className="w-3.5 h-3.5" />}
+                          {busy === `${key}-pdf` ? 'Building…' : 'Packet'}
+                        </button>
+
                         <button onClick={() => markEntered(ds.map(d => d.id), key)} disabled={busy === key}
-                          className="flex items-center gap-1 bg-brand-green text-white text-[11px] font-bold px-3 py-1.5 rounded-lg hover:bg-brand-gmed disabled:opacity-50">
-                          {busy === key ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
-                          Mark this boat entered ({ds.length})
+                          className="flex items-center gap-1.5 bg-brand-green text-white text-[11px] font-bold px-3 py-1.5 rounded-lg hover:bg-brand-gmed disabled:opacity-50 ml-auto">
+                          {busy === key ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                          Entered
                         </button>
                       </div>
 
-                      <div className="space-y-2">
-                  {ds.map(d => {
-                    const fee = Number(d.delivery_fee) || 0;
-                    const groc = Number(d.sinclairs_grocery_total) || 0;
-                    const billsGroc = !!d.bill_for_groceries;
-                    const who = d.vessel_name || company;
-                    return (
-                      <div key={d.id} className="border border-gray-200 rounded-xl bg-gray-50/60 p-3">
-                        <div className="flex items-center justify-between gap-3 mb-1.5">
-                          <p className="text-xs font-semibold text-gray-500">
-                            {d.delivery_date} · {d.vessel_name || '—'}
-                            {d.location_delivered ? ` · ${d.location_delivered}` : ''}
-                          </p>
-                          <div className="flex items-center gap-2">
-                            {d.sinclairs_receipt_url && (
-                              <a href={d.sinclairs_receipt_url} target="_blank" rel="noreferrer"
-                                className="text-[11px] font-bold text-brand-river underline">Receipt</a>
-                            )}
-                            {d.ingram_slip_url && (
-                              <a href={d.ingram_slip_url} target="_blank" rel="noreferrer"
-                                className="text-[11px] font-bold text-brand-river underline">Slip</a>
-                            )}
-                            <button onClick={() => markEntered([d.id], d.id)} disabled={busy === d.id}
-                              className="text-[11px] font-bold text-gray-400 hover:text-brand-green">
-                              {busy === d.id ? '…' : 'Mark entered'}
-                            </button>
-                          </div>
-                        </div>
-                        <div className="grid sm:grid-cols-2 gap-x-4">
-                          <Field label="Customer" value={company} k={`${d.id}-c`} />
-                          <Field label="Invoice date" value={d.delivery_date || ''} k={`${d.id}-d`} />
-                          <Field label="Line 1" value={`${d.service_type || 'Delivery'} — ${d.delivery_date} ${who}`} k={`${d.id}-l1`} />
-                          <Field label="Rate" value={fee.toFixed(2)} k={`${d.id}-r1`} />
-                          {billsGroc && <>
-                            <Field label="Line 2" value={`Sinclair's — ${d.delivery_date} ${who} grocery order`} k={`${d.id}-l2`} />
-                            <Field label="Rate" value={groc.toFixed(2)} k={`${d.id}-r2`} />
-                          </>}
-                        </div>
-                        <div className="flex flex-wrap items-center gap-x-4 mt-2 pt-2 border-t border-gray-200 text-xs">
-                          <span className="font-bold text-brand-navy">Invoice total {formatCurrency(lineTotal(d))}</span>
-                          {!billsGroc && <span className="text-amber-700 font-semibold">Delivery only — pays Sinclair&apos;s direct</span>}
-                        </div>
+                      {downloadError[`${key}-pdf`] && (
+                        <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mb-3">
+                          {downloadError[`${key}-pdf`]}
+                        </p>
+                      )}
+
+                      {/* ── Invoice header fields QuickBooks asks for before
+                             the lines. Same for the whole boat, so they sit
+                             once here rather than on every delivery. ── */}
+                      <div className="grid sm:grid-cols-2 gap-x-4 mb-2">
+                        <Field label="Customer" value={company} k={`${key}-c`} />
+                        <Field label="Invoice date" value={h.invoiceDate || ''} k={`${key}-d`} />
                       </div>
-                    );
-                  })}
+
+                      {/* ── Exactly what Copy will paste, so she can eyeball it
+                             against QuickBooks without opening anything. ── */}
+                      <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
+                        {h.lines.map((l, i) => (
+                          <div key={i} className="flex items-baseline gap-2 px-2.5 py-1.5 text-[11px] border-b border-gray-100 last:border-0">
+                            <span className="font-semibold text-brand-navy shrink-0 min-w-[112px]">{l.item}</span>
+                            <span className="text-gray-500 flex-1 truncate">{l.description}</span>
+                            <span className="font-semibold text-brand-navy shrink-0">{formatCurrency(l.rate * l.qty)}</span>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* ── Paperwork state, stated rather than hidden. ── */}
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-[11px]">
+                        <span className={receipts === groceryRows ? 'text-gray-400' : 'text-amber-700 font-semibold'}>
+                          Receipts {receipts}/{groceryRows}
+                        </span>
+                        <span className={logs === ds.length ? 'text-gray-400' : 'text-amber-700 font-semibold'}>
+                          Signed logs {logs}/{ds.length}
+                        </span>
+                        {groceryRows < ds.length && (
+                          <span className="text-gray-400">
+                            {ds.length - groceryRows} delivery-only — pays Sinclair&apos;s direct
+                          </span>
+                        )}
                       </div>
                     </div>
                   );
@@ -542,7 +664,7 @@ function QuickBooksQueue({ onClose, onEntered }: {
         </div>
 
         <div className="px-5 py-3 border-t border-gray-100 text-[11px] text-gray-400 shrink-0">
-          Enter these in QuickBooks, then mark them — this replaces the &ldquo;Updated QuickBooks&rdquo; column on the spreadsheet.
+          One box is one invoice. Copy the lines, download the packet, attach it, mark it entered — this replaces the &ldquo;Updated QuickBooks&rdquo; column on the spreadsheet.
         </div>
       </div>
     </div>,

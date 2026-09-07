@@ -1,11 +1,13 @@
 'use client';
 // src/app/admin/customers/page.tsx
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import {
-  Lock, RefreshCw, Download, ChevronDown, ChevronRight, RotateCcw,
-  Search, Calendar, X, CheckCircle, AlertCircle, Loader2,
+  Lock, RefreshCw, FileText, ChevronDown, ChevronRight, RotateCcw,
+  Search, Calendar, X, CheckCircle, AlertCircle, Loader2, Printer,
 } from 'lucide-react';
+import { vesselReportHtml } from '@/lib/vessel-report';
 import { fetchAdminSession, canAccess, adminFetch } from '@/lib/admin-auth';
 import { formatCurrency, formatDate } from '@/lib/utils';
 
@@ -383,16 +385,19 @@ export default function CustomersPage() {
 
   useEffect(() => { fetchReport(); }, [fetchReport]);
 
-  function exportCsv() {
-    adminFetch(`/api/admin/reports/export?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}&type=vessels`).then(async res => {
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `vessels_report.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
-    });
+  // Was a raw vessels_report.csv download. Nobody opened it, and it wasn't
+  // something you'd forward to a port captain. This builds the same data as a
+  // branded sheet — same look as the monthly billing packet — previewed in-app
+  // (house rule: no popup windows) with Print / Save as PDF.
+  const [reportHtml, setReportHtml] = useState<string | null>(null);
+  const reportFrameRef = useRef<HTMLIFrameElement>(null);
+
+  function openVesselReport() {
+    const rows = (data?.vessels || []).filter(v => v.orderCount > 0);
+    const label = preset === 'custom'
+      ? `${range.from} to ${range.to}`
+      : (PRESETS.find(p => p.key === preset)?.label || 'All time');
+    setReportHtml(vesselReportHtml(rows as never, label));
   }
 
   if (denied) return (
@@ -473,8 +478,11 @@ export default function CustomersPage() {
         <div className="card-base overflow-hidden">
           <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between flex-wrap gap-3">
             <h2 className="font-display font-bold text-brand-navy">Customer / Vessel Lookup</h2>
-            <button onClick={exportCsv} className="btn-outline text-xs px-3 py-1.5 flex items-center gap-1.5">
-              <Download className="w-3.5 h-3.5" /> CSV
+            <button onClick={openVesselReport}
+              disabled={!data?.vessels?.length}
+              title="A branded, printable summary of what each barge line has ordered"
+              className="btn-outline text-xs px-3 py-1.5 flex items-center gap-1.5 disabled:opacity-40">
+              <FileText className="w-3.5 h-3.5" /> Vessel Activity Report
             </button>
           </div>
           <div className="p-4 border-b border-gray-100">
@@ -577,6 +585,31 @@ export default function CustomersPage() {
             </div>
           )}
         </div>
+      )}
+
+      {/* In-app preview — PORTAL to body (house rule: every fixed overlay does,
+          because animated ancestors trap position:fixed). Printing goes through
+          the iframe so the browser prints the report, not the admin page. */}
+      {reportHtml && createPortal(
+        <div className="fixed inset-0 z-[95] bg-black/70 flex flex-col">
+          <div className="flex items-center justify-between px-5 py-3 bg-brand-navy text-white">
+            <span className="font-display font-bold text-sm">Vessel Activity Report</span>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => reportFrameRef.current?.contentWindow?.print()}
+                className="flex items-center gap-1.5 bg-white/15 hover:bg-white/25 rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors">
+                <Printer className="w-4 h-4" /> Print / Save PDF
+              </button>
+              <button onClick={() => setReportHtml(null)}
+                className="text-white/80 hover:text-white flex items-center gap-1 text-sm">
+                <X className="w-4 h-4" /> Close
+              </button>
+            </div>
+          </div>
+          <iframe ref={reportFrameRef} srcDoc={reportHtml} title="Vessel activity report"
+            className="flex-1 w-full bg-white" />
+        </div>,
+        document.body,
       )}
     </div>
   );

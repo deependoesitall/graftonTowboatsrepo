@@ -1603,8 +1603,13 @@ function Section({ icon, title, children }: { icon: React.ReactNode; title: stri
     <div className="border border-gray-100 rounded-lg p-4">
       <div className="flex items-center gap-2 mb-3">
         <span className="text-brand-navy">{icon}</span>
-        <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wide"
-          dangerouslySetInnerHTML={{ __html: title }} />
+        {/* Rendered as text, never as HTML. This was dangerouslySetInnerHTML
+            purely so "&amp;" displayed as "&" — every caller passes a hardcoded
+            string, so nothing was exploitable today. But it is a loaded gun:
+            the first time someone passes a vessel name or a product title
+            through here it becomes stored XSS in the admin panel. Escaping the
+            ampersand at the call site costs nothing and closes it for good. */}
+        <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wide">{title}</h3>
       </div>
       {children}
     </div>

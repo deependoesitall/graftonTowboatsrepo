@@ -18,6 +18,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { hashPassword, verifyPassword, isLegacyHash } from '@/lib/password';
 import { signAdminSession, sessionCookieOptions, SESSION_COOKIE, AdminRole, AdminPermission } from '@/lib/admin-auth-server';
+import { throttleLogin, recordLoginFailure, clearLoginFailures, clientIp } from '@/lib/login-throttle';
+
+/**
+ * A valid bcrypt hash of a value nobody knows, used only to burn the same
+ * ~100ms a real password check costs when the username doesn't exist. It can
+ * never match: bcrypt is one-way and this is the hash of a random string.
+ */
+const DUMMY_HASH = '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy';
 
 export async function POST(req: NextRequest) {
   let body: { password?: string; username?: string };
@@ -33,6 +41,12 @@ export async function POST(req: NextRequest) {
   }
 
   const supabase = createServiceClient();
+  const ip = clientIp(req.headers);
+
+  // Pay the accumulated delay BEFORE touching the password. Doing it first
+  // means a wrong guess costs the same whether or not the account exists, so
+  // the response time never reveals which usernames are real.
+  await throttleLogin(supabase, username || '', ip);
 
   // ----- Multi-user login -----
   if (username) {
@@ -47,10 +61,25 @@ export async function POST(req: NextRequest) {
     // password was wrong, to avoid username enumeration.
     const genericError = NextResponse.json({ error: 'Invalid username or password' }, { status: 401 });
 
-    if (!user) return genericError;
+    if (!user) {
+      // TIMING ORACLE, CLOSED. Returning here immediately used to answer in a
+      // millisecond, while a REAL username spent ~100ms inside bcrypt. That
+      // gap is measurable over a few requests, so the generic error message
+      // above was telling the truth while the clock gave it away — you could
+      // enumerate every admin username without ever guessing a password.
+      // Burning one bcrypt against a throwaway hash makes both paths cost the
+      // same. The result is discarded; only the elapsed time matters.
+      await verifyPassword(password, DUMMY_HASH);
+      await recordLoginFailure(supabase, username, ip);
+      return genericError;
+    }
 
     const valid = await verifyPassword(password, user.password_hash);
-    if (!valid) return genericError;
+    if (!valid) {
+      await recordLoginFailure(supabase, username, ip);
+      return genericError;
+    }
+    await clearLoginFailures(supabase, username);
 
     // Transparent upgrade: re-hash with bcrypt if this was a legacy SHA-256 hash.
     if (isLegacyHash(user.password_hash)) {
@@ -116,7 +145,14 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  if (!valid) return genericError;
+  if (!valid) {
+    // The legacy path has no username, so failures are counted under '' — the
+    // IP counter is what actually throttles it. Recorded all the same, so a
+    // burst against this endpoint still slows itself down.
+    await recordLoginFailure(supabase, '', ip);
+    return genericError;
+  }
+  await clearLoginFailures(supabase, '');
 
   const token = signAdminSession({
     sub: 'admin',
