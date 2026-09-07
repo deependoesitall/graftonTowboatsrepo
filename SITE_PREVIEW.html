@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GTS marketing home — Next.js rebuild preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* Layout CSS is inlined — no Tailwind CDN, no scripts. Only the two Google
+   fonts load externally, and they are the SAME ones next/font pulls in the
+   real app (Oswald 600/700, Inter 400–700).
+
+   PREVIOUS BUG: this file declared @font-face with local() sources, which made
+   the browser substitute Impact / Arial Narrow Bold instead of fetching Oswald.
+   The headings rendered far heavier and more condensed than the real site.
+   The Next.js route was never affected — it uses var(--font-display) from
+   next/font/google — but the preview misrepresented it. */
+
+:root{
+  --green:#1E3D1E; --gmed:#2D5A1E; --glight:#3D7A28;
+  --yellow:#D9E84A; --ylight:#F0F7A0; --orange:#E8640A; --ored:#D44E05;
+  --red:#C4342A;
+}
+*{box-sizing:border-box; margin:0; padding:0;}
+body{
+  font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  color:var(--green); line-height:1.6;
+  background:linear-gradient(135deg,#D9E84A 0%,#E8F070 50%,#F0F7A0 100%);
+  background-attachment:fixed;
+}
+h1,h2,h3,.display{
+  font-family:'Oswald',Impact,'Arial Narrow',sans-serif;
+  font-weight:700; text-transform:uppercase; letter-spacing:-.02em; line-height:.98;
+}
+a{text-decoration:none; color:inherit;}
+img{max-width:100%;}
+.wrap{max-width:1120px; margin:0 auto; padding:0 24px;}
+
+/* ── preview banner ── */
+.banner{background:var(--green); color:var(--yellow); text-align:center;
+  padding:9px 20px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.12em;}
+
+/* ── nav ── */
+.nav{position:sticky; top:0; z-index:50; background:rgba(255,255,255,.62);
+  backdrop-filter:blur(10px); border-bottom:1px solid rgba(30,61,30,.10);}
+.nav-in{max-width:1120px; margin:0 auto; padding:0 24px; height:88px;
+  display:flex; align-items:center; justify-content:space-between; gap:18px;}
+.logo{width:62px; height:62px; border-radius:50%; background:var(--green); color:var(--yellow);
+  display:flex; align-items:center; justify-content:center; text-align:center;
+  font-family:'Oswald',Impact,sans-serif; font-size:10px; line-height:1.15; flex-shrink:0;}
+.nav-links{display:flex; gap:30px;}
+.nav-links a{font-size:14px; font-weight:600; letter-spacing:.01em;}
+.nav-links a:hover{color:var(--orange);}
+.nav-cta{display:flex; gap:9px; flex-shrink:0;}
+
+/* ── buttons ── */
+.btn{display:inline-flex; align-items:center; justify-content:center; gap:9px;
+  font-weight:700; text-transform:uppercase; letter-spacing:.11em;
+  border-radius:999px; border:2px solid transparent; cursor:pointer; transition:all .15s;}
+.btn-sm{font-size:11px; padding:11px 20px;}
+.btn-lg{font-size:15px; padding:16px 32px;}
+.btn-md{font-size:12px; padding:13px 22px;}
+.solid{background:var(--green); color:#fff; border-color:var(--green);}
+.solid:hover{background:var(--gmed);}
+.ghost{border-color:var(--green); color:var(--green); background:transparent;}
+.ghost:hover{background:var(--green); color:#fff;}
+.orange{background:var(--orange); color:#fff; border-color:var(--orange);}
+.orange:hover{background:var(--ored);}
+.on-green{background:var(--yellow); color:var(--green); border-color:var(--yellow);}
+.ghost-yellow{border-color:var(--yellow); color:var(--yellow); background:transparent;}
+.ghost-yellow:hover{background:var(--yellow); color:var(--green);}
+
+/* ── hero ── */
+.hero{padding:72px 0 52px;}
+.hero-grid{display:grid; grid-template-columns:1.15fr 1fr; gap:56px; align-items:center;}
+.mm-badge{display:inline-flex; align-items:center; gap:8px; background:var(--green);
+  color:var(--yellow); border-radius:999px; padding:7px 17px; margin-bottom:26px;
+  font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.13em;}
+.hero h1{font-size:clamp(2.6rem,5.2vw,4.4rem); margin-bottom:24px;}
+.hero h1 .accent{color:var(--orange);}
+.lede{font-size:18px; color:rgba(30,61,30,.78); margin-bottom:32px; max-width:34rem;}
+.btn-row{display:flex; flex-wrap:wrap; gap:12px;}
+.fineprint{font-size:11px; letter-spacing:.13em; text-transform:uppercase;
+  color:rgba(30,61,30,.5); margin-top:20px;}
+
+/* ── photo slots ── */
+.slot{position:relative; border:2px dashed rgba(30,61,30,.26); border-radius:16px;
+  background:rgba(30,61,30,.04); display:flex; flex-direction:column;
+  align-items:center; justify-content:center; text-align:center; padding:26px; overflow:hidden;}
+.slot::before{content:''; position:absolute; top:0; left:0; right:0; height:4px;
+  background:linear-gradient(to right,var(--red) 0 50%,var(--glight) 50% 100%);}
+.slot .lbl{font-family:'Oswald',Impact,sans-serif; font-weight:700;
+  text-transform:uppercase; font-size:13px; letter-spacing:.01em; color:rgba(30,61,30,.72); line-height:1.2;}
+.slot .hint{font-size:11.5px; color:rgba(30,61,30,.48); margin-top:7px; max-width:17rem; line-height:1.45;}
+.slot .icon{width:26px; height:26px; border-radius:5px; background:rgba(30,61,30,.14); margin-bottom:12px;}
+.slot-tall{aspect-ratio:3/4;}
+.slot-wide{aspect-ratio:4/3;}
+
+/* ── sinclair band ── */
+.band{background:var(--green); border-radius:16px; padding:26px 30px; margin-bottom:56px;
+  display:flex; align-items:center; gap:20px; box-shadow:0 10px 26px rgba(30,61,30,.16);}
+.band-dot{width:48px; height:48px; border-radius:50%; background:rgba(217,232,74,.2); flex-shrink:0;}
+.band p{color:#fff; line-height:1.5;}
+.band strong{font-size:18px; display:block;}
+.band span{color:rgba(217,232,74,.85);}
+
+/* ── services ── */
+.section{padding:24px 0 40px;}
+.section h2{font-size:clamp(2rem,4vw,3rem); text-align:center; margin-bottom:12px;}
+.section .sub{text-align:center; color:rgba(30,61,30,.66); max-width:36rem; margin:0 auto 48px;}
+.cards{display:grid; grid-template-columns:repeat(3,1fr); gap:24px;}
+.card{background:rgba(255,255,255,.66); border:1px solid rgba(30,61,30,.1);
+  border-radius:16px; overflow:hidden; display:flex; flex-direction:column; transition:background .2s;}
+.card:hover{background:rgba(255,255,255,.86);}
+.card-photo{padding:16px 16px 0;}
+.card-body{padding:20px 24px 26px; display:flex; flex-direction:column; flex:1;}
+.card-icon{width:44px; height:44px; border-radius:50%; background:var(--green); margin-bottom:13px;}
+.card h3{font-size:20px; margin-bottom:9px;}
+.card p{font-size:14px; color:rgba(30,61,30,.66); flex:1; line-height:1.6;}
+.card .btn{margin-top:20px;}
+
+/* ── about ── */
+.about{padding:64px 0;}
+.about-grid{display:grid; grid-template-columns:1fr 1fr; gap:56px; align-items:center;}
+.about h2{font-size:clamp(2rem,4vw,3rem); margin-bottom:20px;}
+.about p{font-size:17px; color:rgba(30,61,30,.78); margin-bottom:18px;}
+.stats{display:flex; flex-wrap:wrap; gap:26px; margin-top:32px;}
+.stat{display:flex; align-items:center; gap:12px;}
+.stat-dot{width:40px; height:40px; border-radius:50%; background:rgba(30,61,30,.1);}
+.stat .n{font-family:'Oswald',Impact,sans-serif; font-weight:700; font-size:19px; text-transform:uppercase;}
+.stat .l{font-size:11px; text-transform:uppercase; letter-spacing:.09em; color:rgba(30,61,30,.55);}
+
+/* ── contact ── */
+.contact{background:var(--green); padding:66px 0;}
+.contact h2{color:#fff; font-size:clamp(2rem,4vw,3rem); margin-bottom:16px; text-align:center;}
+.contact .sub{color:rgba(217,232,74,.85); font-size:18px; text-align:center; max-width:32rem; margin:0 auto 36px;}
+.contact .btn-row{justify-content:center; margin-bottom:48px;}
+.details{display:grid; grid-template-columns:repeat(3,1fr); gap:32px; text-align:center;
+  border-top:1px solid rgba(255,255,255,.16); padding-top:40px;}
+.details .d-ico{width:22px; height:22px; border-radius:5px; background:rgba(217,232,74,.35); margin:0 auto 11px;}
+.details .d-main{color:#fff; font-weight:600; font-size:14px; line-height:1.4; word-break:break-word;}
+.details .d-sub{color:rgba(217,232,74,.62); font-size:11px; text-transform:uppercase; letter-spacing:.09em; margin-top:5px;}
+
+/* ── footer ── */
+footer{background:var(--green); border-top:1px solid rgba(255,255,255,.1); padding:30px 0;}
+.foot-in{max-width:1120px; margin:0 auto; padding:0 24px; display:flex;
+  align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;}
+.foot-in p, .foot-in a{color:rgba(217,232,74,.62); font-size:12px;}
+.foot-in a:hover{color:var(--yellow);}
+.foot-links{display:flex; gap:20px;}
+
+@media (max-width:900px){
+  .hero-grid,.about-grid{grid-template-columns:1fr; gap:34px;}
+  .cards{grid-template-columns:1fr;}
+  .details{grid-template-columns:1fr; gap:26px;}
+  .nav-links{display:none;}
+  .nav-in{height:74px;}
+  .band{flex-direction:column; text-align:center;}
+}
+</style>
+</head>
+<body>
+
+<div class="banner">Preview · this is the /site route rebuilt in your Next.js app · nothing is live</div>
+
+<nav class="nav">
+  <div class="nav-in">
+    <div class="logo">GTS<br>LOGO</div>
+    <div class="nav-links">
+      <a href="#">Home</a><a href="#services">Services</a><a href="#about">About</a><a href="#contact">Contact</a>
+    </div>
+    <div class="nav-cta">
+      <a class="btn btn-sm ghost" href="#">Call or Email</a>
+      <a class="btn btn-sm solid" href="#">Order Now</a>
+    </div>
+  </div>
+</nav>
+
+<section class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <div class="mm-badge">MM 219 Mississippi · MM 0 Illinois</div>
+      <h1>Groceries, Supplies<br><span class="accent">&amp; Crew Change</span><br>When You Need It.</h1>
+      <p class="lede">Family-owned marine delivery at the Grafton harbor, where the Illinois meets the Mississippi. We shop it, pack it, and bring it to your vessel — by boat or refrigerated van.</p>
+      <div class="btn-row">
+        <a class="btn btn-lg solid" href="#">Start an Order →</a>
+        <a class="btn btn-lg ghost" href="#">(618) 556-0290</a>
+      </div>
+      <p class="fineprint">No login required · Instant confirmation · 24/7 support</p>
+    </div>
+    <div class="slot slot-tall">
+      <div class="icon"></div>
+      <div class="lbl">GTS boat alongside a towboat</div>
+      <div class="hint">Mid-transfer, groceries going up to a deckhand. The single most valuable photo on the site.</div>
+    </div>
+  </div>
+</section>
+
+<div class="wrap">
+  <div class="band">
+    <div class="band-dot"></div>
+    <p><strong>Groceries from Sinclair&rsquo;s Foods.</strong>
+      <span>Ordered and delivered by Grafton Towboat Services. Cold and frozen goods ride refrigerated the whole way.</span></p>
+  </div>
+</div>
+
+<section class="section" id="services">
+  <div class="wrap">
+    <h2>Our Services</h2>
+    <p class="sub">Grocery delivery, crew change and supplies. Need something else? Tell us and we&rsquo;ll work it out.</p>
+    <div class="cards">
+
+      <div class="card">
+        <div class="card-photo"><div class="slot slot-wide">
+          <div class="icon"></div>
+          <div class="lbl">Sinclair&rsquo;s meat counter</div>
+          <div class="hint">Real shot — replaces the stock photo.</div>
+        </div></div>
+        <div class="card-body">
+          <div class="card-icon"></div>
+          <h3>Grocery Delivery</h3>
+          <p>Partnered with Sinclair&rsquo;s Foods for the best meat and produce you can find. Small town, fresh products. If they don&rsquo;t have it, they get it for you.</p>
+          <a class="btn btn-md orange" href="#">Order Groceries →</a>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-photo"><div class="slot slot-wide">
+          <div class="icon"></div>
+          <div class="lbl">Crew transfer at the dock</div>
+          <div class="hint">People, not scenery. Faces sell this service.</div>
+        </div></div>
+        <div class="card-body">
+          <div class="card-icon"></div>
+          <h3>Crew Change &amp; 24/7 Support</h3>
+          <p>We&rsquo;re here when you need us. Crew change, last-minute problems, odd hours — we&rsquo;ve got you covered.</p>
+          <a class="btn btn-md ghost" href="#">Call to Arrange →</a>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-photo"><div class="slot slot-wide">
+          <div class="icon"></div>
+          <div class="lbl">Loaded pallet on the dock</div>
+          <div class="hint">Currently a 269px image — the fuzziest thing on the site.</div>
+        </div></div>
+        <div class="card-body">
+          <div class="card-icon"></div>
+          <h3>Towboat Supplies</h3>
+          <p>We stock a large variety of items, and if we don&rsquo;t have it we&rsquo;ll get it quickly and keep it in stock going forward.</p>
+          <a class="btn btn-md orange" href="#">Order Supplies →</a>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section class="about" id="about">
+  <div class="wrap about-grid">
+    <div class="slot slot-wide">
+      <div class="icon"></div>
+      <div class="lbl">The three sisters</div>
+      <div class="hint">Carries the family-owned signal. Replaces the marina drone photo — they no longer own the marina.</div>
+    </div>
+    <div>
+      <h2>Small Town and<br>Family Owned</h2>
+      <p>We&rsquo;re a small-town, family-owned business with big-business inventory. Our family has been in the marina business for 20 years and has worked on the river for generations.</p>
+      <p>We have a deep love and respect for the river, and a real understanding of why it matters.</p>
+      <div class="stats">
+        <div class="stat"><div class="stat-dot"></div><div><div class="n">24/7</div><div class="l">Support</div></div></div>
+        <div class="stat"><div class="stat-dot"></div><div><div class="n">MM 219</div><div class="l">Mississippi River</div></div></div>
+        <div class="stat"><div class="stat-dot"></div><div><div class="n">Ch. 68</div><div class="l">via Grafton Harbor</div></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="contact" id="contact">
+  <div class="wrap">
+    <h2>Coming Through Grafton?</h2>
+    <p class="sub">Order online any time, or call and talk to a person. Both work — most crews do both.</p>
+    <div class="btn-row">
+      <a class="btn btn-lg on-green" href="#">Start an Order</a>
+      <a class="btn btn-lg ghost-yellow" href="#">(618) 556-0290</a>
+    </div>
+    <div class="details">
+      <div><div class="d-ico"></div><div class="d-main">(618) 556-0290</div><div class="d-sub">24/7 Support</div></div>
+      <div><div class="d-ico"></div><div class="d-main">25 Dagget Hollow, Grafton, IL 62037</div><div class="d-sub">MM 219 Mississippi · MM 0 Illinois</div></div>
+      <div><div class="d-ico"></div><div class="d-main">GraftonTowboatServices@gmail.com</div><div class="d-sub">Email us anytime</div></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="foot-in">
+    <p>© 2026 Grafton Towboat Services LLC · Grafton, Illinois</p>
+    <div class="foot-links">
+      <a href="#">Privacy Policy</a><a href="#">Terms of Service</a><a href="#">Accessibility</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

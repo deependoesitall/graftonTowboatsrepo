@@ -17,37 +17,55 @@ started, not a worse one.
 
 ---
 
+> **Corrected Sept 6 after actually reading the live site.** Two items in the
+> original version of this file were wrong. Both are fixed below. Details in
+> "What I got wrong" at the bottom.
+
 ## Phase 1 — Two-minute fixes, zero risk
 
-### 1.1 Kill the placeholder link
+### 1.1 ~~Kill the placeholder link~~ — NOTHING TO DO
 
-Somewhere on the site there's a link to `gerbil-lily-pyjz.squarespace.com` —
-Squarespace's auto-generated temporary domain. It screams unfinished.
+**Struck. I verified this and it isn't real.** `gerbil-lily-pyjz` appears 3–5
+times per page, but every occurrence is internal Squarespace plumbing: an HTML
+comment, the site `identifier`, `internalUrl`, and a form block's `secureUrl`.
+None is a visible link. The canonical and `baseUrl` correctly point at
+`www.graftontowboatservices.com`, which is already the primary domain.
 
-Find it: **Pages → search, or just Ctrl-F on the live site.** Delete the link or
-point it at the real page.
+I carried this forward from the Aug 25 notes without checking. Skip it.
 
 ### 1.2 Fix the two capitalization typos
 
-| Wrong | Right |
-|---|---|
-| Crew C**H**ange | Crew Change |
-| Tow Boat S**U**pplies | Towboat Supplies |
+**Both appear on Home AND Services — four edits, not two.** Exact current strings:
 
-Note "Towboat" is **one word** — that's the industry spelling and it's in your
-own company name.
+| Page | Current | Change to |
+|---|---|---|
+| Home | `Crew CHange &` | `Crew Change &` |
+| Home | `Tow Boat SUpplies` | `Towboat Supplies` |
+| Services | `Crew CHange &` | `Crew Change &` |
+| Services | `Tow Boat SUpplies` | `Towboat Supplies` |
+
+"Towboat" is **one word** — the industry spelling, and it's in your own company
+name. The site currently spells it three different ways.
 
 ### 1.3 Remove "Coming Soon!" from Towboat Supplies
 
-It's orderable now. Leaving it up tells customers not to try.
+On **/services**, under the Tow Boat SUpplies block. It's orderable now; leaving
+it up tells customers not to try.
 
 ### 1.4 Fix the mile markers in the footer
 
-The footer says **218 / 0.7**. That's wrong. Replace with exactly what the
-ordering site shows:
+Site-wide footer, two separate lines. Current:
 
 ```
-Mile Marker 219 (Mississippi River) · Mile Marker 0 (Illinois River)
+Mississippi Mile Marker: 218
+Illinois Mile Marker: 0.7
+```
+
+Change to:
+
+```
+Mississippi Mile Marker: 219
+Illinois Mile Marker: 0
 ```
 
 *(Ignore the "219 and 0.9" from the Aug 25 call — Jen was misremembering, and
@@ -81,44 +99,20 @@ Family-owned marine delivery at the Grafton, Illinois harbor. Groceries from Sin
 
 ---
 
-### Grocery Delivery
+### Services
+
+**One page covering all three offerings** — there is no separate Grocery
+Delivery / Crew Change / Towboat Supplies page. This description has to carry
+all three, so it names each one for search while staying under 160 characters.
 
 **SEO Title**
 ```
-Towboat Grocery Delivery | Sinclair's Foods to Your Vessel | Grafton, IL
+Grocery Delivery, Crew Change & Towboat Supplies | Grafton, IL
 ```
 
 **SEO Description**
 ```
-Order groceries online and we deliver straight to your boat at Grafton. Full grocery selection from Sinclair's Foods, shopped fresh and delivered by boat or van. Company billing or personal payment. Serving the Mississippi and Illinois rivers.
-```
-
----
-
-### Crew Change
-
-**SEO Title**
-```
-Crew Change Transportation | Grafton, Illinois | Grafton Towboat Services
-```
-
-**SEO Description**
-```
-Crew change transport at the Grafton harbor — vessel to shore, airport runs and local transfers on the Mississippi and Illinois rivers. Family-owned, available around your vessel's schedule. Call to arrange.
-```
-
----
-
-### Towboat Supplies
-
-**SEO Title**
-```
-Towboat Supplies & Parts Delivery | Grafton, IL | Delivered to Your Vessel
-```
-
-**SEO Description**
-```
-Deck supplies, parts and hardware delivered to your towboat at Grafton, Illinois. Tell us what you need and we source and deliver it — no waiting for the next port. Order online or call Grafton Towboat Services.
+Groceries from Sinclair's Foods, deck supplies and crew change transport, delivered to your towboat at Grafton, Illinois. Order online or call — 24/7 support on the Mississippi and Illinois rivers.
 ```
 
 ---
@@ -151,6 +145,28 @@ Reach Grafton Towboat Services for grocery delivery, towboat supplies and crew c
 
 ---
 
+### Appointments
+
+**This page exists and I didn't know about it** — it's a Squarespace Scheduling
+page, not in the main nav, and the "Book now" / "Schedule Now!" buttons on
+Services appear to point at it. **Check whether it's actually in use before you
+do anything with it.** If it's a leftover from setup, deleting it is cleaner
+than leaving an orphan page indexed.
+
+If you're keeping it:
+
+**SEO Title**
+```
+Schedule a Delivery | Grafton Towboat Services
+```
+
+**SEO Description**
+```
+Schedule grocery delivery, towboat supplies or crew change transport with Grafton Towboat Services at the Grafton, Illinois harbor.
+```
+
+---
+
 **Two rules while you do this:**
 
 - **Keep descriptions between 140 and 160 characters.** Google truncates past
@@ -162,8 +178,11 @@ Reach Grafton Towboat Services for grocery delivery, towboat supplies and crew c
 
 ## Phase 3 — The Order Now button
 
+The existing header button reads **"Call or Email Now"** (verified on the live
+site — the nav is Home · Services · About · Contact + that button).
+
 **Jen's instruction was specific and she rejected the alternative**, so this one
-matters: keep **"Order Now"** and **"Call or Email"** side by side at
+matters: keep **"Order Now"** and **"Call or Email Now"** side by side at
 **equal weight**. Same size, same style — not a primary button and a ghost
 button.
 
@@ -285,6 +304,24 @@ handset in bad light on a moving boat, and that's the only test that matters.
 ---
 
 ## Two things worth doing that aren't on Jen's list
+
+**What I got wrong in the first version of this file**
+
+Both errors came from trusting the Aug 25 notes instead of reading the live
+site. Recording them so the pattern is visible:
+
+1. **"Kill the gerbil-lily-pyjz link."** There is no such link. Every occurrence
+   is internal Squarespace plumbing, and the real domain is already primary. I
+   invented a task.
+2. **A six-page site.** It's five pages, and three of the "pages" I wrote SEO
+   copy for are *sections on the Services page*. That copy would have had
+   nowhere to go.
+
+Also newly discovered by reading the site: the typos appear on **two** pages
+each rather than one, the header button says **"Call or Email Now"** rather than
+"Call or Email", and there's an **/appointments** page nobody mentioned.
+
+---
 
 **Google Business Profile.** Free, and for a business whose customers search
 *"grocery delivery near Grafton IL"* it's worth more than everything in Phase 2
