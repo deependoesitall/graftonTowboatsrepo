@@ -8,7 +8,8 @@
 
 import Link from 'next/link';
 import { Phone, ShoppingCart, MapPin, Mail, Radio, Menu } from 'lucide-react';
-import { BUSINESS, NAV } from '@/app/site/content';
+import { BUSINESS, NAV, img } from '@/app/site/content';
+import { LocalBusinessSchema } from '@/components/site/StructuredData';
 
 /**
  * A photo slot.
@@ -23,14 +24,105 @@ import { BUSINESS, NAV } from '@/app/site/content';
  * live site has alt="" today, which is 13 accessibility failures and 13 missed
  * SEO opportunities.
  */
+/**
+ * A real photograph.
+ *
+ * Plain <img> rather than next/image on purpose: these are a handful of static
+ * images from a CDN that already resizes on request, and next/image would spend
+ * Vercel image-optimisation quota to do a job Squarespace's CDN does for free.
+ *
+ * `width` asks the CDN for roughly what we display, so a phone doesn't download
+ * a 2500px original. The channel-marker stripe stays — it's the one piece of
+ * river language on the site that means something.
+ */
+export function Photo({
+  src, alt, width, aspect = 'wide', priority = false, fit = 'cover',
+}: {
+  src: string; alt: string; width: number;
+  aspect?: 'wide' | 'tall' | 'hero' | 'strip'; priority?: boolean;
+  fit?: 'cover' | 'contain';
+}) {
+  const ratio = {
+    tall:  'aspect-[3/4]',
+    hero:  'aspect-[16/10] md:aspect-[21/9]',
+    // For the sisters: the source is 500×200, three headshots side by side.
+    // Cropping that to 4:3 with object-cover would slice the outer two women
+    // out of frame entirely — the single worst possible thing to crop.
+    strip: 'aspect-[5/2]',
+    wide:  'aspect-[4/3]',
+  }[aspect];
+
+  const contain = fit === 'contain';
+
+  return (
+    <div className={`relative rounded-2xl overflow-hidden ${ratio} ${
+      contain ? 'bg-white/70 border border-brand-green/10' : 'shadow-lg'}`}>
+      <div className="absolute top-0 left-0 right-0 h-1 flex z-10" aria-hidden="true">
+        <div className="flex-1 bg-[#C4342A]" />
+        <div className="flex-1 bg-brand-glight" />
+      </div>
+      <img
+        src={img(src, width)}
+        alt={alt}
+        loading={priority ? 'eager' : 'lazy'}
+        // Every image on the live Squarespace site has alt="". Not here.
+        className={`w-full h-full ${contain ? 'object-contain p-4' : 'object-cover'}`}
+      />
+    </div>
+  );
+}
+
+/**
+ * The sisters.
+ *
+ * Their photo is a 500×200 PNG containing THREE separate rounded portraits on a
+ * TRANSPARENT background — not one photograph. That's why it gets its own
+ * treatment: no card, no border, no channel-marker stripe. Dropped straight
+ * onto the page gradient, the three portraits float and it reads as designed.
+ * Boxed into a white card it reads as a screenshot someone pasted in.
+ *
+ * It's also capped at a sensible width. The source is only 500px, so blowing it
+ * up across a hero would make the people look soft — and these are the faces
+ * the whole "family owned" pitch rests on. Better modest and sharp than large
+ * and mushy, until a higher-resolution version exists.
+ */
+export function SistersPortrait({ src, alt }: { src: string; alt: string }) {
+  return (
+    <figure className="text-center">
+      <img
+        src={img(src, 1000)}
+        alt={alt}
+        className="w-full max-w-[560px] mx-auto h-auto drop-shadow-[0_10px_24px_rgba(30,61,30,0.18)]"
+      />
+      <figcaption className="mt-5 text-brand-green/60 font-body text-sm">
+        The three sisters behind Grafton Towboat Services
+      </figcaption>
+    </figure>
+  );
+}
+
 export function PhotoSlot({
   label, hint, aspect = 'wide',
 }: { label: string; hint: string; aspect?: 'wide' | 'tall' }) {
+  // THE HINT IS A NOTE TO OURSELVES, NOT COPY.
+  //
+  // It's the brief for Jen — "people, not scenery", "replaces the stock photo",
+  // "the current image is 269px". Useful internally, actively embarrassing in
+  // public: the first deploy rendered "the fuzziest thing on the site" on a
+  // live page a customer could read. It now only appears in development.
+  //
+  // The label stays visible in production because "GTS boat alongside a
+  // towboat" reads as a photo that hasn't loaded yet, which is honest — these
+  // are placeholders until Jen's delivery photos arrive.
+  const showHint = process.env.NODE_ENV !== 'production';
+
   return (
     <div
       className={`relative rounded-2xl border-2 border-dashed border-brand-green/25 bg-brand-green/[0.04]
                   flex flex-col items-center justify-center text-center px-6 overflow-hidden
                   ${aspect === 'tall' ? 'aspect-[3/4]' : 'aspect-[4/3]'}`}
+      role="img"
+      aria-label={`Photograph coming soon: ${label}`}
     >
       {/* Channel-marker stripe: red to port, green to starboard. The one piece
           of nautical language here that means something, rather than rope and
@@ -41,7 +133,11 @@ export function PhotoSlot({
       </div>
       <div className="w-7 h-7 rounded-md bg-brand-green/15 mb-3" aria-hidden="true" />
       <p className="gts-heading text-sm text-brand-green/70 leading-tight">{label}</p>
-      <p className="text-[11px] text-brand-green/45 mt-1.5 font-body leading-snug max-w-[16rem]">{hint}</p>
+      {showHint && (
+        <p className="text-[11px] text-brand-green/45 mt-1.5 font-body leading-snug max-w-[16rem]">
+          {hint}
+        </p>
+      )}
     </div>
   );
 }
@@ -179,14 +275,29 @@ export function SiteFooter() {
   );
 }
 
-/** The page shell: gradient background + nav + footer. */
+/** The page shell: structured data + gradient background + nav + footer. */
 export function SiteShell({ current, children }: { current?: string; children: React.ReactNode }) {
   return (
-    <main className="min-h-screen"
-      style={{ background: 'linear-gradient(135deg, #D9E84A 0%, #E8F070 50%, #F0F7A0 100%)' }}>
-      <SiteNav current={current} />
-      {children}
-      <SiteFooter />
-    </main>
+    <>
+      {/* Feeds Google's local business panel. Invisible, and probably the
+          highest-return thing on the site — the Squarespace version had none. */}
+      <LocalBusinessSchema />
+
+      {/* Keyboard users shouldn't have to tab through the whole nav on every
+          page to reach the content. Visually hidden until focused. */}
+      <a href="#main"
+        className="sr-only focus:not-sr-only focus:absolute focus:z-[60] focus:top-3 focus:left-3
+                   focus:bg-brand-green focus:text-white focus:px-4 focus:py-2.5 focus:rounded-full
+                   focus:text-xs focus:font-bold focus:uppercase focus:tracking-widest">
+        Skip to content
+      </a>
+
+      <main id="main" className="min-h-screen"
+        style={{ background: 'linear-gradient(135deg, #D9E84A 0%, #E8F070 50%, #F0F7A0 100%)' }}>
+        <SiteNav current={current} />
+        {children}
+        <SiteFooter />
+      </main>
+    </>
   );
 }

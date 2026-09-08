@@ -33,6 +33,85 @@ export const BUSINESS = {
   orderUrl: 'https://order.graftontowboatservices.com/catalog',
 } as const;
 
+/**
+ * PHOTOGRAPHY.
+ *
+ * These are the real images from the Squarespace site, chosen from everything
+ * that was on it. Three are Unsplash stock, which quietly undercuts the
+ * "small town, family owned" pitch — so they are placeholders with a deadline,
+ * not a final answer. Jen is photographing deliveries; each entry says what
+ * should eventually replace it.
+ *
+ * ✅ NOW SERVED LOCALLY from /public/site/ (Sept 7, 2026).
+ * They used to load from Squarespace's CDN, which would have died with the
+ * subscription on May 6, 2027 and silently emptied the site of every image.
+ * That dependency is gone. To swap any photo, drop a file with the same name
+ * into public/site/ — no code change needed.
+ *
+ * `alt` is written properly on every one. Every image on the live Squarespace
+ * site has alt="" — that's 13 accessibility failures and 13 wasted SEO signals.
+ */
+/**
+ * DONE — Sept 7, 2026. The five files were downloaded into public/site/ by
+ * scripts/download-site-images.ps1 and this was switched on.
+ *
+ * The remote branch below is kept only as a record of where each image came
+ * from, and as an escape hatch if a local file is ever lost before May 2027.
+ * After the Squarespace subscription lapses those URLs are dead, and the whole
+ * `pick()` mechanism can be deleted in favour of plain '/site/…' strings.
+ */
+const USE_LOCAL_IMAGES = true;
+
+const CDN = 'https://images.squarespace-cdn.com/content/v1/6819038bc556772f05a46e4d';
+
+/** Local path if we've downloaded the images, remote CDN if we haven't. */
+const pick = (local: string, remote: string) => (USE_LOCAL_IMAGES ? `/site/${local}` : `${CDN}/${remote}`);
+
+export const IMAGES = {
+  hero: {
+    src: pick('river-sunset.jpg', '1746541643186-OQ80AQ5W3G4ZGHJTDO9B/unsplash-image-K0l4GwGX-Ec.jpg'),
+    alt: 'A loaded barge tow under way on the Mississippi River at sunset near Grafton, Illinois',
+    replaceWith: 'The GTS boat alongside a towboat mid-transfer — groceries going up to a deckhand.',
+  },
+  groceries: {
+    src: pick('meat-counter.jpg', '1746472744398-E7VAP4L3025LGQT3MXVP/unsplash-image-qgfjZUXup1M.jpg'),
+    alt: 'A full fresh meat counter at a grocery store',
+    replaceWith: "The real case at Sinclair's Foods in Jerseyville.",
+  },
+  crewChange: {
+    src: pick('workboat.jpg', '1746472336187-NSHGVFKNVH9YCOXH67QY/unsplash-image-jlrnKLjLcx0.jpg'),
+    alt: 'A workboat tied alongside a barge on the river with a crew member on deck',
+    replaceWith: 'An actual crew transfer at the Grafton dock — faces sell this service.',
+  },
+  supplies: {
+    // 269×188 native, 13 KB. The softest image on the site by a wide margin —
+    // it upscales visibly at the size the Services page shows it.
+    //
+    // It is STOCK, not a GTS photograph (Deepen, Sept 7), so there is nothing
+    // to reshoot and no authenticity lost by swapping it. The fix is simply a
+    // better free stock image of the same subject — see replaceWith.
+    src: pick('forklift.jpg', '587ce179-d5ff-465a-9c69-578fbc6bd8db/download+%281%29.jpg'),
+    alt: 'A forklift moving a pallet of bottled water at the dock',
+    replaceWith:
+      'Any sharp 2000px+ stock shot of pallets/deck supplies being loaded. This is already stock, '
+      + 'so swapping costs nothing — grab one from Unsplash (free for commercial use), save it as '
+      + 'public/site/forklift.jpg, and it picks up automatically. Best candidate for Jen to replace '
+      + 'with a real GTS photo later, but not urgent.',
+  },
+  sisters: {
+    // Already on their Contact page and nobody was using it properly.
+    // This is the family-owned signal Jen asked for.
+    src: pick('sisters.png', '2e583c7d-c344-4fb0-a74e-eb91759643e6/Untitled+%281%29.png'),
+    alt: 'The three sisters who own and run Grafton Towboat Services',
+    replaceWith: 'A higher-resolution version — this one is only 500px wide.',
+  },
+} as const;
+
+/** Squarespace's CDN resizes on request, so we ask for what we'll display
+ *  rather than pulling a 2500px original onto a phone. */
+export const img = (src: string, width: number) =>
+  src.startsWith('/') ? src : `${src}?format=${width}w`;
+
 export const NAV = [
   { label: 'Home', href: '/site' },
   { label: 'Services', href: '/services' },
@@ -55,10 +134,7 @@ export const SERVICES = [
     detail:
       "Order online and we shop it the same way you would — checking dates, picking the good cuts, swapping sensibly when something's out. Cold and frozen goods travel refrigerated the whole way to your vessel.",
     cta: { label: 'Order Groceries', href: BUSINESS.orderUrl },
-    photo: {
-      label: "Sinclair's meat counter",
-      hint: 'Real shot of the case. Replaces the Unsplash stock photo currently on the live site.',
-    },
+    image: IMAGES.groceries,
   },
   {
     slug: 'crew-change',
@@ -68,10 +144,7 @@ export const SERVICES = [
     detail:
       'Vessel to shore, shore to vessel, airport runs and local transfers. Tell us the window and we work around your boat, not the other way round.',
     cta: { label: 'Call to Arrange', href: BUSINESS.phoneHref },
-    photo: {
-      label: 'Crew transfer at the dock',
-      hint: 'People, not scenery. Faces sell this service.',
-    },
+    image: IMAGES.crewChange,
   },
   {
     slug: 'towboat-supplies',
@@ -81,10 +154,7 @@ export const SERVICES = [
     detail:
       "Deck supplies, cleaning gear, parts and hardware. Tell us what you're short of and we source it — no waiting for the next port.",
     cta: { label: 'Order Supplies', href: BUSINESS.orderUrl },
-    photo: {
-      label: 'Loaded pallet on the dock',
-      hint: 'The current image is 269px wide — the fuzziest thing on the site.',
-    },
+    image: IMAGES.supplies,
   },
 ] as const;
 
@@ -104,10 +174,6 @@ export const HOME = {
     rest:
       'Ordered and delivered by Grafton Towboat Services. Cold and frozen goods ride refrigerated the whole way.',
   },
-  heroPhoto: {
-    label: 'GTS boat alongside a towboat',
-    hint: 'Mid-transfer, groceries going up to a deckhand. The single most valuable photo on the site.',
-  },
 } as const;
 
 export const ABOUT = {
@@ -124,10 +190,6 @@ export const ABOUT = {
   ],
   /** No "woman-owned" badge — Dad is an owner via the marina, so it isn't
    *  accurate. The sisters' photo carries the signal instead (Jen, Aug 25). */
-  photo: {
-    label: 'The three sisters',
-    hint: 'Carries the family-owned signal. Replaces the marina drone photo — they no longer own the marina.',
-  },
   stats: [
     { stat: '24/7', label: 'Support' },
     { stat: 'MM 219', label: 'Mississippi River' },

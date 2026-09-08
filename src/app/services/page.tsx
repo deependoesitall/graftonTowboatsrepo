@@ -9,7 +9,7 @@
 
 import type { Metadata } from 'next';
 import { ChevronRight, Phone } from 'lucide-react';
-import { SiteShell, PhotoSlot, CtaBand } from '@/components/site/SiteChrome';
+import { SiteShell, Photo, CtaBand } from '@/components/site/SiteChrome';
 import { SERVICES, SERVICES_PAGE, CTA, BUSINESS } from '@/app/site/content';
 
 export const metadata: Metadata = {
@@ -36,7 +36,7 @@ export default function ServicesPage() {
               className="bg-white/65 backdrop-blur-sm rounded-2xl border border-brand-green/10 overflow-hidden">
               <div className={`grid md:grid-cols-2 gap-0 ${i % 2 ? 'md:[direction:rtl]' : ''}`}>
                 <div className="p-5 md:[direction:ltr]">
-                  <PhotoSlot label={s.photo.label} hint={s.photo.hint} />
+                  <Photo src={s.image.src} alt={s.image.alt} width={900} />
                 </div>
                 <div className="p-6 md:p-8 flex flex-col justify-center md:[direction:ltr]">
                   <h2 className="gts-heading text-2xl md:text-3xl mb-3 leading-tight">{s.title}</h2>

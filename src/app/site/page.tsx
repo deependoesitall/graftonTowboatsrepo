@@ -20,8 +20,8 @@
 
 import type { Metadata } from 'next';
 import { ShoppingCart, Phone, ChevronRight, Truck, Radio } from 'lucide-react';
-import { SiteShell, PhotoSlot, CtaBand } from '@/components/site/SiteChrome';
-import { HOME, SERVICES, CTA, BUSINESS } from './content';
+import { SiteShell, Photo, CtaBand } from '@/components/site/SiteChrome';
+import { HOME, SERVICES, CTA, BUSINESS, IMAGES } from './content';
 
 export const metadata: Metadata = {
   title: HOME.meta.title,
@@ -31,10 +31,13 @@ export const metadata: Metadata = {
 export default function MarketingHome() {
   return (
     <SiteShell current="Home">
-      {/* ── Hero ─────────────────────────────────────────────────────── */}
-      <section className="max-w-6xl mx-auto px-5 pt-14 md:pt-20 pb-12">
-        <div className="grid lg:grid-cols-[1.15fr_1fr] gap-10 lg:gap-14 items-center">
-          <div>
+      {/* ── Hero ─────────────────────────────────────────────────────────
+          Text first, then a wide photograph beneath it. The earlier version put
+          a tall portrait slot beside the headline, which suited placeholders but
+          fights every real photo GTS has — they're all landscape river shots,
+          and cropping a barge tow to 3:4 throws away the river. */}
+      <section className="max-w-6xl mx-auto px-5 pt-14 md:pt-20 pb-10">
+        <div className="max-w-3xl">
             <div className="inline-flex items-center gap-2 bg-brand-green text-brand-yellow rounded-full px-4 py-1.5 mb-6">
               <Radio className="w-3.5 h-3.5" aria-hidden="true" />
               <span className="text-[11px] font-bold uppercase tracking-widest">
@@ -69,9 +72,10 @@ export default function MarketingHome() {
             <p className="text-brand-green/50 text-[11px] mt-5 tracking-widest uppercase font-body">
               {HOME.fineprint}
             </p>
-          </div>
+        </div>
 
-          <PhotoSlot aspect="tall" label={HOME.heroPhoto.label} hint={HOME.heroPhoto.hint} />
+        <div className="mt-11">
+          <Photo src={IMAGES.hero.src} alt={IMAGES.hero.alt} width={1800} aspect="hero" priority />
         </div>
       </section>
 
@@ -109,7 +113,7 @@ export default function MarketingHome() {
             <div key={s.slug}
               className="bg-white/65 backdrop-blur-sm rounded-2xl border border-brand-green/10 overflow-hidden flex flex-col hover:bg-white/85 transition-colors">
               <div className="p-4 pb-0">
-                <PhotoSlot label={s.photo.label} hint={s.photo.hint} />
+                <Photo src={s.image.src} alt={s.image.alt} width={760} />
               </div>
               <div className="p-6 pt-5 flex flex-col flex-1">
                 <h3 className="gts-heading text-xl mb-2 leading-tight">{s.title}</h3>
@@ -124,6 +128,49 @@ export default function MarketingHome() {
                   <ChevronRight className="w-3.5 h-3.5" />
                 </a>
               </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ── How it works ─────────────────────────────────────────────────
+          The Squarespace site never told a first-time customer what actually
+          happens after they get in touch — it listed services and stopped. A
+          port captain deciding whether to try an unfamiliar vendor is asking
+          "what am I committing to here", and three sentences answer it.
+          Mirrors the ordering site's own explainer so the two feel like one
+          business rather than two. */}
+      <section className="max-w-6xl mx-auto px-5 py-14">
+        <h2 className="gts-heading text-3xl md:text-4xl text-center mb-3">How It Works</h2>
+        <p className="text-brand-green/60 font-body text-center max-w-xl mx-auto mb-11">
+          No account, no contract, no minimum. First time is the same as the hundredth.
+        </p>
+
+        <div className="grid md:grid-cols-3 gap-5">
+          {[
+            {
+              n: '01',
+              title: 'Tell us what you need',
+              body: 'Order online, or call and read us a list. Whichever is faster for you at the time.',
+            },
+            {
+              n: '02',
+              title: 'We shop it',
+              body: "We walk Sinclair's aisles picking your order — checking dates, choosing the good cuts, and calling you if something needs substituting.",
+            },
+            {
+              n: '03',
+              title: 'We meet your boat',
+              body: 'Delivered to your vessel at the mile marker, by boat or refrigerated van. Cold stays cold the whole way.',
+            },
+          ].map(({ n, title, body }) => (
+            <div key={n} className="relative bg-white/55 backdrop-blur-sm rounded-2xl border border-brand-green/10 p-7 pt-9">
+              <span className="absolute top-5 right-6 gts-heading text-4xl text-brand-green/10 leading-none select-none"
+                aria-hidden="true">
+                {n}
+              </span>
+              <h3 className="gts-heading text-lg mb-2 pr-12 leading-tight">{title}</h3>
+              <p className="text-brand-green/65 text-sm font-body leading-relaxed">{body}</p>
             </div>
           ))}
         </div>
