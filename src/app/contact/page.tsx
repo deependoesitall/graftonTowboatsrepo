@@ -7,7 +7,7 @@
 
 import type { Metadata } from 'next';
 import { Phone, Mail, MapPin, Radio, Clock } from 'lucide-react';
-import { SiteShell } from '@/components/site/SiteChrome';
+import { SiteShell, OwnerContacts } from '@/components/site/SiteChrome';
 import ContactForm from '@/components/site/ContactForm';
 import { CONTACT_PAGE, BUSINESS } from '@/app/site/content';
 
@@ -73,6 +73,13 @@ export default function ContactPage() {
           </div>
 
           <ContactForm />
+        </div>
+
+        {/* Owners' direct lines. These were on the Squarespace contact page and
+            belong here — a captain with a problem at 5am should be able to
+            reach a person, not a form. */}
+        <div className="mt-14">
+          <OwnerContacts />
         </div>
       </section>
     </SiteShell>

@@ -452,6 +452,36 @@ export function isFloral(p: FreshopProduct): boolean {
 }
 
 /**
+ * Hot, ready-to-eat deli food. Never orderable by a boat.
+ *
+ * A crew member can't take a hot chicken tender meal that was made when the
+ * order was placed and handed over whenever the vessel actually arrives — an
+ * ETA on the river moves by hours. Selling it is a guaranteed complaint.
+ *
+ * THE SIGNAL IS THE TAXONOMY, NOT THE LOCATION OR THE NAME.
+ *
+ * Freshop files these under a sub-department that reads, unambiguously,
+ * "hot_food_and_prepared". Two things that look like better signals are not:
+ *
+ *   · `location` says "COLD DELI" for every one of them — the hot case sits in
+ *     the same walkpath zone as the cold case, so the location field actively
+ *     misleads.
+ *   · Name keywords are far worse. Searching descriptions for "fried" returns
+ *     refried beans, French fried onions, "Baked Not Fried" crisps, frozen
+ *     dinners and fried-pickle-flavoured chips — dozens of shelf-stable items
+ *     a boat can perfectly well order. Matching on names would have quietly
+ *     removed them.
+ *
+ * So this checks the department path only, and deliberately adds no keyword
+ * fallback. A false negative here is one item Jen can disable by hand; a false
+ * positive is stock silently missing from the catalogue with nobody the wiser.
+ */
+export function isHotFood(p: FreshopProduct): boolean {
+  const [, second] = deptPath(p);
+  return /^hot[_-]?food/.test(second || '');
+}
+
+/**
  * Refine the department's base category for Pantry items using the item's
  * canonical sub-path when present ("pantry/beverages/…" → Beverages).
  * AWG flat-URL items simply keep the department category.
@@ -553,6 +583,9 @@ export function buildStoreProduct(p: FreshopProduct, deptCategory: string): Reco
   if (!isSellableStatus(p)) return null;
   if (isAlcohol(p)) return null;
   if (isFloral(p)) return null;
+  // Hot, ready-to-eat deli food — see isHotFood. A boat's ETA moves by hours;
+  // hot food handed over on arrival is a complaint waiting to happen.
+  if (isHotFood(p)) return null;
   const upcRaw = (p.upc || '').trim() || norm(p.barcode_upc_a) || null;
   const weighable = !!p.is_weight_required || isWeighableUpcDigits(upcRaw);
   const step = typeof p.quantity_step === 'number' && isFinite(p.quantity_step) && p.quantity_step > 0 ? p.quantity_step : null;

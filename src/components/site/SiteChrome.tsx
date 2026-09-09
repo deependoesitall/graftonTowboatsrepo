@@ -8,7 +8,7 @@
 
 import Link from 'next/link';
 import { Phone, ShoppingCart, MapPin, Mail, Radio, Menu } from 'lucide-react';
-import { BUSINESS, NAV, img } from '@/app/site/content';
+import { BUSINESS, NAV, OWNERS, img } from '@/app/site/content';
 import { LocalBusinessSchema } from '@/components/site/StructuredData';
 
 /**
@@ -88,16 +88,80 @@ export function Photo({
  */
 export function SistersPortrait({ src, alt }: { src: string; alt: string }) {
   return (
-    <figure className="text-center">
+    <figure className="max-w-[560px] mx-auto">
       <img
         src={img(src, 1000)}
         alt={alt}
-        className="w-full max-w-[560px] mx-auto h-auto drop-shadow-[0_10px_24px_rgba(30,61,30,0.18)]"
+        className="w-full h-auto drop-shadow-[0_10px_24px_rgba(30,61,30,0.18)]"
       />
-      <figcaption className="mt-5 text-brand-green/60 font-body text-sm">
-        The three sisters behind Grafton Towboat Services
+
+      {/* NAMES ALIGNED UNDER THEIR OWN FACES.
+          Order confirmed by Deepen, Sept 8: MaryKaren, Laura, Jennifer, left to
+          right. Worth having asked — the Squarespace page these came from
+          renders its labels misaligned on a wide screen (MaryKaren under the
+          first portrait, Laura under the third, Jennifer under nothing), so
+          reading the mapping off that page would have put the wrong name under
+          someone's photograph on her own company's website.
+
+          The three portraits sit evenly across the source PNG, so an equal
+          three-column grid at the same width lines up beneath them — and unlike
+          Squarespace's absolutely-positioned text, it can't drift apart at any
+          screen size. */}
+      <figcaption className="grid grid-cols-3 gap-1 mt-3">
+        {OWNERS.map(({ name, phone, href }) => (
+          <a key={name} href={href}
+            className="group text-center rounded-xl px-1 py-2 hover:bg-white/60 transition-colors">
+            <span className="block gts-heading text-sm sm:text-base leading-none group-hover:text-brand-orange transition-colors">
+              {name}
+            </span>
+            <span className="block text-brand-green/60 font-body text-[11px] sm:text-xs mt-1 tabular-nums">
+              {phone}
+            </span>
+          </a>
+        ))}
       </figcaption>
+
+      <p className="text-brand-green/55 font-body text-sm text-center mt-4">
+        The three sisters who own and run Grafton Towboat Services
+      </p>
     </figure>
+  );
+}
+
+/**
+ * The owners' direct lines.
+ *
+ * For a business whose whole pitch is "family owned", a captain being able to
+ * ring an owner directly IS the product — so these get real cards rather than
+ * the line of small text they had on Squarespace.
+ *
+ * This is the Contact-page block. The About page captions the same three names
+ * under their own faces via SistersPortrait — that mapping was confirmed by
+ * Deepen on Sept 8 rather than read off the Squarespace page, whose own labels
+ * are misaligned. Both render from OWNERS in content.ts, so a correction in one
+ * place fixes both.
+ */
+export function OwnerContacts() {
+  return (
+    <div>
+      <p className="text-[11px] font-bold uppercase tracking-widest text-brand-green/50 text-center mb-4">
+        Talk to an owner
+      </p>
+      <div className="grid sm:grid-cols-3 gap-3 max-w-2xl mx-auto">
+        {OWNERS.map(({ name, phone, href }) => (
+          <a key={name} href={href}
+            className="group bg-white/65 backdrop-blur-sm rounded-2xl border border-brand-green/10 px-5 py-4 text-center hover:bg-brand-green transition-colors">
+            <p className="gts-heading text-base leading-none mb-1.5 group-hover:text-brand-yellow transition-colors">
+              {name}
+            </p>
+            <p className="inline-flex items-center gap-1.5 text-brand-green/70 font-body text-sm group-hover:text-white transition-colors">
+              <Phone className="w-3 h-3" aria-hidden="true" />
+              {phone}
+            </p>
+          </a>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -146,7 +210,7 @@ export function SiteNav({ current }: { current?: string }) {
   return (
     <nav className="sticky top-0 z-50 bg-white/60 backdrop-blur-md border-b border-brand-green/10">
       <div className="max-w-7xl mx-auto px-5 h-20 md:h-24 flex items-center justify-between gap-4">
-        <Link href="/site" className="flex items-center shrink-0">
+        <Link href="/" className="flex items-center shrink-0">
           <img src="/branding/gts-logo.png" alt={BUSINESS.name} className="h-14 md:h-20 w-auto" />
         </Link>
 
@@ -283,12 +347,26 @@ export function SiteShell({ current, children }: { current?: string; children: R
           highest-return thing on the site — the Squarespace version had none. */}
       <LocalBusinessSchema />
 
-      {/* Keyboard users shouldn't have to tab through the whole nav on every
-          page to reach the content. Visually hidden until focused. */}
+      {/* SKIP LINK — keyboard users shouldn't have to tab through the whole nav
+          on every page to reach the content. Hidden until focused, then it
+          slides into the top-left corner.
+
+          DON'T REWRITE THIS AS `sr-only focus:not-sr-only`. That was the first
+          version and it was broken: the two utilities have equal CSS
+          specificity, so which one wins depends on source order — and
+          `not-sr-only` lost. The link stayed 1×1px even when focused, which
+          means it did nothing at all for the only people it exists to serve.
+          Measured on the deployed site, not assumed.
+
+          A transform can't lose that fight: -translate-y-full parks it fully
+          above the viewport, focus:translate-y-3 brings it down. Transforms
+          also don't affect layout or create phantom scrollbars the way a
+          negative `top` can. */}
       <a href="#main"
-        className="sr-only focus:not-sr-only focus:absolute focus:z-[60] focus:top-3 focus:left-3
-                   focus:bg-brand-green focus:text-white focus:px-4 focus:py-2.5 focus:rounded-full
-                   focus:text-xs focus:font-bold focus:uppercase focus:tracking-widest">
+        className="fixed top-0 left-3 z-[60] -translate-y-full focus:translate-y-3
+                   bg-brand-green text-white px-4 py-2.5 rounded-full
+                   text-xs font-bold uppercase tracking-widest
+                   transition-transform duration-150">
         Skip to content
       </a>
 

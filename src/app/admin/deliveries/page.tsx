@@ -5,12 +5,12 @@
 // rate card, and an editable rate-card manager. No more Google Drive.
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Truck, Plus, Pencil, Trash2, X, Loader2, DollarSign, Check, SlidersHorizontal, FileText, Search, ClipboardCopy, Download } from 'lucide-react';
+import { Truck, Plus, Pencil, Trash2, X, Loader2, DollarSign, Check, SlidersHorizontal, FileText, Search, Download } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import { adminFetch } from '@/lib/admin-auth';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { vesselKey, canonicalVesselName, vesselSuggestions } from '@/lib/vessel';
-import { buildQbHandoff, qbLinesAsTsv } from '@/lib/quickbooks-handoff';
+import { buildQbHandoff } from '@/lib/quickbooks-handoff';
 
 interface Company { id: string; name: string; is_active: boolean; }
 interface ServiceType { id: string; name: string; default_rate: number; sort: number; }
@@ -501,6 +501,24 @@ function QuickBooksQueue({ onClose, onEntered }: {
     </button>
   );
 
+  /**
+   * One click-to-copy cell of an invoice line.
+   *
+   * Deliberately granular. An earlier version offered a single button that put
+   * all the lines on the clipboard tab-separated, on the assumption they could
+   * be pasted into the QuickBooks line grid in one go. THEY CANNOT — Intuit
+   * states there is no way to paste a spreadsheet's rows into an invoice, and a
+   * button that looks like it works but doesn't is worse than no button, since
+   * the failure surfaces as silently missing lines on a real invoice.
+   */
+  const Cell = ({ v, k, cls }: { v: string; k: string; cls: string }) => (
+    <button onClick={() => copy(v, k)} title="Click to copy"
+      className={`text-left truncate rounded px-1.5 py-1 transition-colors ${cls} ${
+        copied === k ? 'bg-green-100 text-green-800' : 'hover:bg-gray-100'}`}>
+      {copied === k ? 'copied' : v}
+    </button>
+  );
+
   return createPortal(
     <div className="fixed inset-0 z-[95] bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
       <div onClick={e => e.stopPropagation()} className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[92vh]">
@@ -585,18 +603,6 @@ function QuickBooksQueue({ onClose, onEntered }: {
 
                       {/* ── The three actions, in the order she does them ── */}
                       <div className="flex flex-wrap items-center gap-2 mb-3">
-                        <button onClick={() => copy(qbLinesAsTsv(h), `${key}-lines`)}
-                          className={`flex items-center gap-1.5 text-[11px] font-bold px-3 py-1.5 rounded-lg border transition-colors ${
-                            copied === `${key}-lines`
-                              ? 'bg-green-50 border-green-300 text-green-700'
-                              : 'bg-white border-gray-300 text-brand-navy hover:border-brand-navy'}`}
-                          title="Copies every line for this boat — paste into the QuickBooks line grid">
-                          <ClipboardCopy className="w-3.5 h-3.5" />
-                          {copied === `${key}-lines`
-                            ? `Copied ${h.lines.length} line${h.lines.length === 1 ? '' : 's'}`
-                            : `Copy ${h.lines.length} line${h.lines.length === 1 ? '' : 's'}`}
-                        </button>
-
                         <button onClick={() => downloadPacket(ds, `${company}-${vessel}`, `${key}-pdf`)}
                           disabled={busy === `${key}-pdf`}
                           className="flex items-center gap-1.5 bg-white border border-gray-300 text-brand-navy text-[11px] font-bold px-3 py-1.5 rounded-lg hover:border-brand-navy disabled:opacity-50"
@@ -628,17 +634,26 @@ function QuickBooksQueue({ onClose, onEntered }: {
                         <Field label="Invoice date" value={h.invoiceDate || ''} k={`${key}-d`} />
                       </div>
 
-                      {/* ── Exactly what Copy will paste, so she can eyeball it
-                             against QuickBooks without opening anything. ── */}
+                      {/* ── The invoice lines, EVERY CELL CLICK-TO-COPY. ──
+                             QuickBooks Online does not accept a multi-row paste
+                             into the line grid — Intuit's own answer is that you
+                             enter them "one at a time". So this is built for the
+                             way the software actually works: click a cell, paste
+                             it, move on. Nothing is retyped and nothing is
+                             transcribed by eye, which is where the errors come
+                             from. */}
                       <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
                         {h.lines.map((l, i) => (
-                          <div key={i} className="flex items-baseline gap-2 px-2.5 py-1.5 text-[11px] border-b border-gray-100 last:border-0">
-                            <span className="font-semibold text-brand-navy shrink-0 min-w-[112px]">{l.item}</span>
-                            <span className="text-gray-500 flex-1 truncate">{l.description}</span>
-                            <span className="font-semibold text-brand-navy shrink-0">{formatCurrency(l.rate * l.qty)}</span>
+                          <div key={i} className="flex items-stretch gap-1 px-1.5 py-1 text-[11px] border-b border-gray-100 last:border-0">
+                            <Cell v={l.item} k={`${key}-i${i}`} cls="font-semibold text-brand-navy min-w-[124px]" />
+                            <Cell v={l.description} k={`${key}-d${i}`} cls="text-gray-500 flex-1 min-w-0" />
+                            <Cell v={l.rate.toFixed(2)} k={`${key}-r${i}`} cls="font-semibold text-brand-navy w-[76px] text-right" />
                           </div>
                         ))}
                       </div>
+                      <p className="text-[10px] text-gray-400 mt-1">
+                        Click any value to copy it, then paste into QuickBooks.
+                      </p>
 
                       {/* ── Paperwork state, stated rather than hidden. ── */}
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-[11px]">

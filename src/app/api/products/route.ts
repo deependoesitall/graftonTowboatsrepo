@@ -15,12 +15,36 @@ export async function GET(req: NextRequest) {
 
   const supabase = createServiceClient();
 
+  // PHOTO-LESS ITEMS SORT LAST — public catalog only.
+  //
+  // Sinclair's carries placeholder images for items they have no photo of, and
+  // those sync to us correctly. The trouble is alphabetical: a lot of them
+  // start with digits or store shorthand ("3 Pc Tender Meal", "37 RASPBERRY
+  // DANISH", "8 2 LAYER"), so they cluster at the front and the first thing a
+  // captain sees is a wall of grey baskets.
+  //
+  // `products_catalog` (migration 069) is `products` plus `has_visible_image`,
+  // which accounts for photos BORROWED from a variant-group sibling — sorting
+  // on image_url alone would bury items that visibly do show a picture.
+  //
+  // Admin keeps the plain table: the no_image filter is a working tool there,
+  // and re-ordering would fight it.
+  const source = isAdmin ? 'products' : 'products_catalog';
+
   let query = supabase
-    .from('products')
+    .from(source)
     .select('*', { count: 'exact' })
     // Paper order-form sequence first (barges shop the form top to bottom);
     // items not on the form sort after, alphabetically.
-    .order('form_seq', { ascending: true, nullsFirst: false })
+    .order('form_seq', { ascending: true, nullsFirst: false });
+
+  // Deliberately AFTER form_seq: the barge order form is a physical sheet
+  // shopped top to bottom, and many of its meat cuts have no photo. Pushing
+  // those down would break the sequence Jen asked for. This only re-orders the
+  // full-store items, which is where the grey baskets actually are.
+  if (!isAdmin) query = query.order('has_visible_image', { ascending: false });
+
+  query = query
     .order('category')
     .order('description')
     .range(offset, offset + perPage - 1);

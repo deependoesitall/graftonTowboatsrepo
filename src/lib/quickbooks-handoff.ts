@@ -182,14 +182,18 @@ export function buildQbHandoff(
 }
 
 /**
- * Tab-separated, one row per line — pastes straight down a QuickBooks invoice
- * line grid. Columns are in QuickBooks' own order:
- *   Product/service ⇥ Description ⇥ Qty ⇥ Rate
+ * REMOVED — September 2026.
  *
- * No header row: QuickBooks would read it as a line item.
+ * This produced tab-separated rows on the assumption they could be pasted into
+ * a QuickBooks Online invoice line grid in one go. THEY CANNOT. Intuit's
+ * position is explicit: there is no way to copy and paste invoice lines from a
+ * spreadsheet into QuickBooks Online — they have to be entered one at a time.
+ *
+ * The button built on this looked like it worked. Its failure mode was silent:
+ * a paste that appears to do something but drops lines, on a real invoice, in
+ * front of a customer's accounts payable department.
+ *
+ * What replaced it is per-cell click-to-copy in the QuickBooks queue, which
+ * matches how the software actually behaves. Kept as a comment so nobody
+ * rediscovers the idea and rebuilds it.
  */
-export function qbLinesAsTsv(h: QbHandoff): string {
-  return h.lines
-    .map(l => [l.item, l.description, String(l.qty), l.rate.toFixed(2)].join('\t'))
-    .join('\n');
-}

@@ -42,6 +42,9 @@ export default function AboutPage() {
           ))}
         </h1>
 
+        {/* Names and direct numbers now sit under each face inside this
+            component, so the separate card row that was here is gone —
+            it repeated the same three numbers twice on one page. */}
         <SistersPortrait src={IMAGES.sisters.src} alt={IMAGES.sisters.alt} />
       </section>
 

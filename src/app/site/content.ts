@@ -84,19 +84,22 @@ export const IMAGES = {
     replaceWith: 'An actual crew transfer at the Grafton dock — faces sell this service.',
   },
   supplies: {
-    // 269×188 native, 13 KB. The softest image on the site by a wide margin —
-    // it upscales visibly at the size the Services page shows it.
+    // REPLACED Sept 2026 via scripts/replace-forklift-photo.ps1. The original
+    // was 269×188 and 13 KB — the softest image on the site, upscaled ~1.7x on
+    // the Services page and sitting next to two 2500px photos, which made it
+    // look worse than it would have alone. It was stock, not a GTS photograph,
+    // so swapping cost nothing in authenticity.
     //
-    // It is STOCK, not a GTS photograph (Deepen, Sept 7), so there is nothing
-    // to reshoot and no authenticity lost by swapping it. The fix is simply a
-    // better free stock image of the same subject — see replaceWith.
+    // ⚠️ The replacement carries another company's livery on the truck
+    // (Portuguese, "TRANSPORTES, LDA"). Small in frame, licensed for commercial
+    // use, and far better than the blur — but it IS someone else's branding on
+    // GTS's services page. First thing to swap when Jen photographs a real
+    // loaded pallet at the Grafton dock.
     src: pick('forklift.jpg', '587ce179-d5ff-465a-9c69-578fbc6bd8db/download+%281%29.jpg'),
-    alt: 'A forklift moving a pallet of bottled water at the dock',
+    alt: 'A forklift loading pallets of supplies into a delivery truck',
     replaceWith:
-      'Any sharp 2000px+ stock shot of pallets/deck supplies being loaded. This is already stock, '
-      + 'so swapping costs nothing — grab one from Unsplash (free for commercial use), save it as '
-      + 'public/site/forklift.jpg, and it picks up automatically. Best candidate for Jen to replace '
-      + 'with a real GTS photo later, but not urgent.',
+      'A real GTS photo: a loaded pallet or supplies going aboard at the Grafton dock. '
+      + 'Drop it in as public/site/forklift.jpg — no code change needed.',
   },
   sisters: {
     // Already on their Contact page and nobody was using it properly.
@@ -112,8 +115,32 @@ export const IMAGES = {
 export const img = (src: string, width: number) =>
   src.startsWith('/') ? src : `${src}?format=${width}w`;
 
+/**
+ * THE OWNERS.
+ *
+ * Carried over from the Squarespace contact page, where they sit under
+ * "Owners Contacts". Three sisters, three direct numbers — and for a business
+ * whose entire pitch is "family owned", a captain being able to ring an owner
+ * directly IS the product. Worth more prominence than a line of small text.
+ *
+ * ORDER MATTERS — left to right: MaryKaren, Laura, Jennifer.
+ * Confirmed by Deepen, Sept 8, and the array below is in that order because
+ * SistersPortrait renders it as a three-column grid aligned under the faces.
+ * REORDERING THIS ARRAY PUTS THE WRONG NAME UNDER SOMEONE'S PHOTOGRAPH.
+ *
+ * Worth having asked rather than inferred: the Squarespace page these came from
+ * renders its own labels misaligned on a wide screen — MaryKaren's under the
+ * first portrait, Laura's under the third, Jennifer's under nothing at all — so
+ * reading the mapping off that page would have got it wrong.
+ */
+export const OWNERS = [
+  { name: 'MaryKaren', phone: '314-809-0853', href: 'tel:3148090853' },
+  { name: 'Laura',     phone: '618-779-2592', href: 'tel:6187792592' },
+  { name: 'Jennifer',  phone: '618-946-4377', href: 'tel:6189464377' },
+] as const;
+
 export const NAV = [
-  { label: 'Home', href: '/site' },
+  { label: 'Home', href: '/' },
   { label: 'Services', href: '/services' },
   { label: 'About', href: '/about' },
   { label: 'Contact', href: '/contact' },

@@ -1,138 +1,187 @@
 // src/app/page.tsx
-import Link from 'next/link';
-import { ShoppingCart, Phone, MapPin, Mail, ChevronRight, Package, FileText, Truck } from 'lucide-react';
+//
+// MARKETING HOME PAGE — the front door of graftontowboatservices.com.
+//
+// Promoted from /site to / on Sept 8, 2026, ahead of pointing the domain at
+// Vercel. The previous occupant was a SECOND ordering landing page; it's gone,
+// because everything it said now lives here and /catalog is one click from
+// every page. Two pages competing to be the front door is how you end up with
+// the problem the Squarespace site had — a primary CTA nobody maintained.
+//
+// A dedicated /how-it-works page is planned for app trailers and media
+// (Deepen, Sept 8). The three-step explainer lower down this page is the seed
+// for it — lift it out when there's video to hang on it.
+//
+// Nav, footer, photo slots and the closing CTA come from SiteChrome so they are
+// defined once. The Squarespace site repeated its footer across five pages,
+// which is exactly how the mile markers ended up wrong in five places at once.
+//
+// ON THE MARINE LOOK: no rope, no anchors, no portholes — that reads as seafood
+// restaurant and a port captain clocks it immediately. The references used here
+// are working-river ones: hi-vis deck-safety yellow (already the brand), the
+// red/green channel-marker stripe on photo slots, and the mile-marker system
+// these crews actually navigate by, promoted out of the footer and into the
+// hero where it does some good.
 
-export default function HomePage() {
+import type { Metadata } from 'next';
+import { ShoppingCart, Phone, ChevronRight, Truck, Radio } from 'lucide-react';
+import { SiteShell, Photo, CtaBand } from '@/components/site/SiteChrome';
+import { HOME, SERVICES, CTA, BUSINESS, IMAGES } from '@/app/site/content';
+
+export const metadata: Metadata = {
+  title: HOME.meta.title,
+  description: HOME.meta.description,
+};
+
+export default function MarketingHome() {
   return (
-    <main className="min-h-screen" style={{ background: 'linear-gradient(135deg, #D9E84A 0%, #E8F070 50%, #F0F7A0 100%)' }}>
+    <SiteShell current="Home">
+      {/* ── Hero ─────────────────────────────────────────────────────────
+          Text first, then a wide photograph beneath it. The earlier version put
+          a tall portrait slot beside the headline, which suited placeholders but
+          fights every real photo GTS has — they're all landscape river shots,
+          and cropping a barge tow to 3:4 throws away the river. */}
+      <section className="max-w-6xl mx-auto px-5 pt-14 md:pt-20 pb-10">
+        <div className="max-w-3xl">
+            <div className="inline-flex items-center gap-2 bg-brand-green text-brand-yellow rounded-full px-4 py-1.5 mb-6">
+              <Radio className="w-3.5 h-3.5" aria-hidden="true" />
+              <span className="text-[11px] font-bold uppercase tracking-widest">
+                {BUSINESS.mileMarkersShort}
+              </span>
+            </div>
 
-      {/* Nav — matches GTS site exactly */}
-      <nav className="sticky top-0 z-50 bg-white/60 backdrop-blur-md border-b border-brand-green/10">
-        {/* Taller bar so the square logo (roundel + wordmark) is legible */}
-        <div className="max-w-7xl mx-auto px-6 h-24 flex items-center justify-between gap-6">
-          {/* Logo */}
-          <Link href="/" className="flex items-center gap-3 shrink-0">
-            <img
-              src="/branding/gts-logo.png"
-              alt="Grafton Towboat Services"
-              className="h-20 w-auto"
-            />
-          </Link>
+            <h1 className="gts-heading text-[2.6rem] sm:text-6xl lg:text-7xl leading-[0.95] mb-6">
+              {HOME.heroLines[0]}<br />
+              <span className="text-brand-orange">{HOME.heroLines[1]}</span><br />
+              {HOME.heroLines[2]}
+            </h1>
 
-          {/* Desktop nav links */}
-          <div className="hidden md:flex items-center gap-8">
-            {[
-              { href: 'https://www.graftontowboatservices.com/', label: 'Home' },
-              { href: 'https://www.graftontowboatservices.com/services', label: 'Services' },
-              { href: 'https://www.graftontowboatservices.com/about', label: 'About' },
-              { href: 'https://www.graftontowboatservices.com/contact', label: 'Contact' },
-            ].map(({ href, label }) => (
-              <a key={label} href={href}
-                className="text-brand-green font-body font-semibold text-sm hover:text-brand-orange transition-colors tracking-wide">
-                {label}
-              </a>
-            ))}
-          </div>
-
-          {/* CTA */}
-          <Link href="/catalog"
-            className="bg-brand-green text-white text-xs font-bold uppercase tracking-widest px-5 py-2.5 rounded-full hover:bg-brand-gmed transition-colors flex items-center gap-2 whitespace-nowrap">
-            <ShoppingCart className="w-3.5 h-3.5" />
-            Order Now
-          </Link>
-        </div>
-      </nav>
-
-      {/* Hero */}
-      <section className="max-w-5xl mx-auto px-6 pt-16 pb-10 text-center">
-        <h1 className="gts-heading text-5xl md:text-7xl leading-none mb-6 text-brand-green">
-          Groceries, Supplies<br />
-          <span className="text-brand-orange">&amp; Crew Change</span><br />
-          When You Need It.
-        </h1>
-        <p className="text-brand-green/70 text-lg mb-10 font-body max-w-xl mx-auto">
-          Partnered with Sinclair&apos;s Foods · Grafton, IL<br />
-          Mile Marker 219 on the Mississippi River, Mile Marker 0 on the Illinois River
-        </p>
-        <Link
-          href="/catalog"
-          className="inline-flex items-center gap-3 bg-brand-green text-white font-bold text-lg uppercase tracking-widest px-10 py-4 rounded-full hover:bg-brand-gmed transition-colors shadow-lg group"
-        >
-          <ShoppingCart className="w-5 h-5" />
-          Order Groceries &amp; Supplies
-          <ChevronRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-        </Link>
-        <p className="text-brand-green/50 text-xs mt-4 tracking-widest uppercase">
-          No login required · Instant confirmation · PDF receipt
-        </p>
-
-        {/* Delivery callout */}
-        <div className="mt-10 inline-flex items-center gap-4 bg-brand-green text-white rounded-2xl px-8 py-5 shadow-lg text-left">
-          <div className="w-12 h-12 bg-brand-yellow/20 rounded-full flex items-center justify-center shrink-0">
-            <Truck className="w-6 h-6 text-brand-yellow" />
-          </div>
-          <div>
-            <p className="font-bold text-base leading-tight">We deliver directly to your vessel — by boat or refrigerated van.</p>
-            <p className="text-brand-yellow/80 text-sm mt-0.5 font-body leading-snug">
-              Order online · we pack &amp; bring it to your boat at Mile Marker 219 on the Mississippi River, Mile Marker 0 on the Illinois River.
-              Cold &amp; frozen goods ride refrigerated the whole way.
+            <p className="text-brand-green/75 text-lg font-body leading-relaxed mb-8 max-w-lg">
+              {HOME.lede}
             </p>
-          </div>
+
+            <div className="flex flex-wrap gap-3">
+              <a href={BUSINESS.orderUrl}
+                className="inline-flex items-center gap-2.5 bg-brand-green text-white font-bold text-base uppercase tracking-widest px-8 py-4 rounded-full hover:bg-brand-gmed transition-colors shadow-lg group">
+                <ShoppingCart className="w-5 h-5" />
+                Start an Order
+                <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+              </a>
+              <a href={BUSINESS.phoneHref}
+                className="inline-flex items-center gap-2.5 border-2 border-brand-green text-brand-green font-bold text-base uppercase tracking-widest px-8 py-4 rounded-full hover:bg-brand-green hover:text-white transition-colors">
+                <Phone className="w-4 h-4" />
+                {BUSINESS.phone}
+              </a>
+            </div>
+
+            <p className="text-brand-green/50 text-[11px] mt-5 tracking-widest uppercase font-body">
+              {HOME.fineprint}
+            </p>
+        </div>
+
+        <div className="mt-11">
+          <Photo src={IMAGES.hero.src} alt={IMAGES.hero.alt} width={1800} aspect="hero" priority />
         </div>
       </section>
 
-      {/* How it works */}
-      <section className="max-w-5xl mx-auto px-6 py-16">
-        <h2 className="gts-heading text-4xl text-brand-green text-center mb-12">How It Works</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {[
-            { num: '01', icon: ShoppingCart, title: 'Browse & Build', desc: 'Search hundreds of grocery and supply items. Add to cart instantly.' },
-            { num: '02', icon: Package, title: 'Enter Vessel Info', desc: 'Company name, contact, PO#, ETA, and any special instructions.' },
-            { num: '03', icon: Truck, title: 'We Deliver to Your Boat', desc: "Submit your order and we'll have it packed and waiting at your vessel when you arrive." },
-          ].map(({ num, icon: Icon, title, desc }) => (
-            <div key={num} className="bg-white/60 backdrop-blur-sm rounded-2xl p-8 border border-brand-green/10 text-center hover:bg-white/80 transition-colors">
-              <div className="w-16 h-16 bg-brand-green rounded-full flex items-center justify-center mx-auto mb-4 shadow-md">
-                <Icon className="w-7 h-7 text-brand-yellow" />
+      {/* ── Sinclair's attribution ───────────────────────────────────────
+          Jen: barge companies care about two things — family-owned, and that
+          the groceries come from a real grocery store. This answers the second.
+          Name prominent, NO Sinclair's logo (Dave's boundary). */}
+      <section className="max-w-6xl mx-auto px-5 pb-14">
+        <div className="bg-brand-green rounded-2xl px-7 py-6 flex flex-col sm:flex-row items-center gap-5 shadow-lg">
+          <div className="w-12 h-12 rounded-full bg-brand-yellow/20 flex items-center justify-center shrink-0">
+            <Truck className="w-6 h-6 text-brand-yellow" aria-hidden="true" />
+          </div>
+          <p className="text-white font-body text-center sm:text-left leading-snug">
+            <span className="font-bold text-lg block sm:inline">{HOME.sinclairs.lead}</span>{' '}
+            <span className="text-brand-yellow/85">{HOME.sinclairs.rest}</span>
+          </p>
+        </div>
+      </section>
+
+      {/* ── Services ─────────────────────────────────────────────────────
+          Every card ends in an action that WORKS. On the live Squarespace site
+          the supplies card said "Coming Soon!" and the grocery card's "Book
+          now" both pointed at an orphaned scheduling page — so the most
+          important link on the site sent customers away from the ordering
+          system entirely. */}
+      <section className="max-w-6xl mx-auto px-5 py-6 md:py-10">
+        <h2 className="gts-heading text-4xl md:text-5xl text-center mb-3">Our Services</h2>
+        <p className="text-brand-green/65 font-body text-center max-w-2xl mx-auto mb-12">
+          Grocery delivery, crew change and supplies. Need something else? Tell us
+          and we&apos;ll work it out.
+        </p>
+
+        <div className="grid md:grid-cols-3 gap-6">
+          {SERVICES.map(s => (
+            <div key={s.slug}
+              className="bg-white/65 backdrop-blur-sm rounded-2xl border border-brand-green/10 overflow-hidden flex flex-col hover:bg-white/85 transition-colors">
+              <div className="p-4 pb-0">
+                <Photo src={s.image.src} alt={s.image.alt} width={760} />
               </div>
-              <span className="text-brand-orange font-bold text-xs uppercase tracking-widest">{num}</span>
-              <h3 className="gts-heading text-xl text-brand-green mt-1 mb-2">{title}</h3>
-              <p className="text-brand-green/60 text-sm leading-relaxed font-body">{desc}</p>
+              <div className="p-6 pt-5 flex flex-col flex-1">
+                <h3 className="gts-heading text-xl mb-2 leading-tight">{s.title}</h3>
+                <p className="text-brand-green/65 text-sm leading-relaxed font-body flex-1">{s.blurb}</p>
+                <a href={s.cta.href}
+                  className={`mt-5 inline-flex items-center justify-center gap-2 font-bold uppercase tracking-widest text-xs px-5 py-3 rounded-full transition-colors ${
+                    s.cta.href.startsWith('tel:')
+                      ? 'border-2 border-brand-green text-brand-green hover:bg-brand-green hover:text-white'
+                      : 'bg-brand-orange text-white hover:bg-brand-ored'
+                  }`}>
+                  {s.cta.label}
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </a>
+              </div>
             </div>
           ))}
         </div>
+      </section>
 
-        <div className="text-center mt-10">
-          <Link href="/catalog" className="inline-flex items-center gap-2 bg-brand-orange text-white font-bold uppercase tracking-widest text-sm px-10 py-4 rounded-full hover:bg-brand-ored transition-colors shadow-md">
-            <ShoppingCart className="w-4 h-4" />
-            Start Your Order
-          </Link>
+      {/* ── How it works ─────────────────────────────────────────────────
+          The Squarespace site never told a first-time customer what actually
+          happens after they get in touch — it listed services and stopped. A
+          port captain deciding whether to try an unfamiliar vendor is asking
+          "what am I committing to here", and three sentences answer it.
+          Mirrors the ordering site's own explainer so the two feel like one
+          business rather than two. */}
+      <section className="max-w-6xl mx-auto px-5 py-14">
+        <h2 className="gts-heading text-3xl md:text-4xl text-center mb-3">How It Works</h2>
+        <p className="text-brand-green/60 font-body text-center max-w-xl mx-auto mb-11">
+          No account, no contract, no minimum. First time is the same as the hundredth.
+        </p>
+
+        <div className="grid md:grid-cols-3 gap-5">
+          {[
+            {
+              n: '01',
+              title: 'Tell us what you need',
+              body: 'Order online, or call and read us a list. Whichever is faster for you at the time.',
+            },
+            {
+              n: '02',
+              title: 'We shop it',
+              body: "We walk Sinclair's aisles picking your order — checking dates, choosing the good cuts, and calling you if something needs substituting.",
+            },
+            {
+              n: '03',
+              title: 'We meet your boat',
+              body: 'Delivered to your vessel at the mile marker, by boat or refrigerated van. Cold stays cold the whole way.',
+            },
+          ].map(({ n, title, body }) => (
+            <div key={n} className="relative bg-white/55 backdrop-blur-sm rounded-2xl border border-brand-green/10 p-7 pt-9">
+              <span className="absolute top-5 right-6 gts-heading text-4xl text-brand-green/10 leading-none select-none"
+                aria-hidden="true">
+                {n}
+              </span>
+              <h3 className="gts-heading text-lg mb-2 pr-12 leading-tight">{title}</h3>
+              <p className="text-brand-green/65 text-sm font-body leading-relaxed">{body}</p>
+            </div>
+          ))}
         </div>
       </section>
 
-      {/* Contact strip */}
-      <section className="bg-brand-green py-12">
-        <div className="max-w-4xl mx-auto px-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 text-center">
-            {[
-              { icon: Phone, label: '(618) 556-0290', sub: '24/7 Support', href: 'tel:6185560290' },
-              { icon: MapPin, label: 'Mile Marker 219 (Mississippi River) · Mile Marker 0 (Illinois River)', sub: 'Grafton, IL 62037', href: null },
-              { icon: Mail, label: 'GraftonTowboatServices@gmail.com', sub: 'Email us anytime', href: 'mailto:GraftonTowboatServices@gmail.com' },
-            ].map(({ icon: Icon, label, sub, href }) => (
-              <div key={label} className="flex flex-col items-center gap-2">
-                <div className="w-10 h-10 bg-brand-yellow/20 rounded-full flex items-center justify-center mb-1">
-                  <Icon className="w-5 h-5 text-brand-yellow" />
-                </div>
-                {href ? (
-                  <a href={href} className="text-white font-bold hover:text-brand-yellow transition-colors font-body">{label}</a>
-                ) : (
-                  <span className="text-white font-bold font-body">{label}</span>
-                )}
-                <span className="text-brand-yellow/60 text-sm font-body">{sub}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-    </main>
+      <CtaBand heading={CTA.heading} lede={CTA.lede} />
+    </SiteShell>
   );
 }

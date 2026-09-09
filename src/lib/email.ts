@@ -68,8 +68,14 @@ export function buildOrderEmailHtml(
     showSinclairNote?: boolean;
     /** Final email only — renders the GTS delivery charge + grand total. */
     showDelivery?: boolean;
+    /** Documents too large to attach, offered as links instead. Passed down
+     *  from sendOrderShoppedEmail when the size budget is hit. */
+    linkedDocs?: Array<{ label: string; url: string }>;
   }
 ): string {
+  /** Was this document linked rather than attached? */
+  const isLinked = (url?: string | null) =>
+    !!url && (opts.linkedDocs ?? []).some(d => d.url === url);
   const groceryItems  = order.items.filter(i => i.item_type !== 'service');
   const serviceItems  = order.items.filter(i => i.item_type === 'service');
   const itemCount     = groceryItems.reduce((s, i) => s + i.quantity, 0);
@@ -112,7 +118,7 @@ export function buildOrderEmailHtml(
       </div>
       <table width="100%" style="border-collapse:collapse;font-size:13px;">
         ${billGroceries ? `<tr>
-          <td style="padding:8px 12px;color:#333;">Groceries (Sinclair&apos;s)${order.sinclairs_receipt_url ? ` <span style="color:#4d7c5f;font-size:10px;">— itemized receipt attached</span>` : ''}</td>
+          <td style="padding:8px 12px;color:#333;">Groceries (Sinclair&apos;s)${order.sinclairs_receipt_url ? ` <span style="color:#4d7c5f;font-size:10px;">— itemized receipt ${isLinked(order.sinclairs_receipt_url) ? 'linked below' : 'attached'}</span>` : ''}</td>
           <td style="padding:8px 12px;text-align:right;font-weight:700;">${formatCurrency(groceryTotal)}</td>
         </tr>` : `<tr>
           <td colspan="2" style="padding:8px 12px;color:#666;font-size:11px;font-style:italic;">Groceries are billed to you directly by Sinclair&apos;s — these charges cover Grafton Towboat Services delivery only.</td>
@@ -144,10 +150,20 @@ export function buildOrderEmailHtml(
            saves a phone call and a fortnight of Net-30 sitting still. */''}
       ${order.sinclairs_receipt_url || order.ingram_slip_url || order.po_number ? `
       <div style="padding:9px 12px;background:#f7f9f1;border-top:1px solid #e4e8da;font-size:11px;color:#4d7c5f;line-height:1.7;">
-        <b style="color:#1E3D1E;">Attached for your records:</b>
+        <b style="color:#1E3D1E;">For your records:</b>
         ${order.po_number ? `<br>&bull; Purchase order <b>${order.po_number}</b>` : ''}
-        ${order.sinclairs_receipt_url ? '<br>&bull; Sinclair&rsquo;s itemized register receipt' : ''}
-        ${order.ingram_slip_url ? '<br>&bull; Signed delivery log &amp; receipt acknowledgement' : ''}
+        ${order.sinclairs_receipt_url ? (
+          isLinked(order.sinclairs_receipt_url)
+            // Too large to attach without risking the whole message bouncing at
+            // the recipient's mail server. Linked instead — same document.
+            ? `<br>&bull; Sinclair&rsquo;s itemized register receipt &mdash; <a href="${order.sinclairs_receipt_url}" style="color:#E8640A;font-weight:700;">download here</a> <span style="color:#8aa294;">(too large to attach)</span>`
+            : '<br>&bull; Sinclair&rsquo;s itemized register receipt <span style="color:#8aa294;">(attached)</span>'
+        ) : ''}
+        ${order.ingram_slip_url ? (
+          isLinked(order.ingram_slip_url)
+            ? `<br>&bull; Signed delivery log &amp; receipt acknowledgement &mdash; <a href="${order.ingram_slip_url}" style="color:#E8640A;font-weight:700;">download here</a> <span style="color:#8aa294;">(too large to attach)</span>`
+            : '<br>&bull; Signed delivery log &amp; receipt acknowledgement <span style="color:#8aa294;">(attached)</span>'
+        ) : ''}
       </div>` : ''}
     </div>` : '';
   const codMethodLabel = order.cod_payment_method === 'credit_card' ? 'Credit Card — we’ll call to collect'
@@ -489,7 +505,18 @@ export async function sendOrderReceivedEmail(
 // exported separately so the dashboard can PREVIEW the exact email first.
 // Goes to: customer + business (CC)
 // ─────────────────────────────────────────────────────────────
-export function buildOrderShoppedEmailHtml(order: Order): string {
+/**
+ * Documents that couldn't ride along as attachments.
+ *
+ * Passed in by sendOrderShoppedEmail when the size budget is hit, so the body
+ * can offer a link instead of promising an attachment that isn't there. Saying
+ * "attached" about a file the customer can't find is worse than saying nothing.
+ */
+export interface ShoppedEmailDocs {
+  linked?: Array<{ label: string; url: string }>;
+}
+
+export function buildOrderShoppedEmailHtml(order: Order, docs: ShoppedEmailDocs = {}): string {
   // Orders with no grocery items (crew change / services only) were never
   // "shopped" — use neutral fulfillment language for those.
   const hasGroceryItems = order.items.some(i => i.item_type !== 'service');
@@ -503,6 +530,7 @@ export function buildOrderShoppedEmailHtml(order: Order): string {
     buttonUrl:  `mailto:GraftonTowboatServices@gmail.com`,
     footerText: 'Grafton Towboat Services · Grafton, IL 62037 · (618) 556-0290 · GraftonTowboatServices@gmail.com',
     showDelivery: true,
+    linkedDocs: docs.linked,
   });
 }
 
@@ -539,14 +567,50 @@ export async function sendOrderShoppedEmail(
   // ever rode the email; the signed slip was captured and then forgotten,
   // which meant the one document the customer's AP department actually
   // requires was the one we didn't send.
+  // ── SIZE BUDGET ───────────────────────────────────────────────────
+  //
+  // THE FAILURE THIS PREVENTS: Resend rejects an over-sized message, and a
+  // rejection fails the WHOLE send — not just the offending attachment. The
+  // captain then receives nothing at all, and the first anyone knows is a
+  // phone call asking where the order confirmation went.
+  //
+  // The numbers make this a live risk rather than a theoretical one. Sinclair's
+  // register receipt for the Scott Noble ran 23 pages, and the signed log is a
+  // photo straight off a phone at 3–5 MB. Resend's own ceiling is 40 MB, but
+  // that is not the binding constraint — MOST CORPORATE MAIL SYSTEMS REJECT
+  // OVER 10 MB, and barge-line accounts payable run exactly that kind of mail
+  // system. An email Resend happily accepts can still bounce at Ingram.
+  //
+  // So: budget 8 MB, leaving headroom under a 10 MB cap for headers and the
+  // base64 encoding overhead (~33%, which is why the budget is checked against
+  // raw bytes with room to spare).
+  const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+  let attachedBytes = pdfBuffer2.length;
+
+  /** Documents too large to attach. They get LINKED in the email instead. */
+  const linkedDocs: Array<{ label: string; url: string }> = [];
+
   const attachDoc = async (url: string | null | undefined, name: string, label: string) => {
     if (!url) return;
     try {
       const res = await fetch(url);
       if (!res.ok) { console.error(`Could not attach ${label}: HTTP ${res.status}`); return; }
       const buf = Buffer.from(await res.arrayBuffer());
+
+      if (attachedBytes + buf.length > MAX_ATTACHMENT_BYTES) {
+        // Degrade, don't fail. The customer still gets the email and still
+        // gets the document — one click further away instead of not at all.
+        console.warn(
+          `${label} not attached: ${(buf.length / 1024 / 1024).toFixed(1)} MB would take the message over `
+          + `${(MAX_ATTACHMENT_BYTES / 1024 / 1024).toFixed(0)} MB. Linked in the email instead.`,
+        );
+        linkedDocs.push({ label, url });
+        return;
+      }
+
       const ext = url.split('.').pop()?.split('?')[0]?.slice(0, 5) || 'pdf';
       attachments.push({ filename: `${name}-${order.order_number}.${ext}`, content: buf });
+      attachedBytes += buf.length;
     } catch (e) {
       // Never block the email on a document — a missing attachment is
       // recoverable by forwarding it; a final email that never sends is not.
@@ -554,18 +618,21 @@ export async function sendOrderShoppedEmail(
     }
   };
 
+  // ORDER MATTERS. The signed log goes first because it is small (one photo)
+  // and it is the document the customer's accounts payable actually REQUIRES —
+  // Ingram's form says in red that they will not accept an invoice without it.
+  // Sinclair's 23-page receipt is the big one and the one that can be looked up
+  // later, so it yields the budget if something has to.
+  await attachDoc(order.ingram_slip_url, 'signed-delivery-log', 'signed delivery log');
+
   // Sinclair's ACTUAL register receipt — the customer's itemized prices line by
   // line, rather than our estimate.
   if (order.bill_for_groceries !== false) {
     await attachDoc(order.sinclairs_receipt_url, 'sinclairs-receipt', 'Sinclair receipt');
   }
-  // The signed delivery log / receipt acknowledgement. Sent whenever it exists,
-  // regardless of who's billed for groceries — it's proof of delivery, not
-  // proof of a grocery charge.
-  await attachDoc(order.ingram_slip_url, 'signed-delivery-log', 'signed delivery log');
 
   const hasGroceryItems = order.items.some(i => i.item_type !== 'service');
-  const shoppedHtml = buildOrderShoppedEmailHtml(order);
+  const shoppedHtml = buildOrderShoppedEmailHtml(order, { linked: linkedDocs });
 
   // Vessel email first — the boat tracks the order, not the home office.
   const shoppedTo = order.vessel_email || order.customer_email;
