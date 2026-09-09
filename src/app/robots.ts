@@ -11,7 +11,9 @@
 
 import type { MetadataRoute } from 'next';
 
-const SITE = 'https://www.graftontowboatservices.com';
+// Apex, not www — must match sitemap.ts and StructuredData.tsx. See the note in
+// sitemap.ts for why the canonical host changed in Sept 2026.
+const SITE = 'https://graftontowboatservices.com';
 
 export default function robots(): MetadataRoute.Robots {
   return {

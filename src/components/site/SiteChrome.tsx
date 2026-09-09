@@ -320,8 +320,16 @@ export function SiteFooter() {
             {/* Trading name, not the legal name. A copyright notice only has to
                 identify the owner, and "LLC" in a footer reads like paperwork.
                 The entity name stays where it actually matters — Terms, Privacy
-                and invoices, which is where naming the LLC does real work. */}
-            © {new Date().getFullYear()} {BUSINESS.name} · Grafton, Illinois
+                and invoices, which is where naming the LLC does real work.
+
+                NO YEAR, DELIBERATELY. These pages are statically generated, so
+                `new Date().getFullYear()` would freeze at the last deploy — and
+                a marketing site can sit untouched for a year or more. A footer
+                reading "© 2026" in 2028 says the business folded. The year is
+                legally worthless here anyway (US copyright is automatic since
+                1989), so omitting it removes a failure mode rather than adding
+                a chore nobody will remember. */}
+            © {BUSINESS.name} · Grafton, Illinois
           </p>
           {/* Footer, not main nav — nobody navigates to a privacy policy on
               purpose, and it clutters the top of the site. */}

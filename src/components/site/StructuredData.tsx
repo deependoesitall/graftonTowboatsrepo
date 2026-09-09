@@ -20,7 +20,10 @@
 
 import { BUSINESS } from '@/app/site/content';
 
-const SITE = 'https://www.graftontowboatservices.com';
+// Apex, not www — must match sitemap.ts and robots.ts. The `@id` below is the
+// stable identifier Google ties the business entity to, so changing this host
+// is not cosmetic: it re-keys the entity. Change all three files together.
+const SITE = 'https://graftontowboatservices.com';
 
 export function LocalBusinessSchema() {
   const schema = {

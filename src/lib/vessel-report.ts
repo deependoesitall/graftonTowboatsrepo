@@ -143,7 +143,7 @@ export function vesselReportHtml(vessels: VesselReportRow[], rangeLabel: string)
       : '<div style="padding:40px;text-align:center;color:#999;font-size:13px;">No vessel activity in this period.</div>'}
     <div style="margin-top:18px;padding-top:10px;border-top:1px solid #e6e9dd;font-size:9px;color:#9aa392;text-align:center;">
       Grafton Towboat Services · Groceries from Sinclair&rsquo;s Foods, ordered and delivered by us ·
-      Order online at order.graftontowboatservices.com
+      Order online at graftontowboatservices.com
     </div>
   </div>
 </body></html>`;

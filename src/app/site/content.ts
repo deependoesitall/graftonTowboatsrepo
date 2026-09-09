@@ -30,7 +30,23 @@ export const BUSINESS = {
   /** Corrected Sept 2026. The site said 218 / 0.7 for months. */
   mileMarkers: 'Mile Marker 219 (Mississippi River) · Mile Marker 0 (Illinois River)',
   mileMarkersShort: 'MM 219 Mississippi · MM 0 Illinois',
-  orderUrl: 'https://order.graftontowboatservices.com/catalog',
+  /**
+   * RELATIVE ON PURPOSE (Sept 2026).
+   *
+   * This was hardcoded to https://order.graftontowboatservices.com/catalog back
+   * when the marketing site and the app lived on different hosts. They don't
+   * anymore — the apex serves both, and order.* redirects to it.
+   *
+   * Leaving it absolute would have sent every "Order Groceries" button on the
+   * new site out to order.*, only to be 301'd straight back to the domain the
+   * visitor was already on. A pointless round trip on a phone with one bar of
+   * signal in the middle of the river, which is exactly where these buttons get
+   * pressed.
+   *
+   * Relative also means this keeps working on Vercel preview deployments, where
+   * an absolute production URL would jump the visitor out of the preview.
+   */
+  orderUrl: '/catalog',
 } as const;
 
 /**

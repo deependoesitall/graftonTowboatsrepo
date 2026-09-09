@@ -11,7 +11,16 @@
 
 import type { MetadataRoute } from 'next';
 
-const SITE = 'https://www.graftontowboatservices.com';
+// APEX, NOT www. Sept 2026: the domain moved off Squarespace and the bare
+// graftontowboatservices.com is now the canonical address, with www and the
+// order.* subdomain both redirecting to it. A sitemap that advertises a
+// hostname which 301s is a self-inflicted crawl tax — every URL costs Google an
+// extra round trip and the redirect target is what gets indexed anyway.
+//
+// If the canonical host ever changes, this constant, robots.ts and
+// StructuredData.tsx must all move together or they'll disagree about which
+// site this is.
+const SITE = 'https://graftontowboatservices.com';
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const now = new Date();
@@ -22,6 +31,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: `${SITE}/contact`, lastModified: now, changeFrequency: 'yearly', priority: 0.7 },
     // The catalogue is the money page — it changes nightly with the Sinclair's
     // sync, and it's where a search for a specific product should land.
-    { url: 'https://order.graftontowboatservices.com/catalog', lastModified: now, changeFrequency: 'daily', priority: 0.9 },
+    { url: `${SITE}/catalog`, lastModified: now, changeFrequency: 'daily', priority: 0.9 },
   ];
 }
