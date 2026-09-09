@@ -160,8 +160,25 @@ export default function MarketingHome() {
             },
             {
               n: '02',
-              title: 'We shop it',
-              body: "We walk Sinclair's aisles picking your order — checking dates, choosing the good cuts, and calling you if something needs substituting.",
+              // DON'T ATTRIBUTE THE LABOUR HERE. Two corrections landed on this
+              // one paragraph in Sept 2026 and they pull in opposite directions:
+              //
+              //   1. It said "we shop it / we walk Sinclair's aisles". False —
+              //      Sinclair's own staff pull the grocery orders.
+              //   2. The fix said "anything they don't carry, we source
+              //      ourselves". Also false — on an off-catalog run it might be
+              //      Sinclair's staff or GTS who drives to Walmart. It varies.
+              //
+              // So the copy describes the OUTCOME and the MECHANISM the customer
+              // uses, and stays silent on whose hands do it. A cook does not
+              // care who drove; they care that it arrives. Any sentence naming
+              // the driver will be wrong some of the time.
+              //
+              // It also surfaces the external-item feature (paste a link, add a
+              // note), which is a real differentiator and was invisible on the
+              // marketing site until now.
+              title: 'We put it together',
+              body: "Grocery orders are pulled at Sinclair's by their own staff — the people who stock the shelves, picking your meat and produce. Need something the store doesn't carry? Send a link or just write it down, and it gets picked up along the way.",
             },
             {
               n: '03',

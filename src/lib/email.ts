@@ -13,6 +13,56 @@ function getResend(): Resend {
   return _resend;
 }
 
+/**
+ * THE ADDRESS CUSTOMERS SEE AND REPLY TO.
+ *
+ * Separate from the internal `to` address on purpose. Two different jobs:
+ *
+ *   · BUSINESS_EMAIL / the hardcoded Gmail = where order notifications LAND.
+ *     Internal. Jen's team inbox. Nobody outside GTS should ever see it.
+ *   · PUBLIC_CONTACT_EMAIL = what a captain sees in the From line, the footer
+ *     and the "Questions?" button, and what their reply goes to.
+ *
+ * Until Sept 2026 these were the same value, and the customer-facing one was
+ * hardcoded to the Gmail address in three places. A barge line receiving an
+ * order confirmation from a gmail.com address is a small thing that reads as
+ * a big one when you're deciding whether to trust a new vendor.
+ *
+ * ⚠️ SEQUENCE MATTERS — DO NOT SET THIS ENV VAR EARLY.
+ * Pointing this at orders@graftontowboatservices.com before the domain can
+ * actually RECEIVE mail (MX records + a forwarder) sends every customer reply
+ * into a black hole. Nothing bounces, nothing errors, the questions just never
+ * arrive. Set up receiving first, send a test, THEN set this.
+ *
+ * The fallback is deliberately the working Gmail, so an unset variable is
+ * merely unpolished rather than broken.
+ */
+const publicContactEmail = () =>
+  process.env.PUBLIC_CONTACT_EMAIL || 'GraftonTowboatServices@gmail.com';
+
+/**
+ * SINCLAIR'S. They shop the orders, so they need to see one the moment it lands.
+ *
+ * NEW-ORDER EMAIL ONLY. Not the final/delivery email — that one renders GTS's
+ * delivery charge and grand total via `showDelivery`, which is GTS's commercial
+ * relationship with the barge line and none of Sinclair's business. The
+ * new-order email deliberately omits it, which is what makes this safe to send
+ * as-is rather than building a separate template.
+ *
+ * The COD handling fee IS shown, and that's correct — confirmed by Deepen,
+ * Sept 2026: that fee is Sinclair's, not GTS's. I had assumed the opposite and
+ * nearly built a stripped-down template to hide it from the people it belongs to.
+ *
+ * Hardcoded default rather than env-only on purpose: an unset variable would
+ * mean Sinclair's silently never hears about an order, and nobody would notice
+ * until a boat arrived at an empty dock. Override via env if the addresses
+ * change.
+ */
+const sinclairsOrderEmails = (): string[] =>
+  (process.env.SINCLAIRS_ORDER_EMAILS
+    || 'sinclairfoods@jerseyville-il.net,dwittman@jerseyville-il.net')
+    .split(',').map(s => s.trim()).filter(Boolean);
+
 export interface EmailTemplateConfig {
   subject_template?: string;
   header_tagline?: string;
@@ -456,10 +506,22 @@ export async function sendOrderReceivedEmail(
     ? applyTemplateVars(opts.template.subject_template, order, appUrl)
     : `🚢 New Order #${order.order_number} — ${order.company_name} (${formatCurrency(order.subtotal)})`;
 
+  // SINCLAIR'S GET A COPY — but only if there's anything for them to shop.
+  //
+  // A crew-change-only order has nothing but service lines, and Sinclair's has
+  // no reason to see it. This mirrors the admin permission model, where
+  // Sinclair's staff already can't open service-only orders: the email and the
+  // UI should agree about what that account is entitled to see, or the
+  // permission boundary is decorative.
+  const hasShoppableItems = order.items.some(i => i.item_type !== 'service');
+  const businessCc = hasShoppableItems
+    ? [...ccList, ...sinclairsOrderEmails()]
+    : ccList;
+
   const businessResult = await getResend().emails.send({
     from:        fromEmail,
     to:          [toEmail],
-    ...(ccList.length > 0 ? { cc: ccList } : {}),
+    ...(businessCc.length > 0 ? { cc: businessCc } : {}),
     replyTo:     toEmail,
     subject:     businessSubject,
     html:        businessHtml,
@@ -479,13 +541,14 @@ export async function sendOrderReceivedEmail(
       tagline:    'Order Confirmation',
       intro:      `Thank you for your order, ${order.contact_name}! We've received it and will begin preparing your delivery. A copy of your order is attached to this email.`,
       buttonText: 'Questions? Contact Us',
-      buttonUrl:  `mailto:GraftonTowboatServices@gmail.com`,
-      footerText: 'Grafton Towboat Services · Grafton, IL 62037 · (618) 556-0290 · GraftonTowboatServices@gmail.com',
+      buttonUrl:  `mailto:${publicContactEmail()}`,
+      footerText: `Grafton Towboat Services · Grafton, IL 62037 · (618) 556-0290 · ${publicContactEmail()}`,
     });
     const customerResult = await getResend().emails.send({
       from:        fromEmail,
       to:          [confirmTo],
-      replyTo:     toEmail,
+      // Customer replies go to the PUBLIC address, not the internal inbox.
+      replyTo:     publicContactEmail(),
       subject:     `✅ Order Confirmed — ${order.order_number} — Grafton Towboat Services`,
       html:        customerHtml,
       attachments: pdfAttachment,
@@ -645,7 +708,9 @@ export async function sendOrderShoppedEmail(
     from:        fromEmail,
     to:          recipients,
     ...(cc.length > 0 ? { cc } : {}),
-    replyTo:     toEmail,
+    // This one goes to the boat with GTS cc'd, so the reply address is the
+    // public one — same reasoning as the confirmation email above.
+    replyTo:     publicContactEmail(),
     subject:     hasGroceryItems
                    ? `📦 Your Order is Ready — ${order.order_number} — Grafton Towboat Services`
                    : `✅ Your Request is Fulfilled — ${order.order_number} — Grafton Towboat Services`,

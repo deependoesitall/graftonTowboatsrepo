@@ -96,7 +96,8 @@ export default function AboutPage() {
             </span>
             <span className="text-brand-yellow/85">
               A family grocery in Jerseyville that&apos;s been feeding this county
-              for decades. We walk their aisles the same way you would.
+              for decades. Their people pick your order off the same shelves
+              they stock.
             </span>
           </p>
           <p className="text-brand-yellow/55 text-[11px] font-body mt-4 uppercase tracking-widest">

@@ -175,7 +175,7 @@ export const SERVICES = [
     blurb:
       "Partnered with Sinclair's Foods for the best meat and produce you can find. Small town, fresh products. If they don't have it, they get it for you.",
     detail:
-      "Order online and we shop it the same way you would — checking dates, picking the good cuts, swapping sensibly when something's out. Cold and frozen goods travel refrigerated the whole way to your vessel.",
+      "Order online and Sinclair's own staff pull it from the shelves — the same people who stock the store, choosing your meat and produce. Need something they don't carry? Paste a link or write it in the notes — a part, a TV, a carton of smokes — and it comes with the rest of the order. Cold and frozen goods travel refrigerated the whole way to your vessel.",
     cta: { label: 'Order Groceries', href: BUSINESS.orderUrl },
     image: IMAGES.groceries,
   },
@@ -209,7 +209,11 @@ export const HOME = {
   },
   heroLines: ['Groceries, Supplies', '& Crew Change', 'When You Need It.'],
   lede:
-    'Family-owned marine delivery at the Grafton harbor, where the Illinois meets the Mississippi. We shop it, pack it, and bring it to your vessel — by boat or refrigerated van.',
+    // Was "We shop it, pack it, and bring it to your vessel" — inaccurate.
+    // Sinclair's staff pull the groceries, and off-catalog items get fetched by
+    // whoever is best placed that day. See the long note on step 02 in
+    // page.tsx for why this copy deliberately doesn't say who does the work.
+    "Family-owned marine delivery at the Grafton harbor, where the Illinois meets the Mississippi. Groceries from Sinclair's, and anything else you need tracked down — brought to your vessel by boat or refrigerated van.",
   fineprint: 'No login required · Instant confirmation · 24/7 support',
   /** Jen's approved wording. Name prominent, NO Sinclair's logo (Dave's ask). */
   sinclairs: {
