@@ -15,6 +15,10 @@ const FIELDS = [
   'delivery_fee', 'bill_for_groceries', 'sinclairs_grocery_total',
   'updated_quickbooks', 'phone_number_used', 'ingram_slip_image_url',
   'issues_comments', 'gts_correspondent', 'invoice_sent', 'incentive',
+  // Migration 072. THIS LIST IS A SILENT FILTER — anything missing from it is
+  // dropped by pick() with no error, so the form saves "successfully" and the
+  // data never lands. Add the column here in the same commit as the migration.
+  'po_number', 'helper_name', 'helper_hours', 'helper_pay',
 ];
 
 function pick(body: Record<string, unknown>) {

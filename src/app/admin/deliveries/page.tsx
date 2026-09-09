@@ -286,9 +286,28 @@ export default function DeliveriesPage() {
                       </span>
                     )}
                   </td>
-                  <td className="px-3 py-2.5 text-gray-600">{d.service_type || '—'}</td>
-                  <td className="px-3 py-2.5 text-right font-semibold">{d.delivery_fee != null ? formatCurrency(d.delivery_fee) : '—'}</td>
-                  <td className="px-3 py-2.5 text-right">{d.sinclairs_grocery_total != null ? formatCurrency(d.sinclairs_grocery_total) : '—'}</td>
+                  {/* Missing service or fee = this row can't be invoiced. It's
+                      not an error — a delivery gets logged before the fee is
+                      known — but it must be findable later. Amber, not red:
+                      it's unfinished, not wrong. */}
+                  <td className={`px-3 py-2.5 ${d.service_type ? 'text-gray-600' : 'bg-amber-50 text-amber-700 font-semibold'}`}>
+                    {d.service_type || 'no service'}
+                  </td>
+                  <td className={`px-3 py-2.5 text-right font-semibold ${d.delivery_fee == null ? 'bg-amber-50 text-amber-700' : ''}`}>
+                    {d.delivery_fee != null ? formatCurrency(d.delivery_fee) : 'no fee'}
+                  </td>
+                  {/* GROCERIES: em dash when GTS isn't billing them.
+                      A figure here on a not-billed row read as money owed and
+                      invited double-charging a boat that pays Sinclair's
+                      direct. If we're not billing it, the number is Sinclair's
+                      business and doesn't belong in a GTS money column. */}
+                  <td className="px-3 py-2.5 text-right">
+                    {d.bill_for_groceries
+                      ? (d.sinclairs_grocery_total != null
+                          ? formatCurrency(d.sinclairs_grocery_total)
+                          : <span className="text-red-600 font-semibold text-xs">missing</span>)
+                      : <span className="text-gray-300">—</span>}
+                  </td>
                   <td className="px-3 py-2.5">{d.bill_for_groceries ? <span className="text-green-700 font-bold text-xs">Yes</span> : <span className="text-gray-400 text-xs">No</span>}</td>
                   <td className="px-3 py-2.5 text-gray-600">{d.delivery_driver || '—'}</td>
                   <td className="px-3 py-2.5 text-xs">{d.invoice_sent ? <span className="text-green-700">Sent {d.invoice_sent}</span> : <span className="text-amber-600 font-semibold">Not sent</span>}</td>
@@ -310,7 +329,7 @@ export default function DeliveriesPage() {
           delivery={editing === 'new' ? null : editing}
           companies={companies}
           serviceTypes={serviceTypes}
-          knownVessels={vesselSuggestions(rows)}
+          vesselRecords={rows}
           onClose={() => setEditing(null)}
           // loadMeta too: saving may have created a new barge line, and it has
           // to appear in the pick list and rate cards straight away.
@@ -687,11 +706,50 @@ function QuickBooksQueue({ onClose, onEntered }: {
   );
 }
 
+/** Who at GTS took the job. Free text let four spellings of one person in. */
+const CORRESPONDENTS = ['Jen', 'Laura', 'MK', 'LS'];
+
+/**
+ * MONEY INPUTS ARE TEXT, NOT type="number".
+ *
+ * `<input type="number">` looked right and behaved badly on a fee field:
+ *   · spinner arrows — one stray scroll over a focused field silently changes
+ *     an invoice amount, and nobody notices until a barge line queries it
+ *   · step=0.01 arrow-keys through pennies, which is never what anyone wants
+ *   · accepts negatives, so a delivery could be logged at -$0.08
+ *   · browsers accept "1e5" and hand back 100000
+ *
+ * Text + a strict filter gives a plain box that only takes money.
+ */
+const moneyChars = (s: string) => {
+  // Digits and at most one decimal point. No minus — a delivery fee is never
+  // negative, and silently dropping the sign beats a confusing rejection.
+  const cleaned = String(s).replace(/[^\d.]/g, '');
+  const [head, ...rest] = cleaned.split('.');
+  return rest.length ? `${head}.${rest.join('').slice(0, 2)}` : head;
+};
+
+/** Tidy to 2dp on blur. Empty stays empty — that's meaningfully different
+ *  from zero, and a fee of $0.00 is a real thing we shouldn't invent. */
+const moneyBlur = (s: string) => {
+  const v = moneyChars(s);
+  if (v === '' || v === '.') return '';
+  const n = Number(v);
+  return Number.isFinite(n) ? n.toFixed(2) : '';
+};
+
 // ── Add / edit a delivery ────────────────────────────────────────────────
-function DeliveryEditor({ delivery, companies, serviceTypes, knownVessels = [], onClose, onSaved }: {
-  delivery: Delivery | null; companies: Company[]; serviceTypes: ServiceType[]; knownVessels?: string[];
+function DeliveryEditor({ delivery, companies, serviceTypes, vesselRecords = [], onClose, onSaved }: {
+  delivery: Delivery | null; companies: Company[]; serviceTypes: ServiceType[];
+  vesselRecords?: Array<{ vessel_name?: string | null; company_id?: string | null }>;
   onClose: () => void; onSaved: () => void;
 }) {
+  // `dialog` MUST be rendered or the promise never settles and the UI hangs
+  // with no visible dialog — see the render below.
+  const { confirm, dialog } = useConfirm();
+  const isEdit = !!delivery;
+  const [showOptional, setShowOptional] = useState(false);
+
   const [f, setF] = useState<Record<string, any>>(() => ({
     delivery_date: delivery?.delivery_date || new Date().toISOString().slice(0, 10),
     delivery_driver: delivery?.delivery_driver || '',
@@ -706,20 +764,71 @@ function DeliveryEditor({ delivery, companies, serviceTypes, knownVessels = [], 
     company_name: delivery?.company?.name || '',
     service_type: delivery?.service_type || '',
     location_delivered: delivery?.location_delivered || '',
-    delivery_fee: delivery?.delivery_fee ?? '',
+    // STRING, always. Held as text so the field can be genuinely empty rather
+    // than 0, and so nothing seeds a value the user didn't choose. The only
+    // thing that ever fills this is the rate-card lookup below.
+    delivery_fee: delivery?.delivery_fee != null ? Number(delivery.delivery_fee).toFixed(2) : '',
     bill_for_groceries: delivery?.bill_for_groceries ?? false,
-    sinclairs_grocery_total: delivery?.sinclairs_grocery_total ?? '',
+    // 2dp string, same as delivery_fee — both go through moneyChars/moneyBlur.
+    sinclairs_grocery_total: delivery?.sinclairs_grocery_total != null
+      ? Number(delivery.sinclairs_grocery_total).toFixed(2) : '',
     updated_quickbooks: delivery?.updated_quickbooks ?? false,
     phone_number_used: delivery?.phone_number_used || '',
     issues_comments: delivery?.issues_comments || '',
     gts_correspondent: delivery?.gts_correspondent || '',
     invoice_sent: delivery?.invoice_sent || '',
     incentive: delivery?.incentive || '',
+    // Migration 072. Optional, collapsed by default.
+    po_number: (delivery as any)?.po_number || '',
+    helper_name: (delivery as any)?.helper_name || '',
+    helper_hours: (delivery as any)?.helper_hours ?? '',
+    helper_pay: (delivery as any)?.helper_pay ?? '',
   }));
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [rateHint, setRateHint] = useState<string>('');
+  const [cardRate, setCardRate] = useState<number | null>(null);
   const set = (k: string, v: any) => setF(p => ({ ...p, [k]: v }));
+
+  // DIRTY TRACKING — snapshot the initial state once, compare against it.
+  //
+  // This exists so an accidental dismissal can't bin a half-typed delivery.
+  // Someone logging a job at 5am has the date, boat, fee and driver in their
+  // head and nowhere else; losing it means asking the driver again.
+  const [initial] = useState(() => JSON.stringify(f));
+  const dirty = JSON.stringify(f) !== initial;
+
+  /** The only way out. Clean form leaves silently; dirty form asks first. */
+  const attemptClose = useCallback(async () => {
+    if (!dirty) { onClose(); return; }
+    // confirm() resolves to the ACTION ID (or null if dismissed), not a
+    // boolean — so this must compare to 'ok'. A truthy check would treat
+    // "Keep editing" as consent and throw the form away, which is precisely
+    // the bug this whole dialog exists to prevent.
+    const choice = await confirm({
+      title: 'Discard this delivery?',
+      message: 'What you have typed here will be lost.',
+      danger: true,
+      actions: [
+        { id: 'ok', label: 'Discard', variant: 'danger' },
+        { id: 'cancel', label: 'Keep editing', variant: 'neutral' },
+      ],
+    });
+    if (choice === 'ok') onClose();
+  }, [dirty, onClose, confirm]);
+
+  // Escape routes through the same guard as Cancel. Capture phase so this runs
+  // before anything else that might listen for Escape.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      e.preventDefault();
+      attemptClose();
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [attemptClose]);
 
   // Sinclair's receipt on this delivery (only when billing groceries)
   const [receiptUrl, setReceiptUrl] = useState<string | null>(delivery?.sinclairs_receipt_url ?? null);
@@ -764,11 +873,29 @@ function DeliveryEditor({ delivery, companies, serviceTypes, knownVessels = [], 
           : d.source === 'company' ? "this company’s rate"
           : 'default rate';
         setRateHint(`${label}: ${formatCurrency(d.rate)}`);
+        setCardRate(Number(d.rate));
         // Only prefill when the fee is still empty (don't clobber an edit).
-        setF(p => (p.delivery_fee === '' || p.delivery_fee == null) ? { ...p, delivery_fee: d.rate } : p);
+        // Stored as a 2dp STRING so it matches everything else the field holds
+        // — a raw number here made the override check below fire spuriously.
+        setF(p => (p.delivery_fee === '' || p.delivery_fee == null)
+          ? { ...p, delivery_fee: Number(d.rate).toFixed(2) }
+          : p);
       });
     return () => { cancelled = true; };
   }, [f.company_id, svcId, f.vessel_name]);
+
+  // Fee differs from what the rate card says — worth flagging, never blocking.
+  // Overrides are legitimate and routine (a long run, a favour, a split job);
+  // the point is that it's visibly deliberate rather than a typo nobody caught.
+  const feeIsOverride =
+    cardRate != null && f.delivery_fee !== '' && Number(f.delivery_fee) !== cardRate;
+
+  // Boats already seen for this company. Falls back to every known boat before
+  // a company is picked, so the list is never uselessly empty.
+  const vesselOptions = useMemo(
+    () => vesselSuggestions(vesselRecords, f.company_id || undefined),
+    [vesselRecords, f.company_id],
+  );
 
   // Typed company → existing row (case-insensitive), or a brand-new one.
   const typedCompany = (f.company_name || '').trim();
@@ -777,7 +904,28 @@ function DeliveryEditor({ delivery, companies, serviceTypes, knownVessels = [], 
   );
   const isNewCompany = typedCompany.length > 0 && !matchedCompany;
 
+  // HARD BLOCK: billing for groceries with no amount produces an invoice line
+  // that says "groceries" and charges nothing. It's the one combination that
+  // silently loses GTS money, so it's the one thing that can't be saved.
+  const groceriesMissingTotal =
+    !!f.bill_for_groceries &&
+    (f.sinclairs_grocery_total === '' || f.sinclairs_grocery_total == null);
+
   async function save() {
+    // SOFT WARNING: a service with no fee is usually an oversight, but not
+    // always — a comped run is real. Ask, don't forbid.
+    if (f.service_type && (f.delivery_fee === '' || f.delivery_fee == null)) {
+      const choice = await confirm({
+        title: 'Save with no delivery fee?',
+        message: `This is logged as “${f.service_type}” but the fee is blank. It won't appear on the QuickBooks queue as billable.`,
+        actions: [
+          { id: 'ok', label: 'Save anyway', variant: 'primary' },
+          { id: 'cancel', label: 'Go back', variant: 'neutral' },
+        ],
+      });
+      if (choice !== 'ok') return;
+    }
+
     setSaving(true);
     setSaveError('');
 
@@ -802,7 +950,20 @@ function DeliveryEditor({ delivery, companies, serviceTypes, knownVessels = [], 
 
     // company_name is UI-only — the deliveries table stores company_id.
     const { company_name: _omit, ...rest } = f;
-    const payload = { ...rest, company_id: companyId };
+    // Money and hours travel as text in the form so the boxes can be genuinely
+    // empty. Empty must reach the API as null, not 0 — "no fee recorded" and
+    // "we charged nothing" are different facts and the ledger distinguishes them.
+    const num = (v: any) => (v === '' || v == null ? null : Number(v));
+    const payload = {
+      ...rest,
+      company_id: companyId,
+      delivery_fee: num(rest.delivery_fee),
+      sinclairs_grocery_total: num(rest.sinclairs_grocery_total),
+      hours_worked: num(rest.hours_worked),
+      amount_paid_driver: num(rest.amount_paid_driver),
+      helper_hours: num(rest.helper_hours),
+      helper_pay: num(rest.helper_pay),
+    };
     const method = delivery ? 'PATCH' : 'POST';
     const body = delivery ? { id: delivery.id, ...payload } : payload;
     const res = await adminFetch('/api/admin/deliveries', { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -823,11 +984,23 @@ function DeliveryEditor({ delivery, companies, serviceTypes, knownVessels = [], 
   );
 
   return createPortal(
-    <div className="fixed inset-0 z-[95] bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col">
+    // NO onClick ON THE BACKDROP.
+    //
+    // It used to close the dialog, which meant a mis-aimed click anywhere
+    // outside the panel destroyed a part-typed delivery with no warning and no
+    // undo. A click-outside shortcut is not worth losing a job someone is
+    // halfway through recording. Cancel, the X, and Escape are the ways out,
+    // and all three run the dirty check.
+    <div className="fixed inset-0 z-[95] bg-black/60 flex items-center justify-center p-4">
+      {/* The discard / no-fee prompts.
+          MUST be rendered somewhere or confirm()'s promise never settles and
+          the form silently hangs. Position in this tree doesn't matter — it
+          portals to document.body at z-[110], above this editor's z-[95]. */}
+      {dialog}
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col">
         <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
           <h3 className="font-display text-lg font-bold text-brand-navy">{delivery ? 'Edit delivery' : 'Add delivery'}</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+          <button onClick={attemptClose} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
         </div>
         <div className="p-5 overflow-y-auto grid grid-cols-2 gap-3">
           {field('Date', 'delivery_date', 'date')}
@@ -868,8 +1041,11 @@ function DeliveryEditor({ delivery, companies, serviceTypes, knownVessels = [], 
             <input list="known-vessels" value={f.vessel_name ?? ''} onChange={e => set('vessel_name', e.target.value)}
               placeholder="Type any boat — new ones welcome"
               className="mt-0.5 w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-green/30" />
+            {/* Filtered to the chosen company. Ingram alone runs 15+ boats, so
+                an unfiltered list of every vessel GTS has ever served made the
+                right one hard to find and near-duplicates easy to create. */}
             <datalist id="known-vessels">
-              {knownVessels.map(v => <option key={v} value={v} />)}
+              {vesselOptions.map(v => <option key={v} value={v} />)}
             </datalist>
           </label>
           <label className="block">
@@ -880,28 +1056,120 @@ function DeliveryEditor({ delivery, companies, serviceTypes, knownVessels = [], 
               {serviceTypes.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
             </select>
           </label>
-          <label className="block">
-            <span className="text-xs font-semibold text-gray-500">Delivery fee {rateHint && <span className="text-brand-green font-normal">· {rateHint}</span>}</span>
-            <input type="number" step="0.01" value={f.delivery_fee ?? ''} onChange={e => set('delivery_fee', e.target.value)}
-              className="mt-0.5 w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm" />
-          </label>
           {field('Location delivered', 'location_delivered')}
-          {field('Driver', 'delivery_driver')}
-          {field('Hours worked', 'hours_worked', 'number')}
-          {field('Driver pay', 'amount_paid_driver', 'number')}
-          {field("Sinclair's grocery total", 'sinclairs_grocery_total', 'number')}
-          {field('Phone number used', 'phone_number_used')}
-          {field('GTS correspondent', 'gts_correspondent')}
-          {field('Invoice sent (date)', 'invoice_sent', 'date')}
-          {field('Incentive', 'incentive')}
-          <label className="flex items-center gap-2 text-sm mt-1">
+
+          {/* ── Money ─────────────────────────────────────────────────── */}
+          <label className="block">
+            <span className="text-xs font-semibold text-gray-500">
+              Delivery fee {rateHint && <span className="text-brand-green font-normal">· {rateHint}</span>}
+            </span>
+            <div className="mt-0.5 relative">
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-gray-400 pointer-events-none">$</span>
+              {/* inputMode="decimal" gives phones a number pad without any of
+                  type="number"'s behaviour. See moneyChars/moneyBlur above. */}
+              <input
+                type="text" inputMode="decimal" autoComplete="off" placeholder="0.00"
+                value={f.delivery_fee ?? ''}
+                onChange={e => set('delivery_fee', moneyChars(e.target.value))}
+                onBlur={e => set('delivery_fee', moneyBlur(e.target.value))}
+                className={`w-full border rounded-lg pl-6 pr-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-green/30 ${
+                  feeIsOverride ? 'border-amber-300 bg-amber-50' : 'border-gray-200'
+                }`} />
+            </div>
+            {feeIsOverride && (
+              <span className="block mt-1 text-[11px] font-semibold text-amber-700">
+                Override — differs from the rate card ({formatCurrency(cardRate!)}).
+              </span>
+            )}
+          </label>
+
+          <label className="flex items-center gap-2 text-sm mt-1 self-end pb-1.5">
             <input type="checkbox" checked={!!f.bill_for_groceries} onChange={e => set('bill_for_groceries', e.target.checked)} className="w-4 h-4 accent-brand-green" />
             Bill for groceries
           </label>
-          <label className="flex items-center gap-2 text-sm mt-1">
-            <input type="checkbox" checked={!!f.updated_quickbooks} onChange={e => set('updated_quickbooks', e.target.checked)} className="w-4 h-4 accent-brand-green" />
-            Updated QuickBooks
+
+          {/* Only exists when it's actually being billed — an always-visible
+              box invited a total on deliveries where Sinclair's bills the boat
+              direct, which then showed up on a GTS invoice as a double charge. */}
+          {f.bill_for_groceries && (
+            <label className="block">
+              <span className="text-xs font-semibold text-gray-500">
+                Sinclair&apos;s grocery total <span className="text-red-500">*</span>
+              </span>
+              <div className="mt-0.5 relative">
+                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-gray-400 pointer-events-none">$</span>
+                <input
+                  type="text" inputMode="decimal" autoComplete="off" placeholder="0.00"
+                  value={f.sinclairs_grocery_total ?? ''}
+                  onChange={e => set('sinclairs_grocery_total', moneyChars(e.target.value))}
+                  onBlur={e => set('sinclairs_grocery_total', moneyBlur(e.target.value))}
+                  className={`w-full border rounded-lg pl-6 pr-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-green/30 ${
+                    groceriesMissingTotal ? 'border-red-300 bg-red-50' : 'border-gray-200'
+                  }`} />
+              </div>
+              {groceriesMissingTotal && (
+                <span className="block mt-1 text-[11px] font-semibold text-red-600">
+                  Required while &ldquo;Bill for groceries&rdquo; is on.
+                </span>
+              )}
+            </label>
+          )}
+
+          {/* ── Who did it ────────────────────────────────────────────── */}
+          {field('Driver', 'delivery_driver')}
+          {field('Hours worked', 'hours_worked', 'number')}
+          {field('Driver pay', 'amount_paid_driver', 'number')}
+          {field('Phone number used', 'phone_number_used')}
+          <label className="block">
+            <span className="text-xs font-semibold text-gray-500">GTS correspondent</span>
+            {/* Was free text, which produced "MK", "Mary K", "marykaren" and
+                "MaryKaren" as four different people in the ledger. */}
+            <select value={f.gts_correspondent} onChange={e => set('gts_correspondent', e.target.value)}
+              className="mt-0.5 w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm">
+              <option value="">—</option>
+              {CORRESPONDENTS.map(c => <option key={c} value={c}>{c}</option>)}
+              {/* Keeps an existing odd value visible instead of blanking it. */}
+              {f.gts_correspondent && !CORRESPONDENTS.includes(f.gts_correspondent) && (
+                <option value={f.gts_correspondent}>{f.gts_correspondent}</option>
+              )}
+            </select>
           </label>
+
+          {/* ── Everything else, folded away ──────────────────────────────
+              Logging a delivery is a 5am job on a phone. The nine fields
+              above are the ones that always get filled; these are occasional,
+              and having them all on screen made the common case look like
+              paperwork. Invoice date, incentive and Updated QuickBooks are
+              gone from Add entirely — they're states a delivery reaches later,
+              not facts you know at the dock. */}
+          <div className="col-span-2 border-t border-gray-100 pt-3">
+            <button type="button" onClick={() => setShowOptional(v => !v)}
+              className="text-xs font-bold text-brand-navy hover:text-brand-green flex items-center gap-1.5">
+              <Plus className={`w-3.5 h-3.5 transition-transform ${showOptional ? 'rotate-45' : ''}`} />
+              {showOptional ? 'Hide' : 'Add'} PO number, helper and attachments
+            </button>
+          </div>
+
+          {showOptional && (
+            <>
+              {field('PO number', 'po_number')}
+              {field('Helper', 'helper_name')}
+              {field('Helper hours', 'helper_hours', 'number')}
+              {field('Helper pay', 'helper_pay', 'number')}
+            </>
+          )}
+
+          {/* Invoice state — edit only. Never part of creating a delivery. */}
+          {isEdit && (
+            <>
+              {field('Invoice sent (date)', 'invoice_sent', 'date')}
+              {field('Incentive', 'incentive')}
+              <label className="flex items-center gap-2 text-sm mt-1">
+                <input type="checkbox" checked={!!f.updated_quickbooks} onChange={e => set('updated_quickbooks', e.target.checked)} className="w-4 h-4 accent-brand-green" />
+                Updated QuickBooks
+              </label>
+            </>
+          )}
 
           {/* Sinclair's receipt — only when billing for groceries */}
           {f.bill_for_groceries && (
@@ -940,8 +1208,10 @@ function DeliveryEditor({ delivery, companies, serviceTypes, knownVessels = [], 
           </div>
         )}
         <div className="px-5 py-4 border-t border-gray-100 flex gap-3">
-          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50">Cancel</button>
-          <button onClick={save} disabled={saving} className="flex-1 py-2.5 rounded-xl bg-brand-green text-white text-sm font-bold flex items-center justify-center gap-1.5 hover:bg-brand-gmed disabled:opacity-50">
+          <button onClick={attemptClose} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50">Cancel</button>
+          <button onClick={save} disabled={saving || groceriesMissingTotal}
+            title={groceriesMissingTotal ? "Enter the Sinclair's grocery total first" : undefined}
+            className="flex-1 py-2.5 rounded-xl bg-brand-green text-white text-sm font-bold flex items-center justify-center gap-1.5 hover:bg-brand-gmed disabled:opacity-50">
             {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : <><Check className="w-4 h-4" /> Save</>}
           </button>
         </div>
