@@ -317,7 +317,11 @@ export function SiteFooter() {
 
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-white/10">
           <p className="text-brand-yellow/55 text-xs font-body text-center sm:text-left">
-            © {new Date().getFullYear()} {BUSINESS.legalName} · Grafton, Illinois
+            {/* Trading name, not the legal name. A copyright notice only has to
+                identify the owner, and "LLC" in a footer reads like paperwork.
+                The entity name stays where it actually matters — Terms, Privacy
+                and invoices, which is where naming the LLC does real work. */}
+            © {new Date().getFullYear()} {BUSINESS.name} · Grafton, Illinois
           </p>
           {/* Footer, not main nav — nobody navigates to a privacy policy on
               purpose, and it clutters the top of the site. */}
