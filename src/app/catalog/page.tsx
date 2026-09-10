@@ -3,6 +3,7 @@ import { Suspense } from 'react';
 import Link from 'next/link';
 import { Newspaper, BadgePercent, Ship, Truck, Anchor, Phone } from 'lucide-react';
 import { CouponStrip } from '@/components/catalog/CouponStrip';
+import CatalogRails from '@/components/catalog/CatalogRails';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 import { ProductGrid } from '@/components/catalog/ProductGrid';
 import { CategoryFilter } from '@/components/catalog/CategoryFilter';
@@ -22,6 +23,8 @@ interface PageProps {
     tab?: string;
     /** 'all' = include full-store items (the "browse everything Sinclair's carries" flows) */
     store?: string;
+    /** Comma-separated product ids — "View all on sale" from the rails. */
+    ids?: string;
   }>;
 }
 
@@ -111,6 +114,13 @@ export default async function CatalogPage({ searchParams }: PageProps) {
   // view; ?store=all opens the whole Sinclair's catalog ("Don't see it?
   // Browse everything Sinclair's carries").
   const storeAll = params.store === 'all';
+  // "View all on sale" from the rail — an explicit id list rather than a
+  // re-query, because the rail already decided which items qualify (genuine
+  // shelf sales, no clip-only offers) and re-deriving that here would risk the
+  // two disagreeing.
+  const ids = (params.ids || '')
+    .split(',').map(s => s.trim()).filter(Boolean)
+    .slice(0, 200);   // cap — this arrives from a URL anyone can edit
   const perPage  = 60;
   const offset   = (page - 1) * perPage;
 
@@ -150,7 +160,11 @@ export default async function CatalogPage({ searchParams }: PageProps) {
   // curated list, the store view shows ONLY what's beyond it. Overlapping them
   // meant the store view opened on barge items (ground chuck, beef liver…),
   // which is exactly what the order form is already for.
-  query = query.eq('store_only', storeAll);
+  //
+  // An explicit id list overrides that split — a sale spans both, and someone
+  // following "View all on sale" wants the sale, not one half of it.
+  if (ids.length) query = query.in('id', ids);
+  else query = query.eq('store_only', storeAll);
 
   if (search) {
     // search_text is a stored generated column: lower(description || ' ' || category || ' ' || tags).
@@ -298,6 +312,15 @@ export default async function CatalogPage({ searchParams }: PageProps) {
               <PromoSections />
             </Suspense>
           </div>
+
+          {/* SINCLAIR'S RAILS — sale first, then best sellers, mirroring their
+              own homepage order. Client component: it fetches its own data and
+              renders NOTHING until there's something real, so a switched-off
+              rail or an empty sale week leaves no gap and no skeleton.
+
+              Deliberately below the weekly-ad banner. The ad is the thing
+              crews already know to look for; these are the additions. */}
+          <CatalogRails />
 
           {/* Full-store mode banner — the barge form is home base */}
           {storeAll && (

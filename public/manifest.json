@@ -21,7 +21,11 @@
       "purpose": "maskable"
     }
   ],
-  "categories": ["food", "shopping", "utilities"],
+  "categories": [
+    "food",
+    "shopping",
+    "utilities"
+  ],
   "screenshots": [],
   "prefer_related_applications": false
 }

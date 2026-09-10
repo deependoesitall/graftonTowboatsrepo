@@ -35,6 +35,9 @@ interface Settings {
   email_button_url: string;
   weekly_ad_url: string;
   show_digital_coupons: boolean;
+  /** Migration 075 — the two Sinclair's rails on /catalog. */
+  show_sale_rail: boolean;
+  show_best_sellers_rail: boolean;
   cod_fee_enabled: boolean;
   cod_fee_percent: number;
   fleet_cta_enabled: boolean;
@@ -103,6 +106,8 @@ export default function AdminSettingsPage() {
     email_button_url: '/admin/orders',
     weekly_ad_url: '',
     show_digital_coupons: true,
+    show_sale_rail: true,
+    show_best_sellers_rail: true,
     cod_fee_enabled: true,
     cod_fee_percent: 5,
     fleet_cta_enabled: false,
@@ -278,6 +283,11 @@ export default function AdminSettingsPage() {
     const payload = sessionRole === 'manager'
       ? {
           show_digital_coupons: settings.show_digital_coupons,
+          // Both sides can switch the rails off. Dave's team owns whether
+          // Sinclair's pricing is advertised on someone else's storefront;
+          // GTS owns what its customers see. Either alone is enough.
+          show_sale_rail: settings.show_sale_rail,
+          show_best_sellers_rail: settings.show_best_sellers_rail,
           store_zone_order: settings.store_zone_order,
           cod_fee_enabled: settings.cod_fee_enabled,
           cod_fee_percent: settings.cod_fee_percent,
@@ -672,6 +682,40 @@ export default function AdminSettingsPage() {
                 <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.show_digital_coupons ? 'translate-x-6' : 'translate-x-1'}`} />
               </button>
             </div>
+          </div>
+
+          {/* ── The two Sinclair's rails on /catalog (migration 075) ──────
+              Separate from digital coupons and deliberately so: these are
+              SHELF prices that ring up for anyone, with clip/loyalty offers
+              filtered out before they reach the page. That's the whole reason
+              they're safe to show crews who have no Sinclair's account. */}
+          <div className="card-base p-6 space-y-4">
+            <div>
+              <h2 className="font-bold text-brand-navy">Sinclair&apos;s Catalog Rails</h2>
+              <p className="text-xs text-gray-400 mt-1 leading-relaxed">
+                Two rows on the ordering catalog that mirror Sinclair&apos;s own homepage, refreshed
+                nightly. <strong className="text-brand-navy">These are shelf sales, not digital
+                coupons</strong> — clip-to-save and loyalty offers are filtered out automatically,
+                because crews have no account to clip with. Either team can switch a rail off.
+              </p>
+            </div>
+
+            {([
+              ['show_sale_rail', "What's on sale", 'This week’s shelf specials, biggest saving first.'],
+              ['show_best_sellers_rail', 'Best sellers', 'Sinclair’s featured items, ordered by how much the store sells.'],
+            ] as const).map(([key, label, hint]) => (
+              <div key={key} className="flex items-start justify-between gap-4 border-t border-gray-100 pt-4 first:border-0 first:pt-0">
+                <div>
+                  <p className="text-sm font-semibold text-brand-navy">{label}</p>
+                  <p className="text-xs text-gray-400 mt-0.5 leading-relaxed">{hint}</p>
+                </div>
+                <button
+                  onClick={() => setSettings(s => ({ ...s, [key]: !s[key] }))}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ${settings[key] ? 'bg-brand-green' : 'bg-gray-200'}`}>
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings[key] ? 'translate-x-6' : 'translate-x-1'}`} />
+                </button>
+              </div>
+            ))}
           </div>
 
           {/* ── COD handling fee — toggleable + configurable percent.

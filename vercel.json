@@ -13,12 +13,20 @@
     },
     "src/app/api/cron/catalog-sync/route.ts": {
       "maxDuration": 60
+    },
+    "src/app/api/cron/catalog-rails/route.ts": {
+      "maxDuration": 60
     }
   },
   "crons": [
     {
       "path": "/api/cron/catalog-sync",
       "schedule": "0 7 * * *"
+    },
+    {
+      "_comment": "40 minutes after the catalogue sync. A rail can only point at SKUs we already hold, so building it first would silently skip anything Sinclair's featured that we imported the same night.",
+      "path": "/api/cron/catalog-rails",
+      "schedule": "40 7 * * *"
     }
   ]
 }

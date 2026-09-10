@@ -34,7 +34,7 @@ export function SiteHeader() {
           {/* Self-hosted: the logo used to hotlink Squarespace's CDN, so a
               change on their marketing site would have broken it here. */}
           <img
-            src="/branding/gts-logo.png"
+            src="/branding/gts-lockup.png"
             alt="Grafton Towboat Services"
             className="h-12 w-auto"
           />

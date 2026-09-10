@@ -83,7 +83,7 @@ export default function InstallGuide({
         ) : (
           <div className="flex justify-center mb-9">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/branding/gts-logo.png" alt="Grafton Towboat Services"
+            <img src="/branding/gts-lockup.png" alt="Grafton Towboat Services"
               className="h-[88px] w-auto object-contain drop-shadow-[0_2px_10px_rgba(0,0,0,0.55)]" />
           </div>
         )}

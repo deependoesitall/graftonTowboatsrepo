@@ -211,7 +211,7 @@ export function SiteNav({ current }: { current?: string }) {
     <nav className="sticky top-0 z-50 bg-white/60 backdrop-blur-md border-b border-brand-green/10">
       <div className="max-w-7xl mx-auto px-5 h-20 md:h-24 flex items-center justify-between gap-4">
         <Link href="/" className="flex items-center shrink-0">
-          <img src="/branding/gts-logo.png" alt={BUSINESS.name} className="h-14 md:h-20 w-auto" />
+          <img src="/branding/gts-lockup.png" alt={BUSINESS.name} className="h-14 md:h-20 w-auto" />
         </Link>
 
         <div className="hidden lg:flex items-center gap-8">

@@ -15,7 +15,15 @@ import { sanitizeZoneOrder } from '@/lib/store-layout';
 // Fields a manager may read and write. (weekly_ad_url moved to owner-only —
 // the ad auto-syncs; the manual override is a safety valve Sinclair's staff
 // shouldn't have to think about.)
-const MANAGER_FIELDS = ['show_digital_coupons', 'store_zone_order', 'cod_fee_enabled', 'cod_fee_percent'] as const;
+const MANAGER_FIELDS = [
+  'show_digital_coupons', 'store_zone_order', 'cod_fee_enabled', 'cod_fee_percent',
+  // Migration 075 — the two catalogue rails. Manager-editable because the
+  // rails advertise Sinclair's own shelf pricing on GTS's storefront, and
+  // Dave's side should be able to switch that off without asking anyone.
+  // This list is also what a manager can READ, so omitting them would render
+  // both toggles permanently "off" for the people meant to use them.
+  'show_sale_rail', 'show_best_sellers_rail',
+] as const;
 
 export async function GET(req: NextRequest) {
   const session = requireAdmin(req, { area: 'settings' });
@@ -53,6 +61,8 @@ export async function PATCH(req: NextRequest) {
 
   // Manager-editable fields (Sinclair owns these)
   if (body.show_digital_coupons !== undefined) updates.show_digital_coupons = !!body.show_digital_coupons;
+  if (body.show_sale_rail !== undefined) updates.show_sale_rail = !!body.show_sale_rail;
+  if (body.show_best_sellers_rail !== undefined) updates.show_best_sellers_rail = !!body.show_best_sellers_rail;
   if (body.store_zone_order !== undefined) updates.store_zone_order = sanitizeZoneOrder(body.store_zone_order);
   if (body.cod_fee_enabled !== undefined) updates.cod_fee_enabled = !!body.cod_fee_enabled;
   if (body.cod_fee_percent !== undefined) updates.cod_fee_percent = Math.min(100, Math.max(0, Number(body.cod_fee_percent) || 0));

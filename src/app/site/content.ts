@@ -80,24 +80,42 @@ const USE_LOCAL_IMAGES = true;
 
 const CDN = 'https://images.squarespace-cdn.com/content/v1/6819038bc556772f05a46e4d';
 
-/** Local path if we've downloaded the images, remote CDN if we haven't. */
+/**
+ * Local path if we've downloaded the images, remote CDN if we haven't.
+ *
+ * An EMPTY remote means there is no Squarespace original to fall back to —
+ * true of every photo Jen has taken since the migration. Those exist only in
+ * public/site/, which is where they should be. The remote branch is dead code
+ * kept as provenance for the five images that came off the old site; it can go
+ * once the Squarespace subscription lapses in May 2027.
+ */
 const pick = (local: string, remote: string) => (USE_LOCAL_IMAGES ? `/site/${local}` : `${CDN}/${remote}`);
 
 export const IMAGES = {
+  // ✅ REAL GTS PHOTO — Jen, Sept 2026. Replaced an Unsplash stock barge at
+  // sunset, which was pretty and told a captain nothing.
+  //
+  // This is the entire business in one frame: the branded GTS van parked
+  // alongside a towboat at the dock, mid-delivery. Stock photography on a
+  // "small town, family owned" site quietly argues against the copy — a real
+  // van next to a real boat argues for it.
   hero: {
-    src: pick('river-sunset.jpg', '1746541643186-OQ80AQ5W3G4ZGHJTDO9B/unsplash-image-K0l4GwGX-Ec.jpg'),
-    alt: 'A loaded barge tow under way on the Mississippi River at sunset near Grafton, Illinois',
-    replaceWith: 'The GTS boat alongside a towboat mid-transfer — groceries going up to a deckhand.',
+    src: pick('gts-van-alongside.jpg', ''),
+    alt: 'The Grafton Towboat Services van parked alongside a towboat at the dock, delivering supplies',
+    replaceWith: null,
   },
   groceries: {
     src: pick('meat-counter.jpg', '1746472744398-E7VAP4L3025LGQT3MXVP/unsplash-image-qgfjZUXup1M.jpg'),
     alt: 'A full fresh meat counter at a grocery store',
     replaceWith: "The real case at Sinclair's Foods in Jerseyville.",
   },
+  // ✅ REAL GTS PHOTO — Jen, Sept 2026. Replaced Unsplash stock.
+  // Someone actually working: the van backed up to the boat, doors open, a
+  // person handling the load. People sell this service; scenery doesn't.
   crewChange: {
-    src: pick('workboat.jpg', '1746472336187-NSHGVFKNVH9YCOXH67QY/unsplash-image-jlrnKLjLcx0.jpg'),
-    alt: 'A workboat tied alongside a barge on the river with a crew member on deck',
-    replaceWith: 'An actual crew transfer at the Grafton dock — faces sell this service.',
+    src: pick('gts-loading-vessel.jpg', ''),
+    alt: 'Grafton Towboat Services staff loading supplies from the van onto a towboat at the dock',
+    replaceWith: null,
   },
   supplies: {
     // REPLACED Sept 2026 via scripts/replace-forklift-photo.ps1. The original
@@ -111,11 +129,14 @@ export const IMAGES = {
     // use, and far better than the blur — but it IS someone else's branding on
     // GTS's services page. First thing to swap when Jen photographs a real
     // loaded pallet at the Grafton dock.
-    src: pick('forklift.jpg', '587ce179-d5ff-465a-9c69-578fbc6bd8db/download+%281%29.jpg'),
-    alt: 'A forklift loading pallets of supplies into a delivery truck',
-    replaceWith:
-      'A real GTS photo: a loaded pallet or supplies going aboard at the Grafton dock. '
-      + 'Drop it in as public/site/forklift.jpg — no code change needed.',
+    // ✅ FIXED — Jen's photo, Sept 2026. This slot has been the worst on the
+    // site twice over: first a 269px blur, then a stock forklift carrying
+    // ANOTHER COMPANY'S LIVERY (Portuguese, "TRANSPORTES, LDA") on GTS's own
+    // services page. Both are gone. This is GTS supplies going aboard at the
+    // Grafton dock — the actual thing the page is describing.
+    src: pick('gts-supplies-dock.jpg', ''),
+    alt: 'Supplies and crates being loaded aboard a vessel at the Grafton dock',
+    replaceWith: null,
   },
   sisters: {
     // Already on their Contact page and nobody was using it properly.
