@@ -161,8 +161,8 @@ export async function sendOrderPush(
    * were working in, mid-shop.
    *
    * GTS goes to the order detail (they triage and schedule).
-   * Sinclair's goes to the picking queue (they shop; there is no per-order
-   * route in the shop app, and the queue is one tap from the right order).
+   * Sinclair's goes to the same Orders list with &shop=1 so Shopping Mode
+   * opens — one admin app, not the retired thin shop.* portal.
    *
    * ⚠️ /admin/orders?order=<id>, NOT /admin/orders/<id>.
    *
@@ -181,7 +181,8 @@ export async function sendOrderPush(
       ? {
           title: `Order to shop — ${vessel}`,
           body: line,
-          url: '/',                       // the shop queue, on the shop origin
+          // Full admin Orders + open Shopping Mode — not the retired thin /shop queue.
+          url: `/admin/orders?order=${order.id}&shop=1`,
           tag: `shop-order-${order.order_number}`,
         }
       : {
