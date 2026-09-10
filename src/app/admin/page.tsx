@@ -11,6 +11,7 @@ import {
 import { formatCurrency } from '@/lib/utils';
 import { AdminRole, AdminPermission, setAdminSession, setAdminUiState, fetchAdminSession, adminFetch, isGtsRole, getAdminRole } from '@/lib/admin-auth';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
+import PushBell from '@/components/admin/PushBell';
 
 export default function AdminDashboard() {
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
@@ -149,6 +150,15 @@ export default function AdminDashboard() {
       <div className="mb-6">
         <h1 className="font-display text-2xl font-bold text-brand-navy">Dashboard</h1>
         <p className="text-gray-400 text-sm">Grafton Towboat Services · Order Management</p>
+      </div>
+
+      {/* Order alerts. Renders nothing at all on browsers without Push, or
+          before VAPID keys are configured — so it can ship dark and light up
+          when the keys are set, rather than showing a button that fails.
+          Deliberately on the dashboard and nowhere else: it should be offered
+          once, where someone is already oriented, not follow them around. */}
+      <div className="mb-6">
+        <PushBell />
       </div>
 
       {stats && (

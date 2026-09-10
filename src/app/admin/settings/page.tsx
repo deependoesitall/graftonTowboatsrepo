@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Save, RefreshCw, Eye, EyeOff, Plus, Trash2, UserPlus, ShieldCheck, User, Lock, ScrollText, Search, ArrowRight, ChevronLeft, ChevronRight, MessageSquarePlus, Check, X, Loader2, Send, Wrench } from 'lucide-react';
 import { fetchAdminSession, getAdminRole, canAccess, adminFetch, AdminRole } from '@/lib/admin-auth';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
+import PushDevices from '@/components/admin/PushDevices';
 import { formatDate } from '@/lib/utils';
 import { DEFAULT_ZONE_ORDER, AISLES_TOKEN } from '@/lib/store-layout';
 
@@ -821,6 +822,15 @@ export default function AdminSettingsPage() {
       )}
 
       {/* ── PASSWORD ── */}
+      {/* Sits under the account tab, not a system-settings tab, because these
+          rows belong to the signed-in person — their phones, nobody else's.
+          The API scopes the list to session.sub for the same reason. */}
+      {tab === 'password' && (
+        <div className="mb-4">
+          <PushDevices />
+        </div>
+      )}
+
       {tab === 'password' && (
         <div className="card-base p-6 space-y-5">
           <div className="flex items-center gap-3 mb-2">

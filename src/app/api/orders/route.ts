@@ -21,6 +21,7 @@ async function getUserIdFromToken(req: NextRequest): Promise<string | null> {
 import { generateOrderNumber } from '@/lib/utils';
 import { fetchActiveDeals, computeDiscounts } from '@/lib/sinclair-offers';
 import { sendOrderReceivedEmail } from '@/lib/email';
+import { sendOrderPush } from '@/lib/push';
 import { Order } from '@/types';
 import { requireAdmin, isSinclairScoped } from '@/lib/admin-auth-server';
 import { z } from 'zod';
@@ -500,6 +501,40 @@ export async function POST(req: NextRequest) {
         const message = err instanceof Error ? err.message : String(err);
         console.error('Email error:', err);
         emailDebug = { ok: false, error: message };
+      }
+
+      // WEB PUSH — staff only, and strictly additive to the email above.
+      //
+      // Its own try/catch, deliberately separate from the email's: these two
+      // must not be able to take each other down. A push service outage
+      // cannot be allowed to stop an order confirmation going out, and a
+      // Resend failure shouldn't suppress the notification that gets someone
+      // shopping. sendOrderPush() also never throws on its own — this catch
+      // is belt-and-braces around an import that could fail at module level.
+      //
+      // Audience is GTS + Sinclair's, the same two groups the email reaches.
+      // No vessel ever receives a push; there is no code path that could.
+      try {
+        // AUDIENCE MIRRORS THE EMAIL CC RULE, and must keep mirroring it.
+        //
+        // GTS hears about every order — a crew-change job is still work to
+        // schedule. Sinclair's only hears about orders with something to shop,
+        // because a service-only order is nothing to do with them and buzzing
+        // a shopper's phone for it is how a real alert stops getting looked at.
+        //
+        // Same `item_type !== 'service'` test the Sinclair's CC uses in
+        // lib/email.ts. If one changes, change both — a shopper being emailed
+        // but not notified (or the reverse) is a confusing half-state.
+        const hasShoppableItems = (fullOrder as Order).items
+          ?.some(i => i.item_type !== 'service') ?? false;
+
+        const pushResult = await sendOrderPush(fullOrder as Order, {
+          gts: true,
+          sinclair: hasShoppableItems,
+        });
+        if (pushResult.skipped) console.log('Order push skipped:', pushResult.skipped);
+      } catch (err) {
+        console.error('Order push error (order still saved and emailed):', err);
       }
     }
 
