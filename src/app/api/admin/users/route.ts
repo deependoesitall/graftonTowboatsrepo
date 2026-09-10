@@ -54,6 +54,20 @@ export async function PATCH(req: NextRequest) {
   const { id, password, ...updates } = await req.json();
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
 
+  // ⚠️ NORMALIZE THE USERNAME ON WRITE, ALWAYS.
+  //
+  // The login route looks accounts up with `username.toLowerCase().trim()`. If
+  // an edit here saves "Jen" while login searches for "jen", the row simply
+  // stops matching — and because the login deliberately returns one generic
+  // "Invalid username or password" for every lookup miss, the account looks
+  // like it has the wrong password rather than the wrong case. POST already
+  // lowercases; PATCH did not, so renaming an account through the Users page
+  // could silently lock that person out.
+  if (typeof (updates as Record<string, unknown>).username === 'string') {
+    (updates as Record<string, unknown>).username =
+      ((updates as Record<string, unknown>).username as string).toLowerCase().trim();
+  }
+
   if (password) (updates as Record<string, unknown>).password_hash = await hashPassword(password);
 
   const supabase = createServiceClient();

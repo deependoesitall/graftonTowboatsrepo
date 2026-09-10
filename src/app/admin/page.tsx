@@ -63,7 +63,26 @@ export default function AdminDashboard() {
         }),
       });
       if (!res.ok) {
-        setLoginError(username.trim() ? 'Invalid username or password.' : 'Incorrect password. Please try again.');
+        // ⚠️ DON'T CALL A SERVER CRASH A BAD PASSWORD.
+        //
+        // This used to show "Invalid username or password" for EVERY non-2xx
+        // response, so a 500 — a missing env var, a dropped database column,
+        // Supabase down — was indistinguishable from a typo. Someone stands at
+        // the dock retyping a password that was right the whole time, and the
+        // screen agrees with them. The generic message is correct for a real
+        // 401 (it stops usernames being enumerated); it is a lie for anything
+        // else.
+        if (res.status >= 500) {
+          setLoginError(
+            'Sign-in is temporarily unavailable — this is a server problem, not your password. Try again in a moment.',
+          );
+        } else if (res.status === 429) {
+          setLoginError('Too many attempts. Wait a few seconds and try again.');
+        } else {
+          setLoginError(
+            username.trim() ? 'Invalid username or password.' : 'Incorrect password. Please try again.',
+          );
+        }
         return;
       }
       const { token, user } = await res.json();
@@ -75,6 +94,10 @@ export default function AdminDashboard() {
       }
       // Sinclair users go directly to orders
       window.location.href = permissions.includes('sinclair') ? '/admin/orders' : '/admin';
+    } catch {
+      // Network failure — offline at the dock, DNS hiccup, request blocked.
+      // Without this the button just stopped spinning and said nothing at all.
+      setLoginError('Could not reach the server. Check your connection and try again.');
     } finally {
       setLogging(false);
     }
