@@ -1,23 +1,23 @@
 {
-  "id": "/shop",
-  "name": "GTS - Sinclair's",
-  "short_name": "GTS - Sinclair's",
-  "description": "Pick and pack Grafton Towboat grocery orders",
-  "start_url": "/",
+  "id": "/admin",
+  "name": "GTS Orders",
+  "short_name": "GTS Orders",
+  "description": "Order alerts and shopping for Grafton Towboat / Sinclair's staff — use the full admin, not a separate shop app",
+  "start_url": "/admin/orders",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#0F2419",
-  "theme_color": "#0F2419",
+  "background_color": "#0D1B2A",
+  "theme_color": "#0D1B2A",
   "orientation": "portrait-primary",
   "icons": [
     {
-      "src": "/branding/shop-icon.png",
+      "src": "/branding/admin-icon.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/branding/shop-icon.png",
+      "src": "/branding/admin-icon.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
