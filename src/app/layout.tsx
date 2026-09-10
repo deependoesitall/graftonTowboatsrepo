@@ -25,10 +25,30 @@ export const metadata: Metadata = {
   description:
     "Order groceries, provisions, and supplies for your vessel through Grafton Towboat Services. Partnered with Sinclair's Foods. Mile Marker 219 on the Mississippi River, Mile Marker 0 on the Illinois River.",
   manifest: '/manifest.json',
+  // ⚠️ THE CUSTOMER APP NEEDS ITS OWN ICONS DECLARED HERE.
+  //
+  // `appleWebApp.capable` tells iOS this installs as an app, but iOS ignores
+  // the manifest's icons for the Home Screen and looks ONLY for an
+  // apple-touch-icon. There wasn't one, so a captain who installed the
+  // ordering site got a SCREENSHOT OF THE PAGE as their icon — the exact
+  // failure the comment in shop/layout.tsx warns about, in the one place that
+  // still had it.
+  //
+  // Brand yellow, where the two staff apps are on black: a crew member and a
+  // GTS office phone can both have all three installed, and the light one is
+  // always the customer's.
+  icons: {
+    icon: '/branding/favicon-gts.png',
+    shortcut: '/branding/favicon-gts.png',
+    apple: '/branding/customer-icon.png',
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',
-    title: 'GTS Orders',
+    // NOT 'GTS Orders' — that is the STAFF app, and this label is what sits
+    // under the icon on the Home Screen. Two apps called the same thing on one
+    // phone is the confusion the separate origins exist to prevent.
+    title: 'Grafton Order',
   },
 };
 

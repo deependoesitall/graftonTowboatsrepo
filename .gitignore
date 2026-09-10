@@ -33,8 +33,9 @@ Thumbs.db
 # TypeScript
 *.tsbuildinfo
 next-env.d.ts
+
+# Internal planning docs — not part of the shipped app
 ROUND8_PLAN.md
-PRELAUNCH_CHECKLIST.md
 PRELAUNCH_CHECKLIST.md
 
 # FUSE mount artifacts — never commit

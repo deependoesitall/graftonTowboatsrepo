@@ -13,10 +13,12 @@ import { SiteHeader } from '@/components/layout/SiteHeader';
 import { CartBar } from '@/components/cart/CartBar';
 import { createClient } from '@/lib/supabase/client';
 import { getFavoriteProducts, removeFavorite } from '@/lib/favorites';
-import { addToCart, saveVesselInfo, getVesselInfo } from '@/lib/cart';
+import { addToCart, saveCart, getCart, saveVesselInfo, getVesselInfo, saveCodPayments, clearCodPayments, type StoredCodPay } from '@/lib/cart';
 import { formatCurrency, formatDate, productDisplayName } from '@/lib/utils';
-import { Product, Order } from '@/types';
+import { Product, Order, VESSEL_TYPES } from '@/types';
+import { readCodPayments } from '@/lib/cod-payments';
 import { useToast } from '@/hooks/use-toast';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 
 const STATUS_STYLES: Record<string, string> = {
   new: 'bg-blue-50 text-blue-700 border-blue-200',
@@ -29,6 +31,7 @@ function AccountContent() {
   const { user, loading, signOut, refreshProfile } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
+  const { confirm: confirmDialog, dialog: confirmDialogEl } = useConfirm();
   const [tab, setTab] = useState<'orders' | 'favorites' | 'profile'>('orders');
   const [authOpen, setAuthOpen] = useState(false);
 
@@ -116,23 +119,137 @@ function AccountContent() {
     }
   }
 
-  function repeatOrder(order: Order) {
-    order.items.filter(i => i.item_type !== 'service').forEach(item => {
-      addToCart({
-        product_id: item.product_id,
-        description: item.description,
-        category: item.category,
-        pkg_size: item.pkg_size,
-        uom: item.uom,
-        price: item.unit_price,
-        quantity: item.quantity,
-        image_url: item.image_url,
-        paid_by: 'vessel',
+  /**
+   * REPEAT ORDER — brings back the LINES AND THE HEADER.
+   *
+   * It used to copy line items and nothing else, so the one button whose whole
+   * promise is "same as last time" still made a returning captain retype the
+   * company, vessel, captain, captain's mobile, vessel email, terminal and
+   * delivery method. Every one of those is already snapshotted on the order
+   * being repeated — the data was sitting right there, unused.
+   *
+   * Three other things it got wrong:
+   *
+   *   · paid_by was HARDCODED to 'vessel', so repeating an order silently
+   *     moved every COD line onto the company invoice. A crew member's
+   *     personal Tylenol became the boat's, and nothing said so.
+   *   · cod_name went with it, losing even the record of whose item it was.
+   *   · The toast counted order.items — including the service lines it had
+   *     just filtered out — so it reported adding more than it added.
+   */
+  async function repeatOrder(order: Order) {
+    // Services are deliberately not repeated: a parts pickup or a package
+    // delivery is a one-off errand, not a standing order.
+    const lines = order.items.filter(i => i.item_type !== 'service');
+    const droppedServices = order.items.length - lines.length;
+
+    if (lines.length === 0) {
+      toast({
+        title: 'Nothing to repeat',
+        description: `Order ${order.order_number} has no grocery or supply lines.`,
       });
+      return;
+    }
+
+    // REPLACE, DON'T MERGE. addToCart() adds quantities for a product already
+    // in the cart, so repeating on top of an existing cart silently doubled
+    // everything. And now that paid_by is preserved, a merge could also fold a
+    // COD line into a vessel line and move it onto the company bill.
+    const existing = getCart();
+    if (existing.length > 0) {
+      const ok = await confirmDialog({
+        title: 'Replace your current cart?',
+        message: `Repeating ${order.order_number} brings back ${lines.length} item${lines.length !== 1 ? 's' : ''}. `
+          + `Your cart has ${existing.length} right now — ${existing.length === 1 ? 'it' : 'they'} will be removed.`,
+        danger: true,
+      });
+      if (!ok) return;
+    }
+
+    saveCart(lines.map(item => ({
+      product_id: item.product_id,
+      description: item.description,
+      category: item.category,
+      pkg_size: item.pkg_size,
+      uom: item.uom,
+      price: item.unit_price,
+      quantity: item.quantity,
+      image_url: item.image_url,
+      // Who was paying stays who was paying.
+      paid_by: item.paid_by ?? 'vessel',
+      cod_name: item.cod_name ?? '',
+    })));
+
+    // ── The header ────────────────────────────────────────────────────────
+    //
+    // Restored from the order's own snapshot. The API stores vessel_type
+    // resolved to a plain string, so a custom type has to be unpacked back into
+    // Other + the free-text field or the select lands on nothing.
+    const ext = (order.extended_info || {}) as Record<string, string>;
+    const knownType = (VESSEL_TYPES as readonly string[]).includes(order.vessel_type || '');
+
+    saveVesselInfo({
+      ...getVesselInfo(),
+      company_name:  order.company_name   || '',
+      po_number:     order.po_number      || '',
+      contact_name:  order.contact_name   || '',
+      phone:         order.phone          || '',
+      email:         order.customer_email || '',
+      vessel_name:   order.vessel_name    || '',
+      vessel_type:       knownType ? (order.vessel_type || '') : (order.vessel_type ? 'Other' : ''),
+      vessel_type_other: knownType ? '' : (order.vessel_type || ''),
+      captain_name:  order.captain_name   || '',
+      captain_phone: order.captain_phone  || '',
+      vessel_email:  order.vessel_email   || '',
+      order_contact_name:  ext.order_contact_name  || '',
+      order_contact_title: ext.order_contact_title || '',
+      order_contact_phone: ext.order_contact_phone || '',
+      order_contact_email: ext.order_contact_email || '',
+      terminal_name:   order.terminal_name   || '',
+      delivery_method: order.delivery_method || '',
+      approach_side:   order.approach_side   || '',
+      vhf_channel:     order.vhf_channel     || '',
+
+      // ⚠️ EVERYTHING BELOW IS PER-TRIP AND MUST COME BACK BLANK.
+      //
+      // A stale arrival date is worse than an empty one: an empty field is
+      // caught by validation, while a plausible-looking old date gets submitted
+      // and the van turns up for a boat that left last week. Same for a crew
+      // change that already happened, and notes about a different run.
+      arrival_date: '', arrival_time: '',
+      secondary_terminal_name: '', secondary_arrival_date: '',
+      secondary_arrival_time: '', secondary_delivery_method: '',
+      crew_change: 'no', crew_change_notes: '', crew_arriving: '', crew_departing: '',
+      notes: '', eta: '',
     });
+
+    // ── Who pays, per person ──────────────────────────────────────────────
+    //
+    // Restored from the same snapshot. A boat's crew settle the same way most
+    // weeks — Amber by Venmo, Andy by card — so asking again, including for the
+    // Venmo handle, is exactly the retyping this button is supposed to remove.
+    // The form still shows each choice and still validates it; nothing is
+    // submitted on their behalf.
+    const storedPay = readCodPayments(order.extended_info);
+    if (storedPay.length > 0) {
+      const map: Record<string, StoredCodPay> = {};
+      storedPay.forEach(p => {
+        if (p.method === 'venmo' || p.method === 'cashapp' || p.method === 'credit_card') {
+          map[p.name] = { method: p.method, handle: p.handle, phone: p.phone, time: p.contact_time };
+        }
+      });
+      saveCodPayments(map);
+    } else {
+      // An older order carries no per-person record. Better an empty form than
+      // one quietly prefilled from whoever ordered last.
+      clearCodPayments();
+    }
+
     toast({
-      title: `${order.items.length} items added to cart`,
-      description: `From order ${order.order_number}`,
+      title: `${lines.length} item${lines.length !== 1 ? 's' : ''} added to cart`,
+      description: droppedServices > 0
+        ? `From ${order.order_number}. ${droppedServices} service line${droppedServices !== 1 ? 's' : ''} not repeated — add those again if you need them.`
+        : `From ${order.order_number}. Vessel and delivery details are filled in — just set the date and time.`,
       variant: 'success',
     });
     router.push('/order');
@@ -266,7 +383,7 @@ function AccountContent() {
                     )}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    <button onClick={() => repeatOrder(order)}
+                    <button onClick={() => { void repeatOrder(order); }}
                       className="flex items-center gap-1.5 bg-brand-orange text-white text-xs font-bold uppercase tracking-wide px-3.5 py-2 rounded-full hover:bg-brand-ored transition-colors">
                       <RotateCcw className="w-3.5 h-3.5" /> Repeat Order
                     </button>
@@ -381,6 +498,7 @@ function AccountContent() {
           </div>
         )}
       </div>
+      {confirmDialogEl}
       <CartBar />
     </div>
   );

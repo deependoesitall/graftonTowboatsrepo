@@ -31,10 +31,21 @@ interface Props {
   lockup: 'partner' | 'gts';
   /** CSS background for the page. Each app gets its own. */
   background: string;
+  /**
+   * Does this app push notifications?
+   *
+   * TRUE for the two staff apps, which exist to buzz when an order lands.
+   * FALSE for the customer app: push is staff-only and enforced as such —
+   * push_subscriptions rows are keyed to an admin session and there is no code
+   * path that sends to a vessel. Telling a captain to "turn on notifications"
+   * would be instructing them to wait for something that is never coming.
+   */
+  notifications?: boolean;
 }
 
 export default function InstallGuide({
   appName, headline, eyebrow, blurb, iconSrc, lockup, background,
+  notifications = true,
 }: Props) {
   const STEPS = [
     {
@@ -61,16 +72,18 @@ export default function InstallGuide({
       // instruction people scan past. It gets the gold treatment for that
       // reason alone.
       title: 'Open it from your Home Screen',
-      body: 'Close Safari first. Notifications only work from the icon — never from inside Safari.',
+      body: notifications
+        ? 'Close Safari first. Notifications only work from the icon — never from inside Safari.'
+        : 'Close Safari first. Opening from the icon is what gives you the full screen, with your cart and vessel details remembered.',
       icon: null,
       emphasis: true,
     },
-    {
+    ...(notifications ? [{
       title: 'Turn on notifications',
       body: 'Tap “Notify me of new orders” and allow it when your phone asks.',
-      icon: Bell,
+      icon: Bell as typeof Share | null,
       emphasis: false,
-    },
+    }] : []),
   ];
 
   return (

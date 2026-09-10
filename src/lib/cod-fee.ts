@@ -44,31 +44,76 @@ export function codTotalWithFee(order: CodFeeSource | null | undefined, codSubto
 }
 
 /**
- * One person's share when CODs are split per crew member.
+ * EVERY PERSON'S TOTAL, GUARANTEED TO ADD UP TO THE ORDER TOTAL.
  *
- * A percentage divides itself naturally. A FLAT fee does not — so it is
- * apportioned in proportion to what each person spent. Without this, showing
- * every person "+ $12 fee" would collect the fee several times over, and the
- * per-person figures wouldn't add up to the order total the customer was shown.
+ * ── THE BUG THIS EXISTS TO KILL ─────────────────────────────────────────
  *
- * Edge case: if the COD subtotal is 0 (everything out of stock, or an entirely
- * off-catalog order with no known prices), proportion is undefined — the fee is
- * split evenly across the people involved instead.
+ * Rounding each person independently — which is what this replaced — makes
+ * the rows and the header disagree about a cent roughly a QUARTER of the
+ * time. Real example, from an order placed Sept 10:
+ *
+ *     COD subtotal          $36.74
+ *     5% handling fee        $1.84
+ *     Header total          $38.58   <- codTotalWithFee()
+ *       Amber  28.86 x 1.05 $30.30
+ *       Andy    7.88 x 1.05  $8.27
+ *       Rows add up to      $38.57   <- a penny short
+ *
+ * Nobody loses real money over it — but a crew member settling up at the dock
+ * adds the rows, gets a different number to the one printed at the top, and now
+ * doesn't trust any of it. On a document whose whole job is "here is what you
+ * owe", being internally inconsistent is the expensive part.
+ *
+ * ── HOW ─────────────────────────────────────────────────────────────────
+ *
+ * Work in integer cents, floor everyone, then hand the leftover cents out one
+ * at a time to whoever was rounded down hardest (largest fractional remainder).
+ * That is the standard largest-remainder apportionment, and it guarantees the
+ * parts equal the whole while keeping each person within a cent of their fair
+ * share. Ties break by subtotal then name, so the same order always produces
+ * the same answer — a total that shuffles between two renders of the same PDF
+ * is its own support call.
+ *
+ * People whose only COD is a linked item are NOT passed in here: they have no
+ * known price, so they have no share of a fee computed from known prices.
  */
-export function codPersonTotal(
+export function allocateCodTotals(
   order: CodFeeSource | null | undefined,
-  personSubtotal: number,
+  people: Array<{ name: string; subtotal: number }>,
   codSubtotal: number,
-  personCount = 1,
-): number {
-  if (!isManualCodFee(order)) {
-    return round2(personSubtotal * (1 + codFeePercent(order) / 100));
+): Map<string, number> {
+  const out = new Map<string, number>();
+  if (people.length === 0) return out;
+
+  const cents = (n: number) => Math.round((Number(n) || 0) * 100);
+  const totalCents = cents(codTotalWithFee(order, codSubtotal));
+  const subCents = people.map(p => cents(p.subtotal));
+  const subSum = subCents.reduce((a, b) => a + b, 0);
+
+  // Exact (fractional) share of the total, by spend — or evenly when nothing
+  // has a known price yet.
+  const exact = people.map((_, i) =>
+    subSum > 0 ? (totalCents * subCents[i]) / subSum : totalCents / people.length);
+
+  const floored = exact.map(Math.floor);
+  let remainder = totalCents - floored.reduce((a, b) => a + b, 0);
+
+  const order_ = people
+    .map((p, i) => ({ i, frac: exact[i] - floored[i], sub: subCents[i], name: p.name }))
+    .sort((a, b) => (b.frac - a.frac) || (b.sub - a.sub) || a.name.localeCompare(b.name));
+
+  for (let k = 0; remainder > 0 && k < order_.length; k++, remainder--) {
+    floored[order_[k].i] += 1;
   }
-  const fee = codFeeAmount(order, codSubtotal);
-  const share = codSubtotal > 0
-    ? fee * (personSubtotal / codSubtotal)
-    : fee / Math.max(1, personCount);
-  return round2(personSubtotal + share);
+  // Defensive: a negative remainder can only come from a total smaller than the
+  // floors, which shouldn't happen — but take it off the largest share rather
+  // than silently printing rows that overshoot.
+  for (let k = 0; remainder < 0 && k < order_.length; k++, remainder++) {
+    floored[order_[order_.length - 1 - k].i] -= 1;
+  }
+
+  people.forEach((p, i) => out.set(p.name, floored[i] / 100));
+  return out;
 }
 
 /** Short human label for the fee, e.g. "5% handling fee" or "$15.00 handling fee". */

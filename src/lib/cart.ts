@@ -5,6 +5,7 @@ import { CartItem, VesselInfo, AdditionalServices } from '@/types';
 const CART_KEY     = 'grafton_cart';
 const VESSEL_KEY   = 'grafton_vessel_info';
 const SERVICES_KEY = 'grafton_additional_services';
+const CODPAY_KEY   = 'grafton_cod_payments';
 
 // ── Cart ──────────────────────────────────────────────────────
 
@@ -183,6 +184,57 @@ export function saveAdditionalServices(services: AdditionalServices) {
   if (typeof window === 'undefined') return;
   localStorage.setItem(SERVICES_KEY, JSON.stringify(services));
   window.dispatchEvent(new CustomEvent('cart-updated'));
+}
+
+// ── Per-person COD payment ────────────────────────────────────
+//
+// How each crew member settles up, keyed by the name typed on their COD lines.
+// Kept here rather than in component state so it survives the trip from the
+// account page into the order form, which is what makes Repeat Order able to
+// bring back "Amber pays by Venmo, @amber-h" instead of asking again.
+//
+// NOT part of VesselInfo on purpose: that describes the BOAT and persists
+// between orders as a unit, while this is about particular people and has to be
+// cleared or re-confirmed whenever the names on the COD lines change.
+
+export interface StoredCodPay {
+  method: 'venmo' | 'cashapp' | 'credit_card' | '';
+  handle: string;
+  phone: string;
+  time: string;
+}
+
+export function getCodPayments(): Record<string, StoredCodPay> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(CODPAY_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const out: Record<string, StoredCodPay> = {};
+    for (const [name, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!v || typeof v !== 'object') continue;
+      const e = v as Record<string, unknown>;
+      const m = e.method;
+      out[name] = {
+        method: (m === 'venmo' || m === 'cashapp' || m === 'credit_card') ? m : '',
+        handle: typeof e.handle === 'string' ? e.handle : '',
+        phone:  typeof e.phone  === 'string' ? e.phone  : '',
+        time:   typeof e.time   === 'string' ? e.time   : '',
+      };
+    }
+    return out;
+  } catch { return {}; }
+}
+
+export function saveCodPayments(map: Record<string, StoredCodPay>) {
+  if (typeof window === 'undefined') return;
+  try { localStorage.setItem(CODPAY_KEY, JSON.stringify(map)); } catch { /* quota */ }
+}
+
+export function clearCodPayments() {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem(CODPAY_KEY);
 }
 
 export function clearAdditionalServices() {

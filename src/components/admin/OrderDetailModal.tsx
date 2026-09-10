@@ -13,7 +13,7 @@ import { Order, OrderItem, OrderStatus, Product } from '@/types';
 import { formatCurrency, formatDate, ORDER_STATUSES } from '@/lib/utils';
 import { ShoppingModeModal } from '@/components/admin/ShoppingModeModal';
 import { adminFetch, isGtsRole, getAdminRole } from '@/lib/admin-auth';
-import { codFeeLabel, codPersonTotal, codTotalWithFee } from '@/lib/cod-fee';
+import { codFeeLabel, codTotalWithFee, allocateCodTotals } from '@/lib/cod-fee';
 import { PickSheetOverlay } from '@/components/admin/PickSheetOverlay';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { readCodPayments, codMethodSentence } from '@/lib/cod-payments';
@@ -368,6 +368,22 @@ export function OrderDetailModal({
   const effectiveFee = feeMode === 'flat'
     ? (feeFlatNum ?? 0)
     : Math.round(codSubtotal * feeNum) / 100;
+  // ROWS MUST TRACK THE FEE MARY IS TYPING, NOT THE ONE ON THE ORDER.
+  //
+  // The header above already used `effectiveFee` (live), while each person's
+  // row was computed from order.cod_fee_* (stored) — so editing the fee moved
+  // the total and left the per-person rows sitting at the old number until the
+  // save round-tripped. This feeds the live values in as a fee source, and
+  // allocates in cents so the rows always sum to the header.
+  const liveFee = {
+    cod_fee_percent: feeNum,
+    cod_fee_amount: feeMode === 'flat' ? feeFlatNum : null,
+  };
+  const codShares = allocateCodTotals(liveFee, codGroups.map(([name, list]) => ({
+    name,
+    subtotal: list.reduce((s, i) => s + Number(i.actual_total ?? i.unit_price * i.quantity), 0),
+  })), codSubtotal);
+
   const feeDirty =
     feeMode === 'flat'
       ? feeFlatNum !== (order.cod_fee_amount ?? null)
@@ -630,7 +646,7 @@ export function OrderDetailModal({
                         <p className="text-sm font-bold text-purple-800 flex justify-between">
                           <span>{name}</span>
                           <span>
-                            {formatCurrency(codPersonTotal(order, list.reduce((s, i) => s + Number(i.actual_total ?? i.unit_price * i.quantity), 0), codSubtotal, codGroups.length))}
+                            {formatCurrency(codShares.get(name) ?? 0)}
                             {effectiveFee > 0 && <span className="font-normal text-purple-500 text-xs"> incl. fee</span>}
                           </span>
                         </p>

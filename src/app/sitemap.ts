@@ -32,5 +32,9 @@ export default function sitemap(): MetadataRoute.Sitemap {
     // The catalogue is the money page — it changes nightly with the Sinclair's
     // sync, and it's where a search for a specific product should land.
     { url: `${SITE}/catalog`, lastModified: now, changeFrequency: 'daily', priority: 0.9 },
+    // The customer install page. Listed, unlike /admin/install and
+    // /shop/install, which are noindex — those are handed to named staff, this
+    // one is a link GTS gives out and wants found.
+    { url: `${SITE}/install`, lastModified: now, changeFrequency: 'yearly', priority: 0.5 },
   ];
 }

@@ -6,7 +6,73 @@ recalled.
 
 ---
 
-## 🔴 DO THESE FIRST — nothing else matters until they're done
+## 🔴 The Sinclair's app could not be signed into at all — FIXED, needs deploy
+
+Reported after installing from `shop.graftontowboatservices.com/install`: tapping
+**Sign in** dropped the app out of standalone mode (address bar reappeared) and
+landed on the GTS admin login, and signing in there did nothing useful.
+
+It was not a rough edge. It was a **closed loop — that button could never
+succeed**, however correctly anyone typed their password:
+
+1. `ShopGate` linked to `/admin`. On the shop host, middleware redirects
+   `/admin` to the canonical host. That is a **cross-origin navigation**, and
+   both iOS and Android eject an installed app from standalone when one happens.
+2. The login then completed **on the other origin**. The session JWT lives in
+   `sessionStorage` and the backstop cookie is host-only with
+   `sameSite: 'strict'` — so neither is visible to `shop.*`. By design.
+3. Back in the installed app, `fetchAdminSession()` still found nothing and
+   showed "Sign in to start shopping" again. Forever.
+
+**Fix:** `ShopGate` now renders the sign-in form itself and posts to
+`/api/admin/auth` **on whatever host the app is running on**. Middleware's
+matcher excludes `/api/`, so that request is served directly on `shop.*` and the
+cookie and token land on the origin the picking screens actually read. Nothing
+navigates, so standalone mode survives.
+
+Worth knowing: the 8-hour httpOnly cookie now gets set on `shop.*` too, so the
+app survives being closed and reopened rather than needing a login every launch
+once `sessionStorage` clears.
+
+The one remaining off-origin link is the "wrong app" case — a GTS account
+signing into the Sinclair's app gets a link to GTS Orders. That one *should*
+leave, because it is sending them to a different app.
+
+⚠️ **Untested — the fix is committed but not deployed.** Reinstall the app after
+deploying and check: the sign-in form appears **inside** the app, the address bar
+never appears, and a wrong password shows an inline error rather than a redirect.
+
+### Neither install page had a favicon — same shape of bug, also fixed
+
+Both install pages showed the browser's generic globe, and the two route trees
+without a favicon were **exactly** the two that set `metadata.icons`:
+
+```ts
+icons: { apple: '/branding/shop-icon.png' },   // shop/layout.tsx
+icons: { apple: '/branding/admin-icon.png' },  // admin/layout.tsx
+```
+
+Declaring `icons` in a segment **replaces** the icon set that segment would
+otherwise inherit. With only `apple` listed, every page under `/shop` and
+`/admin` emitted an apple-touch-icon and **no `<link rel="icon">` at all** — so
+the favicons committed earlier tonight (`app/icon.png`, `app/shop/icon.png`)
+were never going to appear on those pages no matter how many times they were
+deployed.
+
+Both now list `icon` and `shortcut` alongside `apple`, pointing at
+`/branding/favicon-gts.png` (green) and `/branding/favicon-sinclairs.png` (red).
+They live in `/public` rather than the app-dir convention because Next serves
+convention icons at a hashed URL that cannot be named in a metadata object.
+
+Checked: those two files are the **only** places in `src/` that declare `icons`,
+so nothing else is suppressing a favicon.
+
+**Note the ordering trap:** the app-dir favicons may also simply not be live yet
+— a lot is still unpushed. Deploy first, then judge. If the globe persists after
+a deploy, hard-reload; browsers cache a missing favicon aggressively.
+
+Still to delete by hand: `src/app/shop/icon-1.png`, the stray from the manual
+favicon drop.
 
 ### 1. Run migrations 071 – 075 in Supabase
 
@@ -75,8 +141,8 @@ and keep them — rotating invalidates every subscription silently.
 was there all along — but the PWA icons were 1408×1408 and ~2 MB each while
 every manifest declares them `512x512`. Same artwork, resized to the declared
 512 and compressed: admin 2110 KB → 109 KB, shop 2182 KB → 111 KB.
-`gts-logo.png` is still 748 KB — Windows denies write access to it (Controlled
-Folder Access), so the compressed copy sits beside it as `gts-logo-1.png`.
+`gts-logo.png` is now 512×512 and 61 KB, down from 1080×1080 and 748 KB — the
+size all four manifests always declared it to be.
 
 **~~Three photos pending.~~ DONE Sept 10 — not yet pushed.** Jen's HEICs are
 converted and sitting in `public/site/` under the three names `content.ts`
@@ -111,7 +177,7 @@ reads correctly:**
 | Marketing site nav | `components/site/SiteChrome.tsx` (`SiteNav`) |
 | Install-page hero — both GTS Orders and Sinclair's | `components/InstallGuide.tsx` |
 
-**Everything else still uses the old square `gts-logo.png` (1080×1080), on
+**Everything else still uses the old square `gts-logo.png` (now 512×512), on
 purpose.** The lockup is 2:1 and cannot serve as a square mark, and the places
 below either need a square or already print the words beside the logo:
 
@@ -131,14 +197,16 @@ below either need a square or already print the words beside the logo:
 
 ### Loose files in public/branding/, safe to delete
 
-- `gts-badge.png` — a square crop of the new badge. Nothing references it.
-- `gts-logo-1.png` — the compressed 512px version of the OLD logo, saved here
-  under Windows' auto-rename. Windows Controlled Folder Access denies writes to
-  `gts-logo.png` itself, so the 748 KB original is still what ships. Clearing
-  that exception and renaming this over it saves ~700 KB.
-- `logo-circle.png` — 1.2 MB, referenced by nothing, long dead.
+Nothing references any of these. They cost ~1.35 MB in the repo.
 
-## Favicon — Sept 10, half done
+- `gts-badge.png` (109 KB) — a square crop of the new badge, from a logo
+  rollout that was scaled back to the three header slots.
+- `gts-logo-1.png` (55 KB) — the compressed logo, downloaded under Windows'
+  auto-rename before the write block was cleared. `gts-logo.png` now holds this
+  content, so this copy is redundant.
+- `logo-circle.png` (1.2 MB) — dead for months.
+
+## Favicon — Sept 10, done
 
 New favicon artwork (rounded square, dark ship over waves, gradient ground).
 Wired through Next's file convention, so no code change and no metadata edit:
@@ -146,27 +214,176 @@ the nearest `icon.png` in the route tree wins.
 
 | File | Colour | Serves |
 |---|---|---|
-| `src/app/shop/icon.png` | **red** — amber→red | ✅ done — `shop.graftontowboatservices.com`, install page included |
-| `src/app/icon.png` | green — gold→green | ❌ **NOT DONE** — Windows denied the write |
+| `src/app/icon.png` | green — gold→green | every tab: marketing site, catalogue, admin |
+| `src/app/shop/icon.png` | **red** — amber→red | `shop.graftontowboatservices.com`, install page included |
 
 The red is the same artwork with the background gradient rotated and the
-silhouette warmed; at 32 px in a tab strip the two are unmistakable, which is
+silhouette warmed. At 32 px in a tab strip the two are unmistakable, which is
 the point — Sinclair's staff and GTS staff often have both open.
 
-### ⚠️ `src/app/icon.png` still has to be replaced by hand
+This is browser-tab favicons only. **Home-screen app icons are deliberately
+untouched** — `admin-icon.png`, `shop-icon.png` and the `/icon.svg` maskable
+are all as they were.
 
-Windows Controlled Folder Access denies writes to it (third file today). The
-name is fixed by Next's app-router convention, so it can't be worked around
-with a new filename the way `gts-logo.png` was.
+## Audit — Sept 10, late. Fixed vs still open
 
-**Until it's replaced, every tab except the Sinclair's app still shows the old
-logo.** Fix is either: clear the exception under Windows Security → Ransomware
-protection → Allow an app through Controlled folder access, or drop the file
-over that path manually.
+### Fixed
 
-Note this is a browser-tab favicon only. **Home-screen app icons are
-deliberately untouched** — `admin-icon.png`, `shop-icon.png` and the
-`/icon.svg` maskable are all as they were.
+**The per-person COD rows didn't add up to the header.** Each person's total was
+rounded independently, so the rows and the printed total disagreed by a cent on
+about **24% of two-person COD orders**. Visible in the Sept 10 test order: header
+$38.58, Amber $30.30 + Andy $8.27 = $38.57. Nobody loses money, but a crew member
+adding the rows at the dock gets a different number to the one at the top and
+stops trusting the document. Replaced with `allocateCodTotals()` in
+`lib/cod-fee.ts` — largest-remainder apportionment in integer cents, verified
+against 200,000 random orders with zero mismatches and no one moving more than a
+cent. Wired into the email, the PDF and the admin modal; `codPersonTotal()` is
+gone.
+
+**The admin modal's rows ignored the fee being typed.** The header used the live
+`effectiveFee`, the rows used the stored `order.cod_fee_*`, so editing a fee moved
+the total and left the per-person figures on the old number until a save
+round-tripped. The modal now allocates against the live values.
+
+**Security headers now cover the whole site** (SECURITY_AUDIT item 6). Only
+`/admin` had them; the ordering pages — where boats type names, phone numbers and
+orders, and where a login session lives — had none. `nosniff`,
+`Referrer-Policy` and `X-Frame-Options: SAMEORIGIN` apply everywhere now, with
+admin excluded from that rule by a negative lookahead so its stricter `DENY`
+isn't left to rule ordering.
+
+**Removed `experimental.serverActions.allowedOrigins: ['localhost:3000']`.** No
+Server Actions exist in the codebase, so it did nothing — but it was a trap
+primed to reject production the day someone added one.
+
+Also: deduped `PRELAUNCH_CHECKLIST.md` in `.gitignore`.
+
+### Checked and clean
+
+Every internal link and `fetch('/api/…')` call resolves to a route that exists
+(the check that would have caught the notification 404). Two empty catch blocks
+in the whole tree, both in settings. No other place computes a COD fee inline.
+
+### Open — needs you, deliberately not done tonight
+
+**`order-documents` bucket is probably public** (SECURITY_AUDIT item 5, still
+⬜). Signed delivery logs and register receipts readable by anyone with the URL.
+Can't be verified from the repo — Supabase dashboard → Storage. The fix is signed
+URLs across three call sites and it risks breaking a working billing flow, so it
+is explicitly a post-launch job.
+
+**HSTS.** Left commented in `next.config.js` with the reasoning. Browsers cache
+it for a year and it cannot be withdrawn server-side; it goes in on a deploy
+someone is watching, ideally without `includeSubDomains` until `shop.*`,
+`order.*` and `send.*` are all confirmed HTTPS-only.
+
+**`tsconfig.json` has `"strict": false`.** That is why nothing catches type
+errors before deploy, and it is the single biggest reason a build is the first
+place a mistake shows up. Turning it on now would surface a large backlog at
+once — a post-launch project, not a launch-week one.
+
+**A Content-Security-Policy** — half a day, needs a nonce-based setup for Next's
+inline scripts. Post-launch.
+
+### Loose files to delete
+
+- `src/app/shop/icon-1.png` — a stray from the manual favicon drop. Next only
+  recognises `icon.png` / `icon<N>.png`, so it is inert, but it looks like a
+  second favicon to anyone reading the folder.
+- ~20 `.fuse_hidden*` files under `src/app/admin/**` (~1 MB) — orphans from a
+  crashed editor mount. Already gitignored, so they are local clutter only.
+
+### Cosmetic, your call
+
+The order form lists each person's COD total **before** the handling fee, with
+the fee as its own line. The email and PDF list each person **including** their
+share of the fee. Both are internally consistent and both add up; they just
+answer the question differently. Worth aligning if a customer ever asks why the
+numbers moved between the form and the confirmation.
+
+## Repeat-buyer checkout — Sept 10 overnight, UNVERIFIED
+
+⚠️ **Written while nobody was awake to test it. Nothing here has been compiled.**
+It is all additive and every piece degrades to the previous behaviour, but read
+this section before deploying rather than after.
+
+**The measure:** step 2 had **12 required fields**. For someone repeating an
+order it is now **2** — arrival date and arrival time.
+
+### 1. Repeat Order restores the header (`app/account/page.tsx`)
+
+It used to copy line items only, so the button whose whole promise is "same as
+last time" still made a captain retype twelve fields that were already
+snapshotted on the order it was repeating.
+
+Three bugs fixed in the same function, one of them financial:
+
+- **`paid_by` was hardcoded to `'vessel'`** — repeating an order silently moved
+  every COD line onto the company invoice, and `cod_name` went with it.
+- **It merged into an existing cart** rather than replacing it. `addToCart()`
+  adds quantities for a product already there, so repeating on top of a cart
+  doubled everything (this is why the test cart read $1,333.22 — twice $668.44).
+  It now asks before replacing.
+- The toast counted the service lines it had just filtered out.
+
+Arrival date, time, secondary location, crew change and notes are deliberately
+**cleared**, never restored. A stale date is worse than a blank one: blank is
+caught by validation, plausible-but-old gets submitted and the van meets a boat
+that left last week.
+
+### 2. Per-person COD payment survives (`lib/cart.ts`, both pages)
+
+`grafton_cod_payments` in localStorage, seeded on mount and written on every
+change. A repeat brings back "Amber pays by Venmo, @amber-h" from the order's
+own `extended_info.cod_payments`. Kept out of `VesselInfo` on purpose — that
+describes the BOAT, this describes particular people and has to go stale when
+the names on the COD lines change. An older order with no per-person record
+clears the map rather than leaving the last crew's details showing.
+
+### 3. Step 2 collapses to a recap when the boat is already known
+
+**This is deliberately NOT the "skip to Confirm" that was asked for.** Landing
+on step 3 means the step-2 fields are never rendered, and the validation that
+protects them runs against state the person never saw. That is a bad thing to
+ship unverified. The collapse gets the same result — one screen, two fields —
+with no change to validation at all: Company and Vessel become a one-line recap
+with an Edit link, and **any error at all forces everything back open.**
+
+If you want the true skip-to-confirm afterwards, it is a smaller change on top
+of this, and it should be built with a build you can run.
+
+### 4 + 5. Vessel chips and terminal typeahead
+
+New endpoint `GET /api/customer/order-defaults` returns the distinct boats and
+terminals from the caller's own past orders.
+
+**No `vessels` table, and that is a decision, not a shortcut.** Every order
+already snapshots its full header, so that snapshot IS the record of "this boat,
+last time" — correct by construction, written for free on every order. A
+separate table would be a second copy of the same facts with a sync problem
+attached: edit the boat, past orders keep the old values, and nothing says which
+wins. A real table earns its place the day a vessel must be editable without
+placing an order, or shared between two people at one company.
+
+- Scoped to `user_id` from a verified bearer token, never to an email or a
+  company name — captains' mobiles and vessel emails must not be enumerable.
+- Any failure returns empty rather than erroring: a guest, an expired session
+  and a 500 all leave the form exactly as it was.
+- The terminal field is a native `<datalist>`, not a custom combobox. It stays
+  a plain text input, so a brand-new terminal is typed as before and there is
+  no popup to misbehave on a phone with one bar.
+
+### What to test first, in order
+
+1. Repeat an order **with COD lines** — check the COD lines are still COD, still
+   attributed to the right person, and the payment method came back.
+2. Repeat onto a **non-empty cart** — confirm the replace prompt, and that
+   declining leaves the cart untouched.
+3. Repeat, then check step 2 shows the recap and only asks for date and time.
+4. Order **as a guest** (signed out) — confirm no chips, no typeahead, and the
+   form behaves precisely as it did before.
+5. A boat with a **custom vessel type** — confirm it comes back as Other plus
+   the free-text value rather than an empty select.
 
 ## Decisions worth not relitigating
 

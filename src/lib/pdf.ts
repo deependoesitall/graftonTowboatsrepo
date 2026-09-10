@@ -2,7 +2,7 @@
 // Generates a clean, branded, print-ready HTML order sheet for Sinclair Foods
 import { Order } from '@/types';
 import { formatCurrency, formatDate } from './utils';
-import { codFeePercent, codFeeLabel, codTotalWithFee, codPersonTotal } from '@/lib/cod-fee';
+import { codFeePercent, codFeeLabel, codTotalWithFee, allocateCodTotals } from '@/lib/cod-fee';
 import { readCodPayments, codMethodSentence } from '@/lib/cod-payments';
 
 export function generateOrderHTML(order: Order): string {
@@ -38,6 +38,10 @@ export function generateOrderHTML(order: Order): string {
   // from. Leaving them off it is how a debt goes uncollected.
   const codLinkedOnly = codPayments.filter(p =>
     p.linked_items > 0 && !codByName.some(([name]) => name === p.name));
+  // Cent-exact: the rows are guaranteed to sum to the header total.
+  const codShares = allocateCodTotals(order, codByName.map(([name, list]) => ({
+    name, subtotal: list.reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0),
+  })), codSubtotal);
 
   const codMethodLabel = order.cod_payment_method === 'credit_card' ? 'Credit Card — call to collect'
     : order.cod_payment_method === 'venmo' ? 'Venmo — send a payment request'
@@ -283,7 +287,7 @@ ${(codItems.length > 0 || codLinkedOnly.length > 0) ? `
       const personTotal = list.reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0);
       const pay = codPayByName.get(name);
       return `<div style="margin-bottom:5px;">
-        <div style="font-weight:800;color:#6b21a8;">${name} &mdash; ${formatCurrency(codPersonTotal(order, personTotal, codSubtotal, codByName.length))}${codFeePct > 0 ? ' <span style="font-weight:400;">incl. fee</span>' : ''}${
+        <div style="font-weight:800;color:#6b21a8;">${name} &mdash; ${formatCurrency(codShares.get(name) ?? personTotal)}${codFeePct > 0 ? ' <span style="font-weight:400;">incl. fee</span>' : ''}${
           pay && pay.linked_items > 0 ? ` <span style="font-weight:400;">+ ${pay.linked_items === 1 ? 'linked item' : `${pay.linked_items} linked items`}</span>` : ''
         }</div>
         ${list.map(i => `<div style="padding-left:12px;font-size:11px;color:#444;">${i.quantity}&times; ${i.description} &middot; ${formatCurrency(i.actual_total ?? i.line_total)}</div>`).join('')}

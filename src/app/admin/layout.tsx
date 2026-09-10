@@ -16,14 +16,27 @@ export const metadata = {
   // the catalog are unaffected: they never see an /admin page, so they never
   // see this manifest.
   manifest: '/admin.webmanifest',
-  // iOS ignores the manifest's icons for the Home Screen and uses this.
+  // ⚠️ `icon` MUST BE LISTED HERE, NOT LEFT TO app/icon.png.
   //
-  // Deliberately NOT /branding/gts-logo.png. That file is the marketing site's
-  // header logo and the `logo` in the LocalBusiness JSON-LD Google reads —
-  // replacing it with an app-icon crop would change the website header and the
-  // logo Google shows for the business. An app icon and a site logo want
-  // different artwork, so they get different files.
-  icons: { apple: '/branding/admin-icon.png' },
+  // Declaring `icons` in a segment REPLACES the icon set that segment would
+  // otherwise inherit. This said `{ apple: … }` and nothing else, so every page
+  // under /admin emitted an apple-touch-icon and NO <link rel="icon"> — the
+  // admin panel and its install page showed the browser's generic globe.
+  //
+  // Referenced from /public rather than the app-dir convention because Next
+  // serves convention icons at a hashed URL that cannot be named here.
+  icons: {
+    icon: '/branding/favicon-gts.png',
+    shortcut: '/branding/favicon-gts.png',
+    // iOS ignores the manifest's icons for the Home Screen and uses this.
+    //
+    // Deliberately NOT /branding/gts-logo.png. That file is the marketing
+    // site's header logo and the `logo` in the LocalBusiness JSON-LD Google
+    // reads — replacing it with an app-icon crop would change the website
+    // header and the logo Google shows for the business. An app icon and a
+    // site logo want different artwork, so they get different files.
+    apple: '/branding/admin-icon.png',
+  },
 };
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {

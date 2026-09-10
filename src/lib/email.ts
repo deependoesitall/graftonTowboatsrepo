@@ -3,7 +3,7 @@ import { Resend } from 'resend';
 import { Order } from '@/types';
 import { formatCurrency, formatDate } from './utils';
 import { generateOrderPdfBuffer } from './pdf-attachment';
-import { codFeePercent, codFeeLabel, codTotalWithFee, codPersonTotal } from '@/lib/cod-fee';
+import { codFeePercent, codFeeLabel, codTotalWithFee, allocateCodTotals } from '@/lib/cod-fee';
 import { readCodPayments, codMethodSentence } from '@/lib/cod-payments';
 
 // Lazily construct the Resend client so importing this module (e.g. during
@@ -226,6 +226,10 @@ export function buildOrderEmailHtml(
   // person collecting payment at the dock.
   const codLinkedOnly = codPayments.filter(p =>
     p.linked_items > 0 && !codByName.some(([name]) => name === p.name));
+  // Cent-exact: the rows are guaranteed to sum to the header total.
+  const codShares = allocateCodTotals(order, codByName.map(([name, list]) => ({
+    name, subtotal: list.reduce((s, i) => s + Number(i.line_total), 0),
+  })), codSubtotal);
 
   const codMethodLabel = order.cod_payment_method === 'credit_card' ? 'Credit Card — we’ll call to collect'
     : order.cod_payment_method === 'venmo' ? 'Venmo — we’ll send a payment request'
@@ -372,7 +376,7 @@ export function buildOrderEmailHtml(
         const personTotal = list.reduce((s, i) => s + Number(i.line_total), 0);
         const pay = codPayByName.get(name);
         return `<div style="margin-bottom:6px;">
-          <div style="font-size:12px;font-weight:800;color:#6b21a8;">${name} — ${formatCurrency(codPersonTotal(order, personTotal, codSubtotal, codByName.length))}${codFeePct > 0 ? ' <span style="font-weight:400;color:#9d7bd8;">incl. fee</span>' : ''}${
+          <div style="font-size:12px;font-weight:800;color:#6b21a8;">${name} — ${formatCurrency(codShares.get(name) ?? personTotal)}${codFeePct > 0 ? ' <span style="font-weight:400;color:#9d7bd8;">incl. fee</span>' : ''}${
             pay && pay.linked_items > 0 ? ` <span style="font-weight:400;color:#9d7bd8;">+ ${pay.linked_items === 1 ? 'linked item' : `${pay.linked_items} linked items`}</span>` : ''
           }</div>
           ${list.map(i => `<div style="font-size:11px;color:#444;padding-left:10px;">${i.quantity}× ${i.description} · ${formatCurrency(Number(i.line_total))}</div>`).join('')}
