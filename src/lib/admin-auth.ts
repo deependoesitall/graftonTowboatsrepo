@@ -2,12 +2,11 @@
 //
 // Client-side admin auth helpers.
 //
-// SESSION MODEL: on login, the server returns a signed JWT, which is
-// stored in sessionStorage. sessionStorage is automatically cleared
-// when the tab/window is closed, giving simple "logged in until the
-// tab is closed" behavior — refreshing the page keeps you logged in
-// (sessionStorage survives reloads), but closing the tab requires
-// logging in again.
+// SESSION MODEL:
+//   • Stay signed in OFF (default was die-on-close): JWT in sessionStorage —
+//     survives refresh, cleared when the tab/PWA is closed.
+//   • Stay signed in ON (checkbox default): JWT in localStorage + httpOnly
+//     cookie on the server (30d). Closing the phone app keeps you signed in.
 //
 // The token is sent on every admin API call as
 // `Authorization: Bearer <jwt>`. The server independently verifies the
@@ -44,34 +43,42 @@ const ADMIN_ROLE_KEY = 'grafton_admin_role';
 const ADMIN_NAME_KEY = 'grafton_admin_name';
 const ADMIN_USERNAME_KEY = 'grafton_admin_username';
 const ADMIN_PERMISSIONS_KEY = 'grafton_admin_permissions';
+const ADMIN_REMEMBER_KEY = 'grafton_admin_remember';
 
-/** Read the stored admin JWT, or null if not logged in (or tab was closed/reopened). */
-export function getAdminToken(): string | null {
+function readKey(key: string): string | null {
   if (typeof window === 'undefined') return null;
-  return sessionStorage.getItem(ADMIN_TOKEN_KEY);
+  // Prefer localStorage (remembered), then sessionStorage (this tab only).
+  return localStorage.getItem(key) ?? sessionStorage.getItem(key);
+}
+
+/** Which store currently holds the session — for in-place UI hint updates. */
+function activeStore(): Storage {
+  if (localStorage.getItem(ADMIN_TOKEN_KEY)) return localStorage;
+  return sessionStorage;
+}
+
+/** Read the stored admin JWT, or null if not logged in. */
+export function getAdminToken(): string | null {
+  return readKey(ADMIN_TOKEN_KEY);
 }
 
 export function getAdminRole(): AdminRole | null {
-  if (typeof window === 'undefined') return null;
-  const r = sessionStorage.getItem(ADMIN_ROLE_KEY);
+  const r = readKey(ADMIN_ROLE_KEY);
   if (r === 'owner' || r === 'gts_manager' || r === 'manager' || r === 'staff') return r;
   return null;
 }
 
 export function getAdminName(): string {
-  if (typeof window === 'undefined') return '';
-  return sessionStorage.getItem(ADMIN_NAME_KEY) || '';
+  return readKey(ADMIN_NAME_KEY) || '';
 }
 
 export function getAdminUsername(): string {
-  if (typeof window === 'undefined') return '';
-  return sessionStorage.getItem(ADMIN_USERNAME_KEY) || '';
+  return readKey(ADMIN_USERNAME_KEY) || '';
 }
 
 export function getAdminPermissions(): AdminPermission[] {
-  if (typeof window === 'undefined') return [];
   try {
-    return JSON.parse(sessionStorage.getItem(ADMIN_PERMISSIONS_KEY) || '[]');
+    return JSON.parse(readKey(ADMIN_PERMISSIONS_KEY) || '[]');
   } catch { return []; }
 }
 
@@ -79,28 +86,47 @@ export function hasAdminPermission(permission: AdminPermission): boolean {
   return getAdminPermissions().includes(permission);
 }
 
-/** Store the JWT and non-secret UI hints after a successful login. */
-export function setAdminSession(token: string, role: AdminRole, displayName: string, username?: string, permissions?: AdminPermission[]) {
-  sessionStorage.setItem(ADMIN_TOKEN_KEY, token);
-  sessionStorage.setItem(ADMIN_ROLE_KEY, role);
-  sessionStorage.setItem(ADMIN_NAME_KEY, displayName);
-  sessionStorage.setItem(ADMIN_USERNAME_KEY, username || 'admin');
-  sessionStorage.setItem(ADMIN_PERMISSIONS_KEY, JSON.stringify(permissions ?? []));
+/**
+ * Store the JWT and non-secret UI hints after a successful login.
+ * `remember` true → localStorage (survives close); false → sessionStorage only.
+ */
+export function setAdminSession(
+  token: string,
+  role: AdminRole,
+  displayName: string,
+  username?: string,
+  permissions?: AdminPermission[],
+  remember: boolean = true,
+) {
+  // Avoid leaving a stale copy in the other store.
+  clearAdminUiState();
+  const store = remember ? localStorage : sessionStorage;
+  store.setItem(ADMIN_TOKEN_KEY, token);
+  store.setItem(ADMIN_ROLE_KEY, role);
+  store.setItem(ADMIN_NAME_KEY, displayName);
+  store.setItem(ADMIN_USERNAME_KEY, username || 'admin');
+  store.setItem(ADMIN_PERMISSIONS_KEY, JSON.stringify(permissions ?? []));
+  if (remember) localStorage.setItem(ADMIN_REMEMBER_KEY, '1');
 }
 
 /** @deprecated kept for backwards compatibility — use setAdminSession */
 export function setAdminUiState(role: AdminRole, displayName: string, username?: string) {
-  sessionStorage.setItem(ADMIN_ROLE_KEY, role);
-  sessionStorage.setItem(ADMIN_NAME_KEY, displayName);
-  sessionStorage.setItem(ADMIN_USERNAME_KEY, username || 'admin');
+  const store = activeStore();
+  store.setItem(ADMIN_ROLE_KEY, role);
+  store.setItem(ADMIN_NAME_KEY, displayName);
+  store.setItem(ADMIN_USERNAME_KEY, username || 'admin');
 }
 
 export function clearAdminUiState() {
-  sessionStorage.removeItem(ADMIN_TOKEN_KEY);
-  sessionStorage.removeItem(ADMIN_ROLE_KEY);
-  sessionStorage.removeItem(ADMIN_NAME_KEY);
-  sessionStorage.removeItem(ADMIN_USERNAME_KEY);
-  sessionStorage.removeItem(ADMIN_PERMISSIONS_KEY);
+  if (typeof window === 'undefined') return;
+  for (const store of [sessionStorage, localStorage]) {
+    store.removeItem(ADMIN_TOKEN_KEY);
+    store.removeItem(ADMIN_ROLE_KEY);
+    store.removeItem(ADMIN_NAME_KEY);
+    store.removeItem(ADMIN_USERNAME_KEY);
+    store.removeItem(ADMIN_PERMISSIONS_KEY);
+  }
+  localStorage.removeItem(ADMIN_REMEMBER_KEY);
 }
 
 // Permission matrix — for UI show/hide only. The server enforces its own
@@ -151,7 +177,7 @@ export function adminFetch(input: RequestInfo | URL, init?: RequestInit): Promis
   });
 }
 
-/** Log out: clear the token from sessionStorage. */
+/** Log out: clear cookie + every client store. */
 export async function logoutAdmin(): Promise<void> {
   try {
     await fetch('/api/admin/logout', { method: 'POST', credentials: 'include' });
@@ -161,24 +187,43 @@ export async function logoutAdmin(): Promise<void> {
 }
 
 /**
- * Check whether a valid admin session exists for this tab. If so, caches
- * the role/display info for UI use and returns it; otherwise returns
- * null and clears any stale local state.
+ * Check whether a valid admin session exists. If so, caches the role/display
+ * info for UI use and returns it; otherwise returns null and clears any stale
+ * local state.
+ *
+ * Tries Bearer from storage first; if storage is empty, still probes `/me`
+ * with credentials so a remembered httpOnly cookie can rehydrate the UI.
  */
 export async function fetchAdminSession(): Promise<{ role: AdminRole; display_name: string; username: string; permissions: AdminPermission[] } | null> {
   const token = getAdminToken();
-  if (!token) {
-    clearAdminUiState();
-    return null;
-  }
 
-  const res = await adminFetch('/api/admin/me');
+  const res = await fetch('/api/admin/me', {
+    credentials: 'include',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+
   if (!res.ok) {
     clearAdminUiState();
     return null;
   }
+
   const data = await res.json();
-  setAdminUiState(data.role, data.display_name, data.username);
-  sessionStorage.setItem(ADMIN_PERMISSIONS_KEY, JSON.stringify(data.permissions ?? []));
-  return { ...data, permissions: data.permissions ?? [] };
+  const permissions: AdminPermission[] = data.permissions ?? [];
+
+  // Cookie-only recovery (storage empty but cookie still valid): keep UI hints
+  // in localStorage so the next paint has a role without forcing a re-login.
+  // Bearer stays absent until the next full login — adminFetch still sends
+  // credentials:'include', and the server accepts the cookie.
+  if (!token) {
+    localStorage.setItem(ADMIN_ROLE_KEY, data.role);
+    localStorage.setItem(ADMIN_NAME_KEY, data.display_name);
+    localStorage.setItem(ADMIN_USERNAME_KEY, data.username);
+    localStorage.setItem(ADMIN_PERMISSIONS_KEY, JSON.stringify(permissions));
+    localStorage.setItem(ADMIN_REMEMBER_KEY, '1');
+  } else {
+    setAdminUiState(data.role, data.display_name, data.username);
+    activeStore().setItem(ADMIN_PERMISSIONS_KEY, JSON.stringify(permissions));
+  }
+
+  return { ...data, permissions };
 }
