@@ -15,7 +15,7 @@
 import ShopGate from '@/components/shop/ShopGate';
 
 export const metadata = {
-  title: "Sinclair's Shop — Grafton Towboat",
+  title: "GTS - Sinclair's",
   robots: 'noindex',
   manifest: '/shop.webmanifest',
   // iOS uses this, not the manifest icons, for the Home Screen.
@@ -26,7 +26,8 @@ export const metadata = {
   icons: { apple: '/branding/shop-icon.png' },
   appleWebApp: {
     capable: true,
-    title: "Sinclair's",
+    // This is the label that appears under the Home Screen icon on iOS.
+    title: "GTS - Sinclair's",
     statusBarStyle: 'black-translucent' as const,
   },
 };

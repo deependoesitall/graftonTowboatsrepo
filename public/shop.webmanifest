@@ -1,13 +1,13 @@
 {
   "id": "/shop",
-  "name": "Sinclair's Shop",
-  "short_name": "Sinclair's",
+  "name": "GTS - Sinclair's",
+  "short_name": "GTS - Sinclair's",
   "description": "Pick and pack Grafton Towboat grocery orders",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#1B4332",
-  "theme_color": "#1B4332",
+  "background_color": "#0F2419",
+  "theme_color": "#0F2419",
   "orientation": "portrait-primary",
   "icons": [
     {
