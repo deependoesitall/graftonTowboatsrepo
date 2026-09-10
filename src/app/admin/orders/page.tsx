@@ -8,6 +8,7 @@ import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { formatCurrency, formatDate, ORDER_STATUSES } from '@/lib/utils';
 import { Order, OrderStatus } from '@/types';
 import { OrderDetailModal } from '@/components/admin/OrderDetailModal';
+import { ShoppingModeModal } from '@/components/admin/ShoppingModeModal';
 import { fetchAdminSession, getAdminRole, canEdit, adminFetch, hasAdminPermission, isGtsRole } from '@/lib/admin-auth';
 
 const STATUS_CONFIG = {
@@ -58,6 +59,7 @@ function OrdersContent() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [deepLinkShop, setDeepLinkShop] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
   // Role-gated UI is resolved AFTER mount — reading localStorage during render
@@ -129,10 +131,15 @@ function OrdersContent() {
   const [deepLinkDone, setDeepLinkDone] = useState(false);
   useEffect(() => {
     if (deepLinkDone || orders.length === 0) return;
-    const wanted = new URLSearchParams(window.location.search).get('order');
+    const params = new URLSearchParams(window.location.search);
+    const wanted = params.get('order');
+    const wantShop = params.get('shop') === '1';
     if (!wanted) { setDeepLinkDone(true); return; }
     const match = orders.find(o => o.id === wanted);
-    if (match) setSelectedOrder(match);
+    if (match) {
+      setSelectedOrder(match);
+      if (wantShop) setDeepLinkShop(true);
+    }
     setDeepLinkDone(true);
     window.history.replaceState({}, '', '/admin/orders');
   }, [orders, deepLinkDone]);
@@ -517,11 +524,18 @@ function OrdersContent() {
           />
         )}
 
-        {/* Order detail modal */}
-        {selectedOrder && (
+        {/* Order detail / shopping-mode modal (Sinclair push deep-link uses shop=1) */}
+        {selectedOrder && deepLinkShop && (
+          <ShoppingModeModal
+            order={selectedOrder}
+            onClose={() => { setSelectedOrder(null); setDeepLinkShop(false); fetchOrders(); }}
+            onComplete={() => { setSelectedOrder(null); setDeepLinkShop(false); fetchOrders(); }}
+          />
+        )}
+        {selectedOrder && !deepLinkShop && (
           <OrderDetailModal
             order={selectedOrder}
-            onClose={() => setSelectedOrder(null)}
+            onClose={() => { setSelectedOrder(null); setDeepLinkShop(false); }}
             onStatusChange={(status) => updateStatus(selectedOrder.id, status)}
             onDownloadPdf={() => downloadOrderPdf(selectedOrder.id, selectedOrder.order_number)}
             onRefresh={fetchOrders}
