@@ -1,7 +1,28 @@
-// middleware.ts — refresh Supabase session cookies on every page request.
-// Uses getSession() (not getUser()) to avoid making a server-side network call
-// on every request — getUser() was causing excessive auth API calls and rate-limit
-// errors (429) that triggered spurious SIGNED_OUT events in the browser SDK.
+// src/middleware.ts
+//
+// ⚠️ THIS FILE MUST LIVE IN src/, NOT THE REPO ROOT. DO NOT MOVE IT.
+//
+// This project keeps its app under src/app. When a Next.js project uses a src
+// directory, middleware must sit inside src/ alongside app/. A middleware.ts at
+// the repo root is SILENTLY IGNORED — no warning at build time, no error in the
+// logs, no hint in the Vercel dashboard. The build succeeds and the file simply
+// never executes.
+//
+// It lived at the root until Sept 2026 and had never run in production. Two
+// things were quietly broken the whole time and neither announced itself:
+//
+//   1. The shop.* → /shop rewrite below did nothing, so the Sinclair's app
+//      404'd while the domain, DNS and deploy all looked correct.
+//   2. The Supabase session refresh underneath never ran either — which is a
+//      slow, invisible failure: sessions expire earlier than they should and
+//      the symptom is a user "randomly getting logged out".
+//
+// (2) predates the shop work and is the more valuable half of this fix.
+//
+// If you ever see middleware behaviour vanish after a refactor, check this
+// file's path first. It is the one Next.js convention that fails without
+// telling you.
+
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
@@ -82,8 +103,9 @@ export async function middleware(request: NextRequest) {
   );
 
   // getSession() reads from cookies and only calls Supabase if the token needs
-  // refreshing (i.e. it's expired). This is much cheaper than getUser() which
-  // makes a server-side validation call on every single request.
+  // refreshing (i.e. it's expired). This is much cheaper than getUser(), which
+  // makes a server-side validation call on every single request and was causing
+  // 429s and spurious SIGNED_OUT events in the browser SDK.
   await supabase.auth.getSession();
 
   return response;
