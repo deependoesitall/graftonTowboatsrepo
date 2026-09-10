@@ -36,7 +36,9 @@ export function LocalBusinessSchema() {
     telephone: BUSINESS.phone,
     email: BUSINESS.email,
     description:
-      "Family-owned marine delivery at Grafton, Illinois. Groceries from Sinclair's Foods, towboat supplies and crew change transport, delivered to vessels on the Mississippi and Illinois rivers.",
+      // Matches HOME.lede in src/app/site/content.ts — this is what Google
+      // shows, so it must not drift from the page it describes.
+      "Family-owned, at Grafton, Illinois. Groceries from Sinclair's Foods, towboat supplies and crew change transport, brought out to vessels on the Mississippi and Illinois rivers.",
     image: `${SITE}/branding/gts-logo.png`,
     logo: `${SITE}/branding/gts-logo.png`,
     address: {

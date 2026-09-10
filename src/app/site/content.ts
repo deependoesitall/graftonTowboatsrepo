@@ -226,7 +226,7 @@ export const HOME = {
   meta: {
     title: 'Grafton Towboat Services | Marine Grocery & Supply Delivery',
     description:
-      "Family-owned marine delivery at Grafton, Illinois - Mile Marker 219. Groceries from Sinclair's Foods, towboat supplies and crew change, delivered to your vessel.",
+      "Family-owned, at Grafton, Illinois - Mile Marker 219. Groceries from Sinclair's Foods, towboat supplies and crew change, brought out to your vessel.",
   },
   heroLines: ['Groceries, Supplies', '& Crew Change', 'When You Need It.'],
   lede:
@@ -234,7 +234,20 @@ export const HOME = {
     // Sinclair's staff pull the groceries, and off-catalog items get fetched by
     // whoever is best placed that day. See the long note on step 02 in
     // page.tsx for why this copy deliberately doesn't say who does the work.
-    "Family-owned marine delivery at the Grafton harbor, where the Illinois meets the Mississippi. Groceries from Sinclair's, and anything else you need tracked down — brought to your vessel by boat or refrigerated van.",
+    //
+    // TWO THINGS WERE WRONG HERE (Sept 2026) AND BOTH MATTERED.
+    //
+    // "at the Grafton harbor" — GTS is at 25 Dagget Hollow, Grafton. Grafton
+    // Harbor is a DIFFERENT BUSINESS, the marina GTS relays VHF Channel 68
+    // through. Putting the company "at" it misplaced GTS and implied a
+    // relationship that isn't there, to an audience that knows the difference.
+    // The Channel 68 references elsewhere are correct and stay — "via Grafton
+    // Harbor" is a relay, not an address.
+    //
+    // "marine delivery" — nobody on the river calls it that. Captains say
+    // groceries, supplies, crew change. Trade jargon in the first sentence of
+    // a family business reads like a directory listing wrote it.
+    "Family-owned, at the confluence of the Illinois and the Mississippi in Grafton, Illinois. Groceries from Sinclair's, and anything else you need tracked down — brought out to your vessel by boat or refrigerated van.",
   fineprint: 'No login required · Instant confirmation · 24/7 support',
   /** Jen's approved wording. Name prominent, NO Sinclair's logo (Dave's ask). */
   sinclairs: {
@@ -248,7 +261,7 @@ export const ABOUT = {
   meta: {
     title: 'Family-Owned Marine Services in Grafton, Illinois',
     description:
-      'A family-owned marine delivery business at the confluence of the Mississippi and Illinois rivers, serving towboat crews with groceries, supplies and transport.',
+      'A family-owned business at the confluence of the Mississippi and Illinois rivers, serving towboat crews with groceries, supplies and crew transport.',
   },
   headingLines: ['Small Town and', 'Family Owned'],
   paragraphs: [
