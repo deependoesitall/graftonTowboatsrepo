@@ -29,10 +29,16 @@ self.addEventListener('push', event => {
   }
 
   const title = d.title || 'New order';
+  const url = d.url || '/admin/orders';
+  // GTS deep-links under /admin; Sinclair's shop queue is `/` on the shop origin.
+  const isAdmin = typeof url === 'string' && url.includes('/admin');
+
   const options = {
     body: d.body || '',
     icon: '/branding/gts-logo.png',
-    badge: '/branding/gts-logo.png',
+    // Dedicated badge asset (already in /branding) — clearer at status-bar size
+    // than the full lockup logo.
+    badge: '/branding/gts-badge.png',
     // Collapses repeats of the same order into one notification instead of
     // stacking duplicates if the send is retried.
     //
@@ -47,7 +53,11 @@ self.addEventListener('push', event => {
     // Orders are why this exists — buzz rather than arrive silently.
     renotify: true,
     requireInteraction: false,
-    data: { url: d.url || '/admin/orders' },
+    data: { url },
+    // One clear action per audience. Unsupported platforms ignore this.
+    actions: isAdmin
+      ? [{ action: 'open', title: 'Open order' }]
+      : [{ action: 'shop', title: 'Start shopping' }],
   };
 
   event.waitUntil(self.registration.showNotification(title, options));
@@ -55,6 +65,7 @@ self.addEventListener('push', event => {
 
 self.addEventListener('notificationclick', event => {
   event.notification.close();
+  // Body tap and action buttons all open the same deep link from the payload.
   const raw = (event.notification.data && event.notification.data.url) || '/admin/orders';
   // Absolute, against THIS worker's origin. The same file is served from both
   // hosts, so a relative path resolves to the right app on its own — the GTS
