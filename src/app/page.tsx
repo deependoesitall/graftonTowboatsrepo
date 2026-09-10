@@ -24,8 +24,9 @@
 // hero where it does some good.
 
 import type { Metadata } from 'next';
-import { ShoppingCart, Phone, ChevronRight, Truck, Radio } from 'lucide-react';
+import { ShoppingCart, Phone, ChevronRight, Radio } from 'lucide-react';
 import { SiteShell, Photo, CtaBand } from '@/components/site/SiteChrome';
+import PartnerLockup from '@/components/site/PartnerLockup';
 import { HOME, SERVICES, CTA, BUSINESS, IMAGES } from '@/app/site/content';
 
 export const metadata: Metadata = {
@@ -89,13 +90,22 @@ export default function MarketingHome() {
           the groceries come from a real grocery store. This answers the second.
           Name prominent, NO Sinclair's logo (Dave's boundary). */}
       <section className="max-w-6xl mx-auto px-5 pb-14">
-        <div className="bg-brand-green rounded-2xl px-7 py-6 flex flex-col sm:flex-row items-center gap-5 shadow-lg">
-          <div className="w-12 h-12 rounded-full bg-brand-yellow/20 flex items-center justify-center shrink-0">
-            <Truck className="w-6 h-6 text-brand-yellow" aria-hidden="true" />
-          </div>
-          <p className="text-white font-body text-center sm:text-left leading-snug">
-            <span className="font-bold text-lg block sm:inline">{HOME.sinclairs.lead}</span>{' '}
-            <span className="text-brand-yellow/85">{HOME.sinclairs.rest}</span>
+        <div className="bg-brand-green rounded-2xl px-7 py-9 shadow-lg">
+          {/* THE LOGO REPLACES THE WORDS "Sinclair's Foods".
+              Dave's boundary was never the mark itself — it was anything
+              implying Sinclair's does the delivery (clarified Sept 2026). So
+              the lockup states the sourcing visually and the caption underneath
+              states who delivers, in words. See PartnerLockup for the full note.
+
+              It also simply works harder: a real grocery store's logo is
+              evidence, where "partnered with a local grocer" is a claim. */}
+          <PartnerLockup
+            tone="dark"
+            size="lg"
+            caption="Groceries from Sinclair's Foods — ordered and delivered by Grafton Towboat Services."
+          />
+          <p className="text-brand-yellow/60 font-body text-center text-sm mt-2.5 max-w-md mx-auto leading-snug">
+            Cold and frozen goods ride refrigerated the whole way.
           </p>
         </div>
       </section>

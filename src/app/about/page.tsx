@@ -14,6 +14,7 @@
 import type { Metadata } from 'next';
 import { Anchor, Clock, MapPin, Radio } from 'lucide-react';
 import { SiteShell, Photo, SistersPortrait, CtaBand } from '@/components/site/SiteChrome';
+import PartnerLockup from '@/components/site/PartnerLockup';
 import { ABOUT, CTA, BUSINESS, IMAGES } from '@/app/site/content';
 
 export const metadata: Metadata = {
@@ -89,18 +90,18 @@ export default function AboutPage() {
           groceries come from a real grocery store. The page above makes the
           first case; this makes the second. Name prominent, no logo. */}
       <section className="max-w-6xl mx-auto px-5 pb-16">
-        <div className="bg-brand-green rounded-2xl px-7 py-7 text-center">
-          <p className="text-white font-body leading-snug max-w-2xl mx-auto">
-            <span className="font-bold text-lg block mb-1.5">
-              Groceries from Sinclair&apos;s Foods.
-            </span>
-            <span className="text-brand-yellow/85">
-              A family grocery in Jerseyville that&apos;s been feeding this county
-              for decades. Their people pick your order off the same shelves
-              they stock.
-            </span>
+        <div className="bg-brand-green rounded-2xl px-7 py-9 text-center">
+          {/* Same lockup as the home page — one component, so the partnership
+              never drifts into two different treatments. Caption is null here
+              because the paragraph below already says who does what, and
+              repeating it would read as a disclaimer rather than a fact. */}
+          <PartnerLockup tone="dark" size="lg" caption={null} />
+          <p className="text-brand-yellow/85 font-body leading-snug max-w-xl mx-auto mt-5">
+            A family grocery in Jerseyville that&apos;s been feeding this county
+            for decades. Their people pick your order off the same shelves they
+            stock — and we bring it to your boat.
           </p>
-          <p className="text-brand-yellow/55 text-[11px] font-body mt-4 uppercase tracking-widest">
+          <p className="text-brand-yellow/55 text-[11px] font-body mt-5 uppercase tracking-widest">
             {BUSINESS.mileMarkers}
           </p>
         </div>

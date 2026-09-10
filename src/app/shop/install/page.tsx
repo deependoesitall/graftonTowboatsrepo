@@ -20,6 +20,7 @@
 // courtesy heads-up to him regardless; it costs nothing and he asked once.
 
 import { Share, Plus, Bell, Smartphone, Monitor, Check } from 'lucide-react';
+import PartnerLockup from '@/components/site/PartnerLockup';
 
 export const metadata = { title: "Install GTS - Sinclair's", robots: 'noindex' };
 
@@ -68,31 +69,9 @@ export default function ShopInstallPage() {
       {/* ── Hero ─────────────────────────────────────────────────────────── */}
       <header className="px-6 pt-14 pb-10 max-w-lg mx-auto text-center">
 
-        {/* PARTNERSHIP LOCKUP — two marks, equal weight, joined not merged.
-            The white rounded plates keep both logos legible on the dark
-            background without recolouring either one, which is the thing a
-            brand owner actually objects to. */}
-        <div className="flex items-center justify-center gap-4 mb-9">
-          <div className="w-[74px] h-[74px] rounded-2xl bg-white/95 shadow-[0_8px_28px_rgba(0,0,0,0.45)] flex items-center justify-center p-2.5 shrink-0">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/branding/gts-logo.png" alt="Grafton Towboat Services"
-              className="w-full h-full object-contain" />
-          </div>
-
-          <div className="flex flex-col items-center gap-1 px-1" aria-hidden="true">
-            <span className="w-px h-4 bg-white/20" />
-            <span className="text-[9px] font-bold uppercase tracking-[0.18em] text-white/40 whitespace-nowrap">
-              with
-            </span>
-            <span className="w-px h-4 bg-white/20" />
-          </div>
-
-          <div className="w-[74px] h-[74px] rounded-2xl bg-white/95 shadow-[0_8px_28px_rgba(0,0,0,0.45)] flex items-center justify-center p-2.5 shrink-0">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/branding/sinclairs-logo.png" alt="Sinclair's Foods"
-              className="w-full h-full object-contain" />
-          </div>
-        </div>
+        {/* Same lockup as the marketing site. Caption omitted — this page is
+            for Sinclair's own staff, who do not need telling who delivers. */}
+        <PartnerLockup tone="dark" size="lg" caption={null} className="mb-9" />
 
         <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-amber-300/80 mb-3">
           For Sinclair&apos;s staff
