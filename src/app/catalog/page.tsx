@@ -13,7 +13,7 @@ import { StoreScopeToggle } from '@/components/catalog/StoreScopeToggle';
 import { AdditionalServicesTab } from '@/components/catalog/AdditionalServicesTab';
 import { OtherPickupCard } from '@/components/catalog/OtherPickupCard';
 import { fetchSinclairCoupons } from '@/lib/sinclair-coupons';
-import { MAIN_CATEGORIES } from '@/lib/utils';
+import { MAIN_CATEGORIES, formatCalendarDate } from '@/lib/utils';
 
 interface PageProps {
   searchParams: Promise<{
@@ -94,7 +94,7 @@ async function PromoSections() {
                 </span>
                 {c.applies_to === 'category' && c.category && <span> on {c.category}</span>}
                 {c.description && <span className="text-amber-700"> · {c.description}</span>}
-                {c.expires_at && <span className="text-amber-600/70"> · through {new Date(c.expires_at + 'T00:00:00').toLocaleDateString()}</span>}
+                {c.expires_at && <span className="text-amber-600/70"> · through {formatCalendarDate(c.expires_at)}</span>}
               </li>
             ))}
           </ul>

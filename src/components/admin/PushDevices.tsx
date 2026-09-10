@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Smartphone, Monitor, Loader2, Trash2, BellOff } from 'lucide-react';
 import { adminFetch } from '@/lib/admin-auth';
+import { formatDateShort } from '@/lib/utils';
 
 interface Device {
   id: string;
@@ -56,8 +57,7 @@ function describe(ua: string | null): { label: string; mobile: boolean } {
 
 const when = (iso: string | null) => {
   if (!iso) return null;
-  const d = new Date(iso);
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return formatDateShort(iso);
 };
 
 export default function PushDevices() {

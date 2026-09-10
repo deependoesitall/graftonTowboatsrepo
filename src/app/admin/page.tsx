@@ -8,7 +8,7 @@ import {
   ShoppingBag, Lock, Eye, EyeOff, Loader2, ShoppingCart,
   Mail, Send, X, FileText, AlertTriangle, Truck,
 } from 'lucide-react';
-import { formatCurrency } from '@/lib/utils';
+import { formatCurrency, formatDateOnly } from '@/lib/utils';
 import { AdminRole, AdminPermission, setAdminSession, setAdminUiState, fetchAdminSession, adminFetch, isGtsRole, getAdminRole } from '@/lib/admin-auth';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import PushBell from '@/components/admin/PushBell';
@@ -277,7 +277,7 @@ export default function AdminDashboard() {
                         <StatusBadge status={order.status} />
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-400">
-                        {new Date(order.created_at).toLocaleDateString()}
+                        {formatDateOnly(order.created_at)}
                       </td>
                     </tr>
                   ))}

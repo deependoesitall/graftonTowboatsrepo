@@ -6,7 +6,7 @@ import { Save, RefreshCw, Eye, EyeOff, Plus, Trash2, UserPlus, ShieldCheck, User
 import { fetchAdminSession, getAdminRole, canAccess, adminFetch, AdminRole } from '@/lib/admin-auth';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import PushDevices from '@/components/admin/PushDevices';
-import { formatDate } from '@/lib/utils';
+import { formatDate, formatDateOnly, formatTimeOnly, formatCalendarDate } from '@/lib/utils';
 import { DEFAULT_ZONE_ORDER, AISLES_TOKEN } from '@/lib/store-layout';
 
 interface AdminUser {
@@ -546,7 +546,7 @@ export default function AdminSettingsPage() {
                     <div className="text-right shrink-0">
                       <p className="text-xs text-gray-400">{formatDate(log.created_at)}</p>
                       <p className="text-[11px] text-gray-300">
-                        {new Date(log.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                        {formatTimeOnly(log.created_at)}
                       </p>
                     </div>
                     </div>
@@ -1031,7 +1031,7 @@ export default function AdminSettingsPage() {
                         </div>
                         <div>
                           <p className="font-semibold text-brand-navy text-sm">{u.display_name || u.username}</p>
-                          <p className="text-xs text-gray-400">@{u.username} · {u.last_login ? `Last login ${new Date(u.last_login).toLocaleDateString()}` : 'Never logged in'}</p>
+                          <p className="text-xs text-gray-400">@{u.username} · {u.last_login ? `Last login ${formatDateOnly(u.last_login)}` : 'Never logged in'}</p>
                         </div>
                       </div>
                       <div className="flex items-center gap-3 flex-wrap justify-end">
@@ -1471,7 +1471,7 @@ function CouponsManager() {
                   </p>
                   <p className="text-xs text-gray-400 truncate">
                     {c.description || 'No description'}
-                    {c.expires_at && <span> · expires {new Date(c.expires_at + 'T00:00:00').toLocaleDateString()}</span>}
+                    {c.expires_at && <span> · expires {formatCalendarDate(c.expires_at)}</span>}
                     {c.created_by && <span> · by {c.created_by}</span>}
                   </p>
                 </div>

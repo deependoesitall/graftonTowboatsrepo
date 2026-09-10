@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { vesselReportHtml } from '@/lib/vessel-report';
 import { fetchAdminSession, canAccess, adminFetch } from '@/lib/admin-auth';
-import { formatCurrency, formatDate } from '@/lib/utils';
+import { formatCurrency, formatDate, formatDateOnly } from '@/lib/utils';
 
 interface VesselOrderItem {
   product_id: string | null;
@@ -465,7 +465,7 @@ export default function CustomersPage() {
             </div>
           )}
           <span className="ml-auto text-xs text-gray-400">
-            {new Date(range.from).toLocaleDateString()} – {new Date(range.to).toLocaleDateString()}
+            {formatDateOnly(range.from)} – {formatDateOnly(range.to)}
           </span>
         </div>
       </div>

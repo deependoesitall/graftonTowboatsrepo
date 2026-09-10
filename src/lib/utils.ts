@@ -51,6 +51,46 @@ export function formatDate(dateString: string): string {
  *
  * en-CA gives YYYY-MM-DD, which is the one locale format that splits cleanly.
  */
+/** "Sep 9" — a timestamp, short, in Grafton time. */
+export function formatDateShort(dateString: string): string {
+  return new Date(dateString).toLocaleDateString('en-US', {
+    timeZone: TIME_ZONE, month: 'short', day: 'numeric',
+  });
+}
+
+/** "Sep 9, 2026" — a timestamp as a plain date, in Grafton time. */
+export function formatDateOnly(dateString: string): string {
+  return new Date(dateString).toLocaleDateString('en-US', {
+    timeZone: TIME_ZONE, year: 'numeric', month: 'short', day: 'numeric',
+  });
+}
+
+/** "11:19 PM" — a timestamp's clock time, in Grafton time. */
+export function formatTimeOnly(dateString: string): string {
+  return new Date(dateString).toLocaleTimeString('en-US', {
+    timeZone: TIME_ZONE, hour: 'numeric', minute: '2-digit',
+  });
+}
+
+/**
+ * A CALENDAR DATE, not an instant. For bare 'YYYY-MM-DD' columns — a coupon's
+ * expiry, an arrival date — where the day IS the value and there is no time.
+ *
+ * ⚠️ Do not pass these through the formatters above. 'YYYY-MM-DD' parses as
+ * UTC midnight, so rendering it in Grafton time lands at 7 PM the DAY BEFORE
+ * and a coupon reads as expiring a day early. Appending 'T00:00:00' instead
+ * makes it midnight in whatever zone the VIEWER is in, which is a different
+ * answer per person. Parsing and formatting both in UTC is the only way a
+ * date with no time attached survives the round trip unchanged.
+ */
+export function formatCalendarDate(ymd: string): string {
+  if (!ymd) return '';
+  const d = new Date(`${ymd.slice(0, 10)}T00:00:00Z`);
+  return d.toLocaleDateString('en-US', {
+    timeZone: 'UTC', year: 'numeric', month: 'short', day: 'numeric',
+  });
+}
+
 export function generateOrderNumber(): string {
   const [year, month, day] = new Intl.DateTimeFormat('en-CA', {
     timeZone: TIME_ZONE,

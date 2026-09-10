@@ -8,7 +8,7 @@ import { Upload, Package, AlertCircle, CheckCircle2, Loader2,
          Download, Trash2, Layers, PackageX, PackageCheck, Filter,
          ImagePlus, Tag, Moon } from 'lucide-react';
 import Image from 'next/image';
-import { formatCurrency, MAIN_CATEGORIES, variantBaseName } from '@/lib/utils';
+import { formatCurrency, MAIN_CATEGORIES, variantBaseName, formatDateShort, formatTimeOnly } from '@/lib/utils';
 import { Product } from '@/types';
 import { useRouter } from 'next/navigation';
 import { fetchAdminSession, canAccess, adminFetch } from '@/lib/admin-auth';
@@ -137,7 +137,7 @@ function CatalogSyncStatus({ isOwner }: { isOwner: boolean }) {
     : status.in_progress
     ? `Syncing — ${status.pages_done}/${status.pages_total} pages · sized at ${status.sized_items.toLocaleString()} store items · ${status.store_items_imported.toLocaleString()} imported so far`
     : status.completed_at
-    ? `Synced ${new Date(status.completed_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} · ${status.products_updated.toLocaleString()} updated · ${status.store_items_imported.toLocaleString()} store items imported (store sized at ${status.sized_items.toLocaleString()})`
+    ? `Synced ${formatDateShort(status.completed_at)}, ${formatTimeOnly(status.completed_at)} · ${status.products_updated.toLocaleString()} updated · ${status.store_items_imported.toLocaleString()} store items imported (store sized at ${status.sized_items.toLocaleString()})`
     : 'Nightly sync runs at 12:05 AM';
 
   const deptDetail = status?.departments?.length
