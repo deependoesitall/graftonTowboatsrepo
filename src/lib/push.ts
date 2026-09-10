@@ -13,6 +13,59 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { formatCurrency } from '@/lib/utils';
 import type { Order } from '@/types';
 
+/** Soft cap so the $amount stays on-screen when the company name is long. */
+const COMPANY_MAX = 40;
+
+function truncateLabel(text: string, max = COMPANY_MAX): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, Math.max(1, max - 1)).trimEnd()}…`;
+}
+
+/**
+ * Scannable flags staff already triage in admin. Empty when nothing noteworthy
+ * — never invent services that aren't on the order.
+ */
+function orderPushSignals(order: Order): string[] {
+  const items = order.items || [];
+  const signals: string[] = [];
+
+  if (items.some(i => i.service_type === 'parts_pickup')) {
+    signals.push('Parts Pickup');
+  }
+
+  const hasPackage = items.some(i => i.service_type === 'package_delivery');
+  const hasOther = items.some(i => i.service_type === 'other_pickup');
+  if (hasPackage || hasOther) {
+    signals.push('Package / Other Delivery');
+  }
+
+  if (order.crew_change === 'yes' || order.crew_change === 'maybe') {
+    signals.push(`Crew Change (${order.crew_change})`);
+  }
+
+  const hasCod =
+    !!order.cod_payment_method ||
+    items.some(i => i.paid_by === 'cod');
+  if (hasCod) signals.push('COD');
+
+  return signals;
+}
+
+/** Money first, then count, then optional signals; company on a second line. */
+function orderPushBody(order: Order, itemCount: number): string {
+  const moneyCount =
+    `${formatCurrency(order.subtotal)} · ${itemCount} item${itemCount === 1 ? '' : 's'}`;
+  const signals = orderPushSignals(order);
+  const head = signals.length
+    ? `${moneyCount} · ${signals.join(' · ')}`
+    : moneyCount;
+
+  if (order.company_name && order.vessel_name) {
+    return `${head}\n${truncateLabel(order.company_name)}`;
+  }
+  return head;
+}
+
 /**
  * VAPID keys identify this server to the push services.
  *
@@ -94,8 +147,7 @@ export async function sendOrderPush(
     .reduce((s, i) => s + i.quantity, 0);
 
   const vessel = order.vessel_name || order.company_name || 'vessel';
-  const line = `${itemCount} item${itemCount === 1 ? '' : 's'} · ${formatCurrency(order.subtotal)}`
-    + (order.company_name && order.vessel_name ? `\n${order.company_name}` : '');
+  const line = orderPushBody(order, itemCount);
 
   /**
    * ONE PAYLOAD PER AUDIENCE — the `url` is origin-relative and the two apps
