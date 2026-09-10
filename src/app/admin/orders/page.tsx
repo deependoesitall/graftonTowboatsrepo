@@ -10,6 +10,7 @@ import { Order, OrderStatus } from '@/types';
 import { OrderDetailModal } from '@/components/admin/OrderDetailModal';
 import { ShoppingModeModal } from '@/components/admin/ShoppingModeModal';
 import { fetchAdminSession, getAdminRole, canEdit, adminFetch, hasAdminPermission, isGtsRole } from '@/lib/admin-auth';
+import PushBell from '@/components/admin/PushBell';
 
 const STATUS_CONFIG = {
   new:         { label: 'New',         bg: 'bg-blue-50',   text: 'text-blue-700',   border: 'border-blue-200',  dot: 'bg-blue-500',  edge: 'border-l-blue-500'  },
@@ -231,6 +232,19 @@ function OrdersContent() {
             <RefreshCw className="w-4 h-4" /> Refresh
           </button>
         </div>
+
+        {/* ⚠️ ORDER ALERTS HAVE TO BE REACHABLE FROM HERE.
+            Sinclair's sessions are redirected to /admin/orders the moment they
+            sign in and never load the dashboard, so the one place that offered
+            "Notify me of new orders" was unreachable for the only people whose
+            job depends on hearing about an order. GTS roles still get it on the
+            dashboard, where it belongs; this is the same control, shown to the
+            people who can't get there. */}
+        {isSinclair && (
+          <div className="mb-6">
+            <PushBell />
+          </div>
+        )}
 
         {/* Pipeline status tabs */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">

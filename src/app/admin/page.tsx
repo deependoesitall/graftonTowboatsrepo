@@ -196,7 +196,7 @@ export default function AdminDashboard() {
           Deliberately on the dashboard and nowhere else: it should be offered
           once, where someone is already oriented, not follow them around. */}
       <div className="mb-6">
-        <PushBell />
+        <PushBell canConfigure={adminRole === 'owner'} />
       </div>
 
       {stats && (

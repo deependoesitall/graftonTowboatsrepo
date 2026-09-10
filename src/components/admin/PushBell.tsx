@@ -33,6 +33,7 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
 
 type State =
   | 'checking'
+  | 'unconfigured'     // VAPID keys missing from THIS BUILD — a server problem
   | 'unsupported'      // browser has no Push API at all
   | 'needs-install'    // iOS Safari in a tab — must be added to Home Screen first
   | 'off'              // supported, not subscribed
@@ -49,7 +50,10 @@ type State =
  * not "wrong app installed". Defaults to the admin guide because that's the
  * host this component was written for.
  */
-export default function PushBell({ installHref = '/admin/install' }: { installHref?: string } = {}) {
+export default function PushBell({
+  installHref = '/admin/install',
+  canConfigure = false,
+}: { installHref?: string; canConfigure?: boolean } = {}) {
   const [state, setState] = useState<State>('checking');
   const [error, setError] = useState('');
 
@@ -57,7 +61,16 @@ export default function PushBell({ installHref = '/admin/install' }: { installHr
 
   useEffect(() => {
     (async () => {
-      if (!vapid) { setState('unsupported'); return; }
+      // NOT 'unsupported' — the BROWSER is fine, the DEPLOYMENT is missing a
+      // key. Collapsing the two hid a server misconfiguration behind a
+      // component that renders nothing, so the toggle silently vanished from
+      // the panel and looked like a feature that had been removed.
+      //
+      // ⚠️ NEXT_PUBLIC_* IS BAKED IN AT BUILD TIME. Setting the key in Vercel
+      // is not enough — a build has to run AFTER it was set. If the last
+      // successful production build predates the variable, this stays empty
+      // no matter what the dashboard says.
+      if (!vapid) { setState('unconfigured'); return; }
 
       // iOS ONLY SUPPORTS WEB PUSH FROM AN INSTALLED HOME-SCREEN APP.
       //
@@ -142,6 +155,27 @@ export default function PushBell({ installHref = '/admin/install' }: { installHr
   if (state === 'checking' || state === 'unsupported') return null;
 
   const shell = 'rounded-xl border p-3 text-sm flex items-start gap-3';
+
+  // Staff don't need to see a configuration problem they can't act on, but the
+  // owner does — otherwise the only signal is an absence, and an absence is
+  // indistinguishable from "we never built this".
+  if (state === 'unconfigured') {
+    if (!canConfigure) return null;
+    return (
+      <div className={`${shell} border-amber-200 bg-amber-50`}>
+        <BellOff className="w-4 h-4 mt-0.5 text-amber-700 shrink-0" />
+        <div>
+          <p className="font-bold text-amber-800">Order alerts aren&apos;t switched on for this deployment</p>
+          <p className="text-amber-700 mt-0.5 leading-relaxed">
+            <code className="font-mono text-xs">NEXT_PUBLIC_VAPID_PUBLIC_KEY</code> is missing from the
+            build that&apos;s live. Add it in Vercel &rarr; Settings &rarr; Environment Variables, then
+            <strong> redeploy</strong> — this value is baked in at build time, so setting it alone
+            changes nothing until a new build runs.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (state === 'needs-install') {
     return (
