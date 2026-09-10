@@ -19,10 +19,10 @@
 // ⚠️ DO NOT render this without its caption, and do not reword the caption to
 // blur who delivers. That is the one thing Dave asked for.
 //
-// ⚠️ DO NOT recolour, crop, or restyle either mark. Both sit on their own
-// neutral plate so each keeps its own colours against any background. Tinting
-// a partner's logo to match your palette is the thing brand owners actually
-// object to, and it costs nothing to avoid.
+// ⚠️ DO NOT recolour, crop, or restyle either mark. Both are transparent PNGs
+// rendered at full size with only a drop-shadow for separation — no plates, no
+// tinting, no masking. Restyling a partner's logo to match your palette is the
+// thing brand owners actually object to, and it costs nothing to avoid.
 
 interface Props {
   /** 'dark' = on the deep green band. 'light' = on the pale site background. */
@@ -33,16 +33,28 @@ interface Props {
   className?: string;
 }
 
+// NO PLATES. Both marks are transparent PNGs, so a white card behind them only
+// shrank the artwork and boxed two logos that were designed to breathe. They
+// render directly at a size that can actually be read across a room.
 const BOX = {
-  sm: 'w-12 h-12 rounded-xl p-1.5',
-  md: 'w-16 h-16 rounded-2xl p-2',
-  lg: 'w-20 h-20 rounded-2xl p-2.5',
+  sm: 'h-11',
+  md: 'h-16',
+  lg: 'h-[88px]',
 } as const;
 
 const CROSS = {
-  sm: 'text-base',
-  md: 'text-xl',
-  lg: 'text-2xl',
+  sm: 'text-lg',
+  md: 'text-2xl',
+  lg: 'text-3xl',
+} as const;
+
+// A drop-shadow FILTER, not a box-shadow — it follows the alpha channel, so it
+// traces the actual logo silhouette instead of a rectangle around it. This is
+// what keeps the dark ring of the GTS badge from dissolving into a dark
+// background without putting a plate behind it.
+const GLOW = {
+  dark: 'drop-shadow-[0_2px_10px_rgba(0,0,0,0.55)]',
+  light: 'drop-shadow-[0_2px_6px_rgba(30,61,30,0.18)]',
 } as const;
 
 export function PartnerLockup({
@@ -52,34 +64,25 @@ export function PartnerLockup({
   className = '',
 }: Props) {
   const dark = tone === 'dark';
-
-  // White plates on dark; a faint outline on light so the white-backed
-  // Sinclair's mark doesn't dissolve into the pale page.
-  const plate = dark
-    ? 'bg-white shadow-[0_6px_20px_rgba(0,0,0,0.28)]'
-    : 'bg-white border border-brand-green/10 shadow-sm';
+  const mark = `${BOX[size]} w-auto object-contain shrink-0 ${GLOW[tone]}`;
 
   return (
     <div className={`flex flex-col items-center ${className}`}>
-      <div className="flex items-center gap-3 sm:gap-4">
-        <div className={`${BOX[size]} ${plate} flex items-center justify-center shrink-0`}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/branding/gts-logo.png" alt="Grafton Towboat Services"
-            className="w-full h-full object-contain" />
-        </div>
+      <div className="flex items-center gap-5 sm:gap-7">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/branding/gts-logo.png" alt="Grafton Towboat Services" className={mark} />
 
         {/* The × is decorative — screen readers get the two alt texts, and
             "Grafton Towboat Services times Sinclair's Foods" would be noise. */}
         <span aria-hidden="true"
-          className={`${CROSS[size]} font-light select-none ${dark ? 'text-brand-yellow/50' : 'text-brand-green/30'}`}>
+          className={`${CROSS[size]} font-light select-none leading-none ${
+            dark ? 'text-white/30' : 'text-brand-green/25'
+          }`}>
           ×
         </span>
 
-        <div className={`${BOX[size]} ${plate} flex items-center justify-center shrink-0`}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/branding/sinclairs-logo.png" alt="Sinclair's Foods"
-            className="w-full h-full object-contain" />
-        </div>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/branding/sinclairs-logo.png" alt="Sinclair's Foods" className={mark} />
       </div>
 
       {caption && (
