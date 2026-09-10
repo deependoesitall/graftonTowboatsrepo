@@ -1,9 +1,9 @@
 // src/app/api/admin/auth/route.ts
 //
 // Admin login. On success, returns a signed JWT in the response body —
-// the client stores this in sessionStorage (cleared on tab close) and
-// sends it back as `Authorization: Bearer <jwt>` on subsequent requests.
-// A legacy httpOnly cookie is also set for backwards compatibility.
+// the client stores it in sessionStorage (die on close) or localStorage
+// when `remember` is true. An httpOnly cookie is set only for remembered
+// sessions (30d); short sessions stay Bearer + sessionStorage only.
 //
 // Supports two login modes:
 //   - Multi-user: { username, password } -> checks admin_users table
@@ -17,7 +17,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { hashPassword, verifyPassword, isLegacyHash } from '@/lib/password';
-import { signAdminSession, sessionCookieOptions, SESSION_COOKIE, AdminRole, AdminPermission } from '@/lib/admin-auth-server';
+import { signAdminSession, sessionCookieOptions, clearedCookieOptions, SESSION_COOKIE, AdminRole, AdminPermission } from '@/lib/admin-auth-server';
 import { throttleLogin, recordLoginFailure, clearLoginFailures, clientIp } from '@/lib/login-throttle';
 
 /**
@@ -28,7 +28,7 @@ import { throttleLogin, recordLoginFailure, clearLoginFailures, clientIp } from 
 const DUMMY_HASH = '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy';
 
 export async function POST(req: NextRequest) {
-  let body: { password?: string; username?: string };
+  let body: { password?: string; username?: string; remember?: boolean };
   try {
     body = await req.json();
   } catch {
@@ -36,6 +36,8 @@ export async function POST(req: NextRequest) {
   }
 
   const { password, username } = body;
+  // Default ON — dock/shop phones expect to stay signed in across closes.
+  const remember = body.remember !== false;
   if (!password || typeof password !== 'string') {
     return NextResponse.json({ error: 'Invalid username or password' }, { status: 400 });
   }
@@ -99,13 +101,19 @@ export async function POST(req: NextRequest) {
       role,
       display_name: user.display_name || user.username,
       permissions,
-    });
+    }, { remember });
 
     const res = NextResponse.json({
       token,
+      remember,
       user: { username: user.username, role, display_name: user.display_name, permissions },
     });
-    res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
+    if (remember) {
+      res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions({ remember: true }));
+    } else {
+      // Die-on-close: no persistent cookie — sessionStorage + short JWT only.
+      res.cookies.set(SESSION_COOKIE, '', clearedCookieOptions());
+    }
     return res;
   }
 
@@ -160,12 +168,17 @@ export async function POST(req: NextRequest) {
     role: 'owner',
     display_name: 'Jennifer',
     permissions: [],
-  });
+  }, { remember });
 
   const res = NextResponse.json({
     token,
+    remember,
     user: { username: 'admin', role: 'owner', display_name: 'Jennifer', permissions: [] },
   });
-  res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
+  if (remember) {
+    res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions({ remember: true }));
+  } else {
+    res.cookies.set(SESSION_COOKIE, '', clearedCookieOptions());
+  }
   return res;
 }

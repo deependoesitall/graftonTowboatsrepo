@@ -19,6 +19,8 @@ export default function AdminDashboard() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
+  // Default ON — admin phones shouldn't force login every open.
+  const [staySignedIn, setStaySignedIn] = useState(true);
   const [loginError, setLoginError] = useState('');
   const [logging, setLogging] = useState(false);
   const [stats, setStats] = useState<null | {
@@ -54,7 +56,11 @@ export default function AdminDashboard() {
       const res = await fetch('/api/admin/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(username.trim() ? { username: username.trim(), password } : { password }),
+        credentials: 'include',
+        body: JSON.stringify({
+          ...(username.trim() ? { username: username.trim(), password } : { password }),
+          remember: staySignedIn,
+        }),
       });
       if (!res.ok) {
         setLoginError(username.trim() ? 'Invalid username or password.' : 'Incorrect password. Please try again.');
@@ -63,7 +69,7 @@ export default function AdminDashboard() {
       const { token, user } = await res.json();
       const permissions: AdminPermission[] = user?.permissions ?? [];
       if (token) {
-        setAdminSession(token, user?.role || 'owner', user?.display_name || user?.username || 'Admin', user?.username || 'admin', permissions);
+        setAdminSession(token, user?.role || 'owner', user?.display_name || user?.username || 'Admin', user?.username || 'admin', permissions, staySignedIn);
       } else {
         setAdminUiState(user?.role || 'owner', user?.display_name || user?.username || 'Admin', user?.username || 'admin');
       }
@@ -129,6 +135,15 @@ export default function AdminDashboard() {
               </div>
               {loginError && <p className="text-red-500 text-xs mt-1">{loginError}</p>}
             </div>
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={staySignedIn}
+                onChange={e => setStaySignedIn(e.target.checked)}
+                className="rounded border-gray-300 text-brand-green focus:ring-brand-green"
+              />
+              <span className="text-sm text-gray-600">Stay signed in</span>
+            </label>
             <button
               onClick={handleLogin}
               disabled={logging || !password}

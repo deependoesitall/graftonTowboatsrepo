@@ -3,15 +3,17 @@
 // (RBAC). This is the SINGLE SOURCE OF TRUTH for admin authorization.
 //
 // Sessions are JWTs signed with ADMIN_SECRET_KEY (HS256). The token is
-// returned to the client on login and stored in sessionStorage (cleared
-// automatically when the tab/window is closed — true "close tab = log
-// out" behavior). The client sends it back as `Authorization: Bearer
-// <jwt>` on every admin API call. A legacy httpOnly cookie is still
-// accepted as a fallback.
+// returned to the client on login and stored in sessionStorage (tab close
+// clears it) or localStorage when "Stay signed in" is checked. The client
+// sends it back as `Authorization: Bearer <jwt>` on every admin API call.
+// An httpOnly cookie is set only for remembered sessions (and still accepted
+// as a fallback for any request that includes it).
 //
-// SESSION LIFETIME: 8 hours server-side as a backstop — in practice the
-// session ends whenever the tab is closed (sessionStorage is cleared),
-// not because of this expiry.
+// SESSION LIFETIME:
+//   • Stay signed in OFF  — 8h JWT; client keeps it in sessionStorage only
+//     (dies when the tab/PWA is closed). No persistent cookie.
+//   • Stay signed in ON   — 30d JWT + httpOnly cookie + localStorage, so
+//     dock phones stay logged in across closes.
 
 import { NextRequest, NextResponse } from 'next/server';
 import jwt from 'jsonwebtoken';
@@ -21,7 +23,10 @@ export type AdminPermission = 'sinclair';
 export type Area = 'orders' | 'products' | 'settings' | 'reports' | 'logs';
 
 export const SESSION_COOKIE = 'gts_admin_session';
-export const SESSION_TTL_SECONDS = 60 * 60 * 8; // 8 hour backstop; sessionStorage clearing on tab close is the real boundary
+/** Short session — matches today's die-on-close default when not remembering. */
+export const SESSION_TTL_SECONDS = 60 * 60 * 8; // 8 hours
+/** Remembered session — dock/shop phones that stay signed in. */
+export const SESSION_TTL_REMEMBER_SECONDS = 60 * 60 * 24 * 30; // 30 days
 
 export interface AdminSessionPayload {
   sub: string;          // admin_users.id, or 'admin' for legacy single-password login
@@ -66,8 +71,12 @@ function getSecret(): string {
 }
 
 /** Sign a new admin session JWT. */
-export function signAdminSession(payload: AdminSessionPayload): string {
-  return jwt.sign(payload, getSecret(), { expiresIn: SESSION_TTL_SECONDS });
+export function signAdminSession(
+  payload: AdminSessionPayload,
+  opts?: { remember?: boolean },
+): string {
+  const expiresIn = opts?.remember ? SESSION_TTL_REMEMBER_SECONDS : SESSION_TTL_SECONDS;
+  return jwt.sign(payload, getSecret(), { expiresIn });
 }
 
 /** Verify and decode an admin session JWT. Returns null if invalid/expired/malformed. */
@@ -100,7 +109,7 @@ export function verifyAdminSession(token: string): AdminSessionPayload | null {
  *
  * Checks, in order:
  *  1. `Authorization: Bearer <jwt>` header
- *  2. The legacy httpOnly session cookie — kept as a fallback
+ *  2. The httpOnly session cookie — set when "Stay signed in" was checked
  */
 export function getAdminSession(req: NextRequest): AdminSessionPayload | null {
   const authHeader = req.headers.get('authorization');
@@ -116,14 +125,15 @@ export function getAdminSession(req: NextRequest): AdminSessionPayload | null {
   return null;
 }
 
-/** Cookie options used when setting/refreshing the session cookie. */
-export function sessionCookieOptions() {
+/** Cookie options used when setting/refreshing a remembered session cookie. */
+export function sessionCookieOptions(opts?: { remember?: boolean }) {
+  const remember = !!opts?.remember;
   return {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'strict' as const,
     path: '/',
-    maxAge: SESSION_TTL_SECONDS,
+    maxAge: remember ? SESSION_TTL_REMEMBER_SECONDS : SESSION_TTL_SECONDS,
   };
 }
 

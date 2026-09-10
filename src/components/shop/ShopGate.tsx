@@ -116,6 +116,8 @@ export default function ShopGate({ children }: { children: React.ReactNode }) {
 function ShopSignIn({ onSignedIn }: { onSignedIn: () => void }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  // Default ON — phones on the dock shouldn't re-auth every open.
+  const [staySignedIn, setStaySignedIn] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -135,7 +137,8 @@ function ShopSignIn({ onSignedIn }: { onSignedIn: () => void }) {
       const res = await fetch('/api/admin/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        credentials: 'include',
+        body: JSON.stringify({ ...body, remember: staySignedIn }),
       });
       const data = await res.json().catch(() => ({}));
 
@@ -152,6 +155,7 @@ function ShopSignIn({ onSignedIn }: { onSignedIn: () => void }) {
         data.user?.display_name || '',
         data.user?.username,
         data.user?.permissions ?? [],
+        staySignedIn,
       );
       onSignedIn();
     } catch {
@@ -190,6 +194,16 @@ function ShopSignIn({ onSignedIn }: { onSignedIn: () => void }) {
             <p className="text-xs text-red-600 leading-relaxed">{error}</p>
           </div>
         )}
+
+        <label className="flex items-center gap-2 cursor-pointer select-none pt-1">
+          <input
+            type="checkbox"
+            checked={staySignedIn}
+            onChange={e => setStaySignedIn(e.target.checked)}
+            className="rounded border-gray-300 text-brand-green focus:ring-brand-green"
+          />
+          <span className="text-xs text-gray-600">Stay signed in</span>
+        </label>
 
         <button
           type="submit" disabled={busy || !password}
