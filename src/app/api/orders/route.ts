@@ -129,6 +129,31 @@ const submitSchema = z.object({
       notes: z.string().optional().default(''),
     }).optional(),
   }).optional().default({}),
+  /**
+   * WHO PAYS, PER PERSON.
+   *
+   * A boat's CODs are settled individually — Amber by Venmo, Andy by card —
+   * and the single vessel.cod_payment_method below could only ever describe
+   * one of them. This array is the real answer; the old field is kept in sync
+   * from the first entry so nothing that reads it regresses.
+   *
+   * OPTIONAL ON PURPOSE. A crew member on a barge may be running a cached
+   * copy of the order form for weeks. Older clients send only the flat field
+   * and must keep working — the refinements below accept either shape.
+   *
+   * `amount` is catalogue COD lines. `linked_items` counts off-catalogue
+   * requests (a Walmart link) that person is paying for, which have NO price
+   * until someone buys them — that's why they're counted, not summed.
+   */
+  cod_payments: z.array(z.object({
+    name: z.string().min(1).max(80),
+    amount: z.number().nonnegative().optional().default(0),
+    linked_items: z.number().int().nonnegative().optional().default(0),
+    method: z.enum(['cash', 'venmo', 'cashapp', 'credit_card', '']).optional().default(''),
+    handle: z.string().max(80).optional().default(''),
+    phone: z.string().max(40).optional().default(''),
+    contact_time: z.string().max(80).optional().default(''),
+  })).optional().default([]),
 }).refine(data => {
   const hasItems = data.items.length > 0;
   const hasSvc = data.services?.parts_pickup?.enabled
@@ -148,17 +173,34 @@ const submitSchema = z.object({
   return !!hasSvc || data.vessel.crew_change !== 'no';
 }, { message: 'COD items ride along with a regular delivery — please add vessel-account groceries, an additional service, or a crew change to this order.' })
 // If anything is COD we need to know how it will be paid.
+//
+// A LINKED ITEM COUNTS. An off-catalogue request marked "a crew member" is a
+// real debt with no price yet; letting it through without a payment route just
+// moves the problem to the dock, where someone has to work out who owes what
+// with the boat about to leave.
 .refine(data => {
-  const hasCod = data.items.some(i => i.paid_by === 'cod');
-  return !hasCod || !!data.vessel.cod_payment_method;
-}, { message: 'Please choose a payment method (Venmo, Cash App, or credit card) for the COD items.' })
-// Venmo / Cash App need the crew member's own handle so we can send the request.
+  const hasCod = data.items.some(i => i.paid_by === 'cod')
+    || (data.services?.other_pickup?.items || []).some(e => e.paid_by === 'cod');
+  if (!hasCod) return true;
+  if (data.cod_payments.length > 0) return data.cod_payments.every(p => !!p.method);
+  return !!data.vessel.cod_payment_method;  // legacy client
+}, { message: 'Please choose a payment method (Venmo, Cash App, or credit card) for each person with COD items.' })
+// Venmo / Cash App need each crew member's own handle so we can send the request.
 .refine(data => {
+  if (data.cod_payments.length > 0) {
+    return data.cod_payments.every(p =>
+      (p.method !== 'venmo' && p.method !== 'cashapp') || !!p.handle.trim());
+  }
   const hasCod = data.items.some(i => i.paid_by === 'cod');
   const m = data.vessel.cod_payment_method;
   if (!hasCod || (m !== 'venmo' && m !== 'cashapp')) return true;
   return !!data.vessel.cod_payment_handle?.trim();
-}, { message: 'Please add your Venmo username or Cash App $cashtag so we can send the payment request.' })
+}, { message: 'Please add the Venmo username or Cash App $cashtag for each person paying that way.' })
+// Card payment needs a number to ring.
+.refine(data => {
+  if (data.cod_payments.length === 0) return true;
+  return data.cod_payments.every(p => p.method !== 'credit_card' || !!p.phone.trim());
+}, { message: 'Please add a phone number for each person paying by card.' })
 // We need SOME email to send the order confirmation to — vessel email is the
 // primary (required in the UI); billing email alone still passes for legacy carts.
 .refine(data => !!data.vessel.vessel_email?.trim() || !!data.vessel.email?.trim(),
@@ -172,7 +214,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid order data', details: parsed.error.issues }, { status: 400 });
     }
 
-    const { vessel, items, services } = parsed.data;
+    const { vessel, items, services, cod_payments: codPayments } = parsed.data;
     const supabase = createServiceClient();
 
     // NO ORDER CUTOFF. There used to be a manager-configured buffer that
@@ -220,6 +262,12 @@ export async function POST(req: NextRequest) {
       extendedInfo.vessel_type_raw = vessel.vessel_type_other;
     if (vessel.personal_cod_notes)
       extendedInfo.personal_cod_notes = vessel.personal_cod_notes;
+    // Per-person payment rides in extended_info rather than new columns.
+    // It's read-mostly, always read as a whole, and never queried across
+    // orders — a jsonb blob is the honest shape for that, and it means this
+    // shipped without a migration while 072–075 are still unrun.
+    if (codPayments.length > 0)
+      extendedInfo.cod_payments = JSON.stringify(codPayments);
 
     const { data: order, error: orderError } = await supabase
       .from('orders')

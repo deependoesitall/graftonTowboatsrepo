@@ -55,20 +55,37 @@ self.addEventListener('push', event => {
 
 self.addEventListener('notificationclick', event => {
   event.notification.close();
-  const target = (event.notification.data && event.notification.data.url) || '/admin/orders';
+  const raw = (event.notification.data && event.notification.data.url) || '/admin/orders';
+  // Absolute, against THIS worker's origin. The same file is served from both
+  // hosts, so a relative path resolves to the right app on its own — the GTS
+  // worker can never send anyone to the shop, or the reverse.
+  const target = new URL(raw, self.location.origin);
+
+  // The app this notification belongs to, as a path prefix: '/admin' for GTS,
+  // '/' for the shop (whose whole origin is the app).
+  const section = '/' + (target.pathname.split('/')[1] || '');
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
-      // Prefer focusing a window that's already open — opening a second copy of
+      // Prefer focusing a window ALREADY IN THIS APP — opening a second copy of
       // the admin panel each time a notification is tapped is how you end up
       // with eleven tabs and a lost draft.
-      for (const c of list) {
-        if ('focus' in c) {
-          if ('navigate' in c) { c.navigate(target).catch(() => {}); }
-          return c.focus();
-        }
+      //
+      // Matching on the section rather than taking list[0] matters: staff have
+      // the customer-facing site open too, and the old version would grab
+      // whatever window came back first and navigate it to the admin panel —
+      // yanking someone out of a half-built order to show them a new one.
+      const preferred = list.find(c => {
+        try { return new URL(c.url).pathname.startsWith(section); } catch { return false; }
+      });
+
+      if (preferred && 'focus' in preferred) {
+        if ('navigate' in preferred) { preferred.navigate(target.href).catch(() => {}); }
+        return preferred.focus();
       }
-      return self.clients.openWindow(target);
+      // Nothing suitable open — a new window, rather than commandeering an
+      // unrelated one.
+      return self.clients.openWindow(target.href);
     })
   );
 });

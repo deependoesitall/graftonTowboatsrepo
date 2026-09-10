@@ -75,7 +75,48 @@ function shopHostRewrite(request: NextRequest): NextResponse | null {
   return NextResponse.rewrite(url);
 }
 
+/**
+ * order.graftontowboatservices.com → the canonical host, same path.
+ *
+ * ⚠️ THIS IS A CORRECTNESS FIX, NOT TIDYING UP.
+ *
+ * While both hosts served the ordering app, they were two ORIGINS, and the
+ * browser scopes almost everything the order flow depends on by origin:
+ *
+ *   · The cart, vessel info and saved services all live in localStorage
+ *     (cart.ts). A customer who built a cart on order.* and then typed the
+ *     bare domain saw an empty cart, with no way to get the first one back.
+ *   · The Supabase session is a host-scoped cookie, so an account created on
+ *     order.* was simply not signed in on the apex — the same person, the same
+ *     password, silently logged out.
+ *
+ * Neither failure produces an error. The customer just sees an empty cart or a
+ * sign-in screen and assumes the site lost their order, and nothing reaches
+ * GTS to say it happened.
+ *
+ * 307, NOT 308, DELIBERATELY. A permanent redirect is cached by browsers and
+ * is painful to walk back; during launch this needs to stay reversible.
+ * Promote it to 308 once order.* has been quiet for a few weeks.
+ *
+ * NOTE: this does NOT move anyone's existing cart — localStorage cannot follow
+ * a redirect. Carts sitting on order.* are lost the moment this deploys, which
+ * is an argument for deploying it sooner, while few people have one.
+ */
+function orderHostRedirect(request: NextRequest): NextResponse | null {
+  const host = (request.headers.get('host') || '').toLowerCase();
+  if (!host.startsWith('order.')) return null;
+
+  const url = request.nextUrl.clone();
+  url.hostname = host.replace(/^order\./, '');
+  return NextResponse.redirect(url, 307);
+}
+
 export async function middleware(request: NextRequest) {
+  // Legacy host first: order.* should never reach the shop logic or the
+  // session refresh below, it should just leave for the canonical origin.
+  const legacy = orderHostRedirect(request);
+  if (legacy) return legacy;
+
   const shopped = shopHostRewrite(request);
   if (shopped) return shopped;
 

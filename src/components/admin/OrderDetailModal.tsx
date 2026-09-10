@@ -16,6 +16,7 @@ import { adminFetch, isGtsRole, getAdminRole } from '@/lib/admin-auth';
 import { codFeeLabel, codPersonTotal, codTotalWithFee } from '@/lib/cod-fee';
 import { PickSheetOverlay } from '@/components/admin/PickSheetOverlay';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
+import { readCodPayments, codMethodSentence } from '@/lib/cod-payments';
 
 interface OrderDetailModalProps {
   order: Order;
@@ -333,6 +334,15 @@ export function OrderDetailModal({
   const deckSubtotal = deckItems
     .filter(i => i.shopping_status !== 'out_of_stock')
     .reduce((s, i) => s + (i.actual_total ?? i.unit_price * i.quantity), 0);
+  // Per-person payment (empty on orders placed before this existed — the
+  // order-level block below is the fallback for exactly those).
+  const codPayments   = readCodPayments(order.extended_info);
+  const codPayByName  = new Map(codPayments.map(p => [p.name, p]));
+  // People who owe only through a linked item have no catalogue lines and so
+  // never reach codGroups. This modal is where Mary works out who owes what.
+  const codLinkedOnly = codPayments.filter(p =>
+    p.linked_items > 0 && !codGroups.some(([name]) => name === p.name));
+
   const codMethodLabel = order.cod_payment_method === 'credit_card' ? 'Credit Card — call to collect'
     : order.cod_payment_method === 'venmo' ? 'Venmo — send a payment request'
     : order.cod_payment_method === 'cashapp' ? 'Cash App — send a payment request'
@@ -609,7 +619,7 @@ export function OrderDetailModal({
             )}
 
             {/* COD items — collected at delivery, NEVER invoiced */}
-            {codItems.length > 0 && (
+            {(codItems.length > 0 || codLinkedOnly.length > 0) && (
               <div className="bg-purple-50 border-2 border-purple-300 rounded-lg p-3">
                 <p className="text-xs font-bold text-purple-700 uppercase tracking-wide mb-2">
                   $ COD Items — collect {formatCurrency(codSubtotal + effectiveFee)}{effectiveFee > 0 ? ` incl. ${codFeeLabel(order, codSubtotal)}` : ''} · separated by crew member (not on the company invoice)
@@ -629,19 +639,38 @@ export function OrderDetailModal({
                             {i.quantity}× {i.description} · {formatCurrency(i.actual_total ?? i.unit_price * i.quantity)}
                           </p>
                         ))}
+                        {codPayByName.get(name) && (
+                          <p className="text-xs text-purple-700 pl-2 mt-0.5">
+                            <strong>Pays by:</strong> {codMethodSentence(codPayByName.get(name)!)}
+                          </p>
+                        )}
                       </div>
                     ))}
+                  {codLinkedOnly.map(p => (
+                    <div key={p.name} className="bg-white/60 rounded-lg px-2.5 py-1.5">
+                      <p className="text-sm font-bold text-purple-800 flex justify-between">
+                        <span>{p.name}</span>
+                        <span className="text-purple-600">
+                          {p.linked_items === 1 ? 'Linked item' : `${p.linked_items} linked items`}
+                          <span className="font-normal text-purple-500 text-xs"> priced when bought</span>
+                        </span>
+                      </p>
+                      <p className="text-xs text-purple-700 pl-2 mt-0.5">
+                        <strong>Pays by:</strong> {codMethodSentence(p)}
+                      </p>
+                    </div>
+                  ))}
                 </div>
                 <div className="text-xs text-purple-800 border-t border-purple-200 pt-2 space-y-1">
-                  {codMethodLabel && <p><strong>Payment method:</strong> {codMethodLabel}</p>}
-                  {(order.cod_payment_method === 'venmo' || order.cod_payment_method === 'cashapp') && (
+                  {codPayments.length === 0 && codMethodLabel && <p><strong>Payment method:</strong> {codMethodLabel}</p>}
+                  {codPayments.length === 0 && (order.cod_payment_method === 'venmo' || order.cod_payment_method === 'cashapp') && (
                     <p>
                       <strong>Send request to:</strong>{' '}
                       <span className="font-mono font-bold">{order.cod_payment_handle || 'no handle given — call them'}</span>
                       {' '}· never accept an inbound send — request the exact final amount
                     </p>
                   )}
-                  {order.cod_payment_method === 'credit_card' && (
+                  {codPayments.length === 0 && order.cod_payment_method === 'credit_card' && (
                     <p>
                       <strong>Call:</strong> {order.cod_preferred_phone || 'no number given'}
                       {order.cod_contact_time && <> · <strong>Best time (around):</strong> {order.cod_contact_time}</>}

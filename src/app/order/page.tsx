@@ -60,6 +60,47 @@ function StepIndicator({ step }: { step: 1 | 2 | 3 }) {
 }
 
 // ─── Shared form helpers ───────────────────────────────────────
+/** How one crew member settles their own COD total. */
+type CodMethod = 'venmo' | 'cashapp' | 'credit_card';
+type CodPay = { method: CodMethod | ''; handle: string; phone: string; time: string };
+
+/**
+ * One person who owes money on this order.
+ *
+ * `amount` is catalogue COD lines, which have prices. `linked` counts
+ * off-catalogue items (a Walmart link) that person is paying for — those have
+ * NO price until someone actually buys them, which is why the two are counted
+ * separately and never added together.
+ */
+type CodPerson = { name: string; amount: number; linked: number };
+
+/** Errors are keyed by person, so two crew members' problems don't collide. */
+const codErrKey = (name: string, field: 'method' | 'handle' | 'phone') =>
+  `codpay_${field}_${name}`;
+
+const codMethodPhrase = (m: CodMethod | '') =>
+  m === 'credit_card' ? 'credit card (we’ll call)'
+  : m === 'cashapp' ? 'Cash App (we’ll send a request)'
+  : m === 'venmo' ? 'Venmo (we’ll send a request)'
+  : '';
+
+const codMethodLabel = (m: CodMethod | '') =>
+  m === 'credit_card' ? 'Credit Card' : m === 'cashapp' ? 'Cash App' : m === 'venmo' ? 'Venmo' : '';
+
+/**
+ * What to show where the dollar amount goes.
+ *
+ * A person whose only COD is a linked item has no total to show — the price
+ * isn't known until it's bought. Showing $0.00 there would read as "owes
+ * nothing", which is the opposite of true.
+ */
+function codAmountLabel(p: CodPerson): string {
+  const linkedLabel = p.linked === 1 ? 'Linked item' : `${p.linked} linked items`;
+  if (p.amount <= 0 && p.linked > 0) return linkedLabel;
+  if (p.linked > 0) return `${formatCurrency(p.amount)} + ${p.linked === 1 ? 'linked item' : `${p.linked} linked items`}`;
+  return formatCurrency(p.amount);
+}
+
 function Field({
   label, required, error, hint, children, col2,
 }: {
@@ -264,6 +305,18 @@ export default function OrderPage() {
   const [emailHasAccount, setEmailHasAccount] = useState(false);
   // Effective COD handling fee % (0 when the feature is toggled off in admin)
   const [codFeePct, setCodFeePct] = useState(5);
+  // PAYMENT METHOD IS PER CREW MEMBER, NOT PER ORDER.
+  //
+  // It used to be one choice for the whole order, which quietly assumed every
+  // COD on a boat settles the same way. They don't — Amber pays by Venmo,
+  // Andy by card — and a single field forced whoever placed the order to pick
+  // one and sort the rest out by phone. Keyed by the name typed on the item,
+  // so it survives adding and removing lines.
+  const [codPay, setCodPay] = useState<Record<string, CodPay>>({});
+  const payFor = (name: string): CodPay =>
+    codPay[name] ?? { method: '', handle: '', phone: '', time: '' };
+  const setPay = (name: string, patch: Partial<CodPay>) =>
+    setCodPay(prev => ({ ...prev, [name]: { ...(prev[name] ?? { method: '', handle: '', phone: '', time: '' }), ...patch } }));
   // Digital coupons — same rules Sinclair's own site applies (no clipping).
   // Preview only; the server recomputes and snapshots at submission.
   const [deals, setDeals] = useState<Array<{
@@ -364,18 +417,23 @@ export default function OrderPage() {
       if (codItems.some(i => !(i.cod_name || '').trim())) {
         errs.cod_name = 'Add the crew member’s name to each COD item.';
       }
-      if (!vessel.cod_payment_method) {
-        errs.cod_payment_method = 'Choose how the COD items will be paid (Venmo, Cash App, or credit card).';
-      }
-      if ((vessel.cod_payment_method === 'venmo' || vessel.cod_payment_method === 'cashapp')
-        && !vessel.cod_payment_handle.trim()) {
-        errs.cod_payment_handle = vessel.cod_payment_method === 'venmo'
-          ? 'Add your Venmo username so we can send the payment request.'
-          : 'Add your Cash App $cashtag so we can send the payment request.';
-      }
-      if (vessel.cod_payment_method === 'credit_card' && !vessel.cod_preferred_phone.trim()) {
-        errs.cod_preferred_phone = 'Add the best phone number to call for card payment.';
-      }
+    }
+
+    // Payment details are validated PER PERSON. Someone with a linked item and
+    // no catalogue lines still owes money, so they are in this list too.
+    if (codPeople.length > 0) {
+      codPeople.forEach(p => {
+        const pay = payFor(p.name);
+        if (!pay.method) {
+          errs[codErrKey(p.name, 'method')] = `Choose how ${p.name} will pay.`;
+        } else if ((pay.method === 'venmo' || pay.method === 'cashapp') && !pay.handle.trim()) {
+          errs[codErrKey(p.name, 'handle')] = pay.method === 'venmo'
+            ? `Add ${p.name}'s Venmo username so we can send the payment request.`
+            : `Add ${p.name}'s Cash App $cashtag so we can send the payment request.`;
+        } else if (pay.method === 'credit_card' && !pay.phone.trim()) {
+          errs[codErrKey(p.name, 'phone')] = `Add the best phone number to call for ${p.name}.`;
+        }
+      });
     }
     return errs;
   }
@@ -464,9 +522,39 @@ export default function OrderPage() {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`;
 
+      // Payment is per person now, and travels as its own array.
+      //
+      // The order-level cod_payment_* fields are still filled in from the FIRST
+      // person. They are the columns every existing reader uses — the GTS
+      // email, the PDF, the admin modal — and orders placed before this change
+      // have nothing else. Keeping them populated means nothing regresses while
+      // those readers learn about the array.
+      const codPayments = codPeople.map(p => {
+        const pay = payFor(p.name);
+        return {
+          name:         p.name,
+          amount:       Math.round(p.amount * 100) / 100,
+          linked_items: p.linked,
+          method:       pay.method,
+          handle:       pay.handle.trim(),
+          phone:        pay.phone.trim(),
+          contact_time: pay.time.trim(),
+        };
+      });
+      const primary = codPayments[0];
+      const vesselOut = primary
+        ? {
+            ...vessel,
+            cod_payment_method:  primary.method,
+            cod_payment_handle:  primary.handle,
+            cod_preferred_phone: primary.phone,
+            cod_contact_time:    primary.contact_time,
+          }
+        : vessel;
+
       const res = await fetch('/api/orders', {
         method: 'POST', headers,
-        body: JSON.stringify({ vessel, items, services }),
+        body: JSON.stringify({ vessel: vesselOut, items, services, cod_payments: codPayments }),
       });
       if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Failed to submit'); }
       const { order_id, order_number, _emailDebug } = await res.json();
@@ -496,13 +584,30 @@ export default function OrderPage() {
 
   // CODs are separated PER CREW MEMBER — each person settles their own
   // total at delivery ("that's a Daniel item, that's Janice" — Jen).
-  const codByName: [string, number][] = Array.from(
-    codItems.reduce((acc, i) => {
-      const name = (i.cod_name || '').trim() || 'Crew member';
-      acc.set(name, (acc.get(name) || 0) + i.price * i.quantity);
-      return acc;
-    }, new Map<string, number>()).entries()
-  ).sort((a, b) => a[0].localeCompare(b[0]));
+  //
+  // LINKED ITEMS COUNT AS A PERSON TOO. An off-catalogue item (a Walmart link)
+  // marked "a crew member" carries a name and creates a real debt, but it has
+  // no price until someone buys it. Leaving those people out of this list is
+  // how a crew member ends up owing money that no screen ever showed — so they
+  // appear here with a "Linked item" marker in place of an amount.
+  const linkedCodEntries = (services.other_pickup?.enabled ? (services.other_pickup.items || []) : [])
+    .filter(e => e.paid_by === 'cod');
+
+  const codPeople: CodPerson[] = (() => {
+    const map = new Map<string, CodPerson>();
+    const slot = (raw?: string | null): CodPerson => {
+      const name = (raw || '').trim() || 'Crew member';
+      let p = map.get(name);
+      if (!p) { p = { name, amount: 0, linked: 0 }; map.set(name, p); }
+      return p;
+    };
+    codItems.forEach(i => { slot(i.cod_name).amount += i.price * i.quantity; });
+    linkedCodEntries.forEach(e => { slot(e.cod_name).linked += 1; });
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  })();
+
+  const hasCodPeople  = codPeople.length > 0;
+  const hasLinkedCod  = linkedCodEntries.length > 0;
 
   // Digital coupon preview — vessel-account items only (CODs ring separately)
   const appliedDeals = deals.flatMap(deal => {
@@ -589,8 +694,18 @@ export default function OrderPage() {
                   onPatch={patch => {
                     updateCartItemFields(item.product_id, patch);
                     setItems(getCart());
-                    if (errors.cod_name || errors.cod_payment_method || errors.items) {
-                      setErrors(e => { const n = { ...e }; delete n.cod_name; return n; });
+                    // Per-person payment errors are keyed by the NAME on the
+                    // line, so renaming "Andy" to "Andrew" strands the old
+                    // key and shows an error against a person who no longer
+                    // exists. Clear the whole codpay_ group on any edit.
+                    if (errors.cod_name || errors.items
+                      || Object.keys(errors).some(k => k.startsWith('codpay_'))) {
+                      setErrors(e => {
+                        const n = { ...e };
+                        delete n.cod_name;
+                        Object.keys(n).forEach(k => { if (k.startsWith('codpay_')) delete n[k]; });
+                        return n;
+                      });
                     }
                   }}
                   codNameError={!!errors.cod_name && item.paid_by === 'cod' && !(item.cod_name || '').trim()}
@@ -610,10 +725,10 @@ export default function OrderPage() {
                       </div>
                     )}
                     {/* CODs separated per crew member — each settles their own */}
-                    {codByName.map(([name, total]) => (
-                      <div key={name} className="flex justify-between items-center text-sm">
-                        <span className="text-purple-700 font-semibold">COD — {name} <span className="font-normal text-purple-500">· paid personally, not on the company invoice</span></span>
-                        <span className="font-bold text-purple-700">{formatCurrency(total)}</span>
+                    {codPeople.map(p => (
+                      <div key={p.name} className="flex justify-between items-center text-sm">
+                        <span className="text-purple-700 font-semibold">COD — {p.name} <span className="font-normal text-purple-500">· paid personally, not on the company invoice</span></span>
+                        <span className="font-bold text-purple-700">{codAmountLabel(p)}</span>
                       </div>
                     ))}
                     <div className="border-t border-brand-gold/30 pt-1.5" />
@@ -692,17 +807,19 @@ export default function OrderPage() {
           </Link>
         )}
 
-        {/* COD payment method — shown only when the cart has COD lines */}
-        {hasCod && (
+        {/* COD payment — one method PER PERSON, not one per order.
+            Anyone with a linked (off-catalogue) item appears here too: they
+            owe money even though the amount isn't known until it's bought. */}
+        {hasCodPeople && (
           <section className="card-base mb-4 p-5 border-2 border-purple-200">
             <SectionHead icon={<ClipboardList className="w-4 h-4" />} title="COD Payment"
-              sub={`${formatCurrency(codSubtotal)} — paid by each crew member personally, separate from the company invoice`} />
+              sub={`${formatCurrency(codSubtotal)}${hasLinkedCod ? ' + linked items, priced when bought' : ''} — paid by each crew member personally, separate from the company invoice`} />
             {/* Per-person breakdown — each crew member settles their own */}
-            <div className="mb-3 bg-purple-50/60 border border-purple-100 rounded-lg divide-y divide-purple-100">
-              {codByName.map(([name, total]) => (
-                <div key={name} className="flex justify-between items-center px-3 py-1.5 text-sm">
-                  <span className="font-semibold text-purple-800">{name}</span>
-                  <span className="font-bold text-purple-800">{formatCurrency(total)}</span>
+            <div className="mb-4 bg-purple-50/60 border border-purple-100 rounded-lg divide-y divide-purple-100">
+              {codPeople.map(p => (
+                <div key={p.name} className="flex justify-between items-center px-3 py-1.5 text-sm">
+                  <span className="font-semibold text-purple-800">{p.name}</span>
+                  <span className="font-bold text-purple-800">{codAmountLabel(p)}</span>
                 </div>
               ))}
               {codFeePct > 0 && (
@@ -717,59 +834,96 @@ export default function OrderPage() {
                   </div>
                 </>
               )}
-            </div>
-            {errors.cod_payment_method && <p className="text-xs text-red-500 mb-2">{errors.cod_payment_method}</p>}
-            <div className="flex gap-3 mb-3">
-              {([['venmo', 'Venmo'], ['cashapp', '💲 Cash App'], ['credit_card', '💳 Credit Card']] as const).map(([val, lbl]) => (
-                <button key={val} type="button"
-                  onClick={() => { setV('cod_payment_method', val); }}
-                  className={`flex-1 py-2.5 rounded-xl border-2 text-sm font-bold transition-all ${
-                    vessel.cod_payment_method === val
-                      ? 'border-purple-600 bg-purple-600 text-white'
-                      : 'border-gray-200 text-gray-500 hover:border-gray-300'
-                  }`}>{lbl}</button>
-              ))}
-            </div>
-            {(vessel.cod_payment_method === 'venmo' || vessel.cod_payment_method === 'cashapp') && (
-              <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 space-y-3">
-                <p className="text-xs text-purple-900">
-                  <strong>We&apos;ll send you a payment request.</strong> Enter your own{' '}
-                  {vessel.cod_payment_method === 'venmo' ? 'Venmo username' : 'Cash App $cashtag'} below —
-                  after your order is shopped, you&apos;ll get a request for the exact final amount.
-                  Please don&apos;t send payment ahead of time.
-                </p>
-                <Field
-                  label={vessel.cod_payment_method === 'venmo' ? 'Your Venmo Username' : 'Your Cash App $Cashtag'}
-                  required error={errors.cod_payment_handle}>
-                  <input type="text" className={`input-base w-full ${errors.cod_payment_handle ? 'border-red-400' : ''}`}
-                    placeholder={vessel.cod_payment_method === 'venmo' ? '@your-venmo' : '$yourcashtag'}
-                    value={vessel.cod_payment_handle}
-                    onChange={e => setV('cod_payment_handle', e.target.value)} />
-                </Field>
-              </div>
-            )}
-            {vessel.cod_payment_method === 'credit_card' && (
-              <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 space-y-3">
-                <p className="text-xs text-purple-900">
-                  <strong>We&apos;ll call you to collect payment.</strong> Card numbers are never entered on this
-                  site — Sinclair&apos;s (or our team) will call the number below to take payment over the phone.
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <Field label="Best Phone Number to Call" required error={errors.cod_preferred_phone}>
-                    <input type="tel" className={`input-base w-full ${errors.cod_preferred_phone ? 'border-red-400' : ''}`}
-                      placeholder="(555) 123-4567"
-                      value={vessel.cod_preferred_phone}
-                      onChange={e => setV('cod_preferred_phone', e.target.value)} />
-                  </Field>
-                  <Field label="Best Time to Call" hint="Crews run 12 on / 12 off — when are you awake?">
-                    <input type="text" className="input-base w-full"
-                      placeholder="e.g. 6 AM – 6 PM"
-                      value={vessel.cod_contact_time}
-                      onChange={e => setV('cod_contact_time', e.target.value)} />
-                  </Field>
+              {hasLinkedCod && (
+                <div className="px-3 py-1.5 text-xs text-purple-600">
+                  Linked items aren&apos;t in that total — we can&apos;t know the price until it&apos;s bought.
+                  They&apos;re collected at delivery{codFeePct > 0 ? `, with the same ${codFeePct}% handling fee` : ''}.
                 </div>
-              </div>
-            )}
+              )}
+            </div>
+
+            {/* HOW EACH PERSON PAYS.
+                Two crew members on the same boat rarely settle the same way,
+                and the person placing the order shouldn't have to pick one
+                method on everyone else's behalf. */}
+            <div className="space-y-3">
+              {codPeople.map(p => {
+                const pay = payFor(p.name);
+                const methodErr = errors[codErrKey(p.name, 'method')];
+                const handleErr = errors[codErrKey(p.name, 'handle')];
+                const phoneErr  = errors[codErrKey(p.name, 'phone')];
+                return (
+                  <div key={p.name} className="rounded-xl border-2 border-purple-100 bg-white p-3">
+                    <div className="flex justify-between items-baseline mb-2">
+                      <span className="text-sm font-bold text-purple-900">{p.name}</span>
+                      <span className="text-xs font-semibold text-purple-500">{codAmountLabel(p)}</span>
+                    </div>
+                    {methodErr && <p className="text-xs text-red-500 mb-2">{methodErr}</p>}
+                    <div className="flex gap-2 mb-2">
+                      {([['venmo', 'Venmo'], ['cashapp', '💲 Cash App'], ['credit_card', '💳 Credit Card']] as const).map(([val, lbl]) => (
+                        <button key={val} type="button"
+                          onClick={() => {
+                            setPay(p.name, { method: val });
+                            setErrors(e => {
+                              const n = { ...e };
+                              delete n[codErrKey(p.name, 'method')];
+                              delete n[codErrKey(p.name, 'handle')];
+                              delete n[codErrKey(p.name, 'phone')];
+                              return n;
+                            });
+                          }}
+                          className={`flex-1 py-2 rounded-lg border-2 text-xs font-bold transition-all ${
+                            pay.method === val
+                              ? 'border-purple-600 bg-purple-600 text-white'
+                              : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                          }`}>{lbl}</button>
+                      ))}
+                    </div>
+                    {(pay.method === 'venmo' || pay.method === 'cashapp') && (
+                      <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 space-y-2">
+                        <p className="text-xs text-purple-900">
+                          <strong>We&apos;ll send {p.name} a payment request.</strong> Enter their{' '}
+                          {pay.method === 'venmo' ? 'Venmo username' : 'Cash App $cashtag'} — after the order is
+                          shopped they&apos;ll get a request for the exact final amount.
+                          Please don&apos;t send payment ahead of time.
+                        </p>
+                        <Field
+                          label={pay.method === 'venmo' ? `${p.name}'s Venmo Username` : `${p.name}'s Cash App $Cashtag`}
+                          required error={handleErr}>
+                          <input type="text" className={`input-base w-full ${handleErr ? 'border-red-400' : ''}`}
+                            placeholder={pay.method === 'venmo' ? '@their-venmo' : '$theircashtag'}
+                            value={pay.handle}
+                            onChange={e => setPay(p.name, { handle: e.target.value })} />
+                        </Field>
+                      </div>
+                    )}
+                    {pay.method === 'credit_card' && (
+                      <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 space-y-2">
+                        <p className="text-xs text-purple-900">
+                          <strong>We&apos;ll call {p.name} to collect payment.</strong> Card numbers are never entered
+                          on this site — Sinclair&apos;s (or our team) will call the number below to take payment
+                          over the phone.
+                        </p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <Field label="Best Phone Number to Call" required error={phoneErr}>
+                            <input type="tel" className={`input-base w-full ${phoneErr ? 'border-red-400' : ''}`}
+                              placeholder="(555) 123-4567"
+                              value={pay.phone}
+                              onChange={e => setPay(p.name, { phone: e.target.value })} />
+                          </Field>
+                          <Field label="Best Time to Call" hint="Crews run 12 on / 12 off — when are they awake?">
+                            <input type="text" className="input-base w-full"
+                              placeholder="e.g. 6 AM – 6 PM"
+                              value={pay.time}
+                              onChange={e => setPay(p.name, { time: e.target.value })} />
+                          </Field>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </section>
         )}
 
@@ -1253,19 +1407,14 @@ export default function OrderPage() {
                       <span className="font-bold text-teal-700">{formatCurrency(deckSubtotal)}</span>
                     </div>
                   )}
-                  {codByName.map(([name, total]) => (
-                    <div key={name} className="flex justify-between">
-                      <span className="text-purple-700">COD — {name}
-                        {vessel.cod_payment_method && (
-                          <span className="text-purple-500"> · {
-                            vessel.cod_payment_method === 'credit_card' ? 'credit card (we’ll call)'
-                            : vessel.cod_payment_method === 'cashapp' ? 'Cash App (we’ll send a request)'
-                            : vessel.cod_payment_method === 'venmo' ? 'Venmo (we’ll send a request)'
-                            : vessel.cod_payment_method
-                          }</span>
+                  {codPeople.map(p => (
+                    <div key={p.name} className="flex justify-between">
+                      <span className="text-purple-700">COD — {p.name}
+                        {payFor(p.name).method && (
+                          <span className="text-purple-500"> · {codMethodPhrase(payFor(p.name).method)}</span>
                         )}
                       </span>
-                      <span className="font-bold text-purple-700">{formatCurrency(total)}</span>
+                      <span className="font-bold text-purple-700">{codAmountLabel(p)}</span>
                     </div>
                   ))}
                 </div>
@@ -1449,29 +1598,36 @@ export default function OrderPage() {
                 )}
               </div>
             )}
-            {hasCod && (
+            {hasCodPeople && (
               <div>
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1">COD Payment</p>
-                <div className="text-sm text-gray-700 bg-purple-50 border border-purple-200 rounded p-2">
-                  <p>
+                <div className="text-sm text-gray-700 bg-purple-50 border border-purple-200 rounded p-2 space-y-1.5">
+                  <p className="text-xs text-purple-800">
                     {codItems.length} item{codItems.length !== 1 ? 's' : ''} · {formatCurrency(codSubtotal * (1 + codFeePct / 100))}{codFeePct > 0 ? ` incl. ${codFeePct}% handling fee` : ''} — paid personally, not on the company invoice
-                    {vessel.cod_payment_method && <> — <strong>{
-                      vessel.cod_payment_method === 'credit_card' ? 'Credit Card'
-                      : vessel.cod_payment_method === 'cashapp' ? 'Cash App'
-                      : vessel.cod_payment_method === 'venmo' ? 'Venmo' : 'Cash'
-                    }</strong></>}
+                    {hasLinkedCod && ', plus linked items priced when bought'}
                   </p>
-                  {(vessel.cod_payment_method === 'venmo' || vessel.cod_payment_method === 'cashapp') && (
-                    <p className="text-xs text-purple-700 mt-0.5">
-                      We&apos;ll send a payment request to <strong>{vessel.cod_payment_handle || 'your account'}</strong> once
-                      the order is shopped. Please don&apos;t send payment ahead of time.
-                    </p>
-                  )}
-                  {vessel.cod_payment_method === 'credit_card' && (
-                    <p className="text-xs text-purple-700 mt-0.5">
-                      We&apos;ll call {vessel.cod_preferred_phone || 'you'}{vessel.cod_contact_time ? ` (around ${vessel.cod_contact_time})` : ''} to collect payment.
-                    </p>
-                  )}
+                  {codPeople.map(p => {
+                    const pay = payFor(p.name);
+                    return (
+                      <div key={p.name} className="border-t border-purple-200/70 pt-1.5 first:border-t-0 first:pt-0">
+                        <p>
+                          <strong>{p.name}</strong> · {codAmountLabel(p)}
+                          {pay.method && <> — <strong>{codMethodLabel(pay.method)}</strong></>}
+                        </p>
+                        {(pay.method === 'venmo' || pay.method === 'cashapp') && (
+                          <p className="text-xs text-purple-700 mt-0.5">
+                            We&apos;ll send a payment request to <strong>{pay.handle || 'their account'}</strong> once
+                            the order is shopped. Please don&apos;t send payment ahead of time.
+                          </p>
+                        )}
+                        {pay.method === 'credit_card' && (
+                          <p className="text-xs text-purple-700 mt-0.5">
+                            We&apos;ll call {pay.phone || 'them'}{pay.time ? ` (around ${pay.time})` : ''} to collect payment.
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}

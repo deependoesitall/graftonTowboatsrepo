@@ -4,6 +4,7 @@ import { Order } from '@/types';
 import { formatCurrency, formatDate } from './utils';
 import { generateOrderPdfBuffer } from './pdf-attachment';
 import { codFeePercent, codFeeLabel, codTotalWithFee, codPersonTotal } from '@/lib/cod-fee';
+import { readCodPayments, codMethodSentence } from '@/lib/cod-payments';
 
 // Lazily construct the Resend client so importing this module (e.g. during
 // `next build` page-data collection) doesn't require RESEND_API_KEY to be set.
@@ -216,6 +217,16 @@ export function buildOrderEmailHtml(
         ) : ''}
       </div>` : ''}
     </div>` : '';
+  // Per-person payment. Empty for orders placed before this existed, and the
+  // order-level codMethodLabel below is the fallback for exactly those.
+  const codPayments   = readCodPayments(ext);
+  const codPayByName  = new Map(codPayments.map(p => [p.name, p]));
+  // People who owe money ONLY through a linked item have no catalogue lines,
+  // so they never appear in codByName and would otherwise be invisible to the
+  // person collecting payment at the dock.
+  const codLinkedOnly = codPayments.filter(p =>
+    p.linked_items > 0 && !codByName.some(([name]) => name === p.name));
+
   const codMethodLabel = order.cod_payment_method === 'credit_card' ? 'Credit Card — we’ll call to collect'
     : order.cod_payment_method === 'venmo' ? 'Venmo — we’ll send a payment request'
     : order.cod_payment_method === 'cashapp' ? 'Cash App — we’ll send a payment request'
@@ -355,16 +366,24 @@ export function buildOrderEmailHtml(
       <div style="font-size:12px;color:#444;">${order.notes}</div>
     </div>` : ''}
 
-    ${codItems.length > 0 ? `<div style="background:#faf5ff;border:1px solid #9333ea;padding:10px 14px;border-radius:4px;margin-bottom:20px;">
+    ${(codItems.length > 0 || codLinkedOnly.length > 0) ? `<div style="background:#faf5ff;border:1px solid #9333ea;padding:10px 14px;border-radius:4px;margin-bottom:20px;">
       <div style="font-size:9px;font-weight:800;color:#9333ea;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">COD Items — ${formatCurrency(codTotalWithFee(order, codSubtotal))}${codFeePct > 0 || codFeeLbl(codSubtotal) !== 'no handling fee' ? ` incl. ${codFeeLbl(codSubtotal)}` : ''} (not invoiced) · paid personally, separated by crew member</div>
       ${codByName.map(([name, list]) => {
         const personTotal = list.reduce((s, i) => s + Number(i.line_total), 0);
+        const pay = codPayByName.get(name);
         return `<div style="margin-bottom:6px;">
-          <div style="font-size:12px;font-weight:800;color:#6b21a8;">${name} — ${formatCurrency(codPersonTotal(order, personTotal, codSubtotal, codByName.length))}${codFeePct > 0 ? ' <span style="font-weight:400;color:#9d7bd8;">incl. fee</span>' : ''}</div>
+          <div style="font-size:12px;font-weight:800;color:#6b21a8;">${name} — ${formatCurrency(codPersonTotal(order, personTotal, codSubtotal, codByName.length))}${codFeePct > 0 ? ' <span style="font-weight:400;color:#9d7bd8;">incl. fee</span>' : ''}${
+            pay && pay.linked_items > 0 ? ` <span style="font-weight:400;color:#9d7bd8;">+ ${pay.linked_items === 1 ? 'linked item' : `${pay.linked_items} linked items`}</span>` : ''
+          }</div>
           ${list.map(i => `<div style="font-size:11px;color:#444;padding-left:10px;">${i.quantity}× ${i.description} · ${formatCurrency(Number(i.line_total))}</div>`).join('')}
+          ${pay ? `<div style="font-size:11px;color:#6b21a8;padding-left:10px;margin-top:2px;"><strong>Pays by:</strong> ${codMethodSentence(pay)}</div>` : ''}
         </div>`;
       }).join('')}
-      ${codMethodLabel ? `<div style="font-size:11px;color:#6b21a8;margin-top:4px;border-top:1px solid #e9d5ff;padding-top:4px;"><strong>Payment:</strong> ${codMethodLabel}${
+      ${codLinkedOnly.map(p => `<div style="margin-bottom:6px;">
+        <div style="font-size:12px;font-weight:800;color:#6b21a8;">${p.name} — ${p.linked_items === 1 ? 'Linked item' : `${p.linked_items} linked items`} <span style="font-weight:400;color:#9d7bd8;">priced when bought</span></div>
+        <div style="font-size:11px;color:#6b21a8;padding-left:10px;margin-top:2px;"><strong>Pays by:</strong> ${codMethodSentence(p)}</div>
+      </div>`).join('')}
+      ${codPayments.length === 0 && codMethodLabel ? `<div style="font-size:11px;color:#6b21a8;margin-top:4px;border-top:1px solid #e9d5ff;padding-top:4px;"><strong>Payment:</strong> ${codMethodLabel}${
         order.cod_payment_method === 'credit_card'
           ? ` — we’ll call ${order.cod_preferred_phone || 'the crew member'}${order.cod_contact_time ? ` (around ${order.cod_contact_time})` : ''}`
           : (order.cod_payment_method === 'venmo' || order.cod_payment_method === 'cashapp')

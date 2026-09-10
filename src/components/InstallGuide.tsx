@@ -79,7 +79,7 @@ export default function InstallGuide({
       {/* ── Hero ───────────────────────────────────────────────────────── */}
       <header className="px-6 pt-14 pb-10 max-w-lg mx-auto text-center">
         {lockup === 'partner' ? (
-          <PartnerLockup tone="dark" size="lg" caption={null} className="mb-9" />
+          <PartnerLockup tone="dark" size="lg" caption={null} gtsMark="lockup" className="mb-9" />
         ) : (
           <div className="flex justify-center mb-9">
             {/* eslint-disable-next-line @next/next/no-img-element */}

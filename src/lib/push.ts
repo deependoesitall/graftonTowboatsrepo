@@ -111,6 +111,18 @@ export async function sendOrderPush(
    * GTS goes to the order detail (they triage and schedule).
    * Sinclair's goes to the picking queue (they shop; there is no per-order
    * route in the shop app, and the queue is one tap from the right order).
+   *
+   * ⚠️ /admin/orders?order=<id>, NOT /admin/orders/<id>.
+   *
+   * This pointed at /admin/orders/<id> for weeks and there has never been an
+   * [id] route under admin/orders — every staff notification opened a Vercel
+   * 404. It looked right in code review because the comment above says "the
+   * order detail", and the detail view is a MODAL on the list page, not a
+   * route of its own.
+   *
+   * A query string cannot 404: the list page renders whatever happens, and an
+   * id that no longer matches an order (deleted, or filtered out) just leaves
+   * the list showing. A path segment has no such floor.
    */
   const payloadFor = (isSinclair: boolean) => JSON.stringify(
     isSinclair
@@ -123,7 +135,7 @@ export async function sendOrderPush(
       : {
           title: `New order — ${vessel}`,
           body: line,
-          url: `/admin/orders/${order.id}`,
+          url: `/admin/orders?order=${order.id}`,
           tag: `order-${order.order_number}`,
         },
   );

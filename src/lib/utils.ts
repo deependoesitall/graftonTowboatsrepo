@@ -13,8 +13,24 @@ export function formatCurrency(amount: number): string {
   }).format(amount);
 }
 
+/**
+ * THE BUSINESS RUNS ON GRAFTON TIME. EVERY DATE IS FORMATTED IN IT.
+ *
+ * Vercel's serverless runtime is UTC. Anything formatted server-side without a
+ * timeZone — which was everything below — printed UTC, so an order placed at
+ * 11:19 PM Central arrived in the customer's inbox stamped 4:19 AM the NEXT
+ * DAY. It looked correct in the admin panel, because that renders in the
+ * browser and picked up the viewer's own zone, which is exactly why it went
+ * unnoticed: the two surfaces disagreed and only the customer saw the wrong one.
+ *
+ * The IANA zone, not a fixed -5/-6 offset: Grafton observes DST, and a
+ * hardcoded offset is a bug with a date on it.
+ */
+export const TIME_ZONE = 'America/Chicago';
+
 export function formatDate(dateString: string): string {
   return new Date(dateString).toLocaleDateString('en-US', {
+    timeZone: TIME_ZONE,
     year: 'numeric',
     month: 'short',
     day: 'numeric',
@@ -23,13 +39,27 @@ export function formatDate(dateString: string): string {
   });
 }
 
+/**
+ * GTS-YYMMDD-nnnn.
+ *
+ * ⚠️ THE DATE PART MUST BE THE LOCAL DATE. getFullYear/getMonth/getDate read
+ * the SERVER's clock, which on Vercel is UTC — so every order placed after
+ * 7 PM Central (6 PM in winter) was numbered with tomorrow's date. Staff find
+ * orders by number and Jen's ledger is organised by day, so a number that
+ * disagrees with the day the order was placed sends someone looking in the
+ * wrong place.
+ *
+ * en-CA gives YYYY-MM-DD, which is the one locale format that splits cleanly.
+ */
 export function generateOrderNumber(): string {
-  const date = new Date();
-  const year = date.getFullYear().toString().slice(-2);
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
+  const [year, month, day] = new Intl.DateTimeFormat('en-CA', {
+    timeZone: TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date()).split('-');
   const rand = Math.floor(Math.random() * 9000) + 1000;
-  return `GTS-${year}${month}${day}-${rand}`;
+  return `GTS-${year.slice(-2)}${month}${day}-${rand}`;
 }
 
 export const ORDER_STATUSES = [

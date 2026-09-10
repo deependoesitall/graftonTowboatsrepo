@@ -115,6 +115,28 @@ function OrdersContent() {
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
 
+  // DEEP LINK FROM A PUSH NOTIFICATION — /admin/orders?order=<id>
+  //
+  // Read straight off window.location rather than useSearchParams(): that hook
+  // forces the whole page into a Suspense boundary at build time, and this is a
+  // one-shot read that doesn't need to re-render on navigation.
+  //
+  // Fires only once, and only when the id actually matches something loaded.
+  // A notification for an order that's since been deleted, cancelled, or
+  // filtered out simply lands on the list — never an error, never an empty
+  // modal. Consumed from the URL afterwards so a refresh doesn't reopen it
+  // over whatever the person moved on to.
+  const [deepLinkDone, setDeepLinkDone] = useState(false);
+  useEffect(() => {
+    if (deepLinkDone || orders.length === 0) return;
+    const wanted = new URLSearchParams(window.location.search).get('order');
+    if (!wanted) { setDeepLinkDone(true); return; }
+    const match = orders.find(o => o.id === wanted);
+    if (match) setSelectedOrder(match);
+    setDeepLinkDone(true);
+    window.history.replaceState({}, '', '/admin/orders');
+  }, [orders, deepLinkDone]);
+
   async function advanceStatus(order: Order) {
     const next = nextStatus(order.status, roleFlags.isGts);
     if (!next) return;
