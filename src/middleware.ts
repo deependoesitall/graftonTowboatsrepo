@@ -11,7 +11,7 @@
 // It lived at the root until Sept 2026 and had never run in production. Two
 // things were quietly broken the whole time and neither announced itself:
 //
-//   1. The shop.* → /shop rewrite below did nothing, so the Sinclair's app
+//   1. The shop.* host routing below did nothing, so the Sinclair's app
 //      404'd while the domain, DNS and deploy all looked correct.
 //   2. The Supabase session refresh underneath never ran either — which is a
 //      slow, invisible failure: sessions expire earlier than they should and
@@ -27,52 +27,54 @@ import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
 /**
- * shop.graftontowboatservices.com → /shop, on the same Vercel project.
+ * shop.graftontowboatservices.com → canonical admin (apex), not the thin /shop
+ * PWA.
  *
- * WHY A SUBDOMAIN AND NOT A PATH.
- * Browsers scope installed web apps by ORIGIN, not path. Two manifests under
- * one hostname are not reliably two apps on iOS — the spec's `id` field exists
- * to disambiguate them, but Safari's handling of it isn't something anyone can
- * promise. Getting it wrong means Sinclair's staff install "Sinclair's Shop"
- * and get an icon that opens the GTS admin, discovered only after Dave's team
- * has already installed it.
+ * WHY THIS CHANGED.
+ * The separate shop.* origin existed so Sinclair's could install a distinct
+ * Home Screen app. In practice that app was a feature-lite "To shop" queue —
+ * no Products, no Settings, no admin chrome — while the real fulfill UX
+ * (ShoppingModeModal: barcode, line edits, weights, substitutions) already
+ * lived inside /admin. Managers landed in the incomplete portal by accident.
  *
- * A separate origin removes the question entirely: separate icon, separate
- * push permission, separate storage, no shared state to collide.
+ * One admin experience: shop.* 307s to the apex /admin/orders (query string
+ * preserved, including ?order=&shop=1 deep links into shopping mode). Staff
+ * reinstall from /admin/install if they still have the old shop icon.
+ *
+ * Static assets (icons, .webmanifest) still pass through on shop.* so an
+ * outdated install can at least update its manifest; start_url now points
+ * staff at apex admin.
  */
-function shopHostRewrite(request: NextRequest): NextResponse | null {
+function shopHostToAdmin(request: NextRequest): NextResponse | null {
   const host = (request.headers.get('host') || '').toLowerCase();
   if (!host.startsWith('shop.')) return null;
 
   const { pathname } = request.nextUrl;
 
-  // Already inside the shop app, or a Next internal — leave it alone.
-  if (pathname.startsWith('/shop') || pathname.startsWith('/_next')) return null;
+  if (pathname.startsWith('/_next')) return null;
 
-  // ANY file request passes through untouched.
-  //
-  // The matcher below excludes common image extensions but NOT .webmanifest —
-  // so without this, shop.host/shop.webmanifest would be rewritten to
-  // /shop/shop.webmanifest, 404, and the install would silently fall back to a
-  // default icon and name. The manifest is the one file this whole feature
-  // depends on, and it was one regex away from never being served.
-  if (pathname.includes('.')) return null;
+  // Let real files through (icons, webmanifest, sw.js). Everything else is a
+  // document navigation that should land on the full admin.
+  if (pathname.includes('.') && !pathname.endsWith('/')) return null;
 
-  // The shop host does not serve the admin panel. Sending someone to the
-  // canonical host rather than 404ing means a bookmarked/pasted admin link
-  // still works — it just lands on the origin that owns that app.
+  const url = request.nextUrl.clone();
+  url.hostname = host.replace(/^shop\./, '');
+
   if (pathname.startsWith('/admin')) {
-    const url = request.nextUrl.clone();
-    url.hostname = host.replace(/^shop\./, '');
-    return NextResponse.redirect(url);
+    // Already an admin path — just move it to the origin that owns admin.
+  } else if (
+    pathname === '/install' ||
+    pathname === '/shop/install' ||
+    pathname.startsWith('/install/') ||
+    pathname.startsWith('/shop/install/')
+  ) {
+    url.pathname = '/admin/install';
+  } else {
+    // /, /shop, /shop/…, and anything else → Orders (shopping lives here).
+    url.pathname = '/admin/orders';
   }
 
-  // Everything else on this host is the shop app. Rewrite (not redirect) so
-  // the address bar keeps saying shop.graftontowboatservices.com — which is
-  // also what makes start_url "/" behave for the installed app.
-  const url = request.nextUrl.clone();
-  url.pathname = `/shop${pathname === '/' ? '' : pathname}`;
-  return NextResponse.rewrite(url);
+  return NextResponse.redirect(url, 307);
 }
 
 /**
@@ -117,7 +119,7 @@ export async function middleware(request: NextRequest) {
   const legacy = orderHostRedirect(request);
   if (legacy) return legacy;
 
-  const shopped = shopHostRewrite(request);
+  const shopped = shopHostToAdmin(request);
   if (shopped) return shopped;
 
   let response = NextResponse.next({ request });
