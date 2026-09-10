@@ -19,11 +19,38 @@ const FIELDS = [
   // dropped by pick() with no error, so the form saves "successfully" and the
   // data never lands. Add the column here in the same commit as the migration.
   'po_number', 'helper_name', 'helper_hours', 'helper_pay',
+  // Migration 074 — the QuickBooks handoff.
+  // grocery_mode decides whether QBO taxes the grocery line, so a silent drop
+  // here would be a tax error, not a cosmetic one.
+  'grocery_mode', 'side_purchases',
+  'customer_invoiced_in_qb', 'driver_paid_in_qb',
+  'not_billable', 'not_billable_reason',
 ];
+
+/** Columns that are NOT NULL in the database — blank must not become null. */
+const NOT_NULL_DEFAULTS: Record<string, unknown> = {
+  grocery_mode: 'none',
+  side_purchases: [],
+  customer_invoiced_in_qb: false,
+  driver_paid_in_qb: false,
+  not_billable: false,
+};
 
 function pick(body: Record<string, unknown>) {
   const out: Record<string, unknown> = {};
-  for (const f of FIELDS) if (f in body) out[f] = body[f] === '' ? null : body[f];
+  for (const f of FIELDS) {
+    if (!(f in body)) continue;
+    const v = body[f];
+    // Empty string means "cleared" for the free-text columns, which is a real
+    // null. But migration 074 added NOT NULL columns, and sending null to one
+    // of those is a 500 the form would surface as "Could not save this
+    // delivery" with no clue why. Fall back to the column's own default.
+    if (v === '' || v === null || v === undefined) {
+      out[f] = f in NOT_NULL_DEFAULTS ? NOT_NULL_DEFAULTS[f] : null;
+    } else {
+      out[f] = v;
+    }
+  }
   return out;
 }
 
@@ -39,7 +66,9 @@ export async function GET(req: NextRequest) {
 
   let query = supabase
     .from('deliveries')
-    .select('*, company:companies(id, name)')
+    // requires_signed_receipt drives the "need slip" warning on the QuickBooks
+    // pack — without it here, every row looks like it needs a slip or none do.
+    .select('*, company:companies(id, name, requires_signed_receipt)')
     .order('delivery_date', { ascending: false, nullsFirst: false });
 
   // The QuickBooks queue is deliberately NOT month-scoped: if Mary Karen is a
@@ -85,7 +114,9 @@ export async function POST(req: NextRequest) {
   const { data, error } = await supabase
     .from('deliveries')
     .insert(pick(body))
-    .select('*, company:companies(id, name)')
+    // requires_signed_receipt drives the "need slip" warning on the QuickBooks
+    // pack — without it here, every row looks like it needs a slip or none do.
+    .select('*, company:companies(id, name, requires_signed_receipt)')
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ delivery: data });
@@ -101,7 +132,9 @@ export async function PATCH(req: NextRequest) {
     .from('deliveries')
     .update({ ...pick(body), updated_at: new Date().toISOString() })
     .eq('id', id)
-    .select('*, company:companies(id, name)')
+    // requires_signed_receipt drives the "need slip" warning on the QuickBooks
+    // pack — without it here, every row looks like it needs a slip or none do.
+    .select('*, company:companies(id, name, requires_signed_receipt)')
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ delivery: data });

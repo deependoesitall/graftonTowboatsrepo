@@ -120,12 +120,28 @@ export default async function CatalogPage({ searchParams }: PageProps) {
   // see the order as they see it on paper now"): form items sort by their
   // position on the paper form, top to bottom; anything not on the form
   // (curated extras, then full-store items) sorts after, alphabetically.
+  // ⚠️ READS products_catalog, NOT products.
+  //
+  // This page is the one customers actually browse, and it queries Supabase
+  // directly from the server component — it never goes through /api/products.
+  // That bit me: `browse_rank` was added to the API route and had no effect
+  // here, so the grey Freshop placeholder baskets kept appearing on page 1
+  // while the API returned a perfectly sorted list nobody was looking at.
+  //
+  // products_catalog is `products` plus browse_rank / has_real_image
+  // (migration 071). It's a security_invoker view, so the RLS on products
+  // still applies exactly as before — same rows, three extra columns.
   let query = supabase
-    .from('products')
+    .from('products_catalog')
     .select('*', { count: 'exact' })
     .eq('is_active', true)
     .eq('is_available', true)
     .order('form_seq', { ascending: true, nullsFirst: false })
+    // AFTER form_seq, so the paper order form's sequence is untouched — every
+    // barge-list row is browse_rank 0 by definition and this is a no-op across
+    // them. It only moves the full-store items, which is where the placeholders
+    // are: 670 of them, against 10 on the barge list.
+    .order('browse_rank', { ascending: true })
     .order('category', { ascending: true })
     .order('description', { ascending: true })
     .range(offset, offset + perPage - 1);

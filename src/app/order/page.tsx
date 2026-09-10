@@ -1484,6 +1484,21 @@ export default function OrderPage() {
           </div>
         </section>
 
+        {/* NOTICE LINE, NOT A CHECKBOX.
+            A required tickbox is one more thing between a cook on a moving boat
+            and a placed order, and it buys nothing legally that a clear notice
+            immediately above the button doesn't — the standard is conspicuous
+            notice at the point of agreement, which this is. Deepen was explicit:
+            no checkbox. */}
+        <p className="text-center text-xs text-gray-400 mb-3 leading-relaxed px-2">
+          By submitting this order you agree to our{' '}
+          <a href="/terms" target="_blank" rel="noopener noreferrer"
+            className="text-brand-navy font-semibold underline underline-offset-2">Terms of Service</a>
+          {' '}and{' '}
+          <a href="/privacy" target="_blank" rel="noopener noreferrer"
+            className="text-brand-navy font-semibold underline underline-offset-2">Privacy Policy</a>.
+        </p>
+
         <div className="flex gap-3">
           <button onClick={() => setStep(2)} className="btn-outline flex-1 py-4">&larr; Edit</button>
           <button onClick={handleSubmit} disabled={submitting}

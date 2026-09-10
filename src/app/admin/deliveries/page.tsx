@@ -5,7 +5,8 @@
 // rate card, and an editable rate-card manager. No more Google Drive.
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Truck, Plus, Pencil, Trash2, X, Loader2, DollarSign, Check, SlidersHorizontal, FileText, Search, Download } from 'lucide-react';
+import { Truck, Plus, Pencil, Trash2, X, Loader2, DollarSign, Check, SlidersHorizontal, FileText, Search, Download, Receipt } from 'lucide-react';
+import QbPackPanel from '@/components/admin/QbPackPanel';
 import { formatCurrency } from '@/lib/utils';
 import { adminFetch } from '@/lib/admin-auth';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
@@ -28,13 +29,21 @@ interface Delivery {
   amount_paid_driver: number | null;
   vessel_name: string | null;
   company_id: string | null;
-  company?: { id: string; name: string } | null;
+  company?: { id: string; name: string; requires_signed_receipt?: boolean } | null;
   service_type: string | null;
   location_delivered: string | null;
   delivery_fee: number | null;
   bill_for_groceries: boolean | null;
   sinclairs_grocery_total: number | null;
   updated_quickbooks: boolean | null;
+  // Migration 074 — the QuickBooks handoff.
+  grocery_mode: 'none' | 'sinclair_courtesy' | 'gts_purchased';
+  side_purchases: Array<{ description: string; amount: number }> | null;
+  customer_invoiced_in_qb: boolean | null;
+  driver_paid_in_qb: boolean | null;
+  not_billable: boolean | null;
+  not_billable_reason: string | null;
+  po_number: string | null;
   phone_number_used: string | null;
   issues_comments: string | null;
   gts_correspondent: string | null;
@@ -377,6 +386,8 @@ function QuickBooksQueue({ onClose, onEntered }: {
   // Download failures are shown in place, next to the button that failed —
   // never as a browser dialog, and never swallowed.
   const [downloadError, setDownloadError] = useState<Record<string, string>>({});
+  /** The delivery whose "For QuickBooks" pack is open, if any. */
+  const [packFor, setPackFor] = useState<Delivery | null>(null);
 
   // Loads EVERY unentered delivery, not just the month on screen — being a
   // week behind at a month boundary must never hide work.
@@ -392,16 +403,40 @@ function QuickBooksQueue({ onClose, onEntered }: {
     setTimeout(() => setCopied(k => (k === key ? '' : k)), 1200);
   }
 
+  /**
+   * Mark rows invoiced in QuickBooks.
+   *
+   * ONE REQUEST FOR THE WHOLE BATCH. This used to loop and PATCH each row
+   * individually, which meant a month-end batch of thirty was thirty round
+   * trips — and a failure halfway through left half the batch marked with no
+   * way to tell which half. The qb-status route takes an array and updates
+   * them together.
+   *
+   * It also writes `customer_invoiced_in_qb`, not the old `updated_quickbooks`,
+   * which conflated invoicing the barge line with paying the driver.
+   */
   async function markEntered(ids: string[], key: string) {
     if (!ids.length) return;
     setBusy(key);
     try {
-      for (const id of ids) {
-        await adminFetch('/api/admin/deliveries', {
-          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id, updated_quickbooks: true }),
-        });
-      }
+      await adminFetch('/api/admin/deliveries/qb-status', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, customer_invoiced_in_qb: true }),
+      });
+      await loadPending();
+      onEntered();
+    } finally { setBusy(null); }
+  }
+
+  /** Training runs, waived fees, helper-only rows — off the queue, still in the ledger. */
+  async function markNotBillable(ids: string[], key: string, reason: string) {
+    if (!ids.length) return;
+    setBusy(key);
+    try {
+      await adminFetch('/api/admin/deliveries/qb-status', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, not_billable: true, not_billable_reason: reason }),
+      });
       await loadPending();
       onEntered();
     } finally { setBusy(null); }
@@ -470,12 +505,44 @@ function QuickBooksQueue({ onClose, onEntered }: {
   function blockersFor(d: Delivery): string[] {
     const b: string[] = [];
     if (!d.company?.name) b.push('no company set');
-    if (d.bill_for_groceries && !(Number(d.sinclairs_grocery_total) > 0)) b.push("Sinclair's total missing");
-    if (/ingram/i.test(d.company?.name || '') && !d.ingram_slip_image_url) b.push('signed Ingram log missing');
+
+    // Courtesy without a total under-bills by the largest number on the
+    // invoice, and nothing downstream would catch it.
+    if (d.grocery_mode === 'sinclair_courtesy') {
+      if (!(Number(d.sinclairs_grocery_total) > 0)) b.push("Sinclair's total missing");
+      if (!d.sinclairs_receipt_url) b.push("Sinclair's tape missing");
+    }
+
+    if (d.grocery_mode === 'gts_purchased' && !(d.side_purchases?.length)) {
+      b.push('GTS-purchased but nothing itemised');
+    }
+
+    // PER COMPANY, not a hardcoded name test.
+    //
+    // This used to be /ingram/i, which flagged a missing slip on every row for
+    // every customer whose name happened to match, and — worse — would have
+    // gone on demanding one from Reliant, ARTCO and Kirby, who never ask for
+    // it. A warning that fires when it shouldn't is a warning people learn to
+    // click past, which is exactly how it gets missed on Ingram.
+    if (d.company?.requires_signed_receipt && !d.ingram_slip_image_url) {
+      b.push('signed delivery log missing');
+    }
     return b;
   }
 
-  const billable = (all || []).filter(d => Number(d.delivery_fee) > 0 || d.bill_for_groceries);
+  // THE QUEUE: not yet invoiced, not written off, and actually worth billing.
+  //
+  // `customer_invoiced_in_qb` — not the old `updated_quickbooks`, which also
+  // meant "driver paid" and so hid rows from the wrong job.
+  // `not_billable` — training runs and helper-only rows stay in the ledger for
+  // the record but must never look like unfinished work here.
+  const billable = (all || []).filter(d =>
+    !d.customer_invoiced_in_qb
+    && !d.not_billable
+    && (Number(d.delivery_fee) > 0
+        || d.grocery_mode !== 'none'
+        || (d.side_purchases?.length ?? 0) > 0),
+  );
   const ready = billable.filter(d => blockersFor(d).length === 0);
   const blocked = billable.filter(d => blockersFor(d).length > 0);
 
@@ -505,8 +572,14 @@ function QuickBooksQueue({ onClose, onEntered }: {
         .sort((a, b) => a[0].localeCompare(b[0])),
     ] as const);
 
+  // Pre-tax total of everything that will go on the QBO invoice.
+  //
+  // Grocery only counts under `sinclair_courtesy` — a `gts_purchased` row's
+  // money lives in side_purchases, and counting both would double it.
   const lineTotal = (d: Delivery) =>
-    (Number(d.delivery_fee) || 0) + (d.bill_for_groceries ? (Number(d.sinclairs_grocery_total) || 0) : 0);
+    (Number(d.delivery_fee) || 0)
+    + (d.grocery_mode === 'sinclair_courtesy' ? (Number(d.sinclairs_grocery_total) || 0) : 0)
+    + (d.side_purchases || []).reduce((s, p) => s + (Number(p.amount) || 0), 0);
 
   const Field = ({ label, value, k }: { label: string; value: string; k: string }) => (
     <button onClick={() => copy(value, k)}
@@ -540,6 +613,16 @@ function QuickBooksQueue({ onClose, onEntered }: {
 
   return createPortal(
     <div className="fixed inset-0 z-[95] bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
+      {/* The pack renders its own portal above this one. Clicking a Pack
+          button must not also close the queue behind it, so it sits outside
+          the stopPropagation wrapper and closes back to this list. */}
+      {packFor && (
+        <QbPackPanel
+          delivery={packFor as unknown as Parameters<typeof QbPackPanel>[0]['delivery']}
+          onClose={() => setPackFor(null)}
+          onMarked={() => { loadPending(); onEntered(); }}
+        />
+      )}
       <div onClick={e => e.stopPropagation()} className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[92vh]">
         <div className="px-5 py-4 border-b border-gray-100 flex items-start justify-between gap-3 shrink-0">
           <div>
@@ -632,10 +715,33 @@ function QuickBooksQueue({ onClose, onEntered }: {
                           {busy === `${key}-pdf` ? 'Building…' : 'Packet'}
                         </button>
 
+                        {/* OPEN PACK — one delivery, one QBO invoice.
+                            Shown per delivery rather than per group because
+                            the tax flags are decided per row: a boat can have
+                            a courtesy grocery run on Tuesday and a taxable
+                            Walmart buy on Thursday, and those are two
+                            different invoices with two different tax answers. */}
+                        {ds.map((d, i) => (
+                          <button key={d.id} onClick={() => setPackFor(d)}
+                            className="flex items-center gap-1.5 bg-brand-navy text-white text-[11px] font-bold px-3 py-1.5 rounded-lg hover:bg-brand-steel"
+                            title="The lines, memo, tax flags and attachments for this delivery">
+                            <Receipt className="w-3.5 h-3.5" />
+                            {ds.length > 1 ? `Pack ${i + 1}` : 'Open pack'}
+                          </button>
+                        ))}
+
                         <button onClick={() => markEntered(ds.map(d => d.id), key)} disabled={busy === key}
                           className="flex items-center gap-1.5 bg-brand-green text-white text-[11px] font-bold px-3 py-1.5 rounded-lg hover:bg-brand-gmed disabled:opacity-50 ml-auto">
                           {busy === key ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
                           Entered
+                        </button>
+
+                        <button onClick={() => markNotBillable(ds.map(d => d.id), `${key}-nb`, 'Skipped from the QuickBooks queue')}
+                          disabled={busy === `${key}-nb`}
+                          className="flex items-center gap-1.5 border border-gray-300 text-gray-500 text-[11px] font-bold px-3 py-1.5 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                          title="Training run, waived fee or helper-only — keep it in the ledger, drop it from this queue">
+                          {busy === `${key}-nb` ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                          Not billable
                         </button>
                       </div>
 
@@ -772,7 +878,15 @@ function DeliveryEditor({ delivery, companies, serviceTypes, vesselRecords = [],
     // 2dp string, same as delivery_fee — both go through moneyChars/moneyBlur.
     sinclairs_grocery_total: delivery?.sinclairs_grocery_total != null
       ? Number(delivery.sinclairs_grocery_total).toFixed(2) : '',
+    // Migration 074. Derived from the old boolean for rows predating it, so an
+    // existing grocery delivery opens showing courtesy rather than "None" —
+    // which would silently drop the grocery line on the next save.
+    grocery_mode: (delivery as any)?.grocery_mode
+      ?? (delivery?.bill_for_groceries ? 'sinclair_courtesy' : 'none'),
+    side_purchases: (delivery as any)?.side_purchases ?? [],
     updated_quickbooks: delivery?.updated_quickbooks ?? false,
+    customer_invoiced_in_qb: delivery?.customer_invoiced_in_qb ?? false,
+    driver_paid_in_qb: delivery?.driver_paid_in_qb ?? false,
     phone_number_used: delivery?.phone_number_used || '',
     issues_comments: delivery?.issues_comments || '',
     gts_correspondent: delivery?.gts_correspondent || '',
@@ -963,6 +1077,17 @@ function DeliveryEditor({ delivery, companies, serviceTypes, vesselRecords = [],
       amount_paid_driver: num(rest.amount_paid_driver),
       helper_hours: num(rest.helper_hours),
       helper_pay: num(rest.helper_pay),
+      // Amounts are text in the form so the boxes can be genuinely empty.
+      // Postgres needs real numbers in the jsonb, and a row with no
+      // description AND no amount is a half-added line nobody finished — drop
+      // it rather than storing an empty object that renders as a blank
+      // taxable line on the invoice pack.
+      side_purchases: (rest.side_purchases || [])
+        .map((p: { description?: string; amount?: unknown }) => ({
+          description: (p.description || '').trim(),
+          amount: Number(p.amount) || 0,
+        }))
+        .filter((p: { description: string; amount: number }) => p.description || p.amount > 0),
     };
     const method = delivery ? 'PATCH' : 'POST';
     const body = delivery ? { id: delivery.id, ...payload } : payload;
@@ -1083,15 +1208,34 @@ function DeliveryEditor({ delivery, companies, serviceTypes, vesselRecords = [],
             )}
           </label>
 
-          <label className="flex items-center gap-2 text-sm mt-1 self-end pb-1.5">
-            <input type="checkbox" checked={!!f.bill_for_groceries} onChange={e => set('bill_for_groceries', e.target.checked)} className="w-4 h-4 accent-brand-green" />
-            Bill for groceries
+          {/* GROCERIES: A THREE-WAY CHOICE, NOT A CHECKBOX.
+              This decides whether QuickBooks adds sales tax, which is a tax
+              question rather than a billing preference — see migration 074.
+              A boolean could not tell "Sinclair's register total, tax already
+              inside it" apart from "we bought this at Walmart on our
+              exemption", and getting it wrong either double-taxes the barge
+              line or leaves GTS owing tax it never collected. */}
+          <label className="block col-span-2">
+            <span className="text-xs font-semibold text-gray-500">Groceries on this delivery</span>
+            <select value={f.grocery_mode} onChange={e => set('grocery_mode', e.target.value)}
+              className="mt-0.5 w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm">
+              <option value="none">None</option>
+              <option value="sinclair_courtesy">Sinclair&apos;s courtesy — pass through their register total (no QBO tax)</option>
+              <option value="gts_purchased">GTS purchased elsewhere — Ruler, Walmart, etc. (QBO taxes it)</option>
+            </select>
+            <span className="block mt-1 text-[11px] text-gray-400 leading-snug">
+              {f.grocery_mode === 'sinclair_courtesy'
+                ? "Sinclair's tax is already in the register total, so QuickBooks must not tax this line again."
+                : f.grocery_mode === 'gts_purchased'
+                  ? 'Bought on the GTS exemption, so QuickBooks should charge tax. Itemise the items below.'
+                  : 'No grocery line on the invoice.'}
+            </span>
           </label>
 
-          {/* Only exists when it's actually being billed — an always-visible
-              box invited a total on deliveries where Sinclair's bills the boat
-              direct, which then showed up on a GTS invoice as a double charge. */}
-          {f.bill_for_groceries && (
+          {/* Only exists under courtesy — an always-visible box invited a
+              total on deliveries where Sinclair's bills the boat direct, which
+              then showed up on a GTS invoice as a double charge. */}
+          {f.grocery_mode === 'sinclair_courtesy' && (
             <label className="block">
               <span className="text-xs font-semibold text-gray-500">
                 Sinclair&apos;s grocery total <span className="text-red-500">*</span>
@@ -1113,6 +1257,66 @@ function DeliveryEditor({ delivery, companies, serviceTypes, vesselRecords = [],
                 </span>
               )}
             </label>
+          )}
+
+          {/* ── Taxable items GTS bought elsewhere ────────────────────────
+              Shown whenever there's something to show, or when the mode says
+              there should be. These become TAXABLE lines in QuickBooks, which
+              is the opposite of the courtesy line directly above — the two
+              sitting next to each other is deliberate, so the difference is
+              visible at the moment someone is deciding. */}
+          {(f.grocery_mode === 'gts_purchased' || (f.side_purchases?.length ?? 0) > 0) && (
+            <div className="col-span-2 border border-gray-200 rounded-lg p-3">
+              <p className="text-xs font-semibold text-gray-500 mb-0.5">
+                Items GTS bought — Ruler, Walmart, ice melt, hardware
+              </p>
+              <p className="text-[11px] text-gray-400 mb-2.5 leading-snug">
+                Bought on the GTS exemption, so <strong>QuickBooks charges tax on these</strong>.
+              </p>
+
+              <div className="space-y-2">
+                {(f.side_purchases || []).map((p: { description: string; amount: number | string }, i: number) => (
+                  <div key={i} className="flex gap-2 items-start">
+                    <input
+                      value={p.description ?? ''} placeholder="What it was"
+                      onChange={e => {
+                        const next = [...(f.side_purchases || [])];
+                        next[i] = { ...next[i], description: e.target.value };
+                        set('side_purchases', next);
+                      }}
+                      className="flex-1 border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm" />
+                    <div className="relative w-28 shrink-0">
+                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-gray-400 pointer-events-none">$</span>
+                      <input
+                        type="text" inputMode="decimal" placeholder="0.00"
+                        value={p.amount ?? ''}
+                        onChange={e => {
+                          const next = [...(f.side_purchases || [])];
+                          next[i] = { ...next[i], amount: moneyChars(e.target.value) };
+                          set('side_purchases', next);
+                        }}
+                        onBlur={e => {
+                          const next = [...(f.side_purchases || [])];
+                          next[i] = { ...next[i], amount: moneyBlur(e.target.value) };
+                          set('side_purchases', next);
+                        }}
+                        className="w-full border border-gray-200 rounded-lg pl-6 pr-2 py-1.5 text-sm" />
+                    </div>
+                    <button type="button"
+                      onClick={() => set('side_purchases', (f.side_purchases || []).filter((_: unknown, j: number) => j !== i))}
+                      className="p-2 text-gray-300 hover:text-red-500 shrink-0">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <button type="button"
+                onClick={() => set('side_purchases', [...(f.side_purchases || []), { description: '', amount: '' }])}
+                className="mt-2 text-xs font-bold text-brand-navy hover:text-brand-green flex items-center gap-1.5">
+                <Plus className="w-3.5 h-3.5" /> Add an item
+              </button>
+            </div>
           )}
 
           {/* ── Who did it ────────────────────────────────────────────── */}
@@ -1159,14 +1363,31 @@ function DeliveryEditor({ delivery, companies, serviceTypes, vesselRecords = [],
             </>
           )}
 
-          {/* Invoice state — edit only. Never part of creating a delivery. */}
+          {/* INVOICE STATE — EDIT ONLY, NEVER ON ADD.
+              These are states a delivery reaches later, at month end, not facts
+              anyone knows standing on a dock. Putting them on the Add form
+              invited someone to tick "invoiced" on a delivery that hadn't
+              happened yet.
+
+              The two QuickBooks flags are separate on purpose (migration 074):
+              invoicing the barge line and paying the driver happen on different
+              days, sometimes by different people, and one shared checkbox meant
+              finishing either job hid the row from the other. */}
           {isEdit && (
             <>
               {field('Invoice sent (date)', 'invoice_sent', 'date')}
               {field('Incentive', 'incentive')}
               <label className="flex items-center gap-2 text-sm mt-1">
-                <input type="checkbox" checked={!!f.updated_quickbooks} onChange={e => set('updated_quickbooks', e.target.checked)} className="w-4 h-4 accent-brand-green" />
-                Updated QuickBooks
+                <input type="checkbox" checked={!!f.customer_invoiced_in_qb}
+                  onChange={e => set('customer_invoiced_in_qb', e.target.checked)}
+                  className="w-4 h-4 accent-brand-green" />
+                Customer invoiced in QuickBooks
+              </label>
+              <label className="flex items-center gap-2 text-sm mt-1">
+                <input type="checkbox" checked={!!f.driver_paid_in_qb}
+                  onChange={e => set('driver_paid_in_qb', e.target.checked)}
+                  className="w-4 h-4 accent-brand-green" />
+                Driver paid in QuickBooks
               </label>
             </>
           )}

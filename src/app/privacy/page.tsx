@@ -15,7 +15,11 @@ import type { Metadata } from 'next';
 import { LegalShell, LS, LSub, LP, LUL, LTable, LCallout } from '@/components/site/LegalShell';
 import { BUSINESS } from '@/app/site/content';
 
-const EFFECTIVE = 'Effective September 7, 2026';
+// The terms themselves took force on Sept 7. Sept 9 added sections describing
+// things that already existed (accounts, cookies) plus staff push
+// notifications, which are new. Effective date stays put — changing it would
+// imply the earlier terms were never in force.
+const EFFECTIVE = 'Effective September 7, 2026 · Last updated September 9, 2026';
 
 export const metadata: Metadata = {
   title: 'Privacy Policy | Grafton Towboat Services',
@@ -28,7 +32,7 @@ export default function PrivacyPage() {
     <LegalShell
       title="Privacy Policy"
       effective={EFFECTIVE}
-      lede={`Grafton Towboat Services ("GTS," "we," "us") operates graftontowboatservices.com and the online ordering system used by the vessels we serve. This explains what we collect, why, and what we do with it. We've written it in plain language on purpose.`}
+      lede={`Grafton Towboat Services ("GTS," "we," "us") operates graftontowboatservices.com and order.graftontowboatservices.com — the public website and the ordering system used by the vessels we serve. This policy covers both. It explains what we collect, why, and what we do with it, in plain language on purpose.`}
     >
       <LCallout>
         <strong>The short version:</strong> we collect what we need to get groceries
@@ -74,13 +78,55 @@ export default function PrivacyPage() {
       </LCallout>
 
       <LSub>If you create an account</LSub>
-      <LP>Your email address, so you can see your own past orders. Nothing more.</LP>
+      <LP>
+        An account is optional — you can order without one. If you make one we hold:
+      </LP>
+      <LUL items={[
+        <><strong>Your email address and a password.</strong> The password is stored only as a one-way hash; nobody at GTS can read it, and we will never ask you for it.</>,
+        <><strong>A role</strong> — customer, GTS staff, or Sinclair&apos;s shopper. This decides what you can see. It&apos;s why a Sinclair&apos;s shopper can open the grocery list they need to pick and cannot open our delivery rates.</>,
+        <><strong>The vessel and company you last ordered for</strong>, so you don&apos;t retype them every time.</>,
+      ]} />
 
       <LSub>Delivery documentation</LSub>
       <LP>
         We keep the itemised register receipt from Sinclair&apos;s Foods and, where
-        the barge line requires one, a photograph of the signed delivery log. Those
-        support the invoice and are retained as business records.
+        the barge line requires one, a <strong>photograph of the signed delivery
+        log</strong>. Those exist for one reason: they are the proof of delivery
+        your accounts payable department asks for, and several barge lines will
+        not pay an invoice without them.
+      </LP>
+      <LP>
+        A signed log is shared only with the barge line it belongs to, as part of
+        that invoice packet. It is never shown to another customer, never used in
+        marketing, and never published. It is retained with the order records it
+        supports — see &ldquo;How long we keep it&rdquo; below.
+      </LP>
+
+      <LSub>Notifications to our own staff</LSub>
+      <LP>
+        GTS and Sinclair&apos;s staff can install our ordering app on a phone and
+        opt in to a notification when an order arrives. If someone does, we store
+        a <strong>push subscription</strong> — an anonymous address issued by
+        their browser, plus which device it belongs to — against that staff
+        account, so their phone can be alerted.
+      </LP>
+      <LUL items={[
+        <><strong>Staff only.</strong> Vessels, crews and customers are never sent push notifications, and there is no way in the system to do so.</>,
+        <><strong>Never marketing.</strong> These alerts are operational — a new order arrived — and will not be used to promote anything.</>,
+        <><strong>Off whenever you like.</strong> Turn them off in the app&apos;s settings, in your phone&apos;s notification settings, or by deleting the app. You can also email us and we&apos;ll remove the device.</>,
+      ]} />
+
+      <LSub>Cookies</LSub>
+      <LP>
+        <strong>Essential cookies only.</strong> We use them to keep you signed in,
+        to remember what&apos;s in your cart between pages, and to keep your session
+        secure. That&apos;s the entire list.
+      </LP>
+      <LP>
+        We run <strong>no advertising cookies, no tracking pixels, and no
+        third-party analytics that follow you to other websites.</strong> That is
+        also why you have never seen a cookie banner here — those exist to get
+        consent for tracking we don&apos;t do.
       </LP>
 
       <LSub>If you use the contact form</LSub>
@@ -138,11 +184,18 @@ export default function PrivacyPage() {
         No system is perfectly secure and we won&apos;t claim otherwise. We review
         our security regularly and fix what we find.
       </LP>
+      <LP>
+        <strong>If personal information is ever breached, we will notify affected
+        people as Illinois law requires</strong> (the Personal Information
+        Protection Act, 815 ILCS 530), without unreasonable delay, and we will
+        tell you what happened rather than the minimum we can get away with.
+      </LP>
 
       <LS>5. How long we keep it</LS>
       <LUL items={[
-        <><strong>Orders, invoices, receipts and delivery documentation:</strong> at least seven years, as business and tax records require.</>,
+        <><strong>Orders, invoices, receipts and delivery documentation:</strong> at least seven years, as business and tax records require. Signed delivery-log photographs are kept with the order they belong to, for the same period and for the same reason — they are part of the invoice record.</>,
         <><strong>Account information:</strong> until you ask us to remove it.</>,
+        <><strong>Staff push subscriptions:</strong> until the device is switched off, removed, or stops responding — at which point we mark it dead and stop sending to it.</>,
         <><strong>Contact form messages:</strong> until they&apos;re dealt with and no longer useful as a record.</>,
         <><strong>Server logs:</strong> a short period, typically under 30 days.</>,
       ]} />
