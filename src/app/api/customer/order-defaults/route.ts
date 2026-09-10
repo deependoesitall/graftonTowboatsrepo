@@ -43,6 +43,56 @@ interface VesselDefault {
   last_ordered: string;
 }
 
+/**
+ * ⚠️ ONE STRING LITERAL. DO NOT SPLIT THIS ACROSS A `+`.
+ *
+ * supabase-js infers the row type by parsing the select string AS A TYPE, so it
+ * needs a literal. Written as `'a, b, ' + 'c'` the value is just `string` at the
+ * type level, inference gives up, and every column access fails to compile with
+ * `Property 'vessel_name' does not exist on type 'GenericStringError'` — which
+ * names the symptom and not the cause, and is what broke the build the first
+ * time this shipped.
+ */
+const ORDER_DEFAULT_COLUMNS =
+  'vessel_name, vessel_type, captain_name, captain_phone, vessel_email, company_name, terminal_name, delivery_method, approach_side, vhf_channel, created_at';
+
+/** The shape those columns come back in. Nothing here trusts the inference. */
+interface DefaultsRow {
+  vessel_name: string | null;
+  vessel_type: string | null;
+  captain_name: string | null;
+  captain_phone: string | null;
+  vessel_email: string | null;
+  company_name: string | null;
+  terminal_name: string | null;
+  delivery_method: 'boat' | 'van' | null;
+  approach_side: string | null;
+  vhf_channel: string | null;
+  created_at: string;
+}
+
+async function loadRows(userId: string): Promise<DefaultsRow[]> {
+  const supabase = createServiceClient();
+  // Newest first, then de-duplicated in memory. 60 rows is far more history
+  // than anyone needs to see their own boats and is one cheap indexed read.
+  const { data, error } = await supabase
+    .from('orders')
+    .select(ORDER_DEFAULT_COLUMNS)
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(60);
+
+  if (error) {
+    console.error('order-defaults error:', error);
+    // Degrade to "no history" rather than failing the order form. This endpoint
+    // is a convenience; nothing downstream should break because it had a bad day.
+    return [];
+  }
+  // The column list is fixed and hand-written directly above, so the shape is
+  // known here in a way the generic cannot express.
+  return (data ?? []) as unknown as DefaultsRow[];
+}
+
 export async function GET(req: NextRequest) {
   const authHeader = req.headers.get('authorization');
   if (!authHeader?.startsWith('Bearer ')) {
@@ -58,31 +108,14 @@ export async function GET(req: NextRequest) {
   if (authError || !auth.user) {
     return NextResponse.json({ vessels: [], terminals: [] });
   }
-
-  const supabase = createServiceClient();
-  // Newest first, then de-duplicated in memory. 60 rows is far more history
-  // than anyone needs to see their own boats and is one cheap indexed read.
-  const { data, error } = await supabase
-    .from('orders')
-    .select('vessel_name, vessel_type, captain_name, captain_phone, vessel_email, '
-      + 'company_name, terminal_name, delivery_method, approach_side, vhf_channel, created_at')
-    .eq('user_id', auth.user.id)
-    .order('created_at', { ascending: false })
-    .limit(60);
-
-  if (error) {
-    console.error('order-defaults error:', error);
-    // Degrade to "no history" rather than failing the order form. This endpoint
-    // is a convenience; nothing downstream should break because it had a bad day.
-    return NextResponse.json({ vessels: [], terminals: [] });
-  }
+  const rows = await loadRows(auth.user.id);
 
   const vessels: VesselDefault[] = [];
   const seenVessel = new Set<string>();
   const terminals: string[] = [];
   const seenTerminal = new Set<string>();
 
-  for (const row of data ?? []) {
+  for (const row of rows) {
     const name = (row.vessel_name || '').trim();
     if (name && !seenVessel.has(name.toLowerCase())) {
       seenVessel.add(name.toLowerCase());
