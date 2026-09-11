@@ -239,7 +239,14 @@ function OrdersContent() {
                     className="btn-primary text-sm px-3 py-2 flex items-center gap-1.5">
               <Plus className="w-4 h-4" /> New order
             </button>
-            <button onClick={fetchOrders} className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={(e) => {
+                fetchOrders();
+                // Touch browsers keep :hover/:focus until tap-away — clear it.
+                e.currentTarget.blur();
+              }}
+              className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5">
               <RefreshCw className="w-4 h-4" /> Refresh
             </button>
           </div>

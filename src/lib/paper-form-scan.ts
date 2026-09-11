@@ -9,6 +9,18 @@
 import type { FormLayoutItem } from '@/lib/form-layout-apply';
 
 import { rectifyPage } from '@/lib/paper-form-rectify';
+import {
+  type MarkShape,
+  type MarkGroup,
+  isolateMark,
+  markImage,
+  groupMarks,
+} from '@/lib/paper-form-marks';
+
+// One import surface for the review screens: they should not have to know
+// whether a thing came from the scanner or the mark matcher.
+export { similarMarks, GROUP_THRESHOLD, SUGGEST_THRESHOLD, PRETICK_THRESHOLD } from '@/lib/paper-form-marks';
+export type { MarkShape, MarkGroup } from '@/lib/paper-form-marks';
 
 export interface CatalogItem {
   id: string;
@@ -72,6 +84,27 @@ export interface ScanCandidate {
   contextRegion: CropRegion;
   /** The QNTY cell itself, in the same page coordinates. */
   markRegion: CropRegion;
+  /**
+   * THE MARK ON ITS OWN, BIG.
+   *
+   * The pencil stroke cut away from the printed rules, from the row above
+   * dropping its tail through the line, and from the empty half of the cell —
+   * then blown up. This is what a person actually reads the number off, and it
+   * is a different picture from `cropDataUrl` (the whole cell, rules and all)
+   * on purpose.
+   */
+  markImageDataUrl: string | null;
+  /**
+   * The normalised shape, for matching this mark against the others on the
+   * same order. Null when the cell held nothing that could be isolated.
+   */
+  shape: MarkShape | null;
+  /**
+   * Which set of look-alike marks this one belongs to. Every member of a group
+   * is the same digit in the same hand, so one answer covers all of them.
+   * -1 when the mark could not be shaped.
+   */
+  groupId: number;
 }
 
 export interface WriteInCandidate {
@@ -106,6 +139,11 @@ export interface ScanResult {
   /** Where the quantity column was found, and whether to trust it. */
   qntyColumn: QntyColumn;
   candidates: ScanCandidate[];
+  /**
+   * Marks that look like the same digit, biggest set first. Indexes are into
+   * `candidates`.
+   */
+  markGroups: MarkGroup[];
   writeIns: WriteInCandidate[];
   pageOrientations: Array<0 | 90 | 180 | 270>;
   summaryFlags: string[];
@@ -406,6 +444,26 @@ export async function fileToCanvas(file: File): Promise<HTMLCanvasElement> {
 interface RowBand { y0: number; y1: number }
 
 function findRowBands(canvas: HTMLCanvasElement): RowBand[] {
+  /**
+   * ⚠️ THE ROW GRID DECIDES WHICH ITEM A MARK BELONGS TO. GET IT WRONG AND
+   * EVERYTHING DOWNSTREAM IS WRONG IN A WAY THAT STILL LOOKS PLAUSIBLE.
+   *
+   * The old version tested every horizontal line against ONE fixed darkness
+   * threshold, and if fewer than ten rules cleared it, gave up and laid a flat
+   * 48-row grid over the page from 14% to 88%. On a real scan that happened on
+   * a third of the pages — photocopied rules come out faint — and the
+   * consequences were not subtle: a mark got attributed to whatever row the
+   * invented grid happened to put under it, so the review screen offered
+   * "Pork Steaks" beside a crop of the Dairy section, and the OCR read printed
+   * text out of the wrong cell and reported quantities like "~" and "Rwy".
+   *
+   * Two changes. The threshold now ADAPTS: it starts strict and relaxes until
+   * it finds a plausible number of rules, because "faint" is a property of the
+   * scan, not of the form. And when there still aren't enough, the fallback
+   * grid is built from the spacing of the rules that WERE found — a real pitch
+   * and a real offset measured off this page — instead of a guess that happens
+   * to be right on the pages that never needed it.
+   */
   const { width: w, height: h } = canvas;
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
   const { data } = ctx.getImageData(0, 0, w, h);
@@ -417,6 +475,7 @@ function findRowBands(canvas: HTMLCanvasElement): RowBand[] {
   const yEnd = Math.floor(h * 0.96);
   const xLeft = Math.floor(w * 0.08);
   const xRight = Math.floor(w * 0.92);
+
   const lineScore: number[] = new Array(h).fill(0);
   for (let y = yStart; y < yEnd; y++) {
     let dark = 0; let samples = 0;
@@ -426,30 +485,60 @@ function findRowBands(canvas: HTMLCanvasElement): RowBand[] {
     }
     lineScore[y] = dark / Math.max(1, samples);
   }
-  const rules: number[] = [];
-  const threshold = 0.22;
-  for (let y = yStart + 2; y < yEnd - 2; y++) {
-    if (lineScore[y] >= threshold && lineScore[y] >= lineScore[y - 1] && lineScore[y] >= lineScore[y + 1]) {
-      if (!rules.length || y - rules[rules.length - 1] > 8) rules.push(y);
+
+  const rulesAt = (threshold: number): number[] => {
+    const out: number[] = [];
+    for (let y = yStart + 2; y < yEnd - 2; y++) {
+      if (lineScore[y] >= threshold && lineScore[y] >= lineScore[y - 1] && lineScore[y] >= lineScore[y + 1]) {
+        if (!out.length || y - out[out.length - 1] > 8) out.push(y);
+      }
     }
+    return out;
+  };
+
+  // A full page of this form carries roughly 45–60 ruled rows. Relax until the
+  // count is in that neighbourhood rather than insisting on one darkness.
+  let rules: number[] = [];
+  for (const t of [0.22, 0.18, 0.14, 0.11, 0.08, 0.06]) {
+    rules = rulesAt(t);
+    if (rules.length >= 25) break;
   }
+
   const bands: RowBand[] = [];
   if (rules.length >= 8) {
     for (let i = 0; i < rules.length - 1; i++) {
       const y0 = rules[i] + 1;
       const y1 = rules[i + 1] - 1;
-      if (y1 - y0 >= 10 && y1 - y0 <= Math.floor(h * 0.08)) bands.push({ y0, y1 });
+      if (y1 - y0 >= 8 && y1 - y0 <= Math.floor(h * 0.08)) bands.push({ y0, y1 });
     }
   }
-  if (bands.length < 10) {
-    bands.length = 0;
-    const top = Math.floor(h * 0.14);
-    const bottom = Math.floor(h * 0.88); // leave room for write-in block
-    const rows = 48;
-    const pitch = (bottom - top) / rows;
-    for (let i = 0; i < rows; i++) {
-      bands.push({ y0: Math.floor(top + i * pitch), y1: Math.floor(top + (i + 1) * pitch) - 1 });
+  if (bands.length >= 10) return bands;
+
+  // Not enough usable rules. Build the grid from the page's OWN spacing: the
+  // median gap between whatever rules were found is the row pitch, and the
+  // first rule is where the table starts. Only if there is nothing at all to
+  // measure does this fall back to proportions of the page.
+  bands.length = 0;
+  let pitch = 0;
+  let top = Math.floor(h * 0.14);
+  let bottom = Math.floor(h * 0.88);
+  if (rules.length >= 4) {
+    const gaps: number[] = [];
+    for (let i = 1; i < rules.length; i++) {
+      const g = rules[i] - rules[i - 1];
+      if (g >= 8 && g <= h * 0.08) gaps.push(g);
     }
+    if (gaps.length >= 3) {
+      gaps.sort((a, b) => a - b);
+      pitch = gaps[Math.floor(gaps.length / 2)];
+      top = rules[0];
+      bottom = rules[rules.length - 1];
+    }
+  }
+  if (!pitch) pitch = (bottom - top) / 48;
+
+  for (let y = top; y + pitch <= bottom + 1; y += pitch) {
+    bands.push({ y0: Math.round(y), y1: Math.round(y + pitch) - 1 });
   }
   return bands;
 }
@@ -783,6 +872,7 @@ export function detectInkedRowsOnPage(
   const marked: Array<{
     rowIndex: number; ink: number; cropDataUrl: string;
     contextCropDataUrl: string; contextRegion: CropRegion; markRegion: CropRegion;
+    markImageDataUrl: string | null; shape: MarkShape | null;
   }> = [];
   // One entry per PENCIL MARK, matched to the row it sits on — not one per row
   // that happened to measure dark.
@@ -805,6 +895,24 @@ export function detectInkedRowsOnPage(
 
     const rect = qntyRect(canvas, band, col);
     const region = rowContextRegion(canvas, band);
+    /**
+     * ⚠️ CUT THE MARK OUT OF THE ROW, NOT OUT OF THE BAND.
+     *
+     * The band runs rule to rule and the handwriting on this form does not
+     * respect the rules — the digit above regularly drops its tail below the
+     * line and the one below pokes up through it. Handing the isolator the run
+     * the ink was actually found in tells it which strokes are THIS row's, and
+     * that is the difference between a clean picture of a 2 and a picture of a
+     * 2 with half a 3 above it.
+     */
+    const padRun = Math.max(3, Math.round((run.y1 - run.y0) * 0.35));
+    const markRect = {
+      x0: rect.x0,
+      x1: rect.x1,
+      y0: Math.max(band.y0 - 2, run.y0 - padRun),
+      y1: Math.min(band.y1 + 2, run.y1 + padRun),
+    };
+    const iso = isolateMark(canvas, markRect, { y0: run.y0, y1: run.y1 });
     marked.push({
       rowIndex: best,
       ink: run.ink,
@@ -812,6 +920,8 @@ export function detectInkedRowsOnPage(
       contextCropDataUrl: contextCrop(canvas, region, rect),
       contextRegion: region,
       markRegion: rect,
+      markImageDataUrl: iso ? markImage(canvas, iso.box) : null,
+      shape: iso ? iso.shape : null,
     });
   }
   marked.sort((a, b) => a.rowIndex - b.rowIndex);
@@ -1041,6 +1151,15 @@ export async function scanPaperPages(opts: {
   isPhoto?: boolean[];
   layoutItems: FormLayoutItem[];
   catalog: CatalogItem[];
+  /**
+   * Read the WRITE-IN BLOCK at the bottom of the last pages with OCR.
+   *
+   * It does not touch the quantity cells any more — see the note in the row
+   * loop for what that measured. On the write-in lines it still earns its keep:
+   * they are whole words on a clear stretch of paper, and "Pilbury frozen
+   * Biscuit 4 Case" coming back close enough to match the catalog is worth far
+   * more than the odd misread letter.
+   */
   runOcr?: boolean;
   onProgress?: (p: ScanProgress) => void;
 }): Promise<ScanResult> {
@@ -1129,26 +1248,44 @@ export async function scanPaperPages(opts: {
         layout, indexes.byUpc, indexes.byDescPkg, indexes.byDesc, indexes.bySeq,
       );
 
-      let ocrText: string | null = null;
-      if (runOcr) {
-        onProgress?.({ phase: 'ocr', page: p + 1, pages: oriented.length, message: `Reading handwriting on page ${p + 1}…` });
-        ocrText = await ocrImage(hit.cropDataUrl);
-      }
-      const { qty, note } = interpretMark(ocrText);
+      /**
+       * ⚠️ NO OCR ON QUANTITY CELLS. THIS WAS MEASURED, NOT ASSUMED.
+       *
+       * Forty-nine marks were cut out of the Scott Noble order at 300 dpi,
+       * isolated from the printed rules, upscaled and put through Tesseract in
+       * seven configurations — single character and single line, digit
+       * whitelist on and off, four page-segmentation modes. The best read 5 of
+       * 41 digits, left 35 blank and got 1 wrong. The looped "2" that hand
+       * writes, which is more than half of every order, came back as "a",
+       * "tat", "rag" or nothing — never as a 2.
+       *
+       * Five right out of forty-one is not help; it is a wrong number sitting
+       * in a box that looks filled in. What replaced it is the thing that does
+       * work: the marks are grouped by shape below, a person says what one
+       * group is, and every mark in it takes that answer.
+       */
+      const ocrText: string | null = null;
+      const qty: number | null = null;
+      const note: string | null = null;
       const rowFlags = [...flags];
-      // The stripe everything was measured in is not trusted, so no row read
-      // through it may present itself as settled.
-      if (!qntyCol.confident) {
-        rowFlags.push('Quantity column position is uncertain on this scan — confirm against the crop.');
-      }
-      if (qty == null && note) rowFlags.push(`Handwriting looks like a note (“${note}”), not a number.`);
-      // ⚠️ ONLY WHEN WE ACTUALLY TRIED. Pushed unconditionally, this fired on
-      // every row of every scan with handwriting reading switched off, which
-      // flagged the whole order as uncertain and buried the handful of marks
-      // that genuinely were.
-      if (qty == null && !note && runOcr) {
-        rowFlags.push('Could not read a quantity — type it from the crop.');
-      }
+      /**
+       * ⚠️ AN UNTRUSTED COLUMN IS A PAGE FACT, NOT A ROW FACT.
+       *
+       * This used to push "quantity column position is uncertain" onto every
+       * row, and since any flag sends a row to the needs-you panel, a set of
+       * phone photos put the ENTIRE order in there — bypassing the keypad step
+       * on exactly the scans where a person most wants it, and burying the two
+       * or three rows with a real problem. The warning belongs in the summary,
+       * where it already is, and every mark is shown in its own row context
+       * anyway.
+       */
+
+      // ⚠️ A MARK WITHOUT A NUMBER IS NOT A PROBLEM, IT IS THE NORMAL CASE.
+      //
+      // Every quantity is now answered by a person in the Quantities step, so
+      // flagging "could not read a quantity" would flag all forty of them and
+      // bury the handful — an unmatched item, a word instead of a number — that
+      // genuinely need thinking about.
       // ⚠️ ROTATION IS A PAGE FACT, NOT A ROW FACT.
       //
       // This used to be pushed onto every row, and since a row with any flag at
@@ -1170,29 +1307,57 @@ export async function scanPaperPages(opts: {
         matchHow: how,
         // Same reasoning as the flag above: no quantity is only a red flag if
         // something tried to read one.
-        confidence: (qty == null && runOcr) ? 'needs_review' : confidence,
+        confidence,
         flags: rowFlags,
         disagreement,
         suggestedQty: qty,
         markNote: note,
         ocrText,
         orientationApplied: pageOrientations[p],
-        ocrAttempted: runOcr,
+        ocrAttempted: false,
         contextCropDataUrl: hit.contextCropDataUrl,
         contextRegion: hit.contextRegion,
         markRegion: hit.markRegion,
+        markImageDataUrl: hit.markImageDataUrl,
+        shape: hit.shape,
+        groupId: -1,
       });
     }
   }
+
+  /**
+   * GROUP THE MARKS THAT ARE THE SAME DIGIT.
+   *
+   * One hand wrote every quantity on this order, and it writes a 2 the same way
+   * all forty times. Two pictures of the same digit can be matched to each other
+   * far more surely than either can be recognised — so instead of guessing at
+   * numbers, marks that look alike are put together and a person answers each
+   * set once.
+   *
+   * Measured on the Scott Noble order: 49 marks, 34 sets, and no set containing
+   * two different numbers.
+   */
+  onProgress?.({ phase: 'detect', page: oriented.length, pages: oriented.length,
+    message: `Matching ${candidates.length} marks against each other…` });
+  const markGroups = groupMarks(candidates.map(c => c.shape));
+  markGroups.forEach((g, gi) => { for (const m of g.members) candidates[m].groupId = gi; });
 
   // Write-in / COD block on the last 1–2 pages (Scott Noble–class forms).
   const writeInPages = oriented.length <= 1
     ? [oriented.length - 1]
     : [oriented.length - 2, oriented.length - 1].filter(i => i >= 0);
-  for (const pi of [...new Set(writeInPages)]) {
+  for (const pi of runOcr ? [...new Set(writeInPages)] : []) {
     onProgress?.({ phase: 'writeins', page: pi + 1, pages: oriented.length, message: `Reading write-ins on page ${pi + 1}…` });
     const found = await extractWriteIns(oriented[pi], pi, catalog, indexes.byUpc);
     writeIns.push(...found);
+  }
+  if (!runOcr) {
+    // Switched off, so say what is not being looked at rather than letting the
+    // write-in block quietly go missing from the order.
+    summaryFlags.push(
+      'Write-in reading is off — anything handwritten at the bottom of the last pages was not '
+      + 'picked up. Check the paper before you send this.',
+    );
   }
   if (rectified) {
     summaryFlags.push(
@@ -1214,5 +1379,5 @@ export async function scanPaperPages(opts: {
   }
 
   onProgress?.({ phase: 'done', page: oriented.length, pages: oriented.length, message: 'Ready for your review' });
-  return { qntyColumn: qntyCol, candidates, writeIns, pageOrientations, summaryFlags };
+  return { qntyColumn: qntyCol, candidates, markGroups, writeIns, pageOrientations, summaryFlags };
 }

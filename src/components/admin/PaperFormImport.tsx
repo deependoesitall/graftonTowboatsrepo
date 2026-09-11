@@ -16,11 +16,13 @@ import {
   type WriteInCandidate,
   type ScanProgress,
   type AnyCandidate,
+  type MarkGroup,
   fileToCanvas,
   renderPdfToCanvases,
   scanPaperPages,
   needsHumanDecision,
 } from '@/lib/paper-form-scan';
+import { PaperFormQuantities, type QtyMark } from '@/components/admin/PaperFormQuantities';
 import {
   PaperFormUnknowns,
   type Resolution,
@@ -78,11 +80,13 @@ export function PaperFormImport({ catalog, setLine, applyLines, appendNotes, add
   const [formRows, setFormRows] = useState<FormReview[] | null>(null);
   const [writeRows, setWriteRows] = useState<WriteReview[] | null>(null);
   const [summaryFlags, setSummaryFlags] = useState<string[]>([]);
+  const [markGroups, setMarkGroups] = useState<MarkGroup[]>([]);
   const [runOcr, setRunOcr] = useState(true);
   const [dragOver, setDragOver] = useState(false);
 
   const reset = () => {
     setFormRows(null); setWriteRows(null); setError(''); setProgress(null); setSummaryFlags([]);
+    setMarkGroups([]);
   };
 
   /**
@@ -114,6 +118,46 @@ export function PaperFormImport({ catalog, setLine, applyLines, appendNotes, add
     [unknownRows],
   );
 
+  /**
+   * THE MARKS THAT JUST NEED A NUMBER.
+   *
+   * Everything the scanner could place on the form and match to a product — so
+   * the only open question is what the pencil says. These go to the keypad
+   * step; anything with a real problem behind it (no catalog match, a
+   * disagreement between UPC and description, a write-in) stays in the panel
+   * below where there is room to explain.
+   */
+  const qtyMarks: QtyMark[] = useMemo(
+    () => (formRows || [])
+      .map((r, idx) => ({ r, idx }))
+      .filter(({ r, idx }) => !flaggedFormIdx.has(idx) && !!r.match)
+      .map(({ r, idx }) => ({
+        key: `f${idx}`,
+        index: idx,
+        imageUrl: r.markImageDataUrl,
+        contextUrl: r.contextCropDataUrl,
+        description: r.match?.description || r.layout.description,
+        page: r.pageIndex + 1,
+        qty: r.qtyInput,
+        note: r.noteInput,
+      })),
+    [formRows, flaggedFormIdx],
+  );
+
+  const markShapes = useMemo(() => (formRows || []).map(r => r.shape), [formRows]);
+
+  const setQty = useCallback((keys: string[], qty: string) => {
+    const want = new Set(keys.map(k => Number(k.slice(1))));
+    setFormRows(prev => prev
+      ? prev.map((x, i) => want.has(i) ? { ...x, qtyInput: qty, include: Number(qty) > 0 } : x)
+      : prev);
+  }, []);
+
+  const setMarkNote = useCallback((key: string, text: string) => {
+    const idx = Number(key.slice(1));
+    setFormRows(prev => prev ? prev.map((x, i) => i === idx ? { ...x, noteInput: text } : x) : prev);
+  }, []);
+
   const resolve = useCallback((key: string, res: Resolution) => {
     const idx = Number(key.slice(1));
     if (key.startsWith('f')) {
@@ -130,6 +174,7 @@ export function PaperFormImport({ catalog, setLine, applyLines, appendNotes, add
     setFormRows(null);
     setWriteRows(null);
     setSummaryFlags([]);
+    setMarkGroups([]);
     try {
       const files = Array.from(list);
       const canvases: HTMLCanvasElement[] = [];
@@ -170,6 +215,7 @@ export function PaperFormImport({ catalog, setLine, applyLines, appendNotes, add
       }
 
       setSummaryFlags(result.summaryFlags);
+      setMarkGroups(result.markGroups);
       setFormRows(result.candidates.map(c => ({
         ...c,
         include: !!c.match && c.suggestedQty != null,
@@ -408,9 +454,9 @@ export function PaperFormImport({ catalog, setLine, applyLines, appendNotes, add
       <div>
         <h2 className="text-sm font-bold text-brand-navy">Scan the paper form</h2>
         <p className="text-xs text-gray-500 mt-1 leading-relaxed">
-          Drop the marked Sinclair PDF or photos. Pages straighten themselves. You review every
-          quantity — nothing is added until you say so. Write-ins and COD notes on the last page
-          show up here too.
+          Drop the marked Sinclair PDF or photos. Pages straighten themselves, the marks are cut out
+          and sorted so identical handwriting is answered once, and you tap the number. Nothing is
+          added until you say so. Write-ins and COD notes on the last page show up here too.
         </p>
       </div>
 
@@ -489,7 +535,7 @@ export function PaperFormImport({ catalog, setLine, applyLines, appendNotes, add
               onChange={e => setRunOcr(e.target.checked)}
               className="rounded border-gray-300 text-brand-green focus:ring-brand-green"
             />
-            Read handwriting (quantities + write-ins). Still needs your review.
+            Read the write-in block at the bottom of the last pages. Quantities are always yours to confirm.
           </label>
         </div>
       )}
@@ -540,6 +586,16 @@ export function PaperFormImport({ catalog, setLine, applyLines, appendNotes, add
               Not a warmer border on a row in a list of ninety — its own panel,
               because a list is skimmed and skimming is what puts the wrong food
               on a boat. */}
+          {qtyMarks.length > 0 && (
+            <PaperFormQuantities
+              marks={qtyMarks}
+              shapes={markShapes}
+              groups={markGroups}
+              onSet={setQty}
+              onNote={setMarkNote}
+            />
+          )}
+
           {unknownRows.length > 0 && (
             <PaperFormUnknowns rows={unknownRows} catalog={catalog} onResolve={resolve} />
           )}

@@ -24,31 +24,43 @@
 }
 
 @layer components {
-  /* Primary CTA — dark green pill (matches site nav button) */
+  /* Primary CTA — dark green pill (matches site nav button).
+     Hover only on real pointer devices — on touch, :hover sticks until
+     you tap elsewhere (the Orders Refresh bug). Focus ring is
+     :focus-visible so taps don't leave a sticky ring either. */
   .btn-primary {
     @apply bg-brand-green text-white px-6 py-3 rounded-full font-body font-bold text-sm
            uppercase tracking-widest
-           hover:bg-brand-gmed transition-colors duration-200
-           focus:outline-none focus:ring-2 focus:ring-brand-glight focus:ring-offset-2
+           transition-colors duration-200
+           focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-glight focus-visible:ring-offset-2
            disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .btn-primary:hover { @apply bg-brand-gmed; }
   }
 
   /* Orange accent button */
   .btn-gold {
     @apply bg-brand-orange text-white px-6 py-3 rounded-full font-body font-bold text-sm
            uppercase tracking-widest
-           hover:bg-brand-ored transition-colors duration-200
-           focus:outline-none focus:ring-2 focus:ring-brand-orange focus:ring-offset-2
+           transition-colors duration-200
+           focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-orange focus-visible:ring-offset-2
            disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .btn-gold:hover { @apply bg-brand-ored; }
   }
 
   /* Outline button */
   .btn-outline {
     @apply border-2 border-brand-green text-brand-green px-6 py-3 rounded-full font-body font-bold text-sm
            uppercase tracking-wide
-           hover:bg-brand-green hover:text-white transition-colors duration-200
-           focus:outline-none focus:ring-2 focus:ring-brand-green focus:ring-offset-2
+           transition-colors duration-200
+           focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-green focus-visible:ring-offset-2
            disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .btn-outline:hover { @apply bg-brand-green text-white; }
   }
 
   /* Card — white/cream panels on the yellow background */

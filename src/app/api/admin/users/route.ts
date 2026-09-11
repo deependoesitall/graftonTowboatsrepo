@@ -10,6 +10,8 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { hashPassword } from '@/lib/password';
 import { requireAdmin } from '@/lib/admin-auth-server';
 
+export const runtime = 'nodejs';
+
 const SELECTABLE_FIELDS = 'id, username, role, display_name, is_active, last_login, created_at, permissions';
 
 export async function GET(req: NextRequest) {
@@ -51,7 +53,12 @@ export async function PATCH(req: NextRequest) {
   const session = requireAdmin(req, { ownerOnly: true });
   if (session instanceof NextResponse) return session;
 
-  const { id, password, ...updates } = await req.json();
+  const body = await req.json();
+  const { id, password, ...updates } = body as {
+    id?: string;
+    password?: string;
+    [key: string]: unknown;
+  };
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
 
   // ⚠️ NORMALIZE THE USERNAME ON WRITE, ALWAYS.
@@ -63,12 +70,26 @@ export async function PATCH(req: NextRequest) {
   // like it has the wrong password rather than the wrong case. POST already
   // lowercases; PATCH did not, so renaming an account through the Users page
   // could silently lock that person out.
-  if (typeof (updates as Record<string, unknown>).username === 'string') {
-    (updates as Record<string, unknown>).username =
-      ((updates as Record<string, unknown>).username as string).toLowerCase().trim();
+  if (typeof updates.username === 'string') {
+    updates.username = updates.username.toLowerCase().trim();
   }
 
-  if (password) (updates as Record<string, unknown>).password_hash = await hashPassword(password);
+  // Owner password reset path — hash here, never store plaintext.
+  if (typeof password === 'string') {
+    const trimmed = password.trim();
+    if (trimmed.length < 4) {
+      return NextResponse.json(
+        { error: 'Password must be at least 4 characters.' },
+        { status: 400 },
+      );
+    }
+    updates.password_hash = await hashPassword(trimmed);
+  }
+
+  // Refuse empty PATCH bodies (nothing to update).
+  if (Object.keys(updates).length === 0) {
+    return NextResponse.json({ error: 'Nothing to update' }, { status: 400 });
+  }
 
   const supabase = createServiceClient();
   const { data, error } = await supabase

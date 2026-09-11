@@ -138,6 +138,8 @@ export default function AdminSettingsPage() {
   const [pwResetValue, setPwResetValue] = useState('');
   const [pwResetSaving, setPwResetSaving] = useState(false);
   const [pwResetDone, setPwResetDone] = useState<string | null>(null);
+  const [pwResetError, setPwResetError] = useState('');
+  const [pwResetCopied, setPwResetCopied] = useState(false);
 
   // Activity logs
   const [logs, setLogs] = useState<ActivityLog[]>([]);
@@ -373,19 +375,54 @@ export default function AdminSettingsPage() {
   // Owner sets a NEW password for another admin who forgot theirs (no current
   // password needed — that's the whole point of an owner reset).
   async function resetUserPassword(id: string) {
-    if (pwResetValue.length < 4) return;
+    const next = pwResetValue.trim();
+    if (next.length < 4) {
+      setPwResetError('Password must be at least 4 characters.');
+      return;
+    }
     setPwResetSaving(true);
-    const res = await adminFetch('/api/admin/users', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, password: pwResetValue }),
-    });
-    setPwResetSaving(false);
-    if (res.ok) {
-      setPwResetUser(null);
-      setPwResetValue('');
+    setPwResetError('');
+    setPwResetCopied(false);
+    try {
+      const res = await adminFetch('/api/admin/users', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, password: next }),
+      });
+      if (!res.ok) {
+        let msg = 'Could not set password.';
+        try {
+          const err = await res.json();
+          if (err?.error) msg = err.error;
+        } catch { /* ignore */ }
+        if (res.status === 403) msg = 'Only Owners can reset team passwords.';
+        if (res.status === 401) msg = 'Session expired — sign in again, then retry.';
+        setPwResetError(msg);
+        return;
+      }
       setPwResetDone(id);
-      setTimeout(() => setPwResetDone(d => (d === id ? null : d)), 3000);
+      try {
+        await navigator.clipboard.writeText(next);
+        setPwResetCopied(true);
+      } catch {
+        setPwResetCopied(false);
+      }
+      // Keep the row open briefly so Jen can still read/copy the password she set.
+      setTimeout(() => {
+        setPwResetDone(d => (d === id ? null : d));
+        setPwResetUser(cur => {
+          if (cur === id) {
+            setPwResetValue('');
+            setPwResetCopied(false);
+            return null;
+          }
+          return cur;
+        });
+      }, 5000);
+    } catch {
+      setPwResetError('Network error — try again.');
+    } finally {
+      setPwResetSaving(false);
     }
   }
 
@@ -410,9 +447,12 @@ export default function AdminSettingsPage() {
     { key: 'email',    label: 'Email',        ownerOnly: true },
     { key: 'features', label: 'Features',     ownerOnly: true },
   ] as const;
-  const tabs = sessionRole === 'manager'
-    ? allTabs.filter(t => !t.ownerOnly)
-    : allTabs;
+  // Owner-only tabs (Admin Users, Email, Features, General) must not show for
+  // gts_manager/staff/manager — the users API is ownerOnly and used to 403
+  // silently when Set password was clicked from a non-owner session.
+  const tabs = sessionRole === 'owner'
+    ? allTabs
+    : allTabs.filter(t => !t.ownerOnly);
 
   if (denied) return (
     <div className="flex flex-col items-center justify-center py-32 text-center px-4">
@@ -1051,7 +1091,13 @@ export default function AdminSettingsPage() {
                           {u.permissions?.includes('sinclair') ? '− Sinclair' : '+ Sinclair'}
                         </button>
                         <button
-                          onClick={() => { setPwResetUser(pwResetUser === u.id ? null : u.id); setPwResetValue(''); }}
+                          onClick={() => {
+                            const next = pwResetUser === u.id ? null : u.id;
+                            setPwResetUser(next);
+                            setPwResetValue('');
+                            setPwResetError('');
+                            setPwResetCopied(false);
+                          }}
                           className="text-xs text-gray-400 hover:text-brand-river transition-colors">
                           {pwResetDone === u.id ? <span className="text-green-600 font-semibold">✓ Password set</span> : 'Set password'}
                         </button>
@@ -1068,27 +1114,38 @@ export default function AdminSettingsPage() {
 
                     {/* Owner reset: set a new password for this user (they forgot theirs) */}
                     {pwResetUser === u.id && (
-                      <div className="mt-3 flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg p-2.5">
-                        <input
-                          type="text"
-                          autoFocus
-                          value={pwResetValue}
-                          onChange={e => setPwResetValue(e.target.value)}
-                          onKeyDown={e => e.key === 'Enter' && resetUserPassword(u.id)}
-                          placeholder={`New password for @${u.username} (min 4 chars)`}
-                          className="input-base text-sm flex-1" />
-                        <button onClick={() => resetUserPassword(u.id)} disabled={pwResetSaving || pwResetValue.length < 4}
-                          className="btn-primary text-xs px-3 py-2 disabled:opacity-50 whitespace-nowrap">
-                          {pwResetSaving ? 'Saving…' : 'Set password'}
-                        </button>
-                        <button onClick={() => { setPwResetUser(null); setPwResetValue(''); }}
-                          className="text-xs text-gray-400 hover:text-gray-600 px-2">Cancel</button>
+                      <div className="mt-3 space-y-2">
+                        <div className="flex flex-wrap items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg p-2.5">
+                          <input
+                            type="text"
+                            autoFocus
+                            value={pwResetValue}
+                            onChange={e => { setPwResetValue(e.target.value); setPwResetError(''); setPwResetCopied(false); }}
+                            onKeyDown={e => e.key === 'Enter' && resetUserPassword(u.id)}
+                            placeholder={`New password for @${u.username} (min 4 chars)`}
+                            className="input-base text-sm flex-1 min-w-[12rem]" />
+                          <button type="button" onClick={() => resetUserPassword(u.id)}
+                            disabled={pwResetSaving || pwResetValue.trim().length < 4}
+                            className="btn-primary text-xs px-3 py-2 disabled:opacity-50 whitespace-nowrap">
+                            {pwResetSaving ? 'Saving…' : 'Set password'}
+                          </button>
+                          <button type="button" onClick={() => { setPwResetUser(null); setPwResetValue(''); setPwResetError(''); setPwResetCopied(false); }}
+                            className="text-xs text-gray-400 hover:text-gray-600 px-2">Cancel</button>
+                        </div>
+                        {pwResetError && (
+                          <p className="text-xs text-red-600 px-1">{pwResetError}</p>
+                        )}
+                        {pwResetDone === u.id && !pwResetError && (
+                          <p className="text-xs text-green-700 px-1 font-semibold">
+                            ✓ Password set{pwResetCopied ? ' — copied to clipboard' : ''}. Give it to them now, then they can change it under Password.
+                          </p>
+                        )}
+                        {pwResetDone !== u.id && (
+                          <p className="text-[11px] text-gray-400 px-1">
+                            Type the new password here — shown in plain text so you can pass it along. They can change it later under Password.
+                          </p>
+                        )}
                       </div>
-                    )}
-                    {pwResetUser === u.id && (
-                      <p className="text-[11px] text-gray-400 mt-1.5 px-1">
-                        Give them this new password directly — it&apos;s shown in plain text so you can pass it along, then they can change it themselves.
-                      </p>
                     )}
                   </div>
                 ))}
