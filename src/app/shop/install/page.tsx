@@ -26,7 +26,7 @@ import InstallGuide from '@/components/InstallGuide';
 // /shop route keeps the admin identity, because every other /shop route is a
 // redirect into the admin app.
 export const metadata = {
-  title: "Install GTS - Sinclair's",
+  title: "Install GTS Order Fulfillment",
   robots: 'noindex',
   manifest: '/shop.webmanifest',
   icons: {
@@ -41,7 +41,7 @@ export const metadata = {
     capable: true,
     // Exactly what sits under the icon. Must match `appName` on the guide
     // below, or the page promises one name and the phone shows another.
-    title: "GTS - Sinclair's",
+    title: "GTS Fulfill",
     statusBarStyle: 'black-translucent' as const,
   },
 };
@@ -49,7 +49,7 @@ export const metadata = {
 export default function ShopInstallPage() {
   return (
     <InstallGuide
-      appName="GTS - Sinclair's"
+      appName="GTS Fulfill"
       lockup="partner"
       eyebrow="For Sinclair's staff"
       headline={['Orders on your phone,', 'the moment they land.']}
