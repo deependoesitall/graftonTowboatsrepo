@@ -96,7 +96,7 @@ function isSinclairStaff(u: { role: string; permissions?: string[] | null }) {
 export default function AdminSettingsPage() {
   const { confirm: confirmDialog, dialog: confirmDialogEl } = useConfirm();
   const router = useRouter();
-  const [tab, setTab] = useState<'logs' | 'general' | 'sinclair' | 'password' | 'users' | 'email' | 'features'>('general');
+  const [tab, setTab] = useState<'logs' | 'sinclair' | 'password' | 'users' | 'email' | 'features'>('logs');
   const [settings, setSettings] = useState<Settings>({
     business_email: 'GraftonTowboatServices@gmail.com',
     order_email_cc: '',
@@ -190,7 +190,7 @@ export default function AdminSettingsPage() {
       // Managers only see the Sinclair tools + their own password.
       // The server scopes the settings API the same way.
       if (session.role === 'manager') setTab('sinclair');
-      if (session.role === 'owner') loadUsers();
+      else if (session.role === 'owner') { setTab('email'); loadUsers(); }
       loadSettings();
     })();
   }, [router]);
@@ -445,16 +445,16 @@ export default function AdminSettingsPage() {
     // Managers get the log too — server-side scoped to Sinclair-relevant
     // entries (order shopping / status changes, catalog activity).
     { key: 'logs',     label: 'Logs',         ownerOnly: false },
-    { key: 'general',  label: 'General',      ownerOnly: true },
     { key: 'sinclair', label: "Sinclair's",   ownerOnly: false },
     { key: 'password', label: 'Password',     ownerOnly: false },
     { key: 'users',    label: 'Admin Users',  ownerOnly: true },
     { key: 'email',    label: 'Email',        ownerOnly: true },
     { key: 'features', label: 'Features',     ownerOnly: true },
   ] as const;
-  // Owner-only tabs (Admin Users, Email, Features, General) must not show for
+  // Owner-only tabs (Admin Users, Email, Features) must not show for
   // gts_manager/staff/manager — the users API is ownerOnly and used to 403
   // silently when Set password was clicked from a non-owner session.
+  // General was removed: it only duplicated Email's business_email field.
   const tabs = sessionRole === 'owner'
     ? allTabs
     : allTabs.filter(t => !t.ownerOnly);
@@ -498,7 +498,7 @@ export default function AdminSettingsPage() {
       <div className="flex gap-1 bg-white rounded-xl p-1 mb-6 shadow-sm border border-gray-200 overflow-x-auto">
         {tabs.map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
-            className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold uppercase tracking-wide transition-colors whitespace-nowrap ${
+            className={`shrink-0 py-2 px-3 rounded-lg text-xs font-bold uppercase tracking-wide transition-colors whitespace-nowrap ${
               tab === t.key ? 'bg-brand-navy text-white' : 'text-gray-500 hover:bg-gray-100'}`}>
             {t.label}
           </button>
@@ -677,29 +677,6 @@ export default function AdminSettingsPage() {
               Tracks order status changes and deletions made by admin users. Search by order #, vessel/company, contact name, phone, PO number, or staff name. Visible to Owners only.
             </div>
           </div>
-        </div>
-      )}
-
-      {/* ── GENERAL ── */}
-      {tab === 'general' && (
-        <div className="card-base p-6 space-y-5">
-          <h2 className="font-bold text-brand-navy">Business Information</h2>
-          <div>
-            <label className="label-base">Business Email (receives all orders)</label>
-            <input type="email" className="input-base" value={settings.business_email}
-              onChange={e => setSettings(s => ({ ...s, business_email: e.target.value }))} />
-          </div>
-
-          {/* INVOICE NUMBERING WAS HERE — REMOVED Sept 2026.
-              GTS invoices from QuickBooks and always has. This field configured
-              a sequential number for an in-app invoice generator that no screen
-              ever called: the endpoint existed, nothing linked to it. All the
-              field could do was advertise a feature that wasn't there and
-              invite someone to set a number that would later collide with
-              QuickBooks' own sequence.
-              What GTS actually needs is the QuickBooks entry queue in the
-              Deliveries ledger, which hands Mary Karen the lines and the
-              documents without ever assigning a number of its own. */}
         </div>
       )}
 
@@ -1341,11 +1318,16 @@ export default function AdminSettingsPage() {
       {/* ── FEATURES ── */}
       {tab === 'features' && (
         <div className="card-base p-6 space-y-4">
-          <h2 className="font-bold text-brand-navy">Feature Toggles</h2>
+          <div>
+            <h2 className="font-bold text-brand-navy">Feature Toggles</h2>
+            <p className="text-xs text-gray-400 mt-1 leading-relaxed">
+              Only switches that change live behavior. Dead toggles (tax, repeat-order gate)
+              were removed from this screen — those columns may still exist in the database
+              but nothing reads them at runtime.
+            </p>
+          </div>
           {[
             { key: 'fleet_cta_enabled' as const, label: 'Fleet Pricing Banner', desc: 'Show the B2B fleet-contract banner on the catalog ("sign your whole fleet up for special pricing — call us"). Leave off until the wording is final.' },
-            { key: 'repeat_orders_enabled' as const, label: 'Repeat Last Order', desc: 'Let customers quickly re-add all items from their previous order' },
-            { key: 'tax_enabled' as const, label: 'Enable Tax', desc: 'Apply sales tax to orders based on the rate below' },
             { key: 'email_debug_enabled' as const, label: 'Email Debug Mode', desc: 'Show email send results as a toast notification after each order submission (dev/testing only)' },
           ].map(({ key, label, desc }) => (
             <div key={key} className="flex items-start justify-between gap-4 py-3 border-b border-gray-100 last:border-0">
@@ -1361,14 +1343,6 @@ export default function AdminSettingsPage() {
               </button>
             </div>
           ))}
-          {settings.tax_enabled && (
-            <div>
-              <label className="label-base">Tax Rate (%)</label>
-              <input type="number" step="0.01" min="0" max="100" className="input-base w-32"
-                value={settings.tax_rate}
-                onChange={e => setSettings(s => ({ ...s, tax_rate: parseFloat(e.target.value) || 0 }))} />
-            </div>
-          )}
         </div>
       )}
     </div>
