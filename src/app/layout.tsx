@@ -21,7 +21,26 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: 'Grafton Towboat Services — Order Groceries & Supplies',
+  metadataBase: new URL('https://graftontowboatservices.com'),
+  openGraph: {
+    type: 'website',
+    locale: 'en_US',
+    url: 'https://graftontowboatservices.com',
+    siteName: 'Grafton Towboat Services',
+    title: 'Grafton Towboat Services - Order Groceries & Supplies',
+    description:
+      "Family-owned marine grocery and supply delivery in Grafton, Illinois. Partnered with Sinclair's Foods. Mississippi MM 219 / Illinois MM 0.",
+    images: [{ url: '/branding/gts-lockup.png', width: 1178, height: 492, alt: 'Grafton Towboat Services' }],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Grafton Towboat Services - Order Groceries & Supplies',
+    description:
+      "Groceries, towboat supplies, and crew change ? delivered to your vessel at Grafton, IL.",
+    images: ['/branding/gts-lockup.png'],
+  },
+
+  title: 'Grafton Towboat Services - Order Groceries & Supplies',
   description:
     "Order groceries, provisions, and supplies for your vessel through Grafton Towboat Services. Partnered with Sinclair's Foods. Mile Marker 219 on the Mississippi River, Mile Marker 0 on the Illinois River.",
   manifest: '/manifest.json',

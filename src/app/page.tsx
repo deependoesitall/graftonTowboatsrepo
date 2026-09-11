@@ -32,6 +32,18 @@ import { HOME, SERVICES, CTA, BUSINESS, IMAGES } from '@/app/site/content';
 export const metadata: Metadata = {
   title: HOME.meta.title,
   description: HOME.meta.description,
+  openGraph: {
+    title: HOME.meta.title,
+    description: HOME.meta.description,
+    url: 'https://graftontowboatservices.com/',
+    images: [{ url: '/branding/gts-lockup.png', width: 1178, height: 492, alt: 'Grafton Towboat Services' }],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: HOME.meta.title,
+    description: HOME.meta.description,
+    images: ['/branding/gts-lockup.png'],
+  },
 };
 
 export default function MarketingHome() {

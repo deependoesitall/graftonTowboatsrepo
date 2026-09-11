@@ -1,5 +1,6 @@
 // src/app/catalog/page.tsx
 import { Suspense } from 'react';
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Newspaper, BadgePercent, Ship, Truck, Anchor, Phone } from 'lucide-react';
 import { CouponStrip } from '@/components/catalog/CouponStrip';
@@ -14,6 +15,29 @@ import { AdditionalServicesTab } from '@/components/catalog/AdditionalServicesTa
 import { OtherPickupCard } from '@/components/catalog/OtherPickupCard';
 import { fetchSinclairCoupons } from '@/lib/sinclair-coupons';
 import { MAIN_CATEGORIES, formatCalendarDate } from '@/lib/utils';
+
+
+export const metadata: Metadata = {
+  title: "Order Groceries & Supplies for Your Vessel | Grafton Towboat Services",
+  description:
+    "Browse Sinclair's Foods groceries and towboat supplies, then order delivery to your vessel at Grafton, Illinois ? Mississippi MM 219 / Illinois MM 0. Parts pickup, package delivery, and crew change available.",
+  openGraph: {
+    title: "Order for your vessel | Grafton Towboat Services",
+    description:
+      "Groceries from Sinclair's Foods, towboat supplies, and crew support ? ordered online, delivered to your boat.",
+    url: "https://graftontowboatservices.com/catalog",
+    siteName: "Grafton Towboat Services",
+    images: [{ url: "/branding/gts-lockup.png", width: 1178, height: 492, alt: "Grafton Towboat Services" }],
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Order for your vessel | Grafton Towboat Services",
+    description:
+      "Groceries, supplies, and crew support delivered to your vessel at Grafton, IL.",
+    images: ["/branding/gts-lockup.png"],
+  },
+};
 
 interface PageProps {
   searchParams: Promise<{

@@ -15,6 +15,18 @@ import { SERVICES, SERVICES_PAGE, CTA, BUSINESS } from '@/app/site/content';
 export const metadata: Metadata = {
   title: SERVICES_PAGE.meta.title,
   description: SERVICES_PAGE.meta.description,
+  openGraph: {
+    title: SERVICES_PAGE.meta.title,
+    description: SERVICES_PAGE.meta.description,
+    url: 'https://graftontowboatservices.com/services',
+    images: [{ url: '/branding/gts-lockup.png', width: 1178, height: 492, alt: 'Grafton Towboat Services' }],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: SERVICES_PAGE.meta.title,
+    description: SERVICES_PAGE.meta.description,
+    images: ['/branding/gts-lockup.png'],
+  },
 };
 
 export default function ServicesPage() {
