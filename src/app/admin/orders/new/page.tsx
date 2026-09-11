@@ -42,12 +42,13 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  Search, Loader2, Check, X, Plus, Minus, ClipboardPaste,
+  Search, Loader2, Check, X, Plus, Minus, ClipboardPaste, RotateCcw,
   Keyboard, ListOrdered, ChevronRight, AlertCircle, Ship, Camera,
 } from 'lucide-react';
 import { adminFetch, fetchAdminSession } from '@/lib/admin-auth';
 import { formatCurrency } from '@/lib/utils';
 import { PaperFormImport, type CustomLine } from '@/components/admin/PaperFormImport';
+import { RepeatOrderPicker, MissingLinesNotice } from '@/components/admin/RepeatOrderPicker';
 
 /* ───────────────────────── types ───────────────────────── */
 
@@ -90,7 +91,7 @@ interface VesselHeader {
   from_ledger?: boolean;
 }
 
-type Mode = 'sheet' | 'quick' | 'paste' | 'scan';
+type Mode = 'sheet' | 'quick' | 'paste' | 'scan' | 'repeat';
 
 /** The order header, exactly the fields /api/orders takes for a vessel. */
 interface HeaderState {
@@ -135,7 +136,17 @@ export default function NewOrderPage() {
   // sheet never touches what has been entered.
   const [qty, setQty] = useState<Record<string, number>>({});
   /** Per-line pay attribution from Scan (COD write-ins). Default vessel. */
-  const [linePay, setLinePay] = useState<Record<string, { paid_by: 'vessel' | 'cod'; cod_name: string }>>({});
+  /**
+   * ⚠️ 'deck' IS A THIRD BUCKET, NOT A SYNONYM FOR 'vessel'.
+   *
+   * order_items.paid_by is 'vessel' | 'deck' | 'cod'. Deck items are billed to
+   * the company but listed apart from the grocery allowance, which is the whole
+   * reason the distinction exists. This map only had two states, so anything
+   * repeated from a past order that had been marked deck came back as vessel
+   * and quietly moved onto the allowance — a billing error that nobody would
+   * see until Mary Karen reconciled the month.
+   */
+  const [linePay, setLinePay] = useState<Record<string, { paid_by: 'vessel' | 'deck' | 'cod'; cod_name: string }>>({});
   /**
    * OFF-CATALOGUE LINES, RESOLVED FROM THE SCAN.
    *
@@ -146,6 +157,7 @@ export default function NewOrderPage() {
    * id is the right wire format rather than an invented one.
    */
   const [customLines, setCustomLines] = useState<CustomLine[]>([]);
+  const [repeatMissing, setRepeatMissing] = useState<string[]>([]);
 
   const [mode, setMode] = useState<Mode>('sheet');
   const [filter, setFilter] = useState('');
@@ -199,6 +211,11 @@ export default function NewOrderPage() {
     }
     return m;
   }, [items]);
+
+  // Cheap membership test for the repeat picker: a past order can name a
+  // product that has since left the catalogue, and it must say so rather than
+  // drop the line.
+  const catalogIds = useMemo(() => new Set(items.map(i => i.id)), [items]);
 
   const chosen = useMemo(
     () => items.filter(i => (qty[i.id] || 0) > 0),
@@ -277,7 +294,7 @@ export default function NewOrderPage() {
   const applyLines = useCallback((lines: Array<{
     productId: string;
     qty: number;
-    paid_by?: 'vessel' | 'cod';
+    paid_by?: 'vessel' | 'deck' | 'cod';
     cod_name?: string;
   }>) => {
     setQty(prev => {
@@ -300,6 +317,8 @@ export default function NewOrderPage() {
             paid_by: 'cod',
             cod_name: (l.cod_name || '').trim() || 'COD (paper)',
           };
+        } else if (l.paid_by === 'deck') {
+          next[l.productId] = { paid_by: 'deck', cod_name: '' };
         } else if (l.productId in next) {
           // Keep prior COD mark unless this apply explicitly sets vessel.
           if (l.paid_by === 'vessel') delete next[l.productId];
@@ -386,7 +405,7 @@ export default function NewOrderPage() {
       const codNames = [...new Set(
         chosen
           .map(i => linePay[i.id])
-          .filter((p): p is { paid_by: 'vessel' | 'cod'; cod_name: string } => !!p && p.paid_by === 'cod')
+          .filter((p): p is { paid_by: 'vessel' | 'deck' | 'cod'; cod_name: string } => !!p && p.paid_by === 'cod')
           .map(p => p.cod_name || 'COD (paper)'),
       )];
       const notesWithCod = codNames.length
@@ -425,7 +444,9 @@ export default function NewOrderPage() {
             price: i.price,
             quantity: qty[i.id],
             image_url: i.image_url,
-            paid_by: (pay?.paid_by === 'cod' ? 'cod' : 'vessel') as 'vessel' | 'cod',
+            paid_by: (pay?.paid_by === 'cod' ? 'cod'
+                      : pay?.paid_by === 'deck' ? 'deck'
+                      : 'vessel') as 'vessel' | 'deck' | 'cod',
             cod_name: pay?.paid_by === 'cod' ? (pay.cod_name || '') : '',
           };
         }), ...customLines.map(c => ({
@@ -557,6 +578,36 @@ export default function NewOrderPage() {
           {mode === 'paste' && (
             <PasteMode items={items} byUpc={byUpc} setLine={setLine} />
           )}
+          {mode === 'repeat' && (
+            <div className="flex flex-col gap-3">
+              <MissingLinesNotice missing={repeatMissing} onDismiss={() => setRepeatMissing([])} />
+              <RepeatOrderPicker
+                vesselName={header.vessel_name}
+                companyName={header.company_name}
+                catalogIds={catalogIds}
+                onApply={(lines, applyMode, carried) => {
+                  // REPLACE clears the catalogue lines only. Custom lines and
+                  // anything scanned in stay: they were added by hand for THIS
+                  // order and a repeat has no opinion about them.
+                  if (applyMode === 'replace') { setQty({}); setLinePay({}); }
+                  applyLines(lines);
+                  // A line whose product has left the printed form is still a
+                  // thing the boat ordered. It comes across as a write-in with
+                  // its old description and price rather than vanishing.
+                  if (carried.length) {
+                    setCustomLines(prev => [...prev, ...carried.map(c => ({
+                      description: c.description,
+                      qty: c.qty,
+                      price: c.price,
+                      paid_by: c.paid_by === 'cod' ? ('cod' as const) : ('vessel' as const),
+                      cod_name: c.cod_name,
+                    }))]);
+                  }
+                  setRepeatMissing(carried.map(c => `${c.qty} × ${c.description}`));
+                }}
+              />
+            </div>
+          )}
           {mode === 'scan' && (
             <PaperFormImport
               catalog={items}
@@ -574,6 +625,7 @@ export default function NewOrderPage() {
 
       {step === 'check' && (
         <ReviewStep
+          linePay={linePay}
           customLines={customLines}
           removeCustomLine={(i) => setCustomLines(prev => prev.filter((_, k) => k !== i))}
           header={header} chosen={chosen} qty={qty}
@@ -623,6 +675,7 @@ function StepTabs({ step, setStep, lines }: {
 function ModeTabs({ mode, setMode }: { mode: Mode; setMode: (m: Mode) => void }) {
   const tabs: Array<{ id: Mode; label: string; icon: typeof ListOrdered; hint: string }> = [
     { id: 'sheet', label: 'Order form', icon: ListOrdered, hint: 'Same order as the paper' },
+    { id: 'repeat', label: 'Send again', icon: RotateCcw, hint: 'Start from one of this boat\u2019s past orders' },
     { id: 'scan', label: 'Scan form', icon: Camera, hint: 'PDF or photos of the marked form' },
     { id: 'quick', label: 'Quick add', icon: Keyboard, hint: 'Type a UPC or a name' },
     { id: 'paste', label: 'Paste a list', icon: ClipboardPaste, hint: 'From a text or email' },
@@ -1172,9 +1225,10 @@ function PasteMode({ items, byUpc, setLine }: {
 /* ── review ── */
 
 function ReviewStep({ header, chosen, qty, setLine, total, error, submitting, onSubmit, onBack,
-                     customLines, removeCustomLine }: {
+                     customLines, removeCustomLine, linePay }: {
   customLines: CustomLine[];
   removeCustomLine: (index: number) => void;
+  linePay: Record<string, { paid_by: 'vessel' | 'deck' | 'cod'; cod_name: string }>;
   header: HeaderState;
   chosen: SheetItem[];
   qty: Record<string, number>;
@@ -1216,7 +1270,23 @@ function ReviewStep({ header, chosen, qty, setLine, total, error, submitting, on
         {chosen.map(it => (
           <div key={it.id} className="px-4 py-2.5 border-b border-gray-50 flex items-center gap-3">
             <span className="min-w-0 flex-1">
-              <span className="block text-sm text-gray-900 truncate">{it.description}</span>
+              <span className="block text-sm text-gray-900 truncate">
+                {it.description}
+                {/* Who pays is the one thing on this screen that cannot be
+                    inferred from looking at the item, and a repeat can bring a
+                    deck or COD mark across from months ago. Shown so a wrong
+                    one can be caught here rather than on an invoice. */}
+                {linePay[it.id]?.paid_by === 'cod' && (
+                  <span className="ml-2 text-[10px] font-bold uppercase tracking-wider text-purple-700 bg-purple-100 rounded px-1.5 py-0.5">
+                    COD{linePay[it.id]?.cod_name ? ` · ${linePay[it.id].cod_name}` : ''}
+                  </span>
+                )}
+                {linePay[it.id]?.paid_by === 'deck' && (
+                  <span className="ml-2 text-[10px] font-bold uppercase tracking-wider text-blue-700 bg-blue-100 rounded px-1.5 py-0.5">
+                    Deck
+                  </span>
+                )}
+              </span>
               <span className="block text-xs text-gray-400">
                 {qty[it.id]} × {formatCurrency(it.price)}
               </span>
