@@ -115,7 +115,7 @@ function itemCard(i: OrderItem, today: string): string {
   // Sized for first-scan reliability: at print resolution this yields bars
   // ~0.4mm wide × ~12mm tall — comfortably above UPC-A scanner minimums, so
   // even a toner-tired office printer produces gun-readable codes.
-  const svg = weighable ? null : upcASvg(i.upc, { moduleWidth: 2, height: 52 });
+  const svg = weighable ? null : upcASvg(i.upc, { moduleWidth: 2, height: 46 });
   const scanTimes = !weighable && svg && Number.isInteger(i.quantity) && i.quantity > 0
     ? `Scan<br/><b>&times;${i.quantity}</b>` : '';
   const cod = i.paid_by === 'cod';
@@ -286,113 +286,118 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
 <title>Pick Sheet — ${esc(order.order_number)}</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: Arial, Helvetica, sans-serif; color: #111; font-size: 10px; padding: 14px; }
+  body { font-family: Arial, Helvetica, sans-serif; color: #000; font-size: 9.5px; padding: 8px; }
   /* LANDSCAPE. Dave, on the portrait sheet I brought: "this should have been
-     landscaped, so that there's more barcodes on it." Wider page = 4 cards
-     per row instead of 3, which is ~25% fewer pages per order. */
-  @page { size: letter landscape; margin: 8mm; }
-  @media print { body { padding: 0; } }
+     landscaped, so that there's more barcodes on it." Five cards per row
+     on landscape (was 4) — denser sheet, barcodes stay moduleWidth 2. */
+  @page { size: letter landscape; margin: 6mm; }
+  @media print {
+    body { padding: 0; }
+    .bc, .bc svg { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  }
 
   /* Dense layout — max scannable barcodes per page, minimal dead space */
   header.sheet { display: flex; justify-content: space-between; align-items: baseline;
-                 border-bottom: 2px solid #0b2545; padding-bottom: 3px; margin-bottom: 5px; }
-  .brand b { font-size: 13px; color: #0b2545; letter-spacing: .5px; }
-  .brand span { font-size: 9px; color: #555; margin-left: 6px; }
-  .ordmeta { text-align: right; font-size: 9px; line-height: 1.3; }
-  .ordmeta .num { font-size: 12px; font-weight: bold; color: #0b2545; margin-right: 6px; }
+                 border-bottom: 2px solid #000; padding-bottom: 2px; margin-bottom: 3px; }
+  .brand b { font-size: 12px; color: #000; letter-spacing: .4px; }
+  .brand span { font-size: 8.5px; color: #333; margin-left: 5px; }
+  .ordmeta { text-align: right; font-size: 8.5px; line-height: 1.25; }
+  .ordmeta .num { font-size: 11px; font-weight: bold; color: #000; margin-right: 5px; }
 
-  .facts { display: flex; flex-wrap: wrap; gap: 2px 14px; background: #f4f6f8; border: 1px solid #dde3ea;
-           border-radius: 4px; padding: 3px 8px; margin-bottom: 5px; font-size: 9.5px; }
-  .facts b { color: #0b2545; }
-  .warn-sale { background:#fef3c7 !important; border-color:#d97706 !important; color:#7c2d12 !important; }
-  .warn { background: #fdf3d7; border: 1px solid #e8cd7a; border-radius: 4px; padding: 3px 8px; margin-bottom: 5px; font-size: 9.5px; }
-  .notes { background: #fff8e6; border: 1px solid #e8cd7a; border-radius: 4px; padding: 3px 8px; margin-bottom: 5px; font-size: 9.5px; }
+  .facts { display: flex; flex-wrap: wrap; gap: 1px 10px; background: #fff; border: 1px solid #000;
+           border-radius: 2px; padding: 2px 6px; margin-bottom: 3px; font-size: 9px; }
+  .facts b { color: #000; }
+  .warn-sale { background:#fff !important; border-color:#000 !important; color:#000 !important; font-weight: 700; }
+  .warn { background: #fff; border: 1.5px solid #000; border-radius: 2px; padding: 2px 6px; margin-bottom: 3px; font-size: 9px; font-weight: 700; }
+  .notes { background: #fff; border: 1px solid #000; border-radius: 2px; padding: 2px 6px; margin-bottom: 3px; font-size: 9px; }
 
   /* No forced page-breaks — let the browser pack as many cards per page as fit.
      Meat & Seafood / Produce section headers are the department handoff cue. */
-  .dept-head { display: flex; align-items: baseline; gap: 8px; background: #0b2545; color: #fff;
-               padding: 3px 8px; border-radius: 4px 4px 0 0; margin-top: 4px; }
-  .dept-head h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
-  .dept-note { font-size: 8.5px; color: #cfd8e3; }
+  .dept-head { display: flex; align-items: baseline; gap: 6px; background: #000; color: #fff;
+               padding: 2px 6px; border-radius: 0; margin-top: 3px; }
+  .dept-head h2 { font-size: 10px; text-transform: uppercase; letter-spacing: .8px; }
+  .dept-note { font-size: 8px; color: #ddd; }
 
-  .loc-head { background: #e8eef4; border-left: 3px solid #0b2545; font-weight: bold; font-size: 9.5px;
-              padding: 2px 6px; margin-top: 3px; }
-  .loc-count { font-weight: normal; color: #667; font-size: 8.5px; margin-left: 5px; }
+  .loc-head { background: #fff; border-left: 3px solid #000; border-bottom: 1px solid #000; font-weight: bold; font-size: 9px;
+              padding: 1px 5px; margin-top: 2px; }
+  .loc-count { font-weight: normal; color: #444; font-size: 8px; margin-left: 4px; }
 
-  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; padding: 3px 0; }
-  .item { border: 1px solid #c9d2dc; border-radius: 4px; padding: 3px 5px;
-          break-inside: avoid; page-break-inside: avoid; }
-  .item.cod { border: 1.5px solid #7c3aed; background: #faf6ff; }
-  .item.oos { opacity: .45; }
-  .line1 { display: flex; gap: 5px; align-items: baseline; }
-  .qty { font-size: 13px; font-weight: 800; color: #0b2545; white-space: nowrap; }
-  .desc { font-weight: bold; font-size: 9.5px; line-height: 1.15; }
-  .sub { color: #556; font-size: 8px; }
-  .cod-tag { color: #7c3aed; font-weight: bold; font-size: 8px; text-transform: uppercase; }
-  .deck-tag { color: #0f766e; font-weight: bold; font-size: 8px; text-transform: uppercase; }
-  .sale { color: #b91c1c; font-weight: 700; }
-  .sale s { color: #888; font-weight: 400; }
-  .sale-dates { color: #b91c1c; font-weight: 400; font-size: 7.5px; }
-  /* A lapsed sale must not read as a live one — the red price is the number
-     the boat was quoted, not the number the register is about to ring. */
-  .sale-dead { color: #92400e; text-decoration: line-through; }
+  .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px; padding: 2px 0; }
+  .item { border: 1px solid #000; border-radius: 0; padding: 2px 3px;
+          break-inside: avoid; page-break-inside: avoid; background: #fff; }
+  .item.cod { border: 2px solid #000; background: #fff; }
+  .item.oos { opacity: .5; }
+  .line1 { display: flex; gap: 3px; align-items: baseline; }
+  .qty { font-size: 12px; font-weight: 900; color: #000; white-space: nowrap; }
+  .desc { font-weight: bold; font-size: 8.5px; line-height: 1.1; }
+  .sub { color: #222; font-size: 7.5px; }
+  .cod-tag { color: #000; font-weight: 900; font-size: 7.5px; text-transform: uppercase; letter-spacing: .3px; }
+  .deck-tag { color: #000; font-weight: 900; font-size: 7.5px; text-transform: uppercase; letter-spacing: .3px; }
+  .sale { color: #000; font-weight: 800; }
+  .sale s { color: #555; font-weight: 400; }
+  .sale-dates { color: #000; font-weight: 400; font-size: 7px; }
+  /* A lapsed sale must not read as a live one — strikethrough + bold callout. */
+  .sale-dead { color: #333; text-decoration: line-through; }
   .sale-dead s { text-decoration: none; }
   .sale-expired {
-    margin-top: 2px; padding: 2px 4px; font-size: 7.5px; line-height: 1.35;
-    background: #fef3c7; border: 1px solid #d97706; border-radius: 3px; color: #7c2d12;
+    margin-top: 1px; padding: 1px 3px; font-size: 7px; line-height: 1.3;
+    background: #fff; border: 1.5px solid #000; border-radius: 0; color: #000; font-weight: 700;
   }
-  .sale-expired b { color: #b45309; }
-  .sale-diff { font-weight: 700; }
-  .sale-honor { display: inline-block; margin-left: 4px; font-weight: 700; white-space: nowrap; }
+  .sale-expired b { color: #000; }
+  .sale-diff { font-weight: 800; }
+  .sale-honor { display: inline-block; margin-left: 3px; font-weight: 800; white-space: nowrap; }
 
-  /* ── Thumbnails ── small enough to keep the grid dense, big enough to
-     recognize a package at arm's length on a moving cart. */
-  .thumb { width: 22px; height: 22px; object-fit: contain; flex: 0 0 auto;
-           border: 1px solid #e3e3e3; border-radius: 3px; background: #fff; margin-right: 4px; }
-  .thumb-empty { display: inline-block; background: repeating-linear-gradient(
-                   45deg, #f4f4f4, #f4f4f4 3px, #e9e9e9 3px, #e9e9e9 6px); }
+  /* ── Thumbnails ── smaller for 5-col density; still identify a package. */
+  .thumb { width: 16px; height: 16px; object-fit: contain; flex: 0 0 auto;
+           border: 1px solid #000; border-radius: 0; background: #fff; margin-right: 2px; }
+  .thumb-empty { display: inline-block; background: #eee; }
 
   /* ── Section tones ── a shopper holding three stapled blocks needs to know
      which one they're in without reading the header. */
-  .dept-total { margin-left: auto; font-size: 9px; color: #e8eef7; white-space: nowrap; }
-  .counts { display: flex; gap: 26px; margin: 6px 0 2px; }
-  .count-label { display: block; font-size: 9.5px; font-weight: 800; color: #333; line-height: 1.15; }
-  .count-value { display: block; font-size: 12px; color: #111; margin-top: 2px; }
-  .tone-deck  .dept-head { background: #0f766e; }
-  .tone-cod   .dept-head { background: #6b21a8; }
+  .dept-total { margin-left: auto; font-size: 8.5px; color: #fff; white-space: nowrap; font-weight: 700; }
+  .counts { display: flex; gap: 14px; margin: 3px 0 1px; }
+  .count-label { display: block; font-size: 8px; font-weight: 800; color: #000; line-height: 1.1; }
+  .count-value { display: block; font-size: 10px; color: #000; margin-top: 1px; font-weight: 700; }
+  /* Section tones stay black heads — grocery/deck/COD still separate blocks;
+     labels in the header text carry the handoff cue without muddy toner fills. */
+  .tone-deck  .dept-head { background: #000; }
+  .tone-cod   .dept-head { background: #000; }
+  .tone-deck  .dept-head h2::before { content: "DECK · "; }
+  .tone-cod   .dept-head h2::before { content: "COD · "; }
   /* Deck and COD start on their own page — different people, different bags,
      different totals. Grocery flows continuously as before. */
   .newpage { page-break-before: always; break-before: page; }
 
-  .cod-person { border: 1.5px solid #6b21a8; border-radius: 6px; margin-top: 8px;
+  .cod-person { border: 2px solid #000; border-radius: 0; margin-top: 5px;
                 break-inside: avoid; page-break-inside: avoid; }
-  .cod-person-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
-                     background: #f3e8ff; border-bottom: 1px solid #d8b4fe; padding: 5px 8px; }
-  .cod-name { font-size: 13px; font-weight: 900; color: #5b21b6; text-transform: uppercase; letter-spacing: 0.5px; }
-  .cod-person-total { font-size: 10px; color: #6b21a8; }
-  .cod-bag { margin-left: auto; font-size: 9.5px; color: #6b21a8; }
-  .sub-tag { color: #c2410c; font-weight: bold; font-size: 8px; }
+  .cod-person-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+                     background: #fff; border-bottom: 2px solid #000; padding: 3px 6px; }
+  .cod-name { font-size: 11px; font-weight: 900; color: #000; text-transform: uppercase; letter-spacing: 0.4px; }
+  .cod-person-total { font-size: 9px; color: #000; font-weight: 700; }
+  .cod-bag { margin-left: auto; font-size: 8.5px; color: #000; font-weight: 700; }
+  .sub-tag { color: #000; font-weight: 900; font-size: 7.5px; }
 
-  .scanrow { display: flex; align-items: center; gap: 5px; margin-top: 2px; }
-  .bc svg { height: 42px; width: auto; display: block; }
-  .scan { font-size: 8.5px; line-height: 1.1; color: #333; text-align: center; }
-  .scan b { font-size: 12px; }
+  .scanrow { display: flex; align-items: center; gap: 3px; margin-top: 1px; }
+  .bc svg { height: 34px; width: auto; display: block; }
+  .bc svg rect[fill="#fff"], .bc svg rect:first-child { fill: #fff; }
+  .scan { font-size: 7.5px; line-height: 1.05; color: #000; text-align: center; font-weight: 700; }
+  .scan b { font-size: 11px; }
   .wgt { flex: 1; }
-  .wgt-note { font-size: 8.5px; font-weight: bold; color: #b45309; }
-  .wgt-line { font-size: 9px; margin-top: 2px; color: #333; }
-  .upc-raw { font-family: monospace; font-size: 8.5px; color: #555; }
-  .oos-note { font-size: 8.5px; font-weight: bold; color: #999; text-transform: uppercase; }
-  .check { margin-left: auto; font-size: 13px; color: #667; }
+  .wgt-note { font-size: 7.5px; font-weight: 900; color: #000; }
+  .wgt-line { font-size: 8px; margin-top: 1px; color: #000; }
+  .upc-raw { font-family: monospace; font-size: 7.5px; color: #222; }
+  .oos-note { font-size: 7.5px; font-weight: 900; color: #444; text-transform: uppercase; }
+  .check { margin-left: auto; font-size: 12px; color: #000; }
 
-  .svc { border: 1px solid #444; border-radius: 6px; padding: 8px 10px; margin-top: 8px; font-size: 11px;
+  .svc { border: 1.5px solid #000; border-radius: 0; padding: 5px 7px; margin-top: 5px; font-size: 10px;
          break-inside: avoid; page-break-inside: avoid; }
-  .svc-top { display: flex; align-items: flex-start; gap: 7px; }
-  .svc b { font-size: 13px; line-height: 1.25; flex: 1; }
-  .tick { width: 13px; height: 13px; border: 1.5px solid #333; border-radius: 3px; flex: 0 0 auto; margin-top: 1px; }
-  .cod-pill { background:#f3e8ff; color:#5b21b6; border:1px solid #c4a7f5; font-weight:700;
-              font-size:9.5px; padding:2px 6px; border-radius:9px; white-space:nowrap; flex:0 0 auto; }
-  .boat-pill { background:#eef4ee; color:#2f5d3a; border:1px solid #c9dbcd; font-weight:700;
-                  font-size:9.5px; padding:2px 6px; border-radius:9px; white-space:nowrap; flex:0 0 auto; }
+  .svc-top { display: flex; align-items: flex-start; gap: 5px; }
+  .svc b { font-size: 11px; line-height: 1.2; flex: 1; }
+  .tick { width: 11px; height: 11px; border: 1.5px solid #000; border-radius: 0; flex: 0 0 auto; margin-top: 1px; }
+  .cod-pill { background:#fff; color:#000; border:1.5px solid #000; font-weight:800;
+              font-size:8.5px; padding:1px 5px; border-radius:0; white-space:nowrap; flex:0 0 auto; }
+  .boat-pill { background:#fff; color:#000; border:1.5px solid #000; font-weight:800;
+                  font-size:8.5px; padding:1px 5px; border-radius:0; white-space:nowrap; flex:0 0 auto; }
   .svc-src { margin: 4px 0 0 20px; font-size: 10.5px; font-weight: 700; color: #333; }
   .svc-note { margin: 2px 0 0 20px; font-size: 10px; color: #444; }
   /* Reference only — a shopper is not typing this. Small, grey, last. */
