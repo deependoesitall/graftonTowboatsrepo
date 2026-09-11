@@ -38,11 +38,9 @@ export default function TermsPage() {
         not a policy we can make an exception to as a favor.
       </LCallout>
 
-      <LSub>Tobacco</LSub>
+            <LSub>Tobacco</LSub>
       <LP>
-        Where tobacco is available, <strong>a valid ID over 21 is required</strong>.
-        We may decline to carry it. If nobody of age is present at handover, those
-        items return with us; the rest of the order is delivered.
+        <strong>A valid ID over 21 is required.</strong>
       </LP>
 
       <LSub>Catalog</LSub>
