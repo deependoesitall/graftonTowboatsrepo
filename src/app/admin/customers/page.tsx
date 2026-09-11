@@ -449,10 +449,10 @@ export default function CustomersPage() {
         <div className="min-w-0">
           <h1 className="font-display text-2xl font-bold text-brand-navy">Customers &amp; boats</h1>
           <p className="text-gray-400 text-sm mt-0.5">
-            One place for boat customers, cook logins, and order history.
+            One place for boat customers, crew logins, and order history.
           </p>
           <p className="text-xs text-brand-green/70 mt-2 max-w-xl">
-            Tip: Cooks can also reset their own password from Sign in → Forgot password.
+            Tip: Crew can also reset their own password from Sign in → Forgot password.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">

@@ -1,6 +1,6 @@
 'use client';
 // src/components/admin/CustomerLoginsPanel.tsx
-// Jen's cook/captain login manager — set password (typed), quick-add, search.
+// Boat crew login manager - set password (typed), quick-add, search.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
@@ -122,7 +122,7 @@ export function CustomerLoginsPanel() {
         return;
       }
       setPwDone(member.id);
-      setOk(`Password set for ${member.display_name || member.email || 'cook'}`);
+      setOk(`Password set for ${member.display_name || member.email || 'crew member'}`);
       setTimeout(() => {
         setPwFor(null);
         setPwValue('');
@@ -172,10 +172,10 @@ export function CustomerLoginsPanel() {
       <div className="rounded-2xl border border-brand-gold/30 bg-brand-sand/30 px-5 py-4 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="font-display font-bold text-brand-navy text-lg flex items-center gap-2">
-            <KeyRound className="w-5 h-5 text-brand-gold" /> Cook &amp; captain logins
+            <KeyRound className="w-5 h-5 text-brand-gold" /> Boat crew logins
           </h2>
           <p className="text-sm text-gray-500 mt-1 max-w-xl">
-            Type a new password and read it to them on the phone. Cooks can also reset themselves from
+            Type a new password and read it to them on the phone. Crew can also reset themselves from
             Sign in → Forgot password.
           </p>
         </div>
@@ -274,7 +274,7 @@ export function CustomerLoginsPanel() {
           </div>
         ) : companies.length === 0 ? (
           <div className="p-10 text-center space-y-3">
-            <p className="text-sm text-gray-400">No cook logins yet.</p>
+            <p className="text-sm text-gray-400">No crew logins yet.</p>
             <Link href="/admin/customers/onboard" className="btn-primary text-sm inline-flex items-center gap-1.5">
               <Ship className="w-4 h-4" /> Add customer / boat
             </Link>

@@ -1,6 +1,6 @@
 'use client';
 // src/app/admin/customers/onboard/page.tsx
-// Company → boat → cook logins. Typed passwords only.
+// Company → boat → crew logins. Typed passwords only.
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Loader2, Plus, Ship, UserPlus, CheckCircle2 } from 'lucide-react';
@@ -143,7 +143,7 @@ export default function OnboardBoatPage() {
         <div>
           <h1 className="font-display font-bold text-brand-navy text-2xl">Add customer / boat</h1>
           <p className="text-sm text-brand-green/60 mt-0.5">
-            Company → boat → cook logins. Shared history for everyone on the boat.
+            Company → boat → crew logins. Shared history for everyone on the boat.
           </p>
         </div>
       </div>
@@ -211,18 +211,18 @@ export default function OnboardBoatPage() {
             Create boat
           </button>
         ) : (
-          <p className="text-sm text-emerald-700 font-medium">Boat locked in — add cook logins below.</p>
+          <p className="text-sm text-emerald-700 font-medium">Boat locked in — add crew logins below.</p>
         )}
       </section>
 
       {/* Step 3 — Members */}
       <section className="bg-white rounded-2xl border border-brand-green/10 p-5 space-y-4">
         <h2 className="font-display font-bold text-brand-navy text-lg flex items-center gap-2">
-          <UserPlus className="w-5 h-5" /> 3. Cook logins
+          <UserPlus className="w-5 h-5" /> 3. Crew logins
         </h2>
         <p className="text-xs text-brand-green/50">
-          Separate emails/passwords. Same boat history. Type the password — we never generate one.
-          You can also set or reset a cook&apos;s password later from Customers → Logins.
+          Anyone on the boat who orders — cook, captain, steward, whoever. Separate emails/passwords, shared boat history. Type the password — we never generate one.
+          You can also set or reset a crew member&apos;s password later from Customers → Logins.
         </p>
 
         {members.length > 0 && (
