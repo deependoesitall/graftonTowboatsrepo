@@ -48,6 +48,7 @@ import {
 import { adminFetch, fetchAdminSession } from '@/lib/admin-auth';
 import { formatCurrency } from '@/lib/utils';
 import { PaperFormImport, type CustomLine } from '@/components/admin/PaperFormImport';
+import { RegisterReceiptImport } from '@/components/admin/RegisterReceiptImport';
 import { RepeatOrderPicker, MissingLinesNotice } from '@/components/admin/RepeatOrderPicker';
 
 /* ───────────────────────── types ───────────────────────── */
@@ -621,6 +622,18 @@ export default function NewOrderPage() {
                 notes: h.notes.trim() ? `${h.notes.trim()}\n${note}` : note,
               }))}
             />
+          <div className="mt-4">
+            <RegisterReceiptImport
+              catalog={items.map(it => ({ id: it.id, upc: it.upc, description: it.description, price: it.price }))}
+              setLine={setLine}
+              applyLines={applyLines}
+              addCustomLines={(lines) => setCustomLines(prev => [...prev, ...lines])}
+              appendNotes={(note) => setHeader(h => ({
+                ...h,
+                notes: h.notes.trim() ? `${h.notes.trim()}\n${note}` : note,
+              }))}
+            />
+          </div>
           )}
         </>
       )}

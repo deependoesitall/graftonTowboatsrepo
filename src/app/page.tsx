@@ -102,6 +102,7 @@ export default function MarketingHome() {
           <PartnerLockup
             tone="dark"
             size="lg"
+            gtsMark="lockup"
             caption="Groceries from Sinclair's Foods — ordered and delivered by Grafton Towboat Services."
           />
           <p className="text-brand-yellow/60 font-body text-center text-sm mt-2.5 max-w-md mx-auto leading-snug">

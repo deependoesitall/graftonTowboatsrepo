@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { Order, OrderItem, OrderStatus, Product } from '@/types';
 import { formatCurrency, formatDate, ORDER_STATUSES } from '@/lib/utils';
+import { DeliverySummary } from '@/components/order/DeliverySummary';
 import { ShoppingModeModal } from '@/components/admin/ShoppingModeModal';
 import { adminFetch, isGtsRole, getAdminRole } from '@/lib/admin-auth';
 import { codFeeLabel, codTotalWithFee, allocateCodTotals } from '@/lib/cod-fee';
@@ -583,7 +584,12 @@ export function OrderDetailModal({
               </Section>
             )}
 
-            {/* Delivery */}
+            {/* Shared delivery card */}
+          <div className="mb-4">
+            <DeliverySummary order={order} variant="admin" />
+          </div>
+
+          {/* Delivery */}
             {(order.terminal_name || order.arrival_date || order.delivery_method) && (
               <Section icon={<MapPin className="w-3.5 h-3.5" />} title="Delivery Information">
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">

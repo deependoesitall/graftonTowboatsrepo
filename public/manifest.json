@@ -1,11 +1,11 @@
 {
   "name": "Grafton Towboat Order",
-  "short_name": "Grafton Order",
+  "short_name": "GTS Order",
   "description": "Grocery & supply ordering for Grafton Towboat Services",
   "start_url": "/catalog",
   "display": "standalone",
-  "background_color": "#FAF9F0",
-  "theme_color": "#1E3D1E",
+  "background_color": "#0D1B2A",
+  "theme_color": "#0D1B2A",
   "orientation": "portrait-primary",
   "icons": [
     {

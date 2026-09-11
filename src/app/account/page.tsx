@@ -46,6 +46,8 @@ function AccountContent() {
   // Profile
   const [profile, setProfile] = useState({ first_name: '', last_name: '', company_name: '', contact_name: '', phone: '' });
   const [savingProfile, setSavingProfile] = useState(false);
+  // Boats this login is a member of (company · boat)
+  const [boatLinks, setBoatLinks] = useState<Array<{ company: string; boat: string; role: string }>>([]);
 
   // Only trigger data loading once we're sure user is logged in
   useEffect(() => {
@@ -54,6 +56,7 @@ function AccountContent() {
     loadOrders();
     loadFavorites();
     loadProfile();
+    loadBoatLinks();
   }, [user, loading]);
 
   async function loadOrders() {
@@ -84,6 +87,23 @@ function AccountContent() {
     }
   }
 
+
+  async function loadBoatLinks() {
+    try {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from('vessel_members')
+        .select('role, vessel:vessels(name, company:companies(name))');
+      const rows = (data || []).map((row: any) => ({
+        role: row.role || 'cook',
+        boat: row.vessel?.name || '',
+        company: row.vessel?.company?.name || '',
+      })).filter((r: any) => r.boat);
+      setBoatLinks(rows);
+    } catch {
+      setBoatLinks([]);
+    }
+  }
   async function loadProfile() {
     try {
       const supabase = createClient();
@@ -314,6 +334,18 @@ function AccountContent() {
             <LogOut className="w-4 h-4" /> Sign Out
           </button>
         </div>
+
+        {boatLinks.length > 0 && (
+          <div className="mb-4 rounded-xl border border-brand-gold/30 bg-brand-sand/50 px-4 py-3 text-sm">
+            {boatLinks.map((b, i) => (
+              <div key={i} className="font-semibold text-brand-navy">
+                {b.company || 'Company'} · {b.boat}
+                <span className="ml-2 text-xs font-normal text-brand-green/50 capitalize">{b.role}</span>
+              </div>
+            ))}
+            <p className="text-xs text-brand-green/50 mt-1">Past orders for this boat are shared with the other logins on it.</p>
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="flex gap-1 bg-white/70 rounded-xl p-1 mb-6 border border-brand-green/10">

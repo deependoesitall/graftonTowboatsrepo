@@ -95,7 +95,7 @@ export default function AboutPage() {
               never drifts into two different treatments. Caption is null here
               because the paragraph below already says who does what, and
               repeating it would read as a disclaimer rather than a fact. */}
-          <PartnerLockup tone="dark" size="lg" caption={null} />
+          <PartnerLockup tone="dark" size="lg" gtsMark="lockup" caption={null} />
           <p className="text-brand-yellow/85 font-body leading-snug max-w-xl mx-auto mt-5">
             A family grocery in Jerseyville that&apos;s been feeding this county
             for decades. Their people pick your order off the same shelves they

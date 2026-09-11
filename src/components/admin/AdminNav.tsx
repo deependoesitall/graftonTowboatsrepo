@@ -50,8 +50,13 @@ export function AdminNav() {
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
           {/* Logo / title */}
           <Link href="/admin" className="flex items-center gap-3 shrink-0">
+            {/* ⚠️ THE EMBLEM, NOT THE FULL LOGO. gts-logo.png carries the
+                wordmark stacked under the badge, and at 56px on this bar that
+                is three lines of type nobody can read — sitting next to the
+                same words set in HTML right beside it. The badge on its own is
+                the mark at this size. */}
             <img
-              src="/branding/gts-logo.png"
+              src="/branding/gts-badge.png"
               alt="Grafton Towboat Services"
               className="h-14 w-auto object-contain shrink-0"
             />

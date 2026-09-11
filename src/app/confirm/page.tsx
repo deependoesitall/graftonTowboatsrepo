@@ -13,6 +13,7 @@ import { EstimatedInfo } from '@/components/ui/EstimatedInfo';
 import { useAuth } from '@/lib/auth-context';
 import { AuthModal } from '@/components/auth/AuthModal';
 import { SaveOrderPrompt } from '@/components/auth/SaveOrderPrompt';
+import { DeliverySummary } from '@/components/order/DeliverySummary';
 import { createClient } from '@/lib/supabase/client';
 
 function ConfirmContent() {
@@ -70,7 +71,7 @@ function ConfirmContent() {
     <div className="min-h-screen bg-brand-cream flex flex-col">
       <SiteHeader />
       <main className="flex-1 flex items-start justify-center px-4 py-12">
-        <div className="w-full max-w-lg">
+        <div className="w-full max-w-xl">
           {/* Success card */}
           <div className="card-base p-8 text-center mb-6">
             <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -113,6 +114,14 @@ function ConfirmContent() {
               Place Another Order
             </Link>
           </div>
+
+
+          {/* Delivery details — guests and signed-in alike */}
+          {!loading && order && (
+            <div className="mb-6">
+              <DeliverySummary order={order} variant="customer" />
+            </div>
+          )}
 
           {/* Order summary */}
           {loading && (

@@ -12,9 +12,9 @@ export const metadata = {
   // Same admin manifest — no second Home Screen target.
   manifest: '/admin.webmanifest',
   icons: {
-    icon: '/branding/favicon-gts.png',
-    shortcut: '/branding/favicon-gts.png',
-    apple: '/branding/admin-icon.png',
+    icon: '/branding/favicon-sinclairs.png',
+    shortcut: '/branding/favicon-sinclairs.png',
+    apple: '/branding/shop-icon.png',
   },
   appleWebApp: {
     capable: true,

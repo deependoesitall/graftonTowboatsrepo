@@ -35,7 +35,11 @@ self.addEventListener('push', event => {
 
   const options = {
     body: d.body || '',
-    icon: '/branding/gts-logo.png',
+    // ⚠️ THE EMBLEM, NOT THE LOGO WITH THE WORDMARK UNDER IT.
+    // A notification icon is drawn at about 64px. "GRAFTON TOWBOAT SERVICES"
+    // stacked under the badge is three lines of type that turn to mush at that
+    // size; the emblem on its own still reads as the company.
+    icon: '/branding/gts-badge.png',
     // Dedicated badge asset (already in /branding) — clearer at status-bar size
     // than the full lockup logo.
     badge: '/branding/gts-badge.png',

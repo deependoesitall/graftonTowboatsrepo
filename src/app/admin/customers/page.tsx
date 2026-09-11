@@ -439,6 +439,9 @@ export default function CustomersPage() {
           <p className="text-gray-400 text-sm">Customer &amp; vessel order history</p>
         </div>
         <div className="flex items-center gap-2">
+          <a href="/admin/customers/onboard" className="btn-primary text-sm px-3 py-2">
+            Onboard a boat
+          </a>
           <button onClick={fetchReport} className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5">
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
           </button>

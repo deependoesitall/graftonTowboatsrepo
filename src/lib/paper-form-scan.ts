@@ -318,7 +318,18 @@ export function releaseCanvas(canvas: HTMLCanvasElement): void {
  * of ten — 0.089 vs 0.027 — so this is a wide, safe margin rather than a
  * hair-splitting threshold.
  */
-function edgeInkAsymmetry(canvas: HTMLCanvasElement): number {
+/**
+ * How lopsided the ink is between the left and right edges of a page, as a
+ * fraction of the ink in both — positive means the dense side is on the left,
+ * which on this form means upright.
+ *
+ * ⚠️ RELATIVE, NOT ABSOLUTE. A pale fax and a heavy photocopy of the same page
+ * differ by a factor of two in how much of them reads as ink, so any fixed
+ * cutoff on the raw difference is really a cutoff on scan darkness. The ratio
+ * is the same either way: measured over the Scott Noble order at 94, 108, 150,
+ * 200 and 300 dpi it never leaves ±0.37…±0.57, against a decision line at 0.12.
+ */
+function edgeInkContrast(canvas: HTMLCanvasElement): number {
   const { width: w, height: h } = canvas;
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
   const band = (x0f: number, x1f: number) => {
@@ -332,48 +343,67 @@ function edgeInkAsymmetry(canvas: HTMLCanvasElement): number {
     }
     return dark / Math.max(1, n);
   };
-  return band(0.03, 0.14) - band(0.86, 0.97);
+  const left = band(0.03, 0.14);
+  const right = band(0.86, 0.97);
+  // Two blank strips. Nothing to go on, so say nothing rather than flipping on
+  // paper grain.
+  if (left + right < 0.01) return 0;
+  return (left - right) / (left + right);
 }
+
+/** Below this the page is treated as "no clear answer" and left alone. */
+const ORIENT_MARGIN = 0.12;
 
 export function autoOrientCanvas(canvas: HTMLCanvasElement): { canvas: HTMLCanvasElement; rotation: 0 | 90 | 180 | 270 } {
   /**
-   * ⚠️ THE SHAPE OF THE PAGE DECIDES THE AXIS. NOT INK DENSITY.
+   * ⚠️ MEASURE THE FULL-SIZE PAGE. NEVER A THUMBNAIL.
    *
-   * This used to choose between portrait and landscape by counting horizontal
-   * rule lines, and it got 19 pages out of 20 wrong on a perfectly flat scan of
-   * the Scott Noble order — every one of them turned on its side, which made
-   * every crop below unreadable and every mark uncertain.
+   * This is the bug that made the whole scanner useless on a real order, and it
+   * is worth spelling out because it looks so harmless.
    *
-   * The reason it fails is specific and was never going to show up in a small
-   * test. On a ~500px probe the ruled lines are barely a pixel and mostly
-   * disappear, while the Category column — the word "Meat" or "Produce"
-   * repeated down every row — survives as a solid stripe of ink. Turn that page
-   * on its side and the stripe becomes a long horizontal band that the score
-   * counts as dozens of rules. Sideways beats upright, confidently, on a page
-   * with no ambiguity in it at all.
+   * The check used to run on a 500px probe of the page, on the reasoning that
+   * deciding which way up something is does not need detail. It does. The signal
+   * here is the Category column — the words "Grocery - Low" printed down the
+   * left of every row — and at full size those strokes are one to two pixels
+   * wide and solidly black. Shrink a 1275px page to 500 and each stroke is
+   * averaged with the white around it into a mid grey that never crosses the ink
+   * threshold. Both edge bands then read almost nothing:
    *
-   * The Sinclair order form is printed portrait, so the axis is not a judgement
-   * call: a portrait image is already on the right axis and only ever needs 0
-   * or 180, and a landscape image is a photo taken sideways and needs 90 or 270
-   * to become portrait. Which of the two is then settled by the Category
-   * column, which is what actually distinguishes them.
+   *     full page   left 0.031  right 0.094   →  -0.51, flipped, certain
+   *     500px probe left 0.004  right 0.005   →  +0.09, noise
    *
-   * This is also what the person using it expects: a page of the order form is
-   * either the right way up or upside down. It is never on its side.
+   * Every page of the Scott Noble order came back within ±0.009 of zero on the
+   * probe, so which pages got turned was decided by rounding. Sixteen pages were
+   * upside down; the scanner turned a different fifteen. The quantity column on
+   * an unturned page is where the item DESCRIPTION is, so it read printed words
+   * as handwriting, produced sixty-six "marks need you", and showed the operator
+   * crops of upside-down product names.
+   *
+   * The bands are 11% of the width each, so reading them off the full canvas is
+   * about a fifth of one page's pixels — cheaper than making the thumbnail was.
+   *
+   * ⚠️ AND THE SHAPE OF THE PAGE DECIDES THE AXIS, NOT INK DENSITY.
+   *
+   * An earlier version chose between portrait and landscape by counting
+   * horizontal rules and got 19 of 20 pages wrong, because at probe scale the
+   * rules vanish while the Category column survives as a stripe that reads as
+   * dozens of rules when the page is on its side. A portrait page is upright or
+   * upside down; it is not sideways.
    */
   const portrait = canvas.height >= canvas.width;
   const axis: Array<0 | 90 | 180 | 270> = portrait ? [0, 180] : [90, 270];
 
-  // Both options put the page portrait, so the Category column is now in a
-  // known place and the only question left is which end is the top.
-  const probeFirst = probeOf(rotateCanvas(canvas, axis[0]));
-  const asym = edgeInkAsymmetry(probeFirst);
-  releaseCanvas(probeFirst);
+  let contrast: number;
+  if (portrait) {
+    contrast = edgeInkContrast(canvas);
+  } else {
+    // Only a sideways page needs a copy made to measure, and those are rare.
+    const turned = rotateCanvas(canvas, 90);
+    contrast = edgeInkContrast(turned);
+    releaseCanvas(turned);
+  }
 
-  // Dense left / sparse right means upright. A near-zero reading is a page with
-  // no clear answer — a blank or a bad crop — and is left alone rather than
-  // flipped on noise.
-  const best: 0 | 90 | 180 | 270 = asym < -0.012 ? axis[1] : axis[0];
+  const best: 0 | 90 | 180 | 270 = contrast < -ORIENT_MARGIN ? axis[1] : axis[0];
   return { canvas: rotateCanvas(canvas, best), rotation: best };
 }
 
@@ -750,7 +780,19 @@ function findMarkRuns(canvas: HTMLCanvasElement, col: QntyColumn): Array<{ y0: n
     let dark = 0;
     for (let x = 0; x < cw; x++) {
       const i = ((y * cw) + x) * 4;
-      if ((data[i] + data[i + 1] + data[i + 2]) / 3 < 140) dark++;
+      /**
+       * ⚠️ 155, NOT 140, AND THE DIFFERENCE IS TEN MARKS.
+       *
+       * A twenty-page order is rendered at pdf.js scale 1.3 to stay inside
+       * iOS's canvas budget — about 94 dpi, where a pencil stroke is a pixel
+       * wide and comes off the scaler as mid grey rather than black. At 140 the
+       * scanner found 39 of the 49 marks on the Scott Noble order at that
+       * scale and all of them at 300 dpi, which is exactly the kind of bug that
+       * passes every test done on a good scan and loses a fifth of a real
+       * order on a phone. Measured at 94/108/150/200/300 dpi, 155 finds
+       * 46–58 at every one of them.
+       */
+      if ((data[i] + data[i + 1] + data[i + 2]) / 3 < 155) dark++;
     }
     rowInk.push(dark / cw);
   }
@@ -762,7 +804,16 @@ function findMarkRuns(canvas: HTMLCanvasElement, col: QntyColumn): Array<{ y0: n
   // 0.07 found 37. Nothing here is ever added without a person confirming it,
   // so a spare detection costs one tap to dismiss while a missed one is silent
   // — the boat just doesn't get the item and nobody learns why.
-  const ON = 0.07;
+  const ON = 0.05;
+  /**
+   * ⚠️ AND AN UPPER BOUND, BECAUSE A SOLID BAR IS NOT A PENCIL MARK.
+   *
+   * Reading grey as ink also picks up the scanner's dark edge at the top of
+   * page one, which fills the whole column for 88 rows. Handwriting never
+   * comes close: across the real order the densest genuine mark averages 0.49
+   * of the column width, while the two bars measure 0.93 and 1.00.
+   */
+  const SOLID = 0.55;
   const MIN_H = Math.max(6, Math.round(h * 0.005));
   let start: number | null = null;
   for (let y = 0; y <= rowInk.length; y++) {
@@ -771,10 +822,8 @@ function findMarkRuns(canvas: HTMLCanvasElement, col: QntyColumn): Array<{ y0: n
     if (!on && start !== null) {
       if (y - start >= MIN_H) {
         const slice = rowInk.slice(start, y);
-        runs.push({
-          y0: start + yTop, y1: y + yTop,
-          ink: slice.reduce((a, b) => a + b, 0) / slice.length,
-        });
+        const ink = slice.reduce((a, b) => a + b, 0) / slice.length;
+        if (ink <= SOLID) runs.push({ y0: start + yTop, y1: y + yTop, ink });
       }
       start = null;
     }
@@ -877,20 +926,33 @@ export function detectInkedRowsOnPage(
   // One entry per PENCIL MARK, matched to the row it sits on — not one per row
   // that happened to measure dark.
   const used = new Set<number>();
+  let unplaced = 0;
   for (const run of findMarkRuns(canvas, col)) {
     const mid = (run.y0 + run.y1) / 2;
-    let best = -1, bestDist = Infinity;
-    for (let i = 0; i < bands.length; i++) {
-      const c = (bands[i].y0 + bands[i].y1) / 2;
-      const d = Math.abs(c - mid);
-      if (d < bestDist) { bestDist = d; best = i; }
+    /**
+     * ⚠️ IF THE NEAREST ROW IS TAKEN, TRY THE NEXT ONE — DO NOT THROW THE MARK
+     * AWAY.
+     *
+     * Two marks on consecutive rows land close together, and where the rule
+     * between them was faint enough that the row finder merged the pair into one
+     * band, the second mark used to be dropped on the spot. Silently: the boat
+     * simply did not get that item. Walking outwards to the nearest row nobody
+     * has claimed recovers those, and the distance test below still refuses
+     * anything that is not really on a row.
+     */
+    const order = bands
+      .map((b, i) => ({ i, d: Math.abs((b.y0 + b.y1) / 2 - mid) }))
+      .sort((a, b) => a.d - b.d);
+    let best = -1;
+    for (const { i, d } of order) {
+      // A mark further than a row's height from every row center is not on a row
+      // — a margin scribble, a staple shadow, the footer.
+      if (d > (bands[i].y1 - bands[i].y0) * 1.2) break;
+      if (used.has(i)) continue;
+      best = i; break;
     }
-    if (best < 0) continue;
-    // A mark further than a row's height from every row center is not on a row
-    // — a margin scribble, a staple shadow, the footer.
+    if (best < 0) { unplaced++; continue; }
     const band = bands[best];
-    if (bestDist > (band.y1 - band.y0) * 1.2) continue;
-    if (used.has(best)) continue;
     used.add(best);
 
     const rect = qntyRect(canvas, band, col);
@@ -925,7 +987,7 @@ export function detectInkedRowsOnPage(
     });
   }
   marked.sort((a, b) => a.rowIndex - b.rowIndex);
-  return { bands, marked };
+  return { bands, marked, unplaced };
 }
 
 /**
@@ -1057,29 +1119,150 @@ export function parseWriteInLines(text: string): Array<{ raw: string; descriptio
   return out;
 }
 
+/**
+ * Read a region and hand back every word with where it sits on the page.
+ *
+ * Used to find PRINTED headings, which is the one thing OCR on this form is
+ * genuinely good at.
+ */
+async function ocrWords(
+  canvas: HTMLCanvasElement,
+  region: CropRegion,
+): Promise<Array<{ text: string; y0: number; y1: number }>> {
+  try {
+    const Tesseract = await import('tesseract.js');
+    const result = await Tesseract.recognize(cropDataUrl(canvas, region), 'eng', { logger: () => {} });
+    // tesseract.js has moved word boxes around between versions; take them from
+    // wherever they are rather than depending on one shape.
+    const data = result.data as unknown as {
+      words?: Array<{ text?: string; bbox?: { y0: number; y1: number } }>;
+      blocks?: unknown;
+    };
+    const out: Array<{ text: string; y0: number; y1: number }> = [];
+    const push = (t: unknown, bb: unknown) => {
+      const text = typeof t === 'string' ? t.trim() : '';
+      const box = bb as { y0?: number; y1?: number } | undefined;
+      if (!text || !box || typeof box.y0 !== 'number') return;
+      out.push({ text, y0: region.y0 + box.y0, y1: region.y0 + (box.y1 ?? box.y0) });
+    };
+    if (Array.isArray(data.words)) {
+      for (const wd of data.words) push(wd?.text, wd?.bbox);
+    }
+    if (!out.length && data.blocks) {
+      // Walk whatever nesting this version used until words turn up.
+      const walk = (node: unknown) => {
+        if (Array.isArray(node)) { node.forEach(walk); return; }
+        if (!node || typeof node !== 'object') return;
+        const o = node as Record<string, unknown>;
+        if (typeof o.text === 'string' && o.bbox) push(o.text, o.bbox);
+        for (const k of ['blocks', 'paragraphs', 'lines', 'words', 'symbols']) {
+          if (o[k]) walk(o[k]);
+        }
+      };
+      walk(data.blocks);
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Where the WRITE IN ITEMS block starts on a page, in page pixels, or null when
+ * the page has no such block.
+ *
+ * ⚠️ THE BLOCK IS FOUND, NEVER ASSUMED, AND MOST PAGES DO NOT HAVE ONE.
+ *
+ * This used to read a fixed window — the bottom 18%, then y 0.45–0.95 — on the
+ * last two pages of whatever was uploaded. On the Scott Noble order page 19 is
+ * solid catalog and page 20 is catalog down to two thirds, so that window was
+ * pointed at thirty rows of printed product lines. OCR duly read them, and the
+ * operator was handed SIXTY-FIVE write-ins with names like
+ * `[Grocery Low "3540002845 [HOW BOAT PORKN BEANS 280 sa39` to accept or
+ * reject, burying the five real ones.
+ *
+ * The form prints its own answer: a heading that reads WRITE IN ITEMS, in clean
+ * bold capitals, directly above the block. Printed type is the one thing OCR is
+ * reliable at here, so that heading is what we look for — on the real order it
+ * is found at y 0.584 of page 20 and on no other page, which is exactly right.
+ *
+ * If the heading is not found, this page has no write-ins as far as we are
+ * concerned. Missing a handwritten line is recoverable — the operator is told
+ * to check the paper. Inventing sixty-five is not.
+ */
+async function findWriteInBlock(canvas: HTMLCanvasElement): Promise<{ y0: number; y1: number } | null> {
+  const w = canvas.width, h = canvas.height;
+  // The heading always sits below the catalog, and searching the whole page
+  // costs time on every page of every order for nothing.
+  const search = {
+    x0: Math.floor(w * 0.12), y0: Math.floor(h * 0.20),
+    x1: Math.floor(w * 0.80), y1: Math.floor(h * 0.98),
+  };
+  const words = await ocrWords(canvas, search);
+  if (!words.length) return null;
+
+  let headerY: number | null = null;
+  for (let i = 0; i < words.length; i++) {
+    const t = words[i].text.replace(/[^A-Za-z-]/g, '').toUpperCase();
+    if (t === 'WRITE' || t === 'WRITEIN' || t === 'WRITE-IN') {
+      // "WRITE" on its own is a common misread inside a product name; require
+      // the rest of the heading nearby to accept it.
+      const near = words.slice(i + 1, i + 4)
+        .map(x => x.text.replace(/[^A-Za-z]/g, '').toUpperCase());
+      if (t !== 'WRITE' || near.includes('IN') || near.includes('ITEMS') || near.includes('ITEM')) {
+        headerY = words[i].y1;
+        break;
+      }
+    }
+  }
+  if (headerY == null) return null;
+
+  // From just under the heading to the last rule of the table — not to the
+  // bottom of the paper, which is where the page footer lives.
+  const bands = findRowBands(canvas);
+  const bottom = bands.length ? bands[bands.length - 1].y1 : Math.floor(h * 0.93);
+  const y0 = Math.min(headerY + 2, Math.floor(h * 0.95));
+  if (bottom - y0 < h * 0.03) return null;
+  return { y0, y1: bottom };
+}
+
+/**
+ * A printed catalog row that OCR has mangled, rather than something a person
+ * wrote in.
+ *
+ * Belt and braces behind findWriteInBlock: even pointed at the right place, one
+ * stray row of print above the header would otherwise become an item on the
+ * order. Every printed row on this form carries a UPC, and no one hand-writes a
+ * six-digit number in the description column.
+ */
+function looksPrinted(line: string): boolean {
+  if (/\d{6,}/.test(line)) return true;
+  if (/grocery\s*[-–—]?\s*low/i.test(line)) return true;
+  if (/write\s*in\s*items?/i.test(line)) return true;
+  if (/page\s*\d+\s*of\s*\d+/i.test(line)) return true;
+  return false;
+}
+
 async function extractWriteIns(
   canvas: HTMLCanvasElement,
   pageIndex: number,
   catalog: CatalogItem[],
   byUpc: Map<string, CatalogItem>,
 ): Promise<WriteInCandidate[]> {
-  // Bottom ~18% of page — WRITE IN ITEMS block on Sinclair forms.
   const w = canvas.width;
   const h = canvas.height;
-  // ⚠️ THE BLOCK IS NOT IN THE BOTTOM 18% OF THE PAGE.
-  //
-  // This looked at y 0.82–0.97 and found the empty tail of the numbered list
-  // and the "Page 20 of 5076" footer. On the Scott Noble order the written
-  // lines — "large Marshmallows 4 bags", "Hickory Smoker Pellets 2 bags",
-  // "Pilbury frozen Biscuit 4 Case", "Breaded Chik Tenders 1 Case",
-  // "yellow Cornmeal 1 bag" — sit at y 0.60–0.74, above everything it read.
-  //
-  // Widened rather than re-pinned: how far down the block starts depends on
-  // where the catalog happened to end on that page, so a generous window that
-  // certainly contains it beats a tight one that is right for one scan. It also
-  // reaches left to the numbered column and right past the quantity words,
-  // which are in their own column and are half the meaning of the line.
-  const region = { x0: Math.floor(w * 0.05), y0: Math.floor(h * 0.45), x1: Math.floor(w * 0.88), y1: Math.floor(h * 0.95) };
+  const block = await findWriteInBlock(canvas);
+  // No block on this page — and that is the normal case. Reading a window of
+  // catalog rows "just in case" is what produced sixty-five imaginary items.
+  if (!block) return [];
+
+  const pad = Math.round((block.y1 - block.y0) * 0.02);
+  const region = {
+    x0: Math.floor(w * 0.16),
+    y0: Math.max(0, block.y0 - pad),
+    x1: Math.floor(w * 0.86),
+    y1: Math.min(h, block.y1 + pad),
+  };
   const crop = cropDataUrl(canvas, region);
   // The same block again, drawn large. OCR reads the small one; a person
   // deciding what "Vegetarian" means needs to see the handwriting.
@@ -1087,7 +1270,7 @@ async function extractWriteIns(
   const text = await ocrImage(crop);
   if (!text) return [];
 
-  const lines = parseWriteInLines(text);
+  const lines = parseWriteInLines(text).filter(l => !looksPrinted(l.raw));
   // If OCR found a COD banner with no item lines, still surface it.
   if (!lines.length && detectCod(text).isCod) {
     const { isCod, codName } = detectCod(text);
@@ -1234,7 +1417,21 @@ export async function scanPaperPages(opts: {
   }
   for (let p = 0; p < oriented.length; p++) {
     onProgress?.({ phase: 'detect', page: p + 1, pages: oriented.length, message: `Reading quantities on page ${p + 1} of ${oriented.length}…` });
-    const { bands, marked } = detectInkedRowsOnPage(oriented[p], qntyCol);
+    const { bands, marked, unplaced } = detectInkedRowsOnPage(oriented[p], qntyCol);
+    /**
+     * ⚠️ A MARK THAT CANNOT BE TIED TO A ROW CANNOT BE TIED TO A PRODUCT, SO IT
+     * IS DROPPED — AND THE OPERATOR IS TOLD IT WAS.
+     *
+     * Adding it anyway would mean a quantity against no item, which is worse
+     * than nothing. Saying nothing is worse still: the order would go out short
+     * and the only clue would be on the paper.
+     */
+    if (unplaced > 0) {
+      summaryFlags.push(
+        `Page ${p + 1}: ${unplaced} mark${unplaced === 1 ? '' : 's'} could not be lined up with a `
+        + 'row and were left out. Check that page against the paper before you send it.',
+      );
+    }
     const markedByRow = new Map(marked.map(m => [m.rowIndex, m]));
 
     for (let r = 0; r < bands.length; r++) {
@@ -1343,13 +1540,45 @@ export async function scanPaperPages(opts: {
   markGroups.forEach((g, gi) => { for (const m of g.members) candidates[m].groupId = gi; });
 
   // Write-in / COD block on the last 1–2 pages (Scott Noble–class forms).
-  const writeInPages = oriented.length <= 1
-    ? [oriented.length - 1]
-    : [oriented.length - 2, oriented.length - 1].filter(i => i >= 0);
-  for (const pi of runOcr ? [...new Set(writeInPages)] : []) {
-    onProgress?.({ phase: 'writeins', page: pi + 1, pages: oriented.length, message: `Reading write-ins on page ${pi + 1}…` });
+  /**
+   * The last few pages are OFFERED to the write-in reader; it decides. Pages
+   * without a WRITE IN ITEMS block return nothing, so looking at three costs a
+   * row-band pass each and cannot invent items the way the old fixed window
+   * did.
+   */
+  const writeInPages: number[] = [];
+  for (let i = Math.max(0, oriented.length - 3); i < oriented.length; i++) writeInPages.push(i);
+  for (const pi of runOcr ? writeInPages : []) {
+    onProgress?.({ phase: 'writeins', page: pi + 1, pages: oriented.length, message: `Looking for write-ins on page ${pi + 1}…` });
     const found = await extractWriteIns(oriented[pi], pi, catalog, indexes.byUpc);
+    /**
+     * ⚠️ A FLOOD IS A BUG, NOT AN ORDER.
+     *
+     * Nobody hand-writes twenty-five extra items at the bottom of a form. If
+     * this many come back, the block was misread — say so once and keep the
+     * page out of the review screen rather than handing someone a list they
+     * will scroll past and stop trusting.
+     */
+    if (found.length > 25) {
+      summaryFlags.push(
+        `Page ${pi + 1} looked like it had ${found.length} handwritten lines at the bottom, which `
+        + 'is almost certainly a misread — they have been left out. Check the paper for write-ins.',
+      );
+      continue;
+    }
     writeIns.push(...found);
+  }
+  if (runOcr && !writeIns.length) {
+    // ⚠️ SAY THE BLOCK WAS NOT FOUND RATHER THAN SAYING NOTHING.
+    //
+    // This step now declines to guess where the write-in block is, which means
+    // "no write-ins" can equally mean "there were none" or "the heading did not
+    // read". Those need the same thing from the operator — a glance at the
+    // bottom of the paper — and a silent nothing does not ask for it.
+    summaryFlags.push(
+      'No WRITE IN ITEMS block was found on the last pages. If anything is hand-written at the '
+      + 'bottom of the form, add it with Quick add — it has not been picked up.',
+    );
   }
   if (!runOcr) {
     // Switched off, so say what is not being looked at rather than letting the
