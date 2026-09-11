@@ -234,6 +234,31 @@ function rotateCanvas(src: HTMLCanvasElement, deg: 0 | 90 | 180 | 270): HTMLCanv
 }
 
 /** Score how "form-like" a page looks (strong horizontal rules). Higher = better. */
+/**
+ * Downscaled copy used for every measurement that only needs shape, not detail.
+ *
+ * Orientation used to be decided by rotating the FULL page four times and
+ * reading all the pixels of each — four multi-megabyte allocations and four
+ * full getImageData calls per page, repeated twenty times. On a phone that is
+ * most of the wait, and it is wasted: whether a page is upside down is visible
+ * in a thumbnail.
+ */
+function probeOf(canvas: HTMLCanvasElement, target = 500): HTMLCanvasElement {
+  const scale = Math.min(1, target / Math.max(canvas.width, canvas.height));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(canvas.width * scale));
+  c.height = Math.max(1, Math.round(canvas.height * scale));
+  c.getContext('2d', { willReadFrequently: true })!
+    .drawImage(canvas, 0, 0, c.width, c.height);
+  return c;
+}
+
+/** Frees a canvas's backing store. Dropping the reference is not enough on iOS. */
+export function releaseCanvas(canvas: HTMLCanvasElement): void {
+  canvas.width = 0;
+  canvas.height = 0;
+}
+
 function orientationScore(canvas: HTMLCanvasElement): number {
   const { width: w, height: h } = canvas;
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
@@ -246,7 +271,7 @@ function orientationScore(canvas: HTMLCanvasElement): number {
   for (let y = y0; y < y1; y += 2) {
     let dark = 0;
     let n = 0;
-    for (let x = x0; x < x1; x += 4) {
+    for (let x = x0; x < x1; x += 2) {
       const i = (y * w + x) * 4;
       const lum = (data[i] + data[i + 1] + data[i + 2]) / 3;
       n++;
@@ -254,11 +279,9 @@ function orientationScore(canvas: HTMLCanvasElement): number {
     }
     if (n && dark / n > 0.28) rules++;
   }
-  // Prefer landscape-ish line density typical of the form; penalize near-blank.
   return rules;
 }
 
-/** Pick 0/90/180/270 that maximizes horizontal rule evidence. */
 /**
  * Which edge column is the printed Category column?
  *
@@ -296,16 +319,24 @@ function edgeInkAsymmetry(canvas: HTMLCanvasElement): number {
 }
 
 export function autoOrientCanvas(canvas: HTMLCanvasElement): { canvas: HTMLCanvasElement; rotation: 0 | 90 | 180 | 270 } {
+  // Every decision below is made on a ~500px probe. The full page is rotated
+  // exactly once, at the end, when the answer is already known.
+  const probe = probeOf(canvas);
+
   // Step 1 — which AXIS. Rule density separates portrait from landscape and is
   // the thing orientationScore() is actually good at.
-  const upright = orientationScore(canvas);
-  const turned = orientationScore(rotateCanvas(canvas, 90));
+  const upright = orientationScore(probe);
+  const probe90 = rotateCanvas(probe, 90);
+  const turned = orientationScore(probe90);
+  releaseCanvas(probe90);
   const axis: Array<0 | 90 | 180 | 270> = turned > upright ? [90, 270] : [0, 180];
 
   // Step 2 — which WAY UP within that axis. Rule density cannot answer this;
   // the Category column can.
-  const first = rotateCanvas(canvas, axis[0]);
-  const asym = edgeInkAsymmetry(first);
+  const probeFirst = rotateCanvas(probe, axis[0]);
+  const asym = edgeInkAsymmetry(probeFirst);
+  if (probeFirst !== probe) releaseCanvas(probeFirst);
+  releaseCanvas(probe);
 
   // A near-zero reading means neither edge is clearly denser — a blank or badly
   // cropped page. Leave it alone rather than flipping on noise.
@@ -327,7 +358,23 @@ export async function renderPdfToCanvases(
   for (let i = 1; i <= doc.numPages; i++) {
     onPage?.(i, doc.numPages);
     const page = await doc.getPage(i);
-    const viewport = page.getViewport({ scale: 2 });
+    /**
+     * ⚠️ SCALE IS A MEMORY BUDGET, NOT A QUALITY DIAL.
+     *
+     * This rendered every page at scale 2 — 1224 × 1584 for US Letter, about
+     * 7.8 MB of canvas each. Twenty pages is 155 MB held at once, before the
+     * orientation pass makes rotated copies and the rectifier allocates an
+     * output canvas. iOS Safari caps total canvas memory well below that and
+     * does not fail loudly: canvases come back blank, or the tab reloads. An
+     * 11 MB scan of the Scott Noble order hits it every time.
+     *
+     * 1.5 is ~108 dpi, which is plenty to FIND a pencil mark. The crop handed
+     * to OCR is upscaled separately (see contextCrop), so reading the digit
+     * does not depend on this number. Long documents drop further, because the
+     * cap is on the total, not the page.
+     */
+    const scale = doc.numPages > 12 ? 1.3 : 1.5;
+    const viewport = page.getViewport({ scale });
     const canvas = document.createElement('canvas');
     canvas.width = viewport.width;
     canvas.height = viewport.height;
@@ -499,13 +546,17 @@ function borderSkew(canvas: HTMLCanvasElement): number {
 }
 
 export function calibrateQntyColumn(canvases: HTMLCanvasElement[]): QntyColumn {
+  // Column positions are a shape question, so this runs on probes too. At full
+  // size it was reading every pixel of every page a second time purely to find
+  // four vertical lines.
   const BINS = 400;
   const acc = new Float64Array(BINS);
   let used = 0;
 
-  for (const canvas of canvases) {
+  for (const full of canvases) {
+    if (!full.width || !full.height) continue;
+    const canvas = probeOf(full, 700);
     const w = canvas.width, h = canvas.height;
-    if (!w || !h) continue;
     const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
     const y0 = Math.floor(h * 0.14), y1 = Math.floor(h * 0.90);
     const { data } = ctx.getImageData(0, y0, w, Math.max(1, y1 - y0));
@@ -523,13 +574,19 @@ export function calibrateQntyColumn(canvases: HTMLCanvasElement[]): QntyColumn {
       cnt[b] += 1;
     }
     for (let b = 0; b < BINS; b++) acc[b] += sum[b] / Math.max(1, cnt[b]);
+    releaseCanvas(canvas);
     used++;
   }
   if (!used) return QNTY_COL_DEFAULT;
   // Worst skew across the batch — one bad photo is enough to make fixed
   // fractions unsafe for the whole run.
   let skew = 0;
-  for (const c of canvases) skew = Math.max(skew, borderSkew(c));
+  for (const c of canvases) {
+    if (!c.width || !c.height) continue;
+    const pr = probeOf(c, 700);
+    skew = Math.max(skew, borderSkew(pr));
+    releaseCanvas(pr);
+  }
   for (let b = 0; b < BINS; b++) acc[b] /= used;
 
   const peaks: number[] = [];
@@ -1001,6 +1058,14 @@ export async function scanPaperPages(opts: {
     // costs it sharpness.
     const rect = rectifyPage(turned);
     const canvas = rect.canvas;
+    // ⚠️ HAND THE MEMORY BACK AS WE GO.
+    //
+    // Orientation and rectification each produce a NEW canvas; without this the
+    // originals stay alive until the whole scan finishes and the page count
+    // multiplies straight into the canvas cap. Only the canvas actually being
+    // measured needs to exist.
+    if (turned !== canvases[p]) releaseCanvas(canvases[p]);
+    if (canvas !== turned) releaseCanvas(turned);
     if (rect.applied) {
       rectified++;
       onProgress?.({ phase: 'orient', page: p + 1, pages: canvases.length,

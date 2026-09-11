@@ -62,7 +62,7 @@ export default function PrivacyPage() {
       </LP>
       <LUL items={[
         <><strong>Venmo or Cash App</strong> — your handle (for example, <em>@yourname</em>), so we can send a payment request.</>,
-        <><strong>Credit card</strong> — a preferred phone number and a good time to reach you. <strong>We then call you and take the card details by phone.</strong></>,
+        <><strong>Credit card</strong> — a preferred phone number and a good time to reach you. <strong>We will contact you to finalize the transaction.</strong></>,
         <><strong>Cash</strong> — nothing extra. Settled at the dock.</>,
       ]} />
 
@@ -70,8 +70,9 @@ export default function PrivacyPage() {
         <strong>Card details are never entered on this website.</strong> There is no
         field anywhere in the ordering system for a card number, and we will never
         ask you to type one into the site, email one, or send one by text message.
-        If you&apos;re paying a personal balance by card, you give it to a member of
-        our staff over the phone, and it is not stored in the ordering system.
+        If you&apos;re paying a personal balance by card, we contact you to finalize
+        the transaction outside this site, and card details are not stored in the
+        ordering system.
         <br /><br />
         <strong>So if anyone asks you to enter or send card details through this
         site, it isn&apos;t us.</strong>
@@ -89,7 +90,7 @@ export default function PrivacyPage() {
 
       <LSub>Delivery documentation</LSub>
       <LP>
-        We keep the itemised register receipt from Sinclair&apos;s Foods and, where
+        We keep the itemized register receipt from Sinclair&apos;s Foods and, where
         the barge line requires one, a <strong>photograph of the signed delivery
         log</strong>. Those exist for one reason: they are the proof of delivery
         your accounts payable department asks for, and several barge lines will

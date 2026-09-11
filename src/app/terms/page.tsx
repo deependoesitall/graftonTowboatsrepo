@@ -47,13 +47,13 @@ export default function TermsPage() {
         it matters which is which:
       </LP>
       <LUL items={[
-        <><strong>Sinclair&apos;s Foods sells the groceries.</strong> They are the retailer. We buy those items on your behalf as your purchasing agent and deliver them.</>,
+        <><strong>Sinclair&apos;s Foods sells the groceries.</strong> They are the retailer. We are the delivery service and courtesy seller of items sold by Sinclair&apos;s Foods.</>,
         <><strong>GTS sells the delivery itself</strong>, any supplies we stock and provide directly, and services we arrange for you such as crew transport.</>,
       ]} />
       <LP>
-        So a grocery order is a purchase from Sinclair&apos;s that we handle and
-        carry; a delivery charge, a deck supply out of our own stock, or a crew
-        run is a purchase from us.
+        So a grocery order is sold by Sinclair&apos;s and delivered by GTS as the
+        courtesy seller and delivery service; a delivery charge, a deck supply out
+        of our own stock, or a crew run is a purchase from us.
       </LP>
 
       <LS>2. Placing an order</LS>
@@ -81,7 +81,7 @@ export default function TermsPage() {
         item paid for by a crew member, and not as a special request.
       </LCallout>
       <LP>
-        This is not a policy we can make an exception to as a favour. Alcoholic
+        This is not a policy we can make an exception to as a favor. Alcoholic
         products are excluded from our catalogue automatically and will not
         appear as something you can order. If alcohol is written into an order&apos;s
         notes or added as an off-catalogue request, that part of the order will
@@ -90,9 +90,8 @@ export default function TermsPage() {
 
       <LSub>Tobacco</LSub>
       <LP>
-        Where tobacco is available, it is sold <strong>only to people aged 21 or
-        over</strong>. We may decline to carry it on any order, and we may ask
-        for photo identification at handover. If nobody of age is present to
+        Where tobacco is available, <strong>a valid ID over 21 is required</strong>.
+        We may decline to carry it on any order. If nobody of age is present to
         receive it, those items come back with us — the rest of the order is
         delivered as normal.
       </LP>
@@ -133,7 +132,7 @@ export default function TermsPage() {
 
       <LS>4. Charges and payment</LS>
       <LUL items={[
-        'Delivery charges are set by the rate agreed with your company, and vary by service type, time of day and location.',
+        'Delivery charges are based on service type, time of day and location.',
         "Depending on your company's arrangement, GTS either invoices for groceries and delivery together, or invoices delivery only while your company settles with Sinclair's directly.",
         <><strong>Invoices are issued to your company&apos;s accounts payable and are due within 30 days.</strong> The delivery summary emailed to the vessel is a record of what was delivered — it is not an invoice, and nothing is payable on it.</>,
         <>Items a crew member elects to pay for personally are <strong>that individual&apos;s debt, not the company&apos;s</strong> — unless the company has agreed in advance to take them onto its account. A handling fee may apply to personal payments to cover processing costs; it will be disclosed before settlement.</>,
@@ -160,12 +159,7 @@ export default function TermsPage() {
         Within those windows we&apos;ll refund, credit or replace anything that
         arrives wrong, damaged or short.
       </LCallout>
-      <LP>
-        The two windows differ for a practical reason rather than a legal one:
-        nobody can tell three days later whether a chicken went off on our boat
-        or in a galley fridge that wasn&apos;t cold enough, but a wrong part or a
-        short case is just as provable on Friday as it was on Monday.
-      </LP>
+
       <LP>
         We can&apos;t take responsibility for spoilage after handover, including
         where items are not refrigerated or frozen promptly aboard the vessel.
@@ -183,9 +177,9 @@ export default function TermsPage() {
 
       <LS>7. Your responsibilities</LS>
       <LUL items={[
-        'Give accurate vessel, contact and delivery information. Most delivery problems trace back to a wrong phone number or mile marker.',
+        'Give accurate vessel, contact and delivery information.',
         "Keep account credentials secure and don't share them.",
-        'Use the service lawfully, and do not attempt to disrupt it or gain unauthorised access.',
+        'Use the service lawfully, and do not attempt to disrupt it or gain unauthorized access.',
         'Provide safe access for our crew at the delivery point.',
       ]} />
 
@@ -202,7 +196,7 @@ export default function TermsPage() {
       <LP>
         We are not liable for delays or failures caused by circumstances beyond our
         reasonable control, including weather, river conditions, lock closures,
-        mechanical failure, labour disputes, acts of government or supplier shortage.
+        mechanical failure, labor disputes, acts of government or supplier shortage.
       </LP>
 
       <LS>9. Service availability</LS>

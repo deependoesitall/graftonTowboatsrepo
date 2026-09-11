@@ -135,8 +135,9 @@ export function PaperFormImport({ catalog, setLine, applyLines, appendNotes, add
       const canvases: HTMLCanvasElement[] = [];
       for (const f of files) {
         if (f.type === 'application/pdf' || /\.pdf$/i.test(f.name)) {
+          setProgress({ phase: 'render', page: 0, pages: 0, message: `Opening ${f.name}…` });
           const pages = await renderPdfToCanvases(f, (page, pages) => {
-            setProgress({ phase: 'render', page, pages, message: `Opening PDF page ${page} of ${pages}…` });
+            setProgress({ phase: 'render', page, pages, message: `Reading page ${page} of ${pages}…` });
           });
           canvases.push(...pages);
         } else if (f.type.startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(f.name)) {
@@ -223,6 +224,13 @@ export function PaperFormImport({ catalog, setLine, applyLines, appendNotes, add
       return;
     }
     setPasteHint('');
+    const mb = usable.reduce((n, f) => n + f.size, 0) / (1024 * 1024);
+    if (mb > 6) {
+      // A big scan is normal — the Scott Noble order is 11 MB — but the first
+      // thirty seconds are silent while pdf.js opens it, and silence reads as
+      // broken.
+      setPasteHint(`Opening a ${mb.toFixed(0)} MB file — the first page can take a moment on a phone.`);
+    }
     processFiles(usable);
   }, [processFiles]);
 
@@ -244,6 +252,14 @@ export function PaperFormImport({ catalog, setLine, applyLines, appendNotes, add
 
   const pasteFromClipboard = useCallback(async () => {
     setPasteHint('');
+    // ⚠️ SAY SOMETHING BEFORE THE WAIT, NOT AFTER IT.
+    //
+    // Pulling an 11 MB PDF off the clipboard takes several seconds on a phone
+    // and this function showed nothing at all until it was finished, so the
+    // button looked dead and people pressed it again — starting a second read
+    // alongside the first, on a device already short of memory.
+    setBusy(true);
+    setProgress({ phase: 'render', page: 0, pages: 0, message: 'Reading from the clipboard…' });
     try {
       const nav = navigator as Navigator & { clipboard?: { read?: () => Promise<ClipboardItem[]> } };
       if (!nav.clipboard?.read) {
@@ -262,8 +278,12 @@ export function PaperFormImport({ catalog, setLine, applyLines, appendNotes, add
           }
         }
       }
+      setBusy(false);
+      setProgress(null);
       acceptPasted(files);
     } catch {
+      setBusy(false);
+      setProgress(null);
       // A denied permission and an empty clipboard look the same from here, so
       // the message covers both rather than guessing wrong.
       setPasteHint('Couldn’t read the clipboard. Tap the box above, then choose Paste.');
@@ -408,7 +428,7 @@ export function PaperFormImport({ catalog, setLine, applyLines, appendNotes, add
             <span className="text-sm font-semibold text-brand-navy">
               Drop, paste or choose a PDF or photos
             </span>
-            <span className="text-xs text-gray-400">Upside-down pages are fine — about 20 pages is fine</span>
+            <span className="text-xs text-gray-400">Upside-down pages are fine — send the whole order form</span>
             <input
               type="file"
               accept="application/pdf,image/*"

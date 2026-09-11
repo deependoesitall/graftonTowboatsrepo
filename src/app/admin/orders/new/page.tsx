@@ -86,6 +86,8 @@ interface VesselHeader {
   po_number: string;
   last_ordered: string;
   order_count: number;
+  /** Known only from the delivery ledger — header fields will be sparse. */
+  from_ledger?: boolean;
 }
 
 type Mode = 'sheet' | 'quick' | 'paste' | 'scan';
@@ -659,13 +661,40 @@ function WhoStep({ header, setHeader, vessels, terminals, applyVessel, onNext }:
   onNext: () => void;
 }) {
   const [q, setQ] = useState('');
-  const matches = useMemo(() => {
-    const n = norm(q);
-    if (!n) return vessels.slice(0, 8);
-    return vessels.filter(v =>
-      norm(v.vessel_name).includes(n) || norm(v.company_name).includes(n)
-    ).slice(0, 12);
-  }, [q, vessels]);
+  // `vessels` is the opening list the page loaded with; `hits` replaces it once
+  // someone types. Keeping them separate means clearing the box goes straight
+  // back to the recent boats instead of an empty screen.
+  const [hits, setHits] = useState<VesselHeader[] | null>(null);
+  const [searching, setSearching] = useState(false);
+
+  useEffect(() => {
+    const term = q.trim();
+    if (term.length < 2) { setHits(null); setSearching(false); return; }
+
+    // ⚠️ DEBOUNCED, AND LATE REPLIES ARE DISCARDED.
+    //
+    // Without the guard, typing "scott" fires five searches and whichever
+    // lands last wins — which on a phone is regularly the reply to "sc", so the
+    // list flickers back to a worse answer after you have stopped typing.
+    // `cancelled` makes every reply but the newest a no-op.
+    let cancelled = false;
+    setSearching(true);
+    const t = setTimeout(async () => {
+      try {
+        const res = await adminFetch(`/api/admin/order-defaults?q=${encodeURIComponent(term)}`);
+        if (cancelled) return;
+        if (res.ok) {
+          const j = await res.json();
+          setHits(j.vessels || []);
+        }
+      } finally {
+        if (!cancelled) setSearching(false);
+      }
+    }, 200);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [q]);
+
+  const matches = hits ?? vessels.slice(0, 8);
 
   const set = (k: keyof HeaderState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setHeader(h => ({ ...h, [k]: e.target.value } as HeaderState));
@@ -679,13 +708,18 @@ function WhoStep({ header, setHeader, vessels, terminals, applyVessel, onNext }:
             everything below — captain, phone, vessel email, terminal, how it
             gets there — exactly as it was last time. */}
         <p className="text-xs text-gray-500 mb-3">
-          Pick one and the rest of this page fills itself in from their last order.
+          Every boat GTS has ordered for or delivered to. Pick one and the rest of this page
+          fills itself in — completely from a past order, or as far as the delivery ledger
+          knows for a boat that has only ever phoned it in.
         </p>
         <div className="relative mb-3">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
             id="vessel-search" className="input-base pl-9" placeholder="Boat or company name…"
             value={q} onChange={e => setQ(e.target.value)} autoComplete="off" />
+          {searching && (
+            <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 animate-spin text-gray-300" />
+          )}
         </div>
         {matches.length > 0 && (
           <div className="flex flex-col divide-y divide-gray-100 -mx-1">
@@ -701,17 +735,19 @@ function WhoStep({ header, setHeader, vessels, terminals, applyVessel, onNext }:
                     {v.company_name}{v.terminal_name ? ` · ${v.terminal_name}` : ''}
                   </span>
                 </span>
-                <span className="text-xs text-gray-400 shrink-0">
-                  {v.order_count} order{v.order_count === 1 ? '' : 's'}
+                <span className="text-xs text-gray-400 shrink-0 text-right">
+                  {v.from_ledger
+                    ? <>{v.order_count} deliver{v.order_count === 1 ? 'y' : 'ies'}<br /><span className="text-[10px] text-gray-300">from the ledger</span></>
+                    : <>{v.order_count} order{v.order_count === 1 ? '' : 's'}</>}
                 </span>
               </button>
             ))}
           </div>
         )}
-        {q && matches.length === 0 && (
+        {q.trim().length >= 2 && !searching && matches.length === 0 && (
           <p className="text-xs text-gray-500 py-2">
-            No boat by that name has ordered before — fill the fields in below and it will be
-            there next time.
+            Nothing matching that in past orders or the delivery ledger. Fill the fields in
+            below and this boat will be here next time.
           </p>
         )}
       </section>
