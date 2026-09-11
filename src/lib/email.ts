@@ -175,15 +175,19 @@ export function buildOrderEmailHtml(
       </div>
       <table width="100%" style="border-collapse:collapse;font-size:13px;">
         ${billGroceries ? `<tr>
-          <td style="padding:8px 12px;color:#333;">Groceries (Sinclair&apos;s)${order.sinclairs_receipt_url ? ` <span style="color:#4d7c5f;font-size:10px;">— itemized receipt ${isLinked(order.sinclairs_receipt_url) ? 'linked below' : 'attached'}</span>` : ''}</td>
-          <td style="padding:8px 12px;text-align:right;font-weight:700;">${formatCurrency(groceryTotal)}</td>
-        </tr>` : `<tr>
-          <td colspan="2" style="padding:8px 12px;color:#666;font-size:11px;font-style:italic;">Groceries are billed to you directly by Sinclair&apos;s — these charges cover Grafton Towboat Services delivery only.</td>
-        </tr>`}
-        <tr>
           <td style="padding:8px 12px;color:#333;">Delivery${order.delivery_service_type ? ` — ${order.delivery_service_type}` : ''}</td>
           <td style="padding:8px 12px;text-align:right;font-weight:700;">${formatCurrency(deliveryFee)}</td>
         </tr>
+        <tr>
+          <td style="padding:8px 12px;color:#333;">Sinclair&apos;s — Grocery Order${order.sinclairs_receipt_url ? ` <span style="color:#4d7c5f;font-size:10px;">— itemized receipt ${isLinked(order.sinclairs_receipt_url) ? 'linked below' : 'attached'}</span>` : ''}</td>
+          <td style="padding:8px 12px;text-align:right;font-weight:700;">${formatCurrency(groceryTotal)}</td>
+        </tr>` : `<tr>
+          <td colspan="2" style="padding:8px 12px;color:#666;font-size:11px;font-style:italic;">No grocery charges on this GTS summary — the boat pays Sinclair&apos;s directly. Lines below are Grafton Towboat Services delivery / services only.</td>
+        </tr>
+        <tr>
+          <td style="padding:8px 12px;color:#333;">Delivery${order.delivery_service_type ? ` — ${order.delivery_service_type}` : ''}</td>
+          <td style="padding:8px 12px;text-align:right;font-weight:700;">${formatCurrency(deliveryFee)}</td>
+        </tr>`}
         <tr style="background:#D9E84A;">
           <td style="padding:10px 12px;font-size:14px;font-weight:900;color:#1E3D1E;text-transform:uppercase;">Final Total</td>
           <td style="padding:10px 12px;text-align:right;font-size:16px;font-weight:900;color:#1E3D1E;">${formatCurrency(grandTotal)}</td>
@@ -198,7 +202,7 @@ export function buildOrderEmailHtml(
            bill follows from the office. */''}
       <div style="padding:9px 12px;background:#f7f9f1;border-top:1px solid #e4e8da;font-size:11px;color:#4d7c5f;line-height:1.6;">
         This is your delivery summary, not an invoice &mdash; nothing to pay from this email.
-        Your company is billed monthly through QuickBooks (accounts payable) &mdash; often covering several vessel orders in one statement.
+        Your company is billed monthly in QuickBooks (accounts payable). When GTS bills groceries, that statement uses two lines like this summary: delivery, then one Sinclair&apos;s grocery total. When the boat pays Sinclair&apos;s directly, QuickBooks shows GTS delivery / services only.
       </div>
       ${/* Spell out the paperwork. Barge-line accounts payable departments hold
            invoices that arrive without their supporting documents — Ingram's

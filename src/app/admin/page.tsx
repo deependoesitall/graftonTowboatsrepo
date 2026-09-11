@@ -400,6 +400,7 @@ interface QueueOrder {
   shopped_email_sent_at: string | null;
   register_total: number | null;
   sinclairs_receipt_url: string | null;
+  bill_for_groceries?: boolean | null;
   /** Signed delivery log / receipt acknowledgement — the clipboard photo. */
   ingram_slip_url: string | null;
 }
@@ -775,7 +776,7 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
                 >
                   <span className="block text-sm font-bold text-brand-navy">Boat pays Sinclair&apos;s directly</span>
                   <span className="block text-[11px] text-gray-500 mt-0.5 leading-snug">
-                    Most boats. Sinclair calls for a card after shopping. This email shows <strong>GTS delivery only</strong> ? no grocery total, no Sinclair receipt. They won&apos;t think they owe GTS for food.
+                    Most boats (like Kirby). Email + monthly QuickBooks show <strong>GTS delivery / services only</strong> — no Sinclair grocery dollar. They won&apos;t think they owe GTS for food.
                   </span>
                 </button>
                 <button
@@ -787,9 +788,9 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
                       : 'border-gray-200 hover:border-gray-300'
                   }`}
                 >
-                  <span className="block text-sm font-bold text-brand-navy">Courtesy billing ? GTS bills the groceries</span>
+                  <span className="block text-sm font-bold text-brand-navy">Courtesy billing — GTS bills the groceries</span>
                   <span className="block text-[11px] text-gray-500 mt-0.5 leading-snug">
-                    Rare (e.g. Scott Noble). You&apos;ll enter Sinclair&apos;s register total and attach their receipt. MK still invoices the company monthly in QuickBooks.
+                    Rare (Scott Noble / Ingram). Email + QuickBooks get <strong>two lines</strong>: (1) delivery fee (2) Sinclair&apos;s grocery order as one lump matching the register — same shape as Invoice 1128. Attach the register receipt.
                   </span>
                 </button>
               </div>
@@ -799,7 +800,7 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
               {billGroceries && (
                 <div className="mt-3 pt-3 border-t border-gray-100 space-y-2.5">
                   <label className="block">
-                    <span className="text-[11px] font-semibold text-gray-500">Sinclair&apos;s grocery total (from their receipt)</span>
+                    <span className="text-[11px] font-semibold text-gray-500">Sinclair&apos;s grocery line (register total — one lump on the invoice)</span>
                     <div className="flex items-center gap-1 mt-0.5">
                       <span className="text-gray-400 text-sm">$</span>
                       <input type="number" step="0.01" min="0" placeholder="0.00" value={groceryTotal}
@@ -823,7 +824,7 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
                       )}
                     </div>
                     <p className="text-[10px] text-gray-400 mt-1">
-                      It rides along with the final email so the customer gets Sinclair&apos;s exact prices, line by line.
+                      Same supporting doc MK needs for QuickBooks: the itemized register tape behind that one Sinclair&apos;s line.
                     </p>
                   </div>
                   {missingGroceryDocs && (
@@ -915,7 +916,30 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
             </p>
           )}
 
-          {error && (
+          
+          {/* Live invoice-shape strip — mirrors QuickBooks 1125 vs 1128 so Jen sees the bill before she sends. */}
+          {!preview && (
+            <div className="mb-4 rounded-xl border border-brand-navy/15 bg-brand-navy/5 px-3 py-2.5">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-brand-navy/70 mb-1.5">Invoice shape preview</p>
+              {billGroceries ? (
+                <div className="text-xs text-brand-navy space-y-0.5">
+                  <div className="flex justify-between gap-3"><span>1. Delivery{serviceType ? ` — ${serviceType}` : ''}</span><span className="font-bold tabular-nums">${fee === '' ? '0.00' : Number(fee).toFixed(2)}</span></div>
+                  <div className="flex justify-between gap-3"><span>2. Sinclair&apos;s — Grocery Order</span><span className="font-bold tabular-nums">${groceryTotal === '' ? '—' : Number(groceryTotal).toFixed(2)}</span></div>
+                  <div className="flex justify-between gap-3 border-t border-brand-navy/10 pt-1 mt-1 font-bold"><span>Total (same as monthly QB)</span><span className="tabular-nums">${(Number(fee || 0) + Number(groceryTotal || 0)).toFixed(2)}</span></div>
+                  <p className="text-[10px] text-gray-500 pt-1 leading-snug">Courtesy path — email + QuickBooks both carry delivery + one grocery lump (Invoice 1128 shape).</p>
+                </div>
+              ) : (
+                <div className="text-xs text-brand-navy space-y-0.5">
+                  <div className="flex justify-between gap-3"><span>Delivery / services only{serviceType ? ` — ${serviceType}` : ''}</span><span className="font-bold tabular-nums">${fee === '' ? '0.00' : Number(fee).toFixed(2)}</span></div>
+                  <p className="text-[10px] text-gray-500 pt-1 leading-snug">Boat pays Sinclair&apos;s directly — no grocery dollar on this email or the GTS QuickBooks invoice (Invoice 1125 shape).</p>
+                </div>
+              )}
+              {fee === '' && (
+                <p className="text-[10px] text-amber-700 mt-1.5">Pick a service type so the delivery fee auto-fills from the rate card.</p>
+              )}
+            </div>
+          )}
+{error && (
             <p className="mt-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>
           )}
         </div>
