@@ -97,6 +97,10 @@ export interface SyncableProduct {
   quantity_size_ratio: number | null;
   freshop_id: string | null;
   popularity: number | null;
+  /** Delisted rows stay in DB; reactivation when Freshop shows them live again. */
+  is_active?: boolean | null;
+  /** Out-of-stock / delisted flag — reconcile and computeFields both flip this. */
+  is_available?: boolean | null;
 }
 
 // ── UPC normalization (identical to the client enrich) ──
@@ -276,6 +280,17 @@ export function computeFields(
   const newPop = typeof hit.popularity === 'number' && isFinite(hit.popularity) && hit.popularity > 0
     ? Math.round(hit.popularity) : null;
   if (newPop !== product.popularity) fields.popularity = newPop;
+  // Live Freshop hit ⇒ flip back-in-stock flags on contact, not only at
+  // end-of-sweep reconcile (which is skipped on incomplete/safety runs).
+  // Same manual_fields lock as reconcile_store_availability for is_available.
+  if (isSellableStatus(hit)) {
+    if (product.is_active === false) {
+      fields.is_active = true;
+    }
+    if (product.is_available === false && !locked.has('is_available')) {
+      fields.is_available = true;
+    }
+  }
   return Object.keys(fields).length ? fields : null;
 }
 

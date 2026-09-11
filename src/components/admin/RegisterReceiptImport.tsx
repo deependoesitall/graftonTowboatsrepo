@@ -10,6 +10,7 @@ import { extractPdfText } from '@/lib/register-receipt-pdf';
 import {
   parseRegisterReceiptText,
   parseReceiptMeta,
+  formatReceiptDate,
   matchReceiptToCatalog,
   type CatalogRow,
   type MatchedReceiptLine,
@@ -116,9 +117,9 @@ export function RegisterReceiptImport({
 
     const noteBits = [
       'Sinclair register receipt import',
-      meta?.dateHint ? `date ${meta.dateHint}` : null,
+      meta?.dateHint ? `date ${formatReceiptDate(meta.dateHint) || meta.dateHint}` : null,
       meta?.amount != null ? `tape total $${meta.amount.toFixed(2)}` : null,
-      meta?.vesselHint ? `vessel hint ${meta.vesselHint}` : null,
+      meta?.vesselHint ? `boat ${meta.vesselHint}` : null,
       (needsYou || []).filter(n => !n.include).length
         ? `skipped ${(needsYou || []).filter(n => !n.include).length} unmatched PLUs`
         : null,
@@ -163,7 +164,7 @@ export function RegisterReceiptImport({
           company_name: co,
           vessel_name: ves,
           register_total: meta?.amount ?? null,
-          notes: meta?.dateHint ? `Receipt date ${meta.dateHint}` : '',
+          notes: meta?.dateHint ? `Receipt date ${formatReceiptDate(meta.dateHint) || meta.dateHint}` : '',
           lines,
         }),
       });
@@ -207,8 +208,8 @@ export function RegisterReceiptImport({
       {meta && (meta.amount != null || meta.vesselHint || meta.dateHint) && (
         <div className="text-xs text-brand-green/70 bg-brand-sand/40 border border-brand-gold/20 rounded-lg px-3 py-2">
           {[
-            meta.vesselHint && `Boat hint: ${meta.vesselHint}`,
-            meta.dateHint && `Date: ${meta.dateHint}`,
+            meta.vesselHint && `Boat: ${meta.vesselHint}`,
+            meta.dateHint && `Date: ${formatReceiptDate(meta.dateHint) || meta.dateHint}`,
             meta.amount != null && `Tape total: $${meta.amount.toFixed(2)}`,
           ].filter(Boolean).join(' · ')}
         </div>

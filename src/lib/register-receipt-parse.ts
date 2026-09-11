@@ -9,6 +9,8 @@
 //   PILS SS BISCUIT
 //       12 @       4.99 EA          59.88 1 F
 
+import { ourKeys, norm } from '@/lib/freshop-sync';
+
 export interface ReceiptRawLine {
   plu: string;
   description: string;
@@ -23,6 +25,8 @@ export interface CatalogRow {
   upc: string | null;
   description: string;
   price: number;
+  /** Prefer active when several catalog rows share a UPC key. */
+  is_active?: boolean | null;
 }
 
 export interface MatchedReceiptLine {
@@ -43,9 +47,9 @@ export interface UnmatchedReceiptLine {
   reason: 'no_plu_match' | 'blank_plu';
 }
 
-/** Digits only; strip leading zeros — same idea as Order Builder upcKey. */
+/** Digits only; strip leading zeros — delegates to Freshop `norm` (one scheme). */
 export function upcKey(s: string | null | undefined): string {
-  return String(s || '').replace(/\D/g, '').replace(/^0+/, '');
+  return norm(s);
 }
 
 /**
@@ -154,18 +158,30 @@ export function matchReceiptToCatalog(lines: ReceiptRawLine[], catalog: CatalogR
   matched: MatchedReceiptLine[];
   needsYou: UnmatchedReceiptLine[];
 } {
+  // Same key variants as Freshop sync (`ourKeys` / `norm`) — UPC-A check-digit
+  // tolerance for len>=8; short PLUs stay exact. Prefer an active row on collide.
   const byUpc = new Map<string, CatalogRow>();
   for (const c of catalog) {
-    const k = upcKey(c.upc);
-    if (k && !byUpc.has(k)) byUpc.set(k, c);
+    for (const k of ourKeys(c.upc || '')) {
+      const existing = byUpc.get(k);
+      if (!existing) {
+        byUpc.set(k, c);
+      } else if (c.is_active && existing.is_active === false) {
+        byUpc.set(k, c);
+      }
+    }
   }
 
   const matched: MatchedReceiptLine[] = [];
   const needsYou: UnmatchedReceiptLine[] = [];
 
   for (const line of lines) {
-    const k = upcKey(line.plu);
-    const hit = k ? byUpc.get(k) : undefined;
+    const keys = ourKeys(line.plu);
+    let hit: CatalogRow | undefined;
+    for (const k of keys) {
+      hit = byUpc.get(k);
+      if (hit) break;
+    }
     if (hit) {
       matched.push({
         plu: line.plu,
@@ -182,7 +198,7 @@ export function matchReceiptToCatalog(lines: ReceiptRawLine[], catalog: CatalogR
         description: line.description,
         qty: line.qty,
         unitPrice: line.unitPrice,
-        reason: k ? 'no_plu_match' : 'blank_plu',
+        reason: keys.length ? 'no_plu_match' : 'blank_plu',
       });
     }
   }
@@ -190,6 +206,33 @@ export function matchReceiptToCatalog(lines: ReceiptRawLine[], catalog: CatalogR
 }
 
 /** Pull a few header fields when present on the tape. */
+
+const MONTHS: Record<string, string> = {
+  JAN: 'Jan', FEB: 'Feb', MAR: 'Mar', APR: 'Apr', MAY: 'May', JUN: 'Jun',
+  JUL: 'Jul', AUG: 'Aug', SEP: 'Sep', OCT: 'Oct', NOV: 'Nov', DEC: 'Dec',
+};
+
+/** Turn tape dates like 11SEP2026 into Sep 11, 2026. */
+export function formatReceiptDate(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  const m = s.match(/^(\d{1,2})([A-Za-z]{3})(\d{4})$/);
+  if (m) {
+    const day = String(parseInt(m[1], 10));
+    const mon = MONTHS[m[2].toUpperCase()] || m[2];
+    return `${mon} ${day}, ${m[3]}`;
+  }
+  const dmy = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/);
+  if (dmy) {
+    const year = dmy[3].length === 2 ? `20${dmy[3]}` : dmy[3];
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const mi = parseInt(dmy[1], 10) - 1;
+    const mon = months[mi] || dmy[1];
+    return `${mon} ${parseInt(dmy[2], 10)}, ${year}`;
+  }
+  return s;
+}
+
 export function parseReceiptMeta(text: string): {
   vesselHint: string | null;
   amount: number | null;
@@ -202,7 +245,7 @@ export function parseReceiptMeta(text: string): {
     const n = parseFloat(amountM[1].replace(/[^\d.]/g, ''));
     if (Number.isFinite(n)) amount = n;
   }
-  const dateM = text.match(/(\d{1,2}SEP\d{4}|\d{1,2}\.\d{1,2}\.\d{2,4})/i);
+  const dateM = text.match(/(\d{1,2}(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\d{4}|\d{1,2}\.\d{1,2}\.\d{2,4})/i);
   // Vessel often appears near SCOTT NOBLE on the charge header — take a nearby ALLCAPS name line
   let vesselHint: string | null = null;
   const vesselM = text.match(/\b(SCOTT NOBLE|W\.?\s*SCOTT NOBLE)\b/i);

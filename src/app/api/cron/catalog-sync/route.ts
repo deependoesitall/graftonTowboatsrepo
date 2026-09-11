@@ -22,7 +22,7 @@ import { applyFormLayout } from '@/lib/form-layout-apply';
 import { findMatchFor } from '@/lib/image-backfill';
 import {
   fetchFreshopPages, fetchFreshopTotal, freshopKeys, ourKeys, computeFields,
-  buildStoreProduct, norm,
+  buildStoreProduct, isSellableStatus, norm,
   FRESHOP_PAGE_SIZE, FRESHOP_STOREFRONT_ROOT,
   type FreshopProduct, type SyncableProduct, type SyncStats,
 } from '@/lib/freshop-sync';
@@ -250,7 +250,7 @@ async function handle(req: NextRequest) {
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase
       .from('products')
-      .select('id, upc, details, image_url, billed_by_weight, location, location_seq, location_manual, manual_fields, price, quantity_step, quantity_label, quantity_size_ratio, freshop_id, popularity')
+      .select('id, upc, details, image_url, billed_by_weight, location, location_seq, location_manual, manual_fields, price, quantity_step, quantity_label, quantity_size_ratio, freshop_id, popularity, is_active, is_available')
       .eq('store_only', false)
       .range(from, from + 999);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -266,18 +266,39 @@ async function handle(req: NextRequest) {
   // Identity of everything already imported — BOTH the Freshop id and the UPC.
   // The freshop_id set is what stops no-barcode produce duplicating each run;
   // the name+size fallback covers the rare item with neither.
+  // store_only identity + reactivation targets (delisted rows Freshop still sells)
   const knownFreshopIds = new Set<string>();
+  const storeByFreshopId = new Map<string, { id: string; is_active: boolean; is_available: boolean; manual_fields: string[] }>();
+  const storeByUpcKey = new Map<string, { id: string; is_active: boolean; is_available: boolean; manual_fields: string[] }>();
   for (let from = 0; ; from += 5000) {
     const { data, error } = await supabase
       .from('products')
-      .select('upc, freshop_id, description, pkg_size, price')
+      .select('id, upc, freshop_id, description, pkg_size, price, is_active, is_available, manual_fields')
       .eq('store_only', true)
       .range(from, from + 4999);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    const rowsIn = (data || []) as Array<{ upc: string | null; freshop_id: string | null; description: string | null; pkg_size: string | null; price: number | null }>;
+    const rowsIn = (data || []) as Array<{
+      id: string; upc: string | null; freshop_id: string | null;
+      description: string | null; pkg_size: string | null; price: number | null;
+      is_active: boolean | null; is_available: boolean | null;
+      manual_fields: string[] | null;
+    }>;
     for (const r of rowsIn) {
-      for (const k of ourKeys(r.upc || '')) knownUpcKeys.add(k);
-      if (r.freshop_id) knownFreshopIds.add(String(r.freshop_id));
+      const meta = {
+        id: r.id,
+        is_active: r.is_active !== false,
+        is_available: r.is_available !== false,
+        manual_fields: r.manual_fields || [],
+      };
+      for (const k of ourKeys(r.upc || '')) {
+        knownUpcKeys.add(k);
+        const prev = storeByUpcKey.get(k);
+        if (!prev || (!prev.is_active && meta.is_active)) storeByUpcKey.set(k, meta);
+      }
+      if (r.freshop_id) {
+        knownFreshopIds.add(String(r.freshop_id));
+        storeByFreshopId.set(String(r.freshop_id), meta);
+      }
       knownFreshopIds.add(`${productMatchKey(String(r.description || ''), String(r.pkg_size || ''))}|${r.price}`);
     }
     if (!data || data.length < 5000) break;
@@ -386,10 +407,47 @@ async function handle(req: NextRequest) {
         // product on EVERY sync — one row per run. Every Freshop item has an
         // id, so that's the reliable identity.
         const fid = item.id != null ? String(item.id) : '';
-        if (fid && knownFreshopIds.has(fid)) continue;
+        if (fid && knownFreshopIds.has(fid)) {
+          // Already carried — if we delisted it and Freshop still sells it, revive.
+          const existing = storeByFreshopId.get(fid);
+          if (existing && isSellableStatus(item)) {
+            const fields: Record<string, unknown> = {};
+            if (!existing.is_active) fields.is_active = true;
+            if (!existing.is_available && !(existing.manual_fields || []).includes('is_available')) {
+              fields.is_available = true;
+            }
+            if (Object.keys(fields).length) {
+              batchUpdates.push({ id: existing.id, fields });
+              if (fields.is_active) existing.is_active = true;
+              if (fields.is_available) existing.is_available = true;
+            }
+          }
+          continue;
+        }
 
         const upcKey = norm(item.upc || item.barcode_upc_a);
-        if (upcKey && knownUpcKeys.has(upcKey)) continue;    // already carried / inserted
+        if (upcKey && knownUpcKeys.has(upcKey)) {
+          let existing = storeByUpcKey.get(upcKey);
+          if (!existing) {
+            for (const k of ourKeys(item.upc || item.barcode_upc_a || '')) {
+              existing = storeByUpcKey.get(k);
+              if (existing) break;
+            }
+          }
+          if (existing && isSellableStatus(item)) {
+            const fields: Record<string, unknown> = {};
+            if (!existing.is_active) fields.is_active = true;
+            if (!existing.is_available && !(existing.manual_fields || []).includes('is_available')) {
+              fields.is_available = true;
+            }
+            if (Object.keys(fields).length) {
+              batchUpdates.push({ id: existing.id, fields });
+              if (fields.is_active) existing.is_active = true;
+              if (fields.is_available) existing.is_available = true;
+            }
+          }
+          continue;
+        }
 
         const row = buildStoreProduct(item, dept.category);
         if (!row) continue;                                   // alcohol stray / no price / no name

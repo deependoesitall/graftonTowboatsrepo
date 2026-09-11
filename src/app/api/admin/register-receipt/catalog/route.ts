@@ -11,7 +11,7 @@ import { requireAdmin } from '@/lib/admin-auth-server';
 export const dynamic = 'force-dynamic';
 
 /** One literal — supabase-js infers row shape from the select string. */
-const COLUMNS = 'id, upc, description, price';
+const COLUMNS = 'id, upc, description, price, is_active';
 
 const PAGE = 1000;
 
@@ -21,14 +21,15 @@ export async function GET(req: NextRequest) {
   if (session instanceof NextResponse) return session;
 
   const supabase = createServiceClient();
-  const items: { id: string; upc: string; description: string; price: number }[] = [];
+  const items: { id: string; upc: string; description: string; price: number; is_active: boolean }[] = [];
 
   for (let from = 0; from < 50000; from += PAGE) {
     const to = from + PAGE - 1;
+    // Include inactive rows: register tapes often ring UPCs we later delisted
+    // (e.g. Wright's bacon 7962146100 still sells on tape but is_active=false).
     const { data, error } = await supabase
       .from('products')
       .select(COLUMNS)
-      .eq('is_active', true)
       .not('upc', 'is', null)
       .neq('upc', '')
       .order('id', { ascending: true })
@@ -47,6 +48,7 @@ export async function GET(req: NextRequest) {
         upc,
         description: r.description || '',
         price: Number(r.price) || 0,
+        is_active: r.is_active !== false,
       });
     }
     if (rows.length < PAGE) break;
