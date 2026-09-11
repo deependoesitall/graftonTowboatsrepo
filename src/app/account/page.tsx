@@ -46,13 +46,13 @@ function AccountContent() {
   // Profile
   const [profile, setProfile] = useState({ first_name: '', last_name: '', company_name: '', contact_name: '', phone: '' });
   const [savingProfile, setSavingProfile] = useState(false);
-  // Boats this login is a member of (company � boat)
+  // Boats this login is a member of (company · boat)
   const [boatLinks, setBoatLinks] = useState<Array<{ company: string; boat: string; role: string }>>([]);
 
   // Only trigger data loading once we're sure user is logged in
   useEffect(() => {
     if (loading) return;
-    if (!user) return; // just show the sign-in prompt — don't auto-open modal
+    if (!user) return; // just show the sign-in prompt â" don't auto-open modal
     loadOrders();
     loadFavorites();
     loadProfile();
@@ -116,7 +116,7 @@ function AccountContent() {
         phone: data.phone || '',
       });
     } catch {
-      // no profile yet — leave defaults
+      // no profile yet â" leave defaults
     }
   }
 
@@ -140,22 +140,22 @@ function AccountContent() {
   }
 
   /**
-   * REPEAT ORDER — brings back the LINES AND THE HEADER.
+   * REPEAT ORDER â" brings back the LINES AND THE HEADER.
    *
    * It used to copy line items and nothing else, so the one button whose whole
    * promise is "same as last time" still made a returning captain retype the
    * company, vessel, captain, captain's mobile, vessel email, terminal and
    * delivery method. Every one of those is already snapshotted on the order
-   * being repeated — the data was sitting right there, unused.
+   * being repeated â" the data was sitting right there, unused.
    *
    * Three other things it got wrong:
    *
-   *   · paid_by was HARDCODED to 'vessel', so repeating an order silently
+   *   Â· paid_by was HARDCODED to 'vessel', so repeating an order silently
    *     moved every COD line onto the company invoice. A crew member's
    *     personal Tylenol became the boat's, and nothing said so.
-   *   · cod_name went with it, losing even the record of whose item it was.
-   *   · The toast counted order.items — including the service lines it had
-   *     just filtered out — so it reported adding more than it added.
+   *   Â· cod_name went with it, losing even the record of whose item it was.
+   *   Â· The toast counted order.items â" including the service lines it had
+   *     just filtered out â" so it reported adding more than it added.
    */
   async function repeatOrder(order: Order) {
     // Services are deliberately not repeated: a parts pickup or a package
@@ -180,7 +180,7 @@ function AccountContent() {
       const ok = await confirmDialog({
         title: 'Replace your current cart?',
         message: `Repeating ${order.order_number} brings back ${lines.length} item${lines.length !== 1 ? 's' : ''}. `
-          + `Your cart has ${existing.length} right now — ${existing.length === 1 ? 'it' : 'they'} will be removed.`,
+          + `Your cart has ${existing.length} right now â" ${existing.length === 1 ? 'it' : 'they'} will be removed.`,
         danger: true,
       });
       if (!ok) return;
@@ -200,7 +200,7 @@ function AccountContent() {
       cod_name: item.cod_name ?? '',
     })));
 
-    // ── The header ────────────────────────────────────────────────────────
+    // â"â" The header â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"
     //
     // Restored from the order's own snapshot. The API stores vessel_type
     // resolved to a plain string, so a custom type has to be unpacked back into
@@ -230,7 +230,7 @@ function AccountContent() {
       approach_side:   order.approach_side   || '',
       vhf_channel:     order.vhf_channel     || '',
 
-      // ⚠️ EVERYTHING BELOW IS PER-TRIP AND MUST COME BACK BLANK.
+      // â ï¸ EVERYTHING BELOW IS PER-TRIP AND MUST COME BACK BLANK.
       //
       // A stale arrival date is worse than an empty one: an empty field is
       // caught by validation, while a plausible-looking old date gets submitted
@@ -243,10 +243,10 @@ function AccountContent() {
       notes: '', eta: '',
     });
 
-    // ── Who pays, per person ──────────────────────────────────────────────
+    // â"â" Who pays, per person â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"
     //
     // Restored from the same snapshot. A boat's crew settle the same way most
-    // weeks — Amber by Venmo, Andy by card — so asking again, including for the
+    // weeks â" Amber by Venmo, Andy by card â" so asking again, including for the
     // Venmo handle, is exactly the retyping this button is supposed to remove.
     // The form still shows each choice and still validates it; nothing is
     // submitted on their behalf.
@@ -268,8 +268,8 @@ function AccountContent() {
     toast({
       title: `${lines.length} item${lines.length !== 1 ? 's' : ''} added to cart`,
       description: droppedServices > 0
-        ? `From ${order.order_number}. ${droppedServices} service line${droppedServices !== 1 ? 's' : ''} not repeated — add those again if you need them.`
-        : `From ${order.order_number}. Vessel and delivery details are filled in — just set the date and time.`,
+        ? `From ${order.order_number}. ${droppedServices} service line${droppedServices !== 1 ? 's' : ''} not repeated â" add those again if you need them.`
+        : `From ${order.order_number}. Vessel and delivery details are filled in â" just set the date and time.`,
       variant: 'success',
     });
     router.push('/order');
@@ -305,7 +305,7 @@ function AccountContent() {
         <button onClick={() => setAuthOpen(true)} className="btn-primary">Sign In / Create Account</button>
         <p className="mt-4">
           <Link href="/catalog" className="text-brand-orange text-sm font-bold hover:underline">
-            Continue as guest →
+            Continue as guest â'
           </Link>
         </p>
       </div>
@@ -339,7 +339,7 @@ function AccountContent() {
           <div className="mb-4 rounded-xl border border-brand-gold/30 bg-brand-sand/50 px-4 py-3 text-sm">
             {boatLinks.map((b, i) => (
               <div key={i} className="font-semibold text-brand-navy">
-                {b.company || 'Company'} � {b.boat}
+                {b.company || 'Company'} · {b.boat}
                 <span className="ml-2 text-xs font-normal text-brand-green/50 capitalize">{b.role}</span>
               </div>
             ))}
@@ -359,7 +359,7 @@ function AccountContent() {
           ))}
         </div>
 
-        {/* ── PAST ORDERS ── */}
+        {/* â"â" PAST ORDERS â"â" */}
         {tab === 'orders' && (
           ordersLoading ? (
             <div className="flex justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-brand-green" /></div>
@@ -388,15 +388,15 @@ function AccountContent() {
                       </span>
                     </div>
                     <p className="text-sm text-brand-green/70 truncate">
-                      {order.company_name} · {formatDate(order.created_at)}
+                      {order.company_name} Â· {formatDate(order.created_at)}
                     </p>
                     <p className="text-xs text-brand-green/40 mt-0.5">
-                      {order.items?.length || 0} line items · <span className="font-bold text-brand-green">{formatCurrency(order.subtotal)}</span>
+                      {order.items?.length || 0} line items Â· <span className="font-bold text-brand-green">{formatCurrency(order.subtotal)}</span>
                       {(Number(order.discount_total) || 0) > 0 && (
-                        <span className="ml-1.5 text-green-600 font-semibold">🏷 −{formatCurrency(Number(order.discount_total))} coupons</span>
+                        <span className="ml-1.5 text-green-600 font-semibold">ð· â'{formatCurrency(Number(order.discount_total))} coupons</span>
                       )}
                     </p>
-                    {/* Product thumbnails — the little dopamine strip */}
+                    {/* Product thumbnails â" the little dopamine strip */}
                     {(order.items || []).some(i => i.image_url) && (
                       <div className="flex items-center gap-1.5 mt-2">
                         {(order.items || []).filter(i => i.image_url).slice(0, 8).map(i => (
@@ -430,7 +430,7 @@ function AccountContent() {
           )
         )}
 
-        {/* ── FAVORITES ── */}
+        {/* â"â" FAVORITES â"â" */}
         {tab === 'favorites' && (
           favsLoading ? (
             <div className="flex justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-brand-green" /></div>
@@ -441,7 +441,7 @@ function AccountContent() {
               </div>
               <p className="font-bold text-brand-green text-base mb-2">No saved favorites yet</p>
               <p className="text-brand-green/50 text-sm leading-relaxed mb-5 max-w-xs mx-auto">
-                Tap the ★ icon on any item in the catalog to save it here. Your favorites are always one tap away from being added to your next order.
+                Tap the â... icon on any item in the catalog to save it here. Your favorites are always one tap away from being added to your next order.
               </p>
               <Link href="/catalog" className="btn-primary inline-flex items-center gap-2">
                 <Star className="w-4 h-4" /> Browse Catalog
@@ -465,7 +465,7 @@ function AccountContent() {
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold text-brand-green text-sm truncate">{p.description}</p>
                     <p className="text-xs text-brand-green/40">
-                      {p.category}{p.pkg_size ? ` · ${p.pkg_size}` : ''} · <span className="font-bold text-brand-green">{formatCurrency(p.price)}</span>
+                      {p.category}{p.pkg_size ? ` Â· ${p.pkg_size}` : ''} Â· <span className="font-bold text-brand-green">{formatCurrency(p.price)}</span>
                     </p>
                   </div>
                   <button onClick={() => favToCart(p)}
@@ -478,7 +478,7 @@ function AccountContent() {
           )
         )}
 
-        {/* ── PROFILE ── */}
+        {/* â"â" PROFILE â"â" */}
         {tab === 'profile' && (
           <div className="space-y-4">
             <div className="card-base p-6 space-y-4">

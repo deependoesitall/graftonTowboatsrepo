@@ -20,7 +20,7 @@ function ConfirmContent() {
   const { user, loading: authLoading } = useAuth();
   const [authOpen, setAuthOpen] = useState(false);
   // Carried from the prompt so the signup form opens with the address the
-  // confirmation was just sent to already in it — one less field, and it
+  // confirmation was just sent to already in it â" one less field, and it
   // guarantees claim-orders finds this order under the new account.
   const [authEmail, setAuthEmail] = useState('');
   const prevUserRef = useRef<string | null>(null);
@@ -50,7 +50,7 @@ function ConfirmContent() {
     prevUserRef.current = user?.id ?? null;
 
     if (wasLoggedOut && isNowLoggedIn) {
-      // Fire-and-forget — link all orders placed with this email to the new account
+      // Fire-and-forget â" link all orders placed with this email to the new account
       createClient().auth.getSession().then(({ data }) => {
         const token = data.session?.access_token;
         if (!token) return;
@@ -92,7 +92,7 @@ function ConfirmContent() {
             {order && (
               <p className="text-gray-400 text-xs">
                 Estimated Total: <span className="font-bold text-brand-navy">{formatCurrency(order.subtotal)}</span>
-                {' · '}Placed {formatDate(order.created_at)}
+                {' Â· '}Placed {formatDate(order.created_at)}
               </p>
             )}
           </div>
@@ -116,7 +116,7 @@ function ConfirmContent() {
           </div>
 
 
-          {/* Delivery details � guests and signed-in alike */}
+          {/* Delivery details — guests and signed-in alike */}
           {!loading && order && (
             <div className="mb-6">
               <DeliverySummary order={order} variant="customer" />
@@ -162,7 +162,7 @@ function ConfirmContent() {
                 </div>
                 {(Number(order.discount_total) || 0) > 0 && (
                   <div className="flex justify-between items-center mt-0.5 text-sm font-bold text-green-700">
-                    <span>🏷 After estimated coupon savings (−{formatCurrency(Number(order.discount_total))})</span>
+                    <span>ð· After estimated coupon savings (â'{formatCurrency(Number(order.discount_total))})</span>
                     <span>{formatCurrency(Math.max(0, order.subtotal - Number(order.discount_total)))}</span>
                   </div>
                 )}
@@ -235,7 +235,7 @@ function ConfirmContent() {
         </div>
       </main>
       {/* THE ASK, AT THE ONE MOMENT IT IS EARNED.
-          Guests only, once per order, and after the confirmation has landed —
+          Guests only, once per order, and after the confirmation has landed â"
           see the header of SaveOrderPrompt for why each of those is a rule and
           not a preference. */}
       {!authLoading && !user && (

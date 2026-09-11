@@ -612,6 +612,7 @@ export default function NewOrderPage() {
             </div>
           )}
           {mode === 'scan' && (
+            <>
             <PaperFormImport
               catalog={items}
               setLine={setLine}
@@ -634,6 +635,7 @@ export default function NewOrderPage() {
               }))}
             />
           </div>
+            </>
           )}
         </>
       )}
