@@ -1,1 +1,3 @@
-RELOAD_FROM_WORKSPACE_TRACK_B_MSI_PAPER_FORM_SCAN_TS
+// src/lib/paper-form-scan.ts
+// TEMPORARY - loading real content next
+export {};
