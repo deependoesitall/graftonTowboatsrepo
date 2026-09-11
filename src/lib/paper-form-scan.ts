@@ -1,1 +1,1 @@
-PLACEHOLDER_LOAD_FROM_/workspace/paper-form/content-0-src__lib__paper-form-scan.ts
+@/workspace/paper-form/mcp-ready/scan.ts
