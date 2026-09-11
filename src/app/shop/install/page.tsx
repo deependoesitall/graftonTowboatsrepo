@@ -11,7 +11,40 @@
 
 import InstallGuide from '@/components/InstallGuide';
 
-export const metadata = { title: "Install GTS - Sinclair's", robots: 'noindex' };
+// ⚠️ THIS METADATA IS WHAT THE PHONE INSTALLS — AND IT MUST OVERRIDE THE
+// PARENT.
+//
+// src/app/shop/layout.tsx declares the RETIRED shop shell's identity: "GTS
+// Orders", the navy admin icon, /admin.webmanifest. Without the block below
+// this page inherited all of it, so a Sinclair's employee following the
+// Sinclair's-branded instructions ended up with a Home Screen icon called
+// "GTS Orders" wearing Grafton's mark. The page said one thing and the phone
+// did another, and nobody would suspect the layout file.
+//
+// A child segment's `icons`/`manifest`/`appleWebApp` replace the parent's
+// outright, which is exactly what's wanted here — and only here. Every other
+// /shop route keeps the admin identity, because every other /shop route is a
+// redirect into the admin app.
+export const metadata = {
+  title: "Install GTS - Sinclair's",
+  robots: 'noindex',
+  manifest: '/shop.webmanifest',
+  icons: {
+    // Red mark: the one thing that tells two installed apps apart at a glance
+    // in a browser tab.
+    icon: '/branding/favicon-sinclairs.png',
+    shortcut: '/branding/favicon-sinclairs.png',
+    // iOS ignores the manifest's icons for the Home Screen and uses ONLY this.
+    apple: '/branding/shop-icon.png',
+  },
+  appleWebApp: {
+    capable: true,
+    // Exactly what sits under the icon. Must match `appName` on the guide
+    // below, or the page promises one name and the phone shows another.
+    title: "GTS - Sinclair's",
+    statusBarStyle: 'black-translucent' as const,
+  },
+};
 
 export default function ShopInstallPage() {
   return (

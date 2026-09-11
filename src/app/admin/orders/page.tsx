@@ -2,7 +2,7 @@
 // src/app/admin/orders/page.tsx
 import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, Download, Eye, Loader2, RefreshCw, Package, ArrowRight, Trash2, Users, Wrench, Printer } from 'lucide-react';
+import { Search, Download, Eye, Loader2, RefreshCw, Package, ArrowRight, Trash2, Users, Wrench, Printer, Plus } from 'lucide-react';
 import { PickSheetOverlay } from '@/components/admin/PickSheetOverlay';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { formatCurrency, formatDate, ORDER_STATUSES } from '@/lib/utils';
@@ -228,9 +228,21 @@ function OrdersContent() {
             <h1 className="font-display text-2xl font-bold text-brand-navy">Orders</h1>
             <p className="text-gray-400 text-sm">{total.toLocaleString()} total</p>
           </div>
-          <button onClick={fetchOrders} className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5 self-start">
-            <RefreshCw className="w-4 h-4" /> Refresh
-          </button>
+          <div className="flex gap-2 self-start">
+            {/* THE MISSING DOOR.
+                There was no way to create an order from inside admin at all —
+                Jen's only route for a boat that phoned or faxed was to open the
+                customer storefront and shop as if she were them. Paper orders
+                are still most of the volume, so the absence of this button was
+                the single biggest reason data stayed on paper. */}
+            <button onClick={() => router.push('/admin/orders/new')}
+                    className="btn-primary text-sm px-3 py-2 flex items-center gap-1.5">
+              <Plus className="w-4 h-4" /> New order
+            </button>
+            <button onClick={fetchOrders} className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5">
+              <RefreshCw className="w-4 h-4" /> Refresh
+            </button>
+          </div>
         </div>
 
         {/* ⚠️ ORDER ALERTS HAVE TO BE REACHABLE FROM HERE.

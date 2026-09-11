@@ -68,7 +68,20 @@ function shopHostToAdmin(request: NextRequest): NextResponse | null {
     pathname.startsWith('/install/') ||
     pathname.startsWith('/shop/install/')
   ) {
-    url.pathname = '/admin/install';
+    // ⚠️ /shop/install, NOT /admin/install.
+    //
+    // This sent Sinclair's staff to the GTS STAFF install page — navy, "GTS
+    // Orders", the admin icon — which is the wrong app name and the wrong icon
+    // on a shop phone, and reads to Dave's team like they were handed Grafton's
+    // internal tool. The Sinclair's page already exists at /shop/install; the
+    // redirect just wasn't pointed at it.
+    //
+    // Installing from the APEX is now correct and deliberate. The app itself
+    // lives on the apex — shop.* only forwards — so an icon installed from
+    // shop.* would open a host that immediately 307s away, and that redirect is
+    // what threw the installed app out of standalone mode ("signing in kicks me
+    // to Safari"). One origin, two branded install pages.
+    url.pathname = '/shop/install';
   } else {
     // /, /shop, /shop/…, and anything else → Orders (shopping lives here).
     url.pathname = '/admin/orders';

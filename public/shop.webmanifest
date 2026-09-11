@@ -1,23 +1,23 @@
 {
-  "id": "/admin",
-  "name": "GTS Orders",
-  "short_name": "GTS Orders",
-  "description": "Order alerts and shopping for Grafton Towboat / Sinclair's staff — use the full admin, not a separate shop app",
+  "id": "/shop",
+  "name": "GTS - Sinclair's",
+  "short_name": "Sinclair's",
+  "description": "New grocery order alerts and aisle-sorted pick lists for Sinclair's Foods staff.",
   "start_url": "/admin/orders",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#0D1B2A",
-  "theme_color": "#0D1B2A",
+  "background_color": "#0F2419",
+  "theme_color": "#0F2419",
   "orientation": "portrait-primary",
   "icons": [
     {
-      "src": "/branding/admin-icon.png",
+      "src": "/branding/shop-icon.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/branding/admin-icon.png",
+      "src": "/branding/shop-icon.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"

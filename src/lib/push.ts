@@ -11,6 +11,7 @@
 import webpush from 'web-push';
 import { createServiceClient } from '@/lib/supabase/server';
 import { formatCurrency } from '@/lib/utils';
+import { isGtsRole, type AdminRole } from '@/lib/admin-auth-server';
 import type { Order } from '@/types';
 
 /** Soft cap so the $amount stays on-screen when the company name is long. */
@@ -51,6 +52,65 @@ function orderPushSignals(order: Order): string[] {
   return signals;
 }
 
+/**
+ * "Sat Sep 13, 6:00 AM · Van" — when it's due and how it goes out.
+ *
+ * Jen asked for both, twice, and the reason is operational: the alert is what
+ * she decides off. Knowing an order is $80 and ten items tells her nothing
+ * about whether she can run it with the one she already has scheduled; the day
+ * and whether it's the boat or the van is the entire question.
+ *
+ * ⚠️ THE DATE IS FORMATTED BY HAND, NOT THROUGH `new Date(...)`.
+ * `arrival_date` is a bare 'YYYY-MM-DD'. Passing that to the Date constructor
+ * parses it as midnight UTC, and rendering that back in America/Chicago lands
+ * on the PREVIOUS DAY — a Saturday delivery announced as Friday, on the one
+ * message someone schedules their morning around. Splitting the string keeps
+ * the date the customer picked exactly as they picked it.
+ */
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+function deliveryLine(order: Order): string {
+  const o = order as unknown as {
+    arrival_date?: string | null;
+    arrival_time?: string | null;
+    delivery_method?: string | null;
+  };
+  const parts: string[] = [];
+
+  const raw = (o.arrival_date || '').trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  if (m) {
+    const [, y, mo, d] = m;
+    // Date.UTC + getUTCDay: arithmetic only, no local-timezone shift.
+    const weekday = DAYS[new Date(Date.UTC(+y, +mo - 1, +d)).getUTCDay()];
+    parts.push(`${weekday} ${MONTHS[+mo - 1]} ${+d}`);
+  } else if (raw) {
+    // Something we don't recognise — show it rather than silently dropping the
+    // one field she asked for.
+    parts.push(raw);
+  }
+
+  const time = (o.arrival_time || '').trim();
+  if (time) {
+    const t = /^(\d{1,2}):(\d{2})/.exec(time);
+    if (t) {
+      const h = +t[1];
+      const suffix = h >= 12 ? 'PM' : 'AM';
+      const h12 = h % 12 === 0 ? 12 : h % 12;
+      parts.push(`${h12}:${t[2]} ${suffix}`);
+    } else {
+      parts.push(time);
+    }
+  }
+
+  const method = (o.delivery_method || '').trim();
+  const dated = parts.join(', ');
+  if (method === 'boat') return dated ? `${dated} · By boat` : 'By boat';
+  if (method === 'van') return dated ? `${dated} · By van` : 'By van';
+  return dated;
+}
+
 /** Money first, then count, then optional signals; company on a second line. */
 function orderPushBody(order: Order, itemCount: number): string {
   const moneyCount =
@@ -60,10 +120,17 @@ function orderPushBody(order: Order, itemCount: number): string {
     ? `${moneyCount} · ${signals.join(' · ')}`
     : moneyCount;
 
-  if (order.company_name && order.vessel_name) {
-    return `${head}\n${truncateLabel(order.company_name)}`;
+  // Second line: when and how. Company name only if there's room left — the
+  // vessel is already in the title, and the delivery window is what gets acted
+  // on. iOS shows about two lines on the lock screen and silently drops the
+  // rest, so the order of these matters more than it looks.
+  const lines = [head];
+  const when = deliveryLine(order);
+  if (when) lines.push(when);
+  else if (order.company_name && order.vessel_name) {
+    lines.push(truncateLabel(order.company_name));
   }
-  return head;
+  return lines.join('\n');
 }
 
 /**
@@ -124,16 +191,42 @@ export async function sendOrderPush(
 
   const supabase = createServiceClient();
 
-  // Build the audience filter. If neither flag is set there's nobody to tell.
-  const wants: boolean[] = [];
-  if (audience.gts) wants.push(false);       // is_sinclair = false → GTS staff
-  if (audience.sinclair) wants.push(true);   // is_sinclair = true  → Sinclair's
-  if (!wants.length) return { sent: 0, failed: 0, skipped: 'empty audience' };
+  if (!audience.gts && !audience.sinclair) {
+    return { sent: 0, failed: 0, skipped: 'empty audience' };
+  }
 
+  /**
+   * ⚠️ ROUTE BY THE PERSON'S ROLE, NOT BY THE ROW'S is_sinclair FLAG.
+   *
+   * THE BUG THIS FIXES — "notifications work sometimes":
+   *
+   * A push endpoint belongs to a BROWSER ON AN ORIGIN, not to an app. Now that
+   * the Sinclair's app and the GTS app are both served from the apex, a phone
+   * with both installed has ONE service worker registration and therefore ONE
+   * endpoint. This table upserts on endpoint, so whichever app most recently
+   * enabled notifications overwrote is_sinclair for the whole device.
+   *
+   * The old filter then selected rows by that single flag. A phone stamped
+   * is_sinclair = true was excluded from `wants = [false]` — the audience for
+   * an order with nothing to shop — so crew-change and service-only orders
+   * silently never arrived. It was never random: the same order content always
+   * behaved the same way. Placing a mix of orders in testing is exactly what
+   * makes that look like a coin flip.
+   *
+   * It also hit the owner hardest. isSinclairScoped() is true for any account
+   * carrying the 'sinclair' permission — Jen's does — so her own device gets
+   * stamped is_sinclair = true and she stops being told about the GTS-only work
+   * she is the one who schedules.
+   *
+   * Roles don't move when someone installs a second app, so routing on the
+   * stored role is stable no matter how many icons are on the phone. This
+   * DELIBERATELY differs from isSinclairScoped(), which answers a different
+   * question — "which orders may this person SEE" — and correctly treats Jen
+   * as Sinclair-scoped for the grocery view while she remains GTS for alerts.
+   */
   const { data: subs, error } = await supabase
     .from('push_subscriptions')
-    .select('id, endpoint, p256dh, auth, is_sinclair')
-    .in('is_sinclair', wants)
+    .select('id, endpoint, p256dh, auth, is_sinclair, role')
     .is('expired_at', null);
 
   if (error || !subs?.length) {
@@ -196,11 +289,32 @@ export async function sendOrderPush(
   const dead: string[] = [];
   let sent = 0, failed = 0;
 
-  await Promise.all(subs.map(async s => {
+  /**
+   * Which side of the house is this device? `role` is stamped on the row at
+   * subscribe time from the signed session, so it survives the shared-endpoint
+   * problem above. A row written before `role` existed falls back to the old
+   * flag rather than being dropped — an existing device must not go quiet
+   * because we changed how routing works.
+   */
+  function isGtsDevice(row: { role?: string | null; is_sinclair?: boolean }): boolean {
+    if (row.role) return isGtsRole(row.role as AdminRole);
+    return !row.is_sinclair;
+  }
+
+  const recipients = subs.filter(s =>
+    isGtsDevice(s) ? !!audience.gts : !!audience.sinclair,
+  );
+  if (!recipients.length) return { sent: 0, failed: 0, skipped: 'no subscribers in audience' };
+
+  await Promise.all(recipients.map(async s => {
     try {
       await webpush.sendNotification(
         { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
-        payloadFor(s.is_sinclair),
+        // One notification per device, addressed to whoever holds it: GTS gets
+        // "New order", Sinclair's gets "Order to shop" and lands in Shopping
+        // Mode. A phone with both apps gets ONE alert, which is right — it is
+        // one phone and one person.
+        payloadFor(!isGtsDevice(s)),
         { TTL: 60 * 60 }, // An hour. A "new order" alert delivered tomorrow is noise.
       );
       sent++;
@@ -225,7 +339,7 @@ export async function sendOrderPush(
     await supabase
       .from('push_subscriptions')
       .update({ last_sent_at: new Date().toISOString() })
-      .in('id', subs.filter(s => !dead.includes(s.id)).map(s => s.id));
+      .in('id', recipients.filter(s => !dead.includes(s.id)).map(s => s.id));
   }
 
   return { sent, failed };
