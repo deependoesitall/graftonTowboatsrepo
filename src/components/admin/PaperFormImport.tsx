@@ -15,10 +15,17 @@ import {
   type ScanCandidate,
   type WriteInCandidate,
   type ScanProgress,
+  type AnyCandidate,
   fileToCanvas,
   renderPdfToCanvases,
   scanPaperPages,
+  needsHumanDecision,
 } from '@/lib/paper-form-scan';
+import {
+  PaperFormUnknowns,
+  type Resolution,
+  type UnknownRow,
+} from '@/components/admin/PaperFormUnknowns';
 
 const layoutItems = (layoutJson as { items: FormLayoutItem[] }).items;
 
@@ -29,17 +36,34 @@ export interface ApplyLine {
   cod_name?: string;
 }
 
+/**
+ * A line with no catalogue row behind it — a write-in for something Sinclair's
+ * stocks but never printed on the form. It reaches the order through the SAME
+ * builder draft and the same POST /api/orders as everything else; the only
+ * difference on the wire is an empty product_id, which that route already
+ * treats as "no catalogue row" for its service lines.
+ */
+export interface CustomLine {
+  description: string;
+  qty: number;
+  price: number;
+  paid_by?: 'vessel' | 'cod';
+  cod_name?: string;
+}
+
 export interface PaperFormImportProps {
   catalog: CatalogItem[];
   setLine: (productId: string, qty: number) => void;
   /** Optional COD-aware apply (preferred). */
   applyLines?: (lines: ApplyLine[]) => void;
   appendNotes?: (note: string) => void;
+  /** Off-catalogue lines resolved from unreadable marks. */
+  addCustomLines?: (lines: CustomLine[]) => void;
   onApplied?: (count: number) => void;
 }
 
-type FormReview = ScanCandidate & { qtyInput: string; include: boolean; noteInput: string };
-type WriteReview = WriteInCandidate & { qtyInput: string; include: boolean; noteInput: string };
+type FormReview = ScanCandidate & { qtyInput: string; include: boolean; noteInput: string; resolution: Resolution };
+type WriteReview = WriteInCandidate & { qtyInput: string; include: boolean; noteInput: string; resolution: Resolution };
 
 function flagTone(confidence: string, flags: string[]) {
   if (confidence === 'needs_review' || flags.length) return 'border-amber-200 bg-amber-50/40';
@@ -47,7 +71,7 @@ function flagTone(confidence: string, flags: string[]) {
   return 'border-gray-100 bg-white';
 }
 
-export function PaperFormImport({ catalog, setLine, applyLines, appendNotes, onApplied }: PaperFormImportProps) {
+export function PaperFormImport({ catalog, setLine, applyLines, appendNotes, addCustomLines, onApplied }: PaperFormImportProps) {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<ScanProgress | null>(null);
   const [error, setError] = useState('');
@@ -61,11 +85,43 @@ export function PaperFormImport({ catalog, setLine, applyLines, appendNotes, onA
     setFormRows(null); setWriteRows(null); setError(''); setProgress(null); setSummaryFlags([]);
   };
 
-  const needsHuman = useMemo(() => {
-    const f = (formRows || []).filter(r => r.confidence === 'needs_review' || !r.match || r.flags.length).length;
-    const w = (writeRows || []).filter(r => r.confidence === 'needs_review' || !r.match || r.flags.length).length;
-    return f + w;
-  }, [formRows, writeRows]);
+  /**
+   * ⚠️ ONE TEST, NOT THREE. This used to re-derive "needs a look" inline, which
+   * is how a row ends up counted as uncertain in the header and rendered as
+   * confirmed in the list. needsHumanDecision() in paper-form-scan.ts is now the
+   * only place that decides, and the panel below reads the same function.
+   */
+  const flaggedForm = useMemo(
+    () => (formRows || []).map((r, idx) => ({ r, idx })).filter(x => needsHumanDecision(x.r as AnyCandidate)),
+    [formRows],
+  );
+  const flaggedWrite = useMemo(
+    () => (writeRows || []).map((r, idx) => ({ r, idx })).filter(x => needsHumanDecision(x.r as AnyCandidate)),
+    [writeRows],
+  );
+
+  /** Flagged rows leave the main list entirely — they live in the panel. */
+  const flaggedFormIdx = useMemo(() => new Set(flaggedForm.map(x => x.idx)), [flaggedForm]);
+  const flaggedWriteIdx = useMemo(() => new Set(flaggedWrite.map(x => x.idx)), [flaggedWrite]);
+
+  const unknownRows: UnknownRow[] = useMemo(() => [
+    ...flaggedForm.map(x => ({ key: `f${x.idx}`, candidate: x.r as AnyCandidate, resolution: x.r.resolution })),
+    ...flaggedWrite.map(x => ({ key: `w${x.idx}`, candidate: x.r as AnyCandidate, resolution: x.r.resolution })),
+  ], [flaggedForm, flaggedWrite]);
+
+  const needsHuman = useMemo(
+    () => unknownRows.filter(u => u.resolution.kind === 'pending').length,
+    [unknownRows],
+  );
+
+  const resolve = useCallback((key: string, res: Resolution) => {
+    const idx = Number(key.slice(1));
+    if (key.startsWith('f')) {
+      setFormRows(prev => prev ? prev.map((x, i) => i === idx ? { ...x, resolution: res } : x) : prev);
+    } else {
+      setWriteRows(prev => prev ? prev.map((x, i) => i === idx ? { ...x, resolution: res } : x) : prev);
+    }
+  }, []);
 
   const processFiles = useCallback(async (list: FileList | File[] | null) => {
     if (!list || !list.length) return;
@@ -111,12 +167,14 @@ export function PaperFormImport({ catalog, setLine, applyLines, appendNotes, onA
         include: !!c.match && c.suggestedQty != null,
         qtyInput: c.suggestedQty != null ? String(c.suggestedQty) : '',
         noteInput: c.markNote || '',
+        resolution: { kind: 'pending' } as Resolution,
       })));
       setWriteRows(result.writeIns.map(w => ({
         ...w,
         include: !!w.match && w.suggestedQty != null,
         qtyInput: w.suggestedQty != null ? String(w.suggestedQty) : '',
         noteInput: w.isCod ? (w.codName ? `COD ${w.codName}` : 'COD') : '',
+        resolution: { kind: 'pending' } as Resolution,
       })));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not read that scan.');
@@ -129,9 +187,41 @@ export function PaperFormImport({ catalog, setLine, applyLines, appendNotes, onA
   function commit() {
     if (!formRows && !writeRows) return;
     const lines: ApplyLine[] = [];
+    const customs: CustomLine[] = [];
     const notes: string[] = [];
 
-    for (const r of formRows || []) {
+    /**
+     * RESOLVED MARKS FIRST, AND THEY OWN THEIR ROW.
+     *
+     * A row that someone answered in the panel must not ALSO go through the
+     * ordinary include/qty path below, or a mark resolved as "2 × chicken
+     * thighs" would be added twice — once from the answer and once from the
+     * half-read OCR guess that made it uncertain in the first place. Every
+     * flagged row is skipped further down; this is the only thing that speaks
+     * for it.
+     */
+    const answered = (row: { resolution: Resolution }, label: string): boolean => {
+      const res = row.resolution;
+      if (res.kind === 'pending') return false;
+      if (res.kind === 'skip') return true;
+      if (res.kind === 'catalog') {
+        if (res.qty > 0) lines.push({ productId: res.product.id, qty: res.qty });
+        return true;
+      }
+      if (res.kind === 'custom') {
+        if (res.qty > 0) customs.push({ description: res.description, qty: res.qty, price: res.price });
+        return true;
+      }
+      notes.push(label ? `${label}: ${res.text}` : res.text);
+      return true;
+    };
+
+    for (const [idx, r] of (formRows || []).entries()) {
+      if (flaggedFormIdx.has(idx)) {
+        // Unresolved flagged rows are deliberately dropped, not guessed at.
+        answered(r, r.match?.description || r.layout?.description || '');
+        continue;
+      }
       if (!r.include || !r.match) {
         if (!r.include && r.match && r.noteInput.trim()) {
           notes.push(`${r.match.description}: ${r.noteInput.trim()}`);
@@ -147,7 +237,12 @@ export function PaperFormImport({ catalog, setLine, applyLines, appendNotes, onA
       if (r.noteInput.trim()) notes.push(`${r.match.description}: ${r.noteInput.trim()}`);
     }
 
-    for (const w of writeRows || []) {
+    for (const [idx, w] of (writeRows || []).entries()) {
+      if (flaggedWriteIdx.has(idx)) {
+        if (w.isCod && w.codName) notes.push(`COD contact: ${w.codName}`);
+        answered(w, w.description || 'Write-in');
+        continue;
+      }
       if (w.isCod && w.codName) notes.push(`COD contact: ${w.codName}`);
       else if (w.isCod) notes.push('COD noted on paper write-in area.');
 
@@ -172,16 +267,26 @@ export function PaperFormImport({ catalog, setLine, applyLines, appendNotes, onA
     if (applyLines) applyLines(lines);
     else for (const l of lines) setLine(l.productId, l.qty);
 
+    if (customs.length) {
+      if (addCustomLines) addCustomLines(customs);
+      else {
+        // No custom-line channel on this host — never lose the information.
+        // It becomes a note rather than vanishing between two screens.
+        notes.push(...customs.map(c => `Off-catalogue: ${c.qty} × ${c.description}`));
+      }
+    }
+
     if (notes.length && appendNotes) appendNotes(notes.join('\n'));
-    onApplied?.(lines.length);
+    onApplied?.(lines.length + customs.length);
     reset();
   }
 
   const included = useMemo(() => {
-    const a = (formRows || []).filter(r => r.include && r.match && Number(r.qtyInput) > 0).length;
-    const b = (writeRows || []).filter(r => r.include && r.match && Number(r.qtyInput) > 0).length;
-    return a + b;
-  }, [formRows, writeRows]);
+    const a = (formRows || []).filter((r, i) => !flaggedFormIdx.has(i) && r.include && r.match && Number(r.qtyInput) > 0).length;
+    const b = (writeRows || []).filter((r, i) => !flaggedWriteIdx.has(i) && r.include && r.match && Number(r.qtyInput) > 0).length;
+    const c = unknownRows.filter(u => u.resolution.kind === 'catalog' || u.resolution.kind === 'custom').length;
+    return a + b + c;
+  }, [formRows, writeRows, flaggedFormIdx, flaggedWriteIdx, unknownRows]);
 
   const reviewing = formRows || writeRows;
 
@@ -280,11 +385,19 @@ export function PaperFormImport({ catalog, setLine, applyLines, appendNotes, onA
             </button>
           </div>
 
+          {/* THE FLAGGED MARKS, ABOVE EVERYTHING, WITH THEIR OWN TREATMENT.
+              Not a warmer border on a row in a list of ninety — its own panel,
+              because a list is skimmed and skimming is what puts the wrong food
+              on a boat. */}
+          {unknownRows.length > 0 && (
+            <PaperFormUnknowns rows={unknownRows} catalog={catalog} onResolve={resolve} />
+          )}
+
           {formRows && formRows.length > 0 && (
             <section className="space-y-2">
               <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500">Form rows</h3>
               <div className="divide-y divide-gray-100 border border-gray-100 rounded-xl overflow-hidden">
-                {formRows.map((r, idx) => (
+                {formRows.map((r, idx) => flaggedFormIdx.has(idx) ? null : (
                   <div key={`f-${r.layoutSeq}-${idx}`} className={`p-3 flex gap-3 border-l-4 ${flagTone(r.confidence, r.flags)} ${r.include ? '' : 'opacity-60'}`}
                     style={{ borderLeftColor: r.confidence === 'needs_review' || !r.match ? '#f59e0b' : r.confidence === 'high' ? '#16a34a' : '#fbbf24' }}>
                     <input
@@ -354,7 +467,7 @@ export function PaperFormImport({ catalog, setLine, applyLines, appendNotes, onA
             <section className="space-y-2">
               <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500">Write-ins &amp; COD (last page)</h3>
               <div className="divide-y divide-gray-100 border border-gray-100 rounded-xl overflow-hidden">
-                {writeRows.map((w, idx) => (
+                {writeRows.map((w, idx) => flaggedWriteIdx.has(idx) ? null : (
                   <div key={`w-${idx}`} className={`p-3 flex gap-3 border-l-4 ${flagTone(w.confidence, w.flags)}`}
                     style={{ borderLeftColor: w.isCod ? '#7c3aed' : (w.confidence === 'needs_review' || !w.match ? '#f59e0b' : '#16a34a') }}>
                     <input

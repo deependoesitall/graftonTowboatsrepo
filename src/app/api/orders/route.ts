@@ -342,7 +342,17 @@ export async function POST(req: NextRequest) {
       items.forEach(item => {
         allOrderItems.push({
           order_id: order.id,
-          product_id: item.product_id,
+          // ⚠️ EMPTY → NULL, NOT EMPTY STRING.
+          //
+          // order_items.product_id is a uuid with a foreign key to products.
+          // A write-in resolved from a scanned paper form has no catalogue row
+          // behind it and sends an empty id; passing that straight through
+          // fails as `invalid input syntax for type uuid` and takes the whole
+          // order down with it. Service lines below already store null here for
+          // exactly the same reason — this puts off-catalogue grocery lines on
+          // the same footing instead of inventing an id that would bill the
+          // wrong product.
+          product_id: item.product_id || null,
           description: item.description,
           category: item.category,
           pkg_size: item.pkg_size || null,

@@ -47,7 +47,7 @@ import {
 } from 'lucide-react';
 import { adminFetch, fetchAdminSession } from '@/lib/admin-auth';
 import { formatCurrency } from '@/lib/utils';
-import { PaperFormImport } from '@/components/admin/PaperFormImport';
+import { PaperFormImport, type CustomLine } from '@/components/admin/PaperFormImport';
 
 /* ───────────────────────── types ───────────────────────── */
 
@@ -134,6 +134,16 @@ export default function NewOrderPage() {
   const [qty, setQty] = useState<Record<string, number>>({});
   /** Per-line pay attribution from Scan (COD write-ins). Default vessel. */
   const [linePay, setLinePay] = useState<Record<string, { paid_by: 'vessel' | 'cod'; cod_name: string }>>({});
+  /**
+   * OFF-CATALOGUE LINES, RESOLVED FROM THE SCAN.
+   *
+   * A write-in for something Sinclair's stocks but never printed on the form
+   * has no product row to hang a quantity on, so it cannot live in `qty`. It is
+   * still an ordinary grocery line on the order and goes out on the same
+   * submit — see the note by `product_id` in the payload below for why an empty
+   * id is the right wire format rather than an invented one.
+   */
+  const [customLines, setCustomLines] = useState<CustomLine[]>([]);
 
   const [mode, setMode] = useState<Mode>('sheet');
   const [filter, setFilter] = useState('');
@@ -194,8 +204,9 @@ export default function NewOrderPage() {
   );
 
   const total = useMemo(
-    () => chosen.reduce((s, i) => s + i.price * (qty[i.id] || 0), 0),
-    [chosen, qty],
+    () => chosen.reduce((s, i) => s + i.price * (qty[i.id] || 0), 0)
+        + customLines.reduce((s, c) => s + (c.price || 0) * c.qty, 0),
+    [chosen, qty, customLines],
   );
 
   const visible = useMemo(() => {
@@ -351,7 +362,7 @@ export default function NewOrderPage() {
       setStep('who');
       return;
     }
-    if (!chosen.length) {
+    if (!chosen.length && !customLines.length) {
       setSubmitError('Nothing has been added to this order yet.');
       setStep('what');
       return;
@@ -401,7 +412,7 @@ export default function NewOrderPage() {
           crew_change: 'no',
           notes: notesWithCod,
         },
-        items: chosen.map(i => {
+        items: [...chosen.map(i => {
           const pay = linePay[i.id];
           return {
             product_id: i.id,
@@ -415,7 +426,26 @@ export default function NewOrderPage() {
             paid_by: (pay?.paid_by === 'cod' ? 'cod' : 'vessel') as 'vessel' | 'cod',
             cod_name: pay?.paid_by === 'cod' ? (pay.cod_name || '') : '',
           };
-        }),
+        }), ...customLines.map(c => ({
+          // ⚠️ EMPTY product_id, DELIBERATELY.
+          //
+          // order_items.product_id is a uuid with a foreign key to products, so
+          // there is no id we could invent for something that is not in the
+          // catalogue — a made-up one fails the constraint and a real one would
+          // bill the wrong item. The order route already stores null here for
+          // its service lines; an empty string takes that same path and the
+          // description, price and quantity below carry the line.
+          product_id: '',
+          description: c.description,
+          category: 'Write-in',
+          pkg_size: null,
+          uom: null,
+          price: c.price || 0,
+          quantity: c.qty,
+          image_url: null,
+          paid_by: (c.paid_by === 'cod' ? 'cod' : 'vessel') as 'vessel' | 'cod',
+          cod_name: c.paid_by === 'cod' ? (c.cod_name || '') : '',
+        }))],
         // Paper forms rarely name Venmo/Cash App. Cash is the honest default
         // so attribution is not lost; staff can edit the order after place.
         cod_payments: (() => {
@@ -530,6 +560,7 @@ export default function NewOrderPage() {
               catalog={items}
               setLine={setLine}
               applyLines={applyLines}
+              addCustomLines={(lines) => setCustomLines(prev => [...prev, ...lines])}
               appendNotes={(note) => setHeader(h => ({
                 ...h,
                 notes: h.notes.trim() ? `${h.notes.trim()}\n${note}` : note,
@@ -541,6 +572,8 @@ export default function NewOrderPage() {
 
       {step === 'check' && (
         <ReviewStep
+          customLines={customLines}
+          removeCustomLine={(i) => setCustomLines(prev => prev.filter((_, k) => k !== i))}
           header={header} chosen={chosen} qty={qty}
           setLine={setLine} total={total}
           error={submitError} submitting={submitting}
@@ -1102,7 +1135,10 @@ function PasteMode({ items, byUpc, setLine }: {
 
 /* ── review ── */
 
-function ReviewStep({ header, chosen, qty, setLine, total, error, submitting, onSubmit, onBack }: {
+function ReviewStep({ header, chosen, qty, setLine, total, error, submitting, onSubmit, onBack,
+                     customLines, removeCustomLine }: {
+  customLines: CustomLine[];
+  removeCustomLine: (index: number) => void;
   header: HeaderState;
   chosen: SheetItem[];
   qty: Record<string, number>;
@@ -1134,11 +1170,11 @@ function ReviewStep({ header, chosen, qty, setLine, total, error, submitting, on
       <section className="card-base overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
           <h2 className="font-bold text-brand-navy text-sm">
-            {chosen.length} line{chosen.length === 1 ? '' : 's'}
+            {chosen.length + customLines.length} line{chosen.length + customLines.length === 1 ? '' : 's'}
           </h2>
           <span className="text-sm font-bold text-brand-navy tabular-nums">{formatCurrency(total)}</span>
         </div>
-        {chosen.length === 0 && (
+        {chosen.length === 0 && customLines.length === 0 && (
           <p className="p-6 text-sm text-gray-500 text-center">Nothing added yet.</p>
         )}
         {chosen.map(it => (
@@ -1153,6 +1189,31 @@ function ReviewStep({ header, chosen, qty, setLine, total, error, submitting, on
               {formatCurrency(it.price * qty[it.id])}
             </span>
             <button onClick={() => setLine(it.id, 0)} aria-label={`Remove ${it.description}`}
+                    className="text-gray-300 hover:text-red-500 shrink-0">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        ))}
+        {/* Off-catalogue lines are labelled, not blended in: a shopper walking
+            the aisles needs to know this one has no shelf tag to scan and no
+            price until the till. */}
+        {customLines.map((c, i) => (
+          <div key={`c${i}`} className="px-4 py-2.5 border-b border-gray-50 flex items-center gap-3 bg-amber-50/50">
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm text-gray-900 truncate">
+                {c.description}
+                <span className="ml-2 text-[10px] font-bold uppercase tracking-wider text-amber-700 bg-amber-100 rounded px-1.5 py-0.5">
+                  Write-in
+                </span>
+              </span>
+              <span className="block text-xs text-gray-400">
+                {c.qty} × {c.price ? formatCurrency(c.price) : 'price at the register'}
+              </span>
+            </span>
+            <span className="text-sm tabular-nums text-gray-700 shrink-0">
+              {c.price ? formatCurrency(c.price * c.qty) : '—'}
+            </span>
+            <button onClick={() => removeCustomLine(i)} aria-label={`Remove ${c.description}`}
                     className="text-gray-300 hover:text-red-500 shrink-0">
               <X className="w-4 h-4" />
             </button>
@@ -1175,7 +1236,7 @@ function ReviewStep({ header, chosen, qty, setLine, total, error, submitting, on
 
       <div className="flex flex-col sm:flex-row gap-2">
         <button onClick={onBack} className="btn-outline px-5 py-2.5">Back to the items</button>
-        <button onClick={onSubmit} disabled={submitting || chosen.length === 0}
+        <button onClick={onSubmit} disabled={submitting || (chosen.length === 0 && customLines.length === 0)}
                 className="btn-primary px-5 py-2.5 flex items-center justify-center gap-2 disabled:opacity-50">
           {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
           Place this order

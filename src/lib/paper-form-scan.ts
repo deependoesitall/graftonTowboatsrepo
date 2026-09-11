@@ -25,6 +25,9 @@ export interface CatalogItem {
 export type MatchHow = 'upc' | 'desc+pkg' | 'desc' | 'form_seq' | 'unmatched';
 export type Confidence = 'high' | 'medium' | 'low' | 'needs_review';
 
+/** A rectangle on the ORIENTED page, in that page's own pixels. */
+export interface CropRegion { x0: number; y0: number; x1: number; y1: number }
+
 export interface ScanCandidate {
   kind: 'form_row';
   layoutSeq: number;
@@ -42,6 +45,21 @@ export interface ScanCandidate {
   markNote: string | null;
   ocrText: string | null;
   orientationApplied: 0 | 90 | 180 | 270;
+  /**
+   * THE WHOLE ROW, NOT JUST THE MARK.
+   *
+   * `cropDataUrl` above is the QNTY cell alone — right for confirming a digit,
+   * useless for answering "what IS this". Someone looking at a mark reading
+   * "Cs" needs the printed description sitting next to it on the same line, and
+   * enough of the rows above and below to find the place on the paper in their
+   * hand. This is that: full page width, the row plus a row of context either
+   * side, with the QNTY cell outlined so the eye lands on it immediately.
+   */
+  contextCropDataUrl: string;
+  /** Where `contextCropDataUrl` was taken from, for anyone who needs the page. */
+  contextRegion: CropRegion;
+  /** The QNTY cell itself, in the same page coordinates. */
+  markRegion: CropRegion;
 }
 
 export interface WriteInCandidate {
@@ -58,6 +76,9 @@ export interface WriteInCandidate {
   codName: string | null;
   isCod: boolean;
   cropDataUrl: string | null;
+  /** Same idea as the form-row context crop: the write-in block, drawn large. */
+  contextCropDataUrl: string | null;
+  contextRegion: CropRegion | null;
 }
 
 export type AnyCandidate = ScanCandidate | WriteInCandidate;
@@ -363,17 +384,132 @@ function cropDataUrl(canvas: HTMLCanvasElement, r: { x0: number; y0: number; x1:
   return c.toDataURL('image/jpeg', 0.85);
 }
 
+/**
+ * A wide crop with the region of interest outlined.
+ *
+ * ⚠️ THE OUTLINE IS DRAWN ON A COPY, NEVER ON THE PAGE CANVAS. The oriented
+ * page canvases are reused for every row on that page and for ink measurement;
+ * stroking a rectangle onto one would leave that rectangle in every later crop
+ * and, worse, in the ink readings taken after it.
+ */
+function contextCrop(
+  canvas: HTMLCanvasElement,
+  region: CropRegion,
+  highlight: CropRegion | null,
+  maxWidth = 1400,
+): string {
+  const rx0 = Math.max(0, Math.floor(region.x0));
+  const ry0 = Math.max(0, Math.floor(region.y0));
+  const rx1 = Math.min(canvas.width, Math.ceil(region.x1));
+  const ry1 = Math.min(canvas.height, Math.ceil(region.y1));
+  const w = Math.max(1, rx1 - rx0);
+  const h = Math.max(1, ry1 - ry0);
+
+  // Upscale small crops as well as downscale large ones: a row band off a
+  // phone photo can be 40px tall, and a 40px-tall image of someone's
+  // handwriting is not something you can read a decision off.
+  const scale = Math.min(3, Math.max(1, maxWidth / w));
+  const c = document.createElement('canvas');
+  c.width = Math.round(w * scale);
+  c.height = Math.round(h * scale);
+  const ctx = c.getContext('2d')!;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(canvas, rx0, ry0, w, h, 0, 0, c.width, c.height);
+
+  if (highlight) {
+    const hx = (highlight.x0 - rx0) * scale;
+    const hy = (highlight.y0 - ry0) * scale;
+    const hw = (highlight.x1 - highlight.x0) * scale;
+    const hh = (highlight.y1 - highlight.y0) * scale;
+    // Amber, matching the "needs you" tone used throughout admin, and drawn
+    // twice so it survives on both a white form and a grey photocopy.
+    ctx.lineWidth = Math.max(2, Math.round(3 * scale));
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.strokeRect(hx - 2, hy - 2, hw + 4, hh + 4);
+    ctx.strokeStyle = '#D97706';
+    ctx.strokeRect(hx, hy, hw, hh);
+  }
+  return c.toDataURL('image/jpeg', 0.86);
+}
+
+/** The row band, widened to the whole form and padded by a row either side. */
+function rowContextRegion(canvas: HTMLCanvasElement, band: RowBand): CropRegion {
+  const pad = Math.max(8, Math.round((band.y1 - band.y0) * 1.1));
+  return {
+    x0: Math.floor(canvas.width * 0.03),
+    y0: band.y0 - pad,
+    x1: Math.ceil(canvas.width * 0.99),
+    y1: band.y1 + pad,
+  };
+}
+
 export function detectInkedRowsOnPage(canvas: HTMLCanvasElement, inkThreshold = 0.045) {
   const bands = findRowBands(canvas);
-  const marked: Array<{ rowIndex: number; ink: number; cropDataUrl: string }> = [];
+  const marked: Array<{
+    rowIndex: number; ink: number; cropDataUrl: string;
+    contextCropDataUrl: string; contextRegion: CropRegion; markRegion: CropRegion;
+  }> = [];
   for (let i = 0; i < bands.length; i++) {
     const rect = qntyRect(canvas, bands[i]);
     const ink = measureInk(canvas, rect);
     if (ink >= inkThreshold) {
-      marked.push({ rowIndex: i, ink, cropDataUrl: cropDataUrl(canvas, rect) });
+      const region = rowContextRegion(canvas, bands[i]);
+      marked.push({
+        rowIndex: i,
+        ink,
+        cropDataUrl: cropDataUrl(canvas, rect),
+        contextCropDataUrl: contextCrop(canvas, region, rect),
+        contextRegion: region,
+        markRegion: rect,
+      });
     }
   }
   return { bands, marked };
+}
+
+/**
+ * Does a person have to look at this before it can be used?
+ *
+ * ONE DEFINITION, USED EVERYWHERE. The review list, the "needs you" panel and
+ * the counts on screen all call this, so a row can never be quietly confirmed
+ * in one place and flagged in another — which is the failure that makes people
+ * stop trusting a review screen and just hit Apply.
+ *
+ * Deliberately generous. The cost of flagging a row that turned out fine is two
+ * seconds of someone's attention. The cost of not flagging one is a boat
+ * getting the wrong food, found out at the dock.
+ */
+export function needsHumanDecision(c: AnyCandidate): boolean {
+  if (c.confidence === 'needs_review' || c.confidence === 'low') return true;
+  if (!c.match) return true;
+  if (c.suggestedQty == null) return true;
+  if (c.kind === 'form_row') {
+    // A mark that read as words rather than a number — "Cream", "Cs",
+    // "Vegetarian". It means something to the cook and we must not guess.
+    if (c.markNote && c.suggestedQty == null) return true;
+    if (c.disagreement) return true;
+  } else if (c.isCod) {
+    // Who pays is never inferred from handwriting.
+    return true;
+  }
+  return c.flags.length > 0;
+}
+
+/** Why it was flagged, in one line, for someone who has not read the code. */
+export function decisionReason(c: AnyCandidate): string {
+  if (!c.match) {
+    return c.kind === 'write_in'
+      ? 'Not found in the catalogue — say what it is, or keep it as a note.'
+      : 'No catalogue row matched this line of the form.';
+  }
+  if (c.kind === 'form_row' && c.markNote && c.suggestedQty == null) {
+    return `The mark reads “${c.markNote}”, which is not a quantity.`;
+  }
+  if (c.suggestedQty == null) return 'No quantity could be read from the mark.';
+  if (c.kind === 'form_row' && c.disagreement) return c.disagreement;
+  if (c.kind === 'write_in' && c.isCod) return 'Marked COD — confirm who is paying.';
+  if (c.confidence === 'low') return 'Low-confidence match — check it against the crop.';
+  return c.flags[0] || 'Needs a look.';
 }
 
 export function interpretMark(text: string | null): { qty: number | null; note: string | null } {
@@ -461,6 +597,9 @@ async function extractWriteIns(
   const h = canvas.height;
   const region = { x0: Math.floor(w * 0.06), y0: Math.floor(h * 0.82), x1: Math.floor(w * 0.94), y1: Math.floor(h * 0.97) };
   const crop = cropDataUrl(canvas, region);
+  // The same block again, drawn large. OCR reads the small one; a person
+  // deciding what "Vegetarian" means needs to see the handwriting.
+  const contextCrop_ = contextCrop(canvas, region, null);
   const text = await ocrImage(crop);
   if (!text) return [];
 
@@ -481,6 +620,8 @@ async function extractWriteIns(
       codName,
       isCod,
       cropDataUrl: crop,
+      contextCropDataUrl: contextCrop_,
+      contextRegion: region,
     }];
   }
 
@@ -502,6 +643,8 @@ async function extractWriteIns(
       codName: l.codName,
       isCod: l.isCod,
       cropDataUrl: crop,
+      contextCropDataUrl: contextCrop_,
+      contextRegion: region,
     };
   });
 }
@@ -574,6 +717,9 @@ export async function scanPaperPages(opts: {
         markNote: note,
         ocrText,
         orientationApplied: pageOrientations[p],
+        contextCropDataUrl: hit.contextCropDataUrl,
+        contextRegion: hit.contextRegion,
+        markRegion: hit.markRegion,
       });
     }
   }

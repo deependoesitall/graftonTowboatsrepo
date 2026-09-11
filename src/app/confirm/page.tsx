@@ -12,11 +12,16 @@ import { ContactPhones } from '@/components/layout/ContactPhones';
 import { EstimatedInfo } from '@/components/ui/EstimatedInfo';
 import { useAuth } from '@/lib/auth-context';
 import { AuthModal } from '@/components/auth/AuthModal';
+import { SaveOrderPrompt } from '@/components/auth/SaveOrderPrompt';
 import { createClient } from '@/lib/supabase/client';
 
 function ConfirmContent() {
   const { user, loading: authLoading } = useAuth();
   const [authOpen, setAuthOpen] = useState(false);
+  // Carried from the prompt so the signup form opens with the address the
+  // confirmation was just sent to already in it — one less field, and it
+  // guarantees claim-orders finds this order under the new account.
+  const [authEmail, setAuthEmail] = useState('');
   const prevUserRef = useRef<string | null>(null);
   const searchParams = useSearchParams();
   const orderId = searchParams.get('order');
@@ -188,13 +193,17 @@ function ConfirmContent() {
                 </div>
                 <div className="flex-1">
                   <p className="font-bold text-brand-green text-sm mb-1">
-                    Order on the river often?
+                    Ordering again next trip?
                   </p>
                   <p className="text-brand-green/60 text-xs leading-relaxed mb-3">
-                    Create a free account to save favorites with one tap, see your past orders, and reorder everything in one click next time.
+                    An account keeps this order, fills your boat&rsquo;s details in for you, and turns
+                    the whole thing into one tap next time.
                   </p>
                   <div className="flex items-center gap-2">
-                    <button onClick={() => setAuthOpen(true)}
+                    <button onClick={() => {
+                      setAuthEmail((order?.vessel_email || order?.email || '').trim());
+                      setAuthOpen(true);
+                    }}
                       className="bg-brand-orange text-white text-xs font-bold uppercase tracking-wide px-4 py-2 rounded-full hover:bg-brand-ored transition-colors">
                       Create Free Account
                     </button>
@@ -216,7 +225,19 @@ function ConfirmContent() {
           </div>
         </div>
       </main>
+      {/* THE ASK, AT THE ONE MOMENT IT IS EARNED.
+          Guests only, once per order, and after the confirmation has landed —
+          see the header of SaveOrderPrompt for why each of those is a rule and
+          not a preference. */}
+      {!authLoading && !user && (
+        <SaveOrderPrompt
+          order={order}
+          orderNumber={orderNumber}
+          onCreateAccount={(email) => { setAuthEmail(email); setAuthOpen(true); }}
+        />
+      )}
       <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} defaultMode="signup"
+        defaultEmail={authEmail}
         title="Create Free Account" />
     </div>
   );
