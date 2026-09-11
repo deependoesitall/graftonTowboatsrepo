@@ -56,6 +56,16 @@ export interface ScanCandidate {
    * side, with the QNTY cell outlined so the eye lands on it immediately.
    */
   contextCropDataUrl: string;
+  /**
+   * Was handwriting reading actually run on this row?
+   *
+   * Without this the flagging cannot tell "the machine tried and failed" from
+   * "the machine was never asked" — and those need opposite treatment. The
+   * first is a genuine unknown; the second is every row on the form, which is
+   * not a flag, it is the normal way to work when the operator has turned
+   * reading off and intends to type the quantities themselves.
+   */
+  ocrAttempted: boolean;
   /** Where `contextCropDataUrl` was taken from, for anyone who needs the page. */
   contextRegion: CropRegion;
   /** The QNTY cell itself, in the same page coordinates. */
@@ -245,15 +255,57 @@ function orientationScore(canvas: HTMLCanvasElement): number {
 }
 
 /** Pick 0/90/180/270 that maximizes horizontal rule evidence. */
+/**
+ * Which edge column is the printed Category column?
+ *
+ * ⚠️ THIS IS THE ONLY THING THAT CAN TELL 0° FROM 180°.
+ *
+ * orientationScore() counts horizontal rule lines, and a page turned upside
+ * down has exactly the same horizontal rules as one the right way up. The two
+ * scores are identical, the loop keeps the first, and 180° could never be
+ * detected — which is not a corner case: a real twenty-page scan of the Scott
+ * Noble order came through with sixteen of its pages upside down.
+ *
+ * The form itself gives us an asymmetry. The far-left column is the Category
+ * ("Produce", "Meat") printed on every single row, and the far-right of the
+ * table is the quantity column, which is blank except for a few pencil marks.
+ * Dense on the left and sparse on the right means upright; the reverse means
+ * the page is flipped. On that real scan the two classes separated by a factor
+ * of ten — 0.089 vs 0.027 — so this is a wide, safe margin rather than a
+ * hair-splitting threshold.
+ */
+function edgeInkAsymmetry(canvas: HTMLCanvasElement): number {
+  const { width: w, height: h } = canvas;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+  const band = (x0f: number, x1f: number) => {
+    const x0 = Math.floor(w * x0f), x1 = Math.floor(w * x1f);
+    const y0 = Math.floor(h * 0.12), y1 = Math.floor(h * 0.92);
+    const { data } = ctx.getImageData(x0, y0, Math.max(1, x1 - x0), Math.max(1, y1 - y0));
+    let dark = 0, n = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      n++;
+      if ((data[i] + data[i + 1] + data[i + 2]) / 3 < 140) dark++;
+    }
+    return dark / Math.max(1, n);
+  };
+  return band(0.03, 0.14) - band(0.86, 0.97);
+}
+
 export function autoOrientCanvas(canvas: HTMLCanvasElement): { canvas: HTMLCanvasElement; rotation: 0 | 90 | 180 | 270 } {
-  const options: Array<0 | 90 | 180 | 270> = [0, 90, 180, 270];
-  let best: 0 | 90 | 180 | 270 = 0;
-  let bestScore = -1;
-  for (const deg of options) {
-    const c = rotateCanvas(canvas, deg);
-    const s = orientationScore(c);
-    if (s > bestScore) { bestScore = s; best = deg; }
-  }
+  // Step 1 — which AXIS. Rule density separates portrait from landscape and is
+  // the thing orientationScore() is actually good at.
+  const upright = orientationScore(canvas);
+  const turned = orientationScore(rotateCanvas(canvas, 90));
+  const axis: Array<0 | 90 | 180 | 270> = turned > upright ? [90, 270] : [0, 180];
+
+  // Step 2 — which WAY UP within that axis. Rule density cannot answer this;
+  // the Category column can.
+  const first = rotateCanvas(canvas, axis[0]);
+  const asym = edgeInkAsymmetry(first);
+
+  // A near-zero reading means neither edge is clearly denser — a blank or badly
+  // cropped page. Leave it alone rather than flipping on noise.
+  const best: 0 | 90 | 180 | 270 = asym < -0.012 ? axis[1] : axis[0];
   return { canvas: rotateCanvas(canvas, best), rotation: best };
 }
 
@@ -356,9 +408,86 @@ function findRowBands(canvas: HTMLCanvasElement): RowBand[] {
   return bands;
 }
 
+/**
+ * ⚠️ THE QUANTITY COLUMN IS AT 0.64–0.69, NOT 0.86–0.97.
+ *
+ * This read 0.86–0.97 of the page width, which on a real Sinclair form is the
+ * blank right-hand MARGIN — outside the table altogether. Measured on the Scott
+ * Noble scan the table runs 0.08 → 0.87, and the columns fall:
+ *
+ *   Category .08–.18 · UPC .18–.23 · Description .23–.54
+ *   Pack .54–.64 · QNTY .64–.69 · UOM .70–.75 · Price .76–.82
+ *
+ * Reading the margin meant measuring ink on blank paper: with the pages the
+ * right way up the detector found 2 marks in a 20-page order carrying about 30.
+ * Upside down, the same window landed on the Category column — a printed word
+ * on every row — and it reported 640.
+ */
+const QNTY_COL = { lo: 0.640, hi: 0.690 };
+
 function qntyRect(canvas: HTMLCanvasElement, band: RowBand) {
   const w = canvas.width;
-  return { x0: Math.floor(w * 0.86), y0: band.y0, x1: Math.floor(w * 0.97), y1: band.y1 };
+  return {
+    x0: Math.floor(w * QNTY_COL.lo), y0: band.y0,
+    x1: Math.floor(w * QNTY_COL.hi), y1: band.y1,
+  };
+}
+
+/**
+ * Where the pencil actually is, found without trusting the row grid.
+ *
+ * Row banding fails on about a third of real pages — faint ruled lines send it
+ * to an evenly spaced fallback grid that straddles two printed rows and catches
+ * the column rules at the cell edges. Asking "how much ink is in this row's
+ * quantity cell" on top of that grid mostly measures the grid's own error.
+ *
+ * A mark is found directly instead: the quantity column is taken as one tall
+ * strip, inset past its vertical rules, and scanned for runs of rows carrying
+ * ink. Each run is one mark. The row grid is then used only to say WHICH item
+ * the mark belongs to, which is the thing it is reliable for.
+ */
+function findMarkRuns(canvas: HTMLCanvasElement): Array<{ y0: number; y1: number; ink: number }> {
+  const w = canvas.width, h = canvas.height;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+  const inset = Math.max(4, Math.round(w * 0.004));
+  const x0 = Math.floor(w * QNTY_COL.lo) + inset;
+  const x1 = Math.floor(w * QNTY_COL.hi) - inset;
+  // Skip the letterhead: on page one the vessel block sits across this same
+  // column range and is not a quantity.
+  const yTop = Math.floor(h * 0.13);
+  const yBot = Math.floor(h * 0.93);
+  const cw = Math.max(1, x1 - x0);
+  const { data } = ctx.getImageData(x0, yTop, cw, Math.max(1, yBot - yTop));
+
+  const rowInk: number[] = [];
+  for (let y = 0; y < yBot - yTop; y++) {
+    let dark = 0;
+    for (let x = 0; x < cw; x++) {
+      const i = ((y * cw) + x) * 4;
+      if ((data[i] + data[i + 1] + data[i + 2]) / 3 < 140) dark++;
+    }
+    rowInk.push(dark / cw);
+  }
+
+  const runs: Array<{ y0: number; y1: number; ink: number }> = [];
+  const ON = 0.12;
+  const MIN_H = Math.max(6, Math.round(h * 0.005));
+  let start: number | null = null;
+  for (let y = 0; y <= rowInk.length; y++) {
+    const on = y < rowInk.length && rowInk[y] > ON;
+    if (on && start === null) start = y;
+    if (!on && start !== null) {
+      if (y - start >= MIN_H) {
+        const slice = rowInk.slice(start, y);
+        runs.push({
+          y0: start + yTop, y1: y + yTop,
+          ink: slice.reduce((a, b) => a + b, 0) / slice.length,
+        });
+      }
+      start = null;
+    }
+  }
+  return runs;
 }
 
 function measureInk(canvas: HTMLCanvasElement, r: { x0: number; y0: number; x1: number; y1: number }): number {
@@ -445,25 +574,42 @@ function rowContextRegion(canvas: HTMLCanvasElement, band: RowBand): CropRegion 
 
 export function detectInkedRowsOnPage(canvas: HTMLCanvasElement, inkThreshold = 0.045) {
   const bands = findRowBands(canvas);
+  void inkThreshold; // kept for callers; runs carry their own ink measure now
   const marked: Array<{
     rowIndex: number; ink: number; cropDataUrl: string;
     contextCropDataUrl: string; contextRegion: CropRegion; markRegion: CropRegion;
   }> = [];
-  for (let i = 0; i < bands.length; i++) {
-    const rect = qntyRect(canvas, bands[i]);
-    const ink = measureInk(canvas, rect);
-    if (ink >= inkThreshold) {
-      const region = rowContextRegion(canvas, bands[i]);
-      marked.push({
-        rowIndex: i,
-        ink,
-        cropDataUrl: cropDataUrl(canvas, rect),
-        contextCropDataUrl: contextCrop(canvas, region, rect),
-        contextRegion: region,
-        markRegion: rect,
-      });
+  // One entry per PENCIL MARK, matched to the row it sits on — not one per row
+  // that happened to measure dark.
+  const used = new Set<number>();
+  for (const run of findMarkRuns(canvas)) {
+    const mid = (run.y0 + run.y1) / 2;
+    let best = -1, bestDist = Infinity;
+    for (let i = 0; i < bands.length; i++) {
+      const c = (bands[i].y0 + bands[i].y1) / 2;
+      const d = Math.abs(c - mid);
+      if (d < bestDist) { bestDist = d; best = i; }
     }
+    if (best < 0) continue;
+    // A mark further than a row's height from every row centre is not on a row
+    // — a margin scribble, a staple shadow, the footer.
+    const band = bands[best];
+    if (bestDist > (band.y1 - band.y0) * 1.2) continue;
+    if (used.has(best)) continue;
+    used.add(best);
+
+    const rect = qntyRect(canvas, band);
+    const region = rowContextRegion(canvas, band);
+    marked.push({
+      rowIndex: best,
+      ink: run.ink,
+      cropDataUrl: cropDataUrl(canvas, rect),
+      contextCropDataUrl: contextCrop(canvas, region, rect),
+      contextRegion: region,
+      markRegion: rect,
+    });
   }
+  marked.sort((a, b) => a.rowIndex - b.rowIndex);
   return { bands, marked };
 }
 
@@ -482,7 +628,13 @@ export function detectInkedRowsOnPage(canvas: HTMLCanvasElement, inkThreshold = 
 export function needsHumanDecision(c: AnyCandidate): boolean {
   if (c.confidence === 'needs_review' || c.confidence === 'low') return true;
   if (!c.match) return true;
-  if (c.suggestedQty == null) return true;
+  // A missing quantity is an unknown only when something tried to read it.
+  // With reading switched off the operator is typing every quantity by hand in
+  // the list below, and flagging all of them says nothing.
+  if (c.suggestedQty == null) {
+    if (c.kind === 'write_in') return true;
+    if (c.ocrAttempted) return true;
+  }
   if (c.kind === 'form_row') {
     // A mark that read as words rather than a number — "Cream", "Cs",
     // "Vegetarian". It means something to the cook and we must not guess.
@@ -505,7 +657,11 @@ export function decisionReason(c: AnyCandidate): string {
   if (c.kind === 'form_row' && c.markNote && c.suggestedQty == null) {
     return `The mark reads “${c.markNote}”, which is not a quantity.`;
   }
-  if (c.suggestedQty == null) return 'No quantity could be read from the mark.';
+  if (c.suggestedQty == null) {
+    return c.kind === 'form_row' && !c.ocrAttempted
+      ? 'Marked on the form — type the quantity from the crop.'
+      : 'No quantity could be read from the mark.';
+  }
   if (c.kind === 'form_row' && c.disagreement) return c.disagreement;
   if (c.kind === 'write_in' && c.isCod) return 'Marked COD — confirm who is paying.';
   if (c.confidence === 'low') return 'Low-confidence match — check it against the crop.';
@@ -595,7 +751,20 @@ async function extractWriteIns(
   // Bottom ~18% of page — WRITE IN ITEMS block on Sinclair forms.
   const w = canvas.width;
   const h = canvas.height;
-  const region = { x0: Math.floor(w * 0.06), y0: Math.floor(h * 0.82), x1: Math.floor(w * 0.94), y1: Math.floor(h * 0.97) };
+  // ⚠️ THE BLOCK IS NOT IN THE BOTTOM 18% OF THE PAGE.
+  //
+  // This looked at y 0.82–0.97 and found the empty tail of the numbered list
+  // and the "Page 20 of 5076" footer. On the Scott Noble order the written
+  // lines — "large Marshmallows 4 bags", "Hickory Smoker Pellets 2 bags",
+  // "Pilbury frozen Biscuit 4 Case", "Breaded Chik Tenders 1 Case",
+  // "yellow Cornmeal 1 bag" — sit at y 0.60–0.74, above everything it read.
+  //
+  // Widened rather than re-pinned: how far down the block starts depends on
+  // where the catalogue happened to end on that page, so a generous window that
+  // certainly contains it beats a tight one that is right for one scan. It also
+  // reaches left to the numbered column and right past the quantity words,
+  // which are in their own column and are half the meaning of the line.
+  const region = { x0: Math.floor(w * 0.05), y0: Math.floor(h * 0.45), x1: Math.floor(w * 0.88), y1: Math.floor(h * 0.95) };
   const crop = cropDataUrl(canvas, region);
   // The same block again, drawn large. OCR reads the small one; a person
   // deciding what "Vegetarian" means needs to see the handwriting.
@@ -697,8 +866,21 @@ export async function scanPaperPages(opts: {
       const { qty, note } = interpretMark(ocrText);
       const rowFlags = [...flags];
       if (qty == null && note) rowFlags.push(`Handwriting looks like a note (“${note}”), not a number.`);
-      if (qty == null && !note) rowFlags.push('Could not read a quantity — type it from the crop.');
-      if (pageOrientations[p] !== 0) rowFlags.push(`Page auto-rotated ${pageOrientations[p]}°.`);
+      // ⚠️ ONLY WHEN WE ACTUALLY TRIED. Pushed unconditionally, this fired on
+      // every row of every scan with handwriting reading switched off, which
+      // flagged the whole order as uncertain and buried the handful of marks
+      // that genuinely were.
+      if (qty == null && !note && runOcr) {
+        rowFlags.push('Could not read a quantity — type it from the crop.');
+      }
+      // ⚠️ ROTATION IS A PAGE FACT, NOT A ROW FACT.
+      //
+      // This used to be pushed onto every row, and since a row with any flag at
+      // all counts as needing a human, one upside-down page turned all forty of
+      // its rows into "needs you". A scan of twenty pages off a phone is
+      // routinely rotated; the panel that exists to isolate four uncertain
+      // marks would have contained the entire order. It belongs in the summary,
+      // once, where it was already useful.
 
       candidates.push({
         kind: 'form_row',
@@ -710,13 +892,16 @@ export async function scanPaperPages(opts: {
         ink: hit.ink,
         match,
         matchHow: how,
-        confidence: qty == null ? 'needs_review' : confidence,
+        // Same reasoning as the flag above: no quantity is only a red flag if
+        // something tried to read one.
+        confidence: (qty == null && runOcr) ? 'needs_review' : confidence,
         flags: rowFlags,
         disagreement,
         suggestedQty: qty,
         markNote: note,
         ocrText,
         orientationApplied: pageOrientations[p],
+        ocrAttempted: runOcr,
         contextCropDataUrl: hit.contextCropDataUrl,
         contextRegion: hit.contextRegion,
         markRegion: hit.markRegion,
@@ -732,6 +917,15 @@ export async function scanPaperPages(opts: {
     onProgress?.({ phase: 'writeins', page: pi + 1, pages: oriented.length, message: `Reading write-ins on page ${pi + 1}…` });
     const found = await extractWriteIns(oriented[pi], pi, catalog, indexes.byUpc);
     writeIns.push(...found);
+  }
+  const rotated = pageOrientations
+    .map((r, i) => ({ r, page: i + 1 }))
+    .filter(x => x.r !== 0);
+  if (rotated.length) {
+    summaryFlags.push(
+      `Straightened ${rotated.length} page${rotated.length === 1 ? '' : 's'} ` +
+      `(${rotated.map(x => `p${x.page} ${x.r}°`).join(', ')}).`,
+    );
   }
   if (writeIns.length) summaryFlags.push(`Found ${writeIns.length} write-in line${writeIns.length === 1 ? '' : 's'} on the last page(s).`);
   if (candidates.some(c => c.confidence === 'needs_review' || !c.match)) {

@@ -99,9 +99,11 @@ export function PaperFormUnknowns({ rows, catalog, onResolve }: {
           role="dialog" aria-modal="true" aria-label="Scan close-up"
           className="fixed inset-0 z-50 bg-brand-navy/80 flex items-center justify-center p-4"
           onClick={() => setZoom(null)}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={zoom} alt="Close-up of the scanned form"
-               className="max-w-full max-h-full rounded-lg shadow-2xl" />
+          <div className="max-w-full max-h-full overflow-auto rounded-lg shadow-2xl"
+               onClick={e => e.stopPropagation()}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={zoom} alt="Close-up of the scanned form" className="max-w-none" />
+          </div>
           <button onClick={() => setZoom(null)} aria-label="Close"
                   className="absolute top-4 right-4 w-9 h-9 rounded-full bg-white/10 text-white flex items-center justify-center">
             <X className="w-4 h-4" />
@@ -124,7 +126,7 @@ function UnknownItem({ row, catalog, onResolve, onZoom }: {
   const [open, setOpen] = useState<'catalog' | 'custom' | 'note' | null>(null);
 
   const pageNo = c.pageIndex + 1;
-  const crop = c.contextCropDataUrl || (c.kind === 'form_row' ? c.cropDataUrl : c.cropDataUrl);
+  const crop = c.contextCropDataUrl || c.cropDataUrl;
   const printed = c.kind === 'form_row'
     ? (c.layout?.description || c.match?.description || 'Row on the form')
     : (c.description || c.rawText || 'Write-in');
@@ -159,18 +161,33 @@ function UnknownItem({ row, catalog, onResolve, onZoom }: {
       {/* WHERE IT IS ON THE PAPER. Big enough to read at arm's length, and
           clickable for anyone who wants it bigger still. */}
       {crop && (
-        <button
-          type="button"
-          onClick={() => onZoom(crop)}
-          className="mt-3 block w-full group relative rounded-lg overflow-hidden border border-amber-200 bg-white">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={crop} alt={`Page ${pageNo} of the scan, around this mark`}
-               className="w-full h-auto max-h-56 object-contain bg-white" />
-          <span className="absolute bottom-1.5 right-1.5 inline-flex items-center gap-1 text-[11px]
-                           bg-brand-navy/75 text-white rounded px-1.5 py-0.5 opacity-80 group-hover:opacity-100">
+        <div className="mt-3 relative rounded-lg border border-amber-200 bg-white">
+          {/*
+            ⚠️ SCROLL IT, DON'T SHRINK IT.
+
+            A row crop is the full width of the form and about one row tall —
+            roughly 1400 × 140. Fitted to the width of this card it renders
+            about sixty pixels high on a desktop and thirty on a phone, which is
+            smaller than the handwriting was on the paper. The entire point of
+            this crop is that someone can read a pencil mark off it, so the
+            height is fixed at something legible and the width is allowed to run
+            off the side and scroll, exactly the way your eye tracks along a
+            line of the real form.
+          */}
+          <div className="overflow-x-auto overscroll-x-contain">
+            <button type="button" onClick={() => onZoom(crop)} className="block group">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={crop} alt={`Page ${pageNo} of the scan, around this mark`}
+                   className="h-28 sm:h-36 w-auto max-w-none bg-white" />
+            </button>
+          </div>
+          <button
+            type="button" onClick={() => onZoom(crop)}
+            className="absolute bottom-1.5 right-1.5 inline-flex items-center gap-1 text-[11px]
+                       bg-brand-navy/80 text-white rounded px-1.5 py-0.5 hover:bg-brand-navy">
             <ZoomIn className="w-3 h-3" /> Bigger
-          </span>
-        </button>
+          </button>
+        </div>
       )}
 
       {settled ? (

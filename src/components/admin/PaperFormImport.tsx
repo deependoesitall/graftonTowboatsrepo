@@ -4,9 +4,9 @@
 // Calm upload → auto-orient → review. Uncertainty is always visible.
 // Human confirms every quantity. Write-ins / COD from the last page are shown.
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Camera, FileUp, Loader2, Check, X, AlertTriangle, Trash2, RotateCcw,
+  Camera, FileUp, Loader2, Check, X, AlertTriangle, Trash2, RotateCcw, ClipboardPaste,
 } from 'lucide-react';
 import layoutJson from '@/data/order-form-layout.json';
 import type { FormLayoutItem } from '@/lib/form-layout-apply';
@@ -184,6 +184,92 @@ export function PaperFormImport({ catalog, setLine, applyLines, appendNotes, add
     }
   }, [catalog, runOcr]);
 
+  /**
+   * PASTE A PDF OR A PHOTO.
+   *
+   * On an iPhone the scan usually arrives as an attachment in Mail or a file in
+   * Files, and the shortest route from there is Copy → Paste. Making people
+   * save it to Files first, then find it again through a file picker, is three
+   * extra steps at the exact moment someone is standing in an office trying to
+   * get an order in.
+   *
+   * ⚠️ TWO PATHS, BECAUSE ONE IS NOT ENOUGH ON iOS.
+   *
+   *   1. The `paste` EVENT carries `clipboardData.files` and is what fires on a
+   *      desktop and on iOS when the paste lands in an editable element. That
+   *      is why the drop zone below is focusable and contentEditable — on iOS
+   *      the Paste item in the callout menu only appears over something that
+   *      accepts input, so without it there is nothing to paste INTO.
+   *
+   *   2. The Paste BUTTON reads the clipboard directly. Safari requires the
+   *      read to happen inside a user gesture, which a button click is; this is
+   *      the path for someone who taps the button rather than long-pressing.
+   *
+   * Either way the files go through the same processFiles() as the picker and
+   * the drop zone — there is no second import path to keep in step.
+   */
+  const pasteZoneRef = useRef<HTMLDivElement>(null);
+  const [pasteHint, setPasteHint] = useState('');
+
+  const acceptPasted = useCallback((files: File[]) => {
+    const usable = files.filter(f =>
+      f.type === 'application/pdf' || /\.pdf$/i.test(f.name) || f.type.startsWith('image/'));
+    if (!usable.length) {
+      // Naming what WAS on the clipboard beats "nothing found" — usually it is
+      // a link to the file rather than the file itself.
+      setPasteHint(files.length
+        ? 'That clipboard item is not a PDF or an image. Copy the file itself, not a link to it.'
+        : 'Nothing on the clipboard yet. Copy the PDF or the photo first.');
+      return;
+    }
+    setPasteHint('');
+    processFiles(usable);
+  }, [processFiles]);
+
+  useEffect(() => {
+    if (busy || formRows || writeRows) return;
+    const onPaste = (e: ClipboardEvent) => {
+      const dt = e.clipboardData;
+      if (!dt) return;
+      const files = Array.from(dt.files || []);
+      if (!files.length) return;
+      // Only swallow the event when we actually took something, so pasting
+      // text into a field on this page still behaves normally.
+      e.preventDefault();
+      acceptPasted(files);
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [busy, formRows, writeRows, acceptPasted]);
+
+  const pasteFromClipboard = useCallback(async () => {
+    setPasteHint('');
+    try {
+      const nav = navigator as Navigator & { clipboard?: { read?: () => Promise<ClipboardItem[]> } };
+      if (!nav.clipboard?.read) {
+        setPasteHint('This browser can’t read the clipboard directly — tap the box above and use Paste.');
+        return;
+      }
+      const items = await nav.clipboard.read();
+      const files: File[] = [];
+      for (const item of items) {
+        for (const type of item.types) {
+          if (type === 'application/pdf' || type.startsWith('image/')) {
+            const blob = await item.getType(type);
+            const ext = type === 'application/pdf' ? 'pdf' : (type.split('/')[1] || 'png');
+            files.push(new File([blob], `pasted-${Date.now()}.${ext}`, { type }));
+            break;
+          }
+        }
+      }
+      acceptPasted(files);
+    } catch {
+      // A denied permission and an empty clipboard look the same from here, so
+      // the message covers both rather than guessing wrong.
+      setPasteHint('Couldn’t read the clipboard. Tap the box above, then choose Paste.');
+    }
+  }, [acceptPasted]);
+
   function commit() {
     if (!formRows && !writeRows) return;
     const lines: ApplyLine[] = [];
@@ -319,7 +405,9 @@ export function PaperFormImport({ catalog, setLine, applyLines, appendNotes, add
               <FileUp className="w-5 h-5" />
               <Camera className="w-5 h-5" />
             </div>
-            <span className="text-sm font-semibold text-brand-navy">Drop PDF or photos here</span>
+            <span className="text-sm font-semibold text-brand-navy">
+              Drop, paste or choose a PDF or photos
+            </span>
             <span className="text-xs text-gray-400">Upside-down pages are fine — about 20 pages is fine</span>
             <input
               type="file"
@@ -330,6 +418,42 @@ export function PaperFormImport({ catalog, setLine, applyLines, appendNotes, add
               onChange={e => processFiles(e.target.files)}
             />
           </label>
+
+          {/* THE PASTE TARGET.
+              contentEditable and focusable on purpose: iOS only offers Paste in
+              the long-press callout over something that accepts input, so
+              without a target there is literally nowhere on the page to paste a
+              copied PDF. suppressContentEditableWarning because React is right
+              that editable nodes it doesn't own are usually a mistake — here it
+              is the whole point, and nothing is ever read out of it. */}
+          <div className="flex flex-col sm:flex-row gap-2">
+            <div
+              ref={pasteZoneRef}
+              contentEditable
+              suppressContentEditableWarning
+              role="textbox"
+              tabIndex={0}
+              aria-label="Paste a copied PDF or photo here"
+              spellCheck={false}
+              onInput={e => { (e.currentTarget as HTMLDivElement).textContent = ''; }}
+              className="flex-1 min-h-[44px] rounded-lg border border-dashed border-gray-300 bg-white
+                         px-3 py-2.5 text-xs text-gray-400 outline-none focus:border-brand-green
+                         focus:ring-1 focus:ring-brand-green/30 cursor-text"
+            >
+              Copied it on your phone? Tap here, then Paste.
+            </div>
+            <button
+              type="button"
+              onClick={pasteFromClipboard}
+              disabled={busy}
+              className="btn-outline text-xs px-3 py-2 flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50">
+              <ClipboardPaste className="w-3.5 h-3.5" /> Paste from clipboard
+            </button>
+          </div>
+
+          {pasteHint && (
+            <p className="text-xs text-amber-700 leading-relaxed">{pasteHint}</p>
+          )}
 
           <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer select-none">
             <input
