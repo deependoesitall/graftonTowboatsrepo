@@ -1,6 +1,6 @@
 'use client';
 // src/app/admin/customers/onboard/page.tsx
-// Company → boat → crew logins. Typed passwords only.
+// Company → boat → crew logins. Pick boats from the deliveries ledger when they already exist.
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Loader2, Plus, Ship, UserPlus, CheckCircle2 } from 'lucide-react';
@@ -17,6 +17,15 @@ interface Member {
   id: string; email: string | null; display_name: string | null;
   role: string; user_id: string;
 }
+interface LedgerBoat {
+  name_key: string;
+  name: string;
+  delivery_count: number;
+  vessel_id: string | null;
+  already_linked: boolean;
+}
+
+const TYPE_NEW = '__type_new__';
 
 export default function OnboardBoatPage() {
   const router = useRouter();
@@ -24,6 +33,9 @@ export default function OnboardBoatPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companyId, setCompanyId] = useState('');
   const [newCompanyName, setNewCompanyName] = useState('');
+  const [ledgerBoats, setLedgerBoats] = useState<LedgerBoat[]>([]);
+  const [ledgerLoading, setLedgerLoading] = useState(false);
+  const [ledgerPick, setLedgerPick] = useState(''); // name_key or TYPE_NEW or ''
   const [vesselName, setVesselName] = useState('');
   const [vessel, setVessel] = useState<Vessel | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
@@ -54,7 +66,50 @@ export default function OnboardBoatPage() {
     if (res.ok) setCompanies(json.companies || []);
   }, []);
 
+  const loadLedgerBoats = useCallback(async (cid: string) => {
+    if (!cid) {
+      setLedgerBoats([]);
+      return;
+    }
+    setLedgerLoading(true);
+    try {
+      const res = await adminFetch(`/api/admin/vessels/ledger?company_id=${encodeURIComponent(cid)}`);
+      const json = await res.json();
+      if (res.ok) setLedgerBoats(json.boats || []);
+      else setLedgerBoats([]);
+    } catch {
+      setLedgerBoats([]);
+    } finally {
+      setLedgerLoading(false);
+    }
+  }, []);
+
   useEffect(() => { if (ready) loadCompanies(); }, [ready, loadCompanies]);
+
+  useEffect(() => {
+    setLedgerPick('');
+    setVesselName('');
+    setVessel(null);
+    setMembers([]);
+    if (companyId) void loadLedgerBoats(companyId);
+    else setLedgerBoats([]);
+  }, [companyId, loadLedgerBoats]);
+
+  function onLedgerPick(value: string) {
+    setLedgerPick(value);
+    setError(''); setOk('');
+    if (!value || value === TYPE_NEW) {
+      setVesselName('');
+      return;
+    }
+    const boat = ledgerBoats.find(b => b.name_key === value);
+    if (boat) setVesselName(boat.name);
+  }
+
+  const pickedFromLedger = !!ledgerPick && ledgerPick !== TYPE_NEW;
+  const linkLabel = pickedFromLedger || ledgerBoats.some(b => b.name.toLowerCase() === vesselName.trim().toLowerCase())
+    ? 'Link boat'
+    : 'Create boat';
 
   async function createCompany() {
     setError(''); setOk('');
@@ -75,7 +130,7 @@ export default function OnboardBoatPage() {
     } finally { setBusy(false); }
   }
 
-  async function createVessel() {
+  async function linkOrCreateVessel() {
     setError(''); setOk('');
     if (!companyId) { setError('Pick a company first'); return; }
     if (!vesselName.trim()) { setError('Boat name required'); return; }
@@ -84,19 +139,30 @@ export default function OnboardBoatPage() {
       const res = await adminFetch('/api/admin/vessels', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ company_id: companyId, name: vesselName.trim() }),
+        body: JSON.stringify({
+          company_id: companyId,
+          name: vesselName.trim(),
+          backfill_orders: true,
+        }),
       });
       const json = await res.json();
-      if (!res.ok) { setError(json.error || 'Failed to create boat'); return; }
+      if (!res.ok) { setError(json.error || 'Failed to link boat'); return; }
       setVessel(json.vessel);
       setMembers(json.vessel.members || []);
-      setOk(`Boat ${json.vessel.name} created`);
+      const n = json.linked_orders || 0;
+      const verb = json.created ? 'created' : 'linked';
+      setOk(
+        n > 0
+          ? `Boat ${json.vessel.name} ${verb} · attached ${n} past order${n === 1 ? '' : 's'}`
+          : `Boat ${json.vessel.name} ${verb}`,
+      );
+      await loadLedgerBoats(companyId);
     } finally { setBusy(false); }
   }
 
   async function addMember() {
     setError(''); setOk('');
-    if (!vessel) { setError('Create the boat first'); return; }
+    if (!vessel) { setError('Link or create the boat first'); return; }
     if (!firstName.trim() || !email.trim() || password.trim().length < 4) {
       setError('First name, email, and password (4+ chars) required');
       return;
@@ -154,7 +220,7 @@ export default function OnboardBoatPage() {
           <div className="text-sm">
             <span className="font-bold text-brand-navy">{companyLabel || '—'}</span>
             <span className="text-brand-green/40 mx-2">·</span>
-            <span className="font-bold text-brand-navy">{vessel?.name || 'Boat not created yet'}</span>
+            <span className="font-bold text-brand-navy">{vessel?.name || 'Boat not linked yet'}</span>
             {members.length > 0 && (
               <>
                 <span className="text-brand-green/40 mx-2">·</span>
@@ -181,7 +247,7 @@ export default function OnboardBoatPage() {
         <select
           className="input-base"
           value={companyId}
-          onChange={e => { setCompanyId(e.target.value); setVessel(null); setMembers([]); }}
+          onChange={e => setCompanyId(e.target.value)}
         >
           <option value="">Select company…</option>
           {companies.map(c => (
@@ -203,12 +269,65 @@ export default function OnboardBoatPage() {
       {/* Step 2 — Boat */}
       <section className="bg-white rounded-2xl border border-brand-green/10 p-5 space-y-4">
         <h2 className="font-display font-bold text-brand-navy text-lg">2. Boat</h2>
-        <input className="input-base" placeholder="Scott Noble"
-          value={vesselName} onChange={e => setVesselName(e.target.value)}
-          disabled={!!vessel} />
+        <p className="text-xs text-brand-green/50">
+          Boats already on the deliveries ledger for this company show up here — you&apos;re linking a login anchor, not inventing history.
+        </p>
+
+        {companyId && (
+          <div>
+            <label className="text-[11px] font-bold uppercase tracking-widest text-brand-green/50">
+              From deliveries
+            </label>
+            <select
+              className="input-base mt-1"
+              value={ledgerPick}
+              onChange={e => onLedgerPick(e.target.value)}
+              disabled={!!vessel || ledgerLoading}
+            >
+              <option value="">
+                {ledgerLoading ? 'Loading boats…' : ledgerBoats.length ? 'Pick a known boat…' : 'No ledger boats yet — type a name'}
+              </option>
+              {ledgerBoats.map(b => (
+                <option key={b.name_key} value={b.name_key}>
+                  {b.name}
+                  {b.delivery_count ? ` · ${b.delivery_count} deliver${b.delivery_count === 1 ? 'y' : 'ies'}` : ''}
+                  {b.already_linked ? ' · linked' : ''}
+                </option>
+              ))}
+              <option value={TYPE_NEW}>Type a new boat name…</option>
+            </select>
+          </div>
+        )}
+
+        {(ledgerPick === TYPE_NEW || !companyId || (!ledgerLoading && ledgerBoats.length === 0) || (!!ledgerPick && ledgerPick !== TYPE_NEW)) && (
+          <div>
+            {(ledgerPick === TYPE_NEW || (!ledgerBoats.length && companyId)) && (
+              <label className="text-[11px] font-bold uppercase tracking-widest text-brand-green/50">
+                Boat name
+              </label>
+            )}
+            <input
+              className={`input-base ${ledgerPick === TYPE_NEW || (!ledgerBoats.length && companyId) ? 'mt-1' : ''}`}
+              placeholder="Scott Noble"
+              value={vesselName}
+              onChange={e => {
+                setVesselName(e.target.value);
+                if (ledgerPick && ledgerPick !== TYPE_NEW) setLedgerPick(TYPE_NEW);
+              }}
+              disabled={!!vessel || (pickedFromLedger && !!vesselName && ledgerPick !== TYPE_NEW)}
+              readOnly={pickedFromLedger && ledgerPick !== TYPE_NEW}
+            />
+          </div>
+        )}
+
         {!vessel ? (
-          <button type="button" className="btn-primary text-sm" disabled={busy || !companyId} onClick={createVessel}>
-            Create boat
+          <button
+            type="button"
+            className="btn-primary text-sm"
+            disabled={busy || !companyId || !vesselName.trim()}
+            onClick={linkOrCreateVessel}
+          >
+            {linkLabel}
           </button>
         ) : (
           <p className="text-sm text-emerald-700 font-medium">Boat locked in — add crew logins below.</p>
@@ -221,8 +340,8 @@ export default function OnboardBoatPage() {
           <UserPlus className="w-5 h-5" /> 3. Crew logins
         </h2>
         <p className="text-xs text-brand-green/50">
-          Anyone on the boat who orders — cook, captain, steward, whoever. Separate emails/passwords, shared boat history. Type the password — we never generate one.
-          You can also set or reset a crew member&apos;s password later from Customers → Logins.
+          Anyone on the boat who orders — cook, captain, steward, whoever. Separate emails and passwords, shared boat history.
+          Type a password (browsers may suggest one — that is fine). You can also set or reset a crew member&apos;s password later from Customers → Logins.
         </p>
 
         {members.length > 0 && (
