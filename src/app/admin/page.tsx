@@ -524,7 +524,8 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
   const [companyId, setCompanyId] = useState('');
   const [serviceType, setServiceType] = useState('');
   const [fee, setFee] = useState('');
-  const [billGroceries, setBillGroceries] = useState(true);
+  const [billGroceries, setBillGroceries] = useState(order.bill_for_groceries === true); // default OFF unless ledger/order says courtesy
+  const [courtesyHint, setCourtesyHint] = useState('');
   const [rateHint, setRateHint] = useState('');
   // Delivery terms are GTS's business, not Sinclair's. Same gate as the
   // Deliveries page ('reports'), which staff don't have. Read after mount so
@@ -602,6 +603,28 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
       const oc = (order.company_name || '').toLowerCase().trim();
       const match = comps.find((x: { name: string }) => oc && (x.name.toLowerCase() === oc || oc.includes(x.name.toLowerCase()) || x.name.toLowerCase().includes(oc)));
       if (match) setCompanyId(match.id);
+
+      // Courtesy billing is BY BOAT (Jen, Sept 2026) ? look up this vessel in the
+      // delivery ledger. Company match is only for the rate card / fee defaults above.
+      if (order.bill_for_groceries !== true && order.bill_for_groceries !== false) {
+        const boat = (order.vessel_name || '').trim();
+        if (boat) {
+          try {
+            const dr = await adminFetch(`/api/admin/deliveries?vessel_name=${encodeURIComponent(boat)}`);
+            if (dr.ok) {
+              const dj = await dr.json();
+              const rows: Array<{ bill_for_groceries?: boolean | null; grocery_mode?: string | null; vessel_name?: string | null }> = dj.deliveries || [];
+              const courtesy = rows.some(d => d.grocery_mode === 'sinclair_courtesy' || d.bill_for_groceries === true);
+              if (courtesy) {
+                setBillGroceries(true);
+                setCourtesyHint(`Pre-selected for ${boat} from the delivery ledger (courtesy billing on this boat before). Change if this trip is different.`);
+              }
+            }
+          } catch { /* leave default OFF */ }
+        }
+      } else if (order.bill_for_groceries === true) {
+        setCourtesyHint('This order is already marked courtesy billing.');
+      }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -736,16 +759,40 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
                     className="w-32 border border-gray-200 rounded-lg px-2 py-1.5 text-sm" />
                 </div>
               </label>
-              <label className="flex items-start gap-2 mt-2.5 text-xs cursor-pointer">
-                <input type="checkbox" checked={billGroceries} onChange={e => setBillGroceries(e.target.checked)}
-                  className="w-4 h-4 accent-brand-navy mt-0.5" />
-                <span>
-                  <span className="font-semibold text-brand-navy">Bill groceries on this invoice</span>
-                  <span className="block text-gray-400">
-                    On: Sinclair&apos;s grocery total + delivery = one final total. Off: customer pays Sinclair&apos;s directly, email shows delivery charge only.
+              <div className="mt-3 space-y-2">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-gray-500">Who pays for the groceries?</p>
+                {courtesyHint && (
+                  <p className="text-[11px] text-brand-river bg-brand-river/5 border border-brand-river/20 rounded-lg px-2.5 py-1.5">{courtesyHint}</p>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setBillGroceries(false)}
+                  className={`w-full text-left rounded-xl border px-3 py-2.5 transition-colors ${
+                    !billGroceries
+                      ? 'border-brand-navy bg-brand-navy/5 ring-1 ring-brand-navy/20'
+                      : 'border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  <span className="block text-sm font-bold text-brand-navy">Boat pays Sinclair&apos;s directly</span>
+                  <span className="block text-[11px] text-gray-500 mt-0.5 leading-snug">
+                    Most boats. Sinclair calls for a card after shopping. This email shows <strong>GTS delivery only</strong> ? no grocery total, no Sinclair receipt. They won&apos;t think they owe GTS for food.
                   </span>
-                </span>
-              </label>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBillGroceries(true)}
+                  className={`w-full text-left rounded-xl border px-3 py-2.5 transition-colors ${
+                    billGroceries
+                      ? 'border-brand-navy bg-brand-navy/5 ring-1 ring-brand-navy/20'
+                      : 'border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  <span className="block text-sm font-bold text-brand-navy">Courtesy billing ? GTS bills the groceries</span>
+                  <span className="block text-[11px] text-gray-500 mt-0.5 leading-snug">
+                    Rare (e.g. Scott Noble). You&apos;ll enter Sinclair&apos;s register total and attach their receipt. MK still invoices the company monthly in QuickBooks.
+                  </span>
+                </button>
+              </div>
 
               {/* Grocery-billed orders REQUIRE Sinclair's actual receipt total
                   + the receipt PDF — the email can't go out on an estimate. */}
@@ -781,7 +828,7 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
                   </div>
                   {missingGroceryDocs && (
                     <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
-                      Enter the grocery total and attach Sinclair&apos;s receipt before sending, or turn off &ldquo;Bill groceries.&rdquo;
+                      Enter the grocery total and attach Sinclair&apos;s receipt before sending, or switch to &ldquo;Boat pays Sinclair&apos;s directly.&rdquo;
                       {/* Deliberate owner-only override — small on purpose, and it
                           takes an explicit tick so it can't happen by accident. */}
                       {!isOwner ? null : !showOverride ? (

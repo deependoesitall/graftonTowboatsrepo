@@ -104,6 +104,12 @@ function getAppUrl(): string {
   return 'http://localhost:3000';
 }
 
+/** Sinclair staff install/origin ? shopping mode lives here, not on apex. */
+function shopAppUrl(): string {
+  const raw = process.env.NEXT_PUBLIC_SHOP_URL || 'https://shop.graftontowboatservices.com';
+  return raw.replace(/\/$/, '');
+}
+
 // ─────────────────────────────────────────────────────────────
 // HTML email builder (used for both business & customer emails)
 // ─────────────────────────────────────────────────────────────
@@ -152,7 +158,7 @@ export function buildOrderEmailHtml(
   // The delivery fee is GTS's own charge; whether groceries are on THIS bill
   // depends on bill_for_groceries (some barge lines pay Sinclair's directly).
   const deliveryFee = Number(order.delivery_fee) || 0;
-  const billGroceries = order.bill_for_groceries !== false; // default true
+  const billGroceries = order.bill_for_groceries === true; // default false ? most boats pay Sinclair's directly
   // Company-billed groceries ONLY. orders.subtotal includes COD lines, and
   // CODs are settled personally at delivery — invoicing them would charge the
   // company for a crew member's own purchase. Sinclair's rings CODs separately,
@@ -162,7 +168,7 @@ export function buildOrderEmailHtml(
     .reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0);
   const groceryTotal = order.register_total != null ? Number(order.register_total) : billableGroceryTotal;
   const grandTotal = (billGroceries ? groceryTotal : 0) + deliveryFee;
-  const deliveryBox = opts.showDelivery && deliveryFee > 0 ? `
+  const deliveryBox = opts.showDelivery ? `
     <div style="border:2px solid #1E3D1E;border-radius:6px;margin-bottom:18px;overflow:hidden;">
       <div style="background:#1E3D1E;color:#D9E84A;padding:8px 12px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;">
         Grafton Towboat Services — Final Charges
@@ -191,8 +197,8 @@ export function buildOrderEmailHtml(
            think he'd been billed, or worse, to pay twice. It's a summary; the
            bill follows from the office. */''}
       <div style="padding:9px 12px;background:#f7f9f1;border-top:1px solid #e4e8da;font-size:11px;color:#4d7c5f;line-height:1.6;">
-        This is your delivery summary, not an invoice &mdash; nothing to pay here.
-        Your invoice comes separately from our office to your company&rsquo;s accounts payable.
+        This is your delivery summary, not an invoice &mdash; nothing to pay from this email.
+        Your company is billed monthly through QuickBooks (accounts payable) &mdash; often covering several vessel orders in one statement.
       </div>
       ${/* Spell out the paperwork. Barge-line accounts payable departments hold
            invoices that arrive without their supporting documents — Ingram's
@@ -537,9 +543,10 @@ export async function sendOrderReceivedEmail(
   // UI should agree about what that account is entitled to see, or the
   // permission boundary is decorative.
   const hasShoppableItems = order.items.some(i => i.item_type !== 'service');
-  const businessCc = hasShoppableItems
-    ? [...ccList, ...sinclairsOrderEmails()]
-    : ccList;
+  // GTS inbox only on this message. Sinclair's get their OWN email below with a
+  // one-tap Shopping Mode link ? CC'ing them on the GTS template mixed audiences
+  // and sent them to the wrong dashboard.
+  const businessCc = ccList;
 
   const businessResult = await getResend().emails.send({
     from:        fromEmail,
@@ -555,7 +562,37 @@ export async function sendOrderReceivedEmail(
     throw new Error(businessResult.error.message || JSON.stringify(businessResult.error));
   }
 
-  // 2) Customer confirmation email — goes to the VESSEL email first (the boat
+  // 2) Sinclair's ? only when there is grocery to shop. Dedicated message with
+  // a one-tap link into Shopping Mode on the shop host (their installed app).
+  if (hasShoppableItems) {
+    const sinclairTo = sinclairsOrderEmails();
+    if (sinclairTo.length) {
+      const shopUrl = `${shopAppUrl()}/admin/orders?order=${encodeURIComponent(order.id)}&shop=1`;
+      const sinclairHtml = buildOrderEmailHtml(order, {
+        tagline:    'New order to shop',
+        intro:      `Grocery order <strong>${order.order_number}</strong> for <strong>${order.company_name}</strong> / <strong>${order.vessel_name || 'vessel'}</strong> is ready to pick. Open it in Shopping Mode — barcode scan, aisle order, weights, and substitutions.`,
+        buttonText: 'Open in Shopping Mode',
+        buttonUrl:  shopUrl,
+        footerText: 'Grafton Towboat Services — order alerts for Sinclair\'s Foods staff',
+        showSinclairNote: false,
+      });
+      const sinclairResult = await getResend().emails.send({
+        from:    fromEmail,
+        to:      sinclairTo,
+        replyTo: toEmail,
+        subject: `Shop now — Order #${order.order_number} — ${order.vessel_name || order.company_name}`,
+        html:    sinclairHtml,
+        attachments: pdfAttachment,
+      });
+      if (sinclairResult.error) {
+        // Don't fail the whole place-order path if Sinclair mail hiccups ?
+        // GTS and the vessel already got theirs. Log loud so we notice.
+        console.error('Resend Sinclair order email error:', sinclairResult.error);
+      }
+    }
+  }
+
+  // 3) Customer confirmation email — goes to the VESSEL email first (the boat
   // places and tracks the order); billing email is only the fallback. The home
   // office gets the monthly bill, not per-order noise (July 10 demo decision).
   const confirmTo = order.vessel_email || order.customer_email;
@@ -607,10 +644,10 @@ export function buildOrderShoppedEmailHtml(order: Order, docs: ShoppedEmailDocs 
   // "shopped" — use neutral fulfillment language for those.
   const hasGroceryItems = order.items.some(i => i.item_type !== 'service');
   const intro = hasGroceryItems
-    ? `Great news, ${order.contact_name}! Your order has been shopped and is ready. Please find your final order summary attached.`
-    : `Good news, ${order.contact_name}! Your request has been fulfilled. Please find your final order summary attached.`;
+    ? `Great news, ${order.contact_name}! Your order has been delivered. Please find your final delivery summary attached — including GTS delivery charges.`
+    : `Good news, ${order.contact_name}! Your request has been completed and delivered. Please find your final summary attached.`;
   return buildOrderEmailHtml(order, {
-    tagline:    'Order Fulfilled',
+    tagline:    'Delivered',
     intro,
     buttonText: 'Questions? Contact Us',
     buttonUrl:  `mailto:GraftonTowboatServices@gmail.com`,
@@ -713,7 +750,7 @@ export async function sendOrderShoppedEmail(
 
   // Sinclair's ACTUAL register receipt — the customer's itemized prices line by
   // line, rather than our estimate.
-  if (order.bill_for_groceries !== false) {
+  if (order.bill_for_groceries === true) {
     await attachDoc(order.sinclairs_receipt_url, 'sinclairs-receipt', 'Sinclair receipt');
   }
 
@@ -735,8 +772,8 @@ export async function sendOrderShoppedEmail(
     // public one — same reasoning as the confirmation email above.
     replyTo:     publicContactEmail(),
     subject:     hasGroceryItems
-                   ? `📦 Your Order is Ready — ${order.order_number} — Grafton Towboat Services`
-                   : `✅ Your Request is Fulfilled — ${order.order_number} — Grafton Towboat Services`,
+                   ? `Delivered — ${order.order_number} — Grafton Towboat Services`
+                   : `Completed — ${order.order_number} — Grafton Towboat Services`,
     html:        shoppedHtml,
     attachments,
   });

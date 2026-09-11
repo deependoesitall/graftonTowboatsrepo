@@ -63,6 +63,8 @@ export async function GET(req: NextRequest) {
   const month = searchParams.get('month'); // YYYY-MM  (single month)
   const year = searchParams.get('year');   // YYYY     (whole year)
   const pending = searchParams.get('pending'); // '1' → everything not yet in QuickBooks
+  const companyIdFilter = searchParams.get('company_id');
+  const vesselNameFilter = searchParams.get('vessel_name');
 
   let query = supabase
     .from('deliveries')
@@ -70,6 +72,14 @@ export async function GET(req: NextRequest) {
     // pack — without it here, every row looks like it needs a slip or none do.
     .select('*, company:companies(id, name, requires_signed_receipt)')
     .order('delivery_date', { ascending: false, nullsFirst: false });
+
+  // Used by the final-email dialog to default courtesy billing from ledger history.
+  // Jen (Sept 2026): courtesy billing is BY BOAT, not by company ? prefer vessel_name.
+  if (vesselNameFilter && vesselNameFilter.trim()) {
+    query = query.ilike('vessel_name', `%${vesselNameFilter.trim()}%`).limit(25);
+  } else if (companyIdFilter) {
+    query = query.eq('company_id', companyIdFilter).limit(25);
+  }
 
   // The QuickBooks queue is deliberately NOT month-scoped: if Mary Karen is a
   // week behind at a month boundary, last month's unentered deliveries must

@@ -633,6 +633,8 @@ export default function NewOrderPage() {
                 ...h,
                 notes: h.notes.trim() ? `${h.notes.trim()}\n${note}` : note,
               }))}
+              companyName={header.company_name}
+              vesselName={header.vessel_name}
             />
           </div>
             </>

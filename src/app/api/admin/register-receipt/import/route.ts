@@ -4,6 +4,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/admin-auth-server';
+import { vesselNameKey } from '@/lib/vessel-membership';
 
 export async function POST(req: NextRequest) {
   const session = requireAdmin(req, { gtsOnly: true });
@@ -66,6 +67,28 @@ export async function POST(req: NextRequest) {
 
   const supabase = createServiceClient();
 
+  // Prefer an explicit vessel_id; otherwise resolve from company + boat so
+  // membership RLS shows this import on the cook logins for that boat.
+  let resolvedVesselId = vesselId;
+  if (!resolvedVesselId) {
+    const key = vesselNameKey(vesselName);
+    if (key) {
+      const { data: vesselRows } = await supabase
+        .from('vessels')
+        .select('id, name, company:companies!inner(name)')
+        .eq('name_key', key);
+      const coLower = companyName.toLowerCase();
+      const hit = (vesselRows || []).find((row: {
+        id: string;
+        company?: { name?: string } | { name?: string }[] | null;
+      }) => {
+        const co = Array.isArray(row.company) ? row.company[0]?.name : row.company?.name;
+        return (co || '').toLowerCase() === coLower;
+      }) || (vesselRows || [])[0];
+      if (hit?.id) resolvedVesselId = String(hit.id);
+    }
+  }
+
   // Historical import — fulfilled so it does not land in the new-order queue.
   // Do NOT call email/push helpers from this route.
   const orderNumber = `IMP-${Date.now().toString(36).toUpperCase()}`;
@@ -76,7 +99,7 @@ export async function POST(req: NextRequest) {
     phone: '',
     customer_email: customerEmail,
     vessel_name: vesselName,
-    vessel_id: vesselId,
+    vessel_id: resolvedVesselId,
     status: 'fulfilled',
     subtotal,
     register_total: registerTotal ?? subtotal,

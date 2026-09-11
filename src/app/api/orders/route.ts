@@ -19,6 +19,7 @@ async function getUserIdFromToken(req: NextRequest): Promise<string | null> {
 }
 
 import { generateOrderNumber } from '@/lib/utils';
+import { vesselKey } from '@/lib/vessel';
 import { fetchActiveDeals, computeDiscounts } from '@/lib/sinclair-offers';
 import { sendOrderReceivedEmail } from '@/lib/email';
 import { sendOrderPush } from '@/lib/push';
@@ -269,6 +270,31 @@ export async function POST(req: NextRequest) {
     if (codPayments.length > 0)
       extendedInfo.cod_payments = JSON.stringify(codPayments);
 
+
+    // Boat-scoped history (Jen, Sept 2026): cooks on Scott Noble share THAT
+    // boat's orders only ? never other Ingram boats like Mike Schmeng.
+    // Attach vessel_id from the signed-in user's membership when we can.
+    let resolvedVesselId: string | null = null;
+    if (userId) {
+      const { data: memberships } = await supabase
+        .from('vessel_members')
+        .select('vessel_id, vessel:vessels(id, name, name_key, company_id)')
+        .eq('user_id', userId);
+      const boats = (memberships || [])
+        .map((m: { vessel_id: string; vessel?: { id: string; name: string; name_key: string } | { id: string; name: string; name_key: string }[] | null }) => {
+          const v = Array.isArray(m.vessel) ? m.vessel[0] : m.vessel;
+          return v ? { id: v.id, name: v.name, name_key: v.name_key } : null;
+        })
+        .filter(Boolean) as Array<{ id: string; name: string; name_key: string }>;
+      if (boats.length === 1) {
+        resolvedVesselId = boats[0].id;
+      } else if (boats.length > 1) {
+        const want = vesselKey(vessel.vessel_name);
+        const hit = boats.find(b => b.name_key === want || vesselKey(b.name) === want);
+        if (hit) resolvedVesselId = hit.id;
+      }
+    }
+
     const { data: order, error: orderError } = await supabase
       .from('orders')
       .insert({
@@ -306,6 +332,7 @@ export async function POST(req: NextRequest) {
         subtotal,
         status: 'new',
         user_id: userId,
+        vessel_id: resolvedVesselId,
       })
       .select()
       .single();
