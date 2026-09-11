@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
   const supabase = createServiceClient();
 
   // Prefer an explicit vessel_id; otherwise resolve from company + boat so
-  // membership RLS shows this import on the cook logins for that boat.
+  // membership RLS shows this import on the crew logins for that boat.
   let resolvedVesselId = vesselId;
   if (!resolvedVesselId) {
     const key = vesselNameKey(vesselName);

@@ -1,7 +1,7 @@
 // src/app/api/admin/vessels/[id]/members/route.ts
 // GET   — list members for a vessel
-// POST  — create a cook/captain login and link them to the vessel
-// PATCH — set/reset a member's password (typed only; never auto-generated)
+// POST  — create a crew login and link them to the vessel
+// PATCH — set/reset a member's password (typed only; staff types it)
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/admin-auth-server';
