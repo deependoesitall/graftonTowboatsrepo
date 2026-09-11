@@ -66,7 +66,24 @@ export function RegisterReceiptImport({
       }
       const m = parseReceiptMeta(text);
       setMeta(m);
-      const { matched: hits, needsYou: miss } = matchReceiptToCatalog(lines, catalog);
+
+      // Match against the FULL store UPC catalog (includes store_only).
+      // Order Builder still passes the lean paper-form sheet as `catalog` for
+      // draft UI — that filter must stay lean — but register PLUs live on
+      // store-only rows that never appear on the barge form.
+      let matchCatalog = catalog;
+      try {
+        const res = await adminFetch('/api/admin/register-receipt/catalog');
+        if (res.ok) {
+          const json = await res.json();
+          const full = (json.items || []) as CatalogRow[];
+          if (full.length) matchCatalog = full;
+        }
+      } catch {
+        // Fall back to the sheet catalog if the full fetch fails.
+      }
+
+      const { matched: hits, needsYou: miss } = matchReceiptToCatalog(lines, matchCatalog);
       setMatched(hits.map(h => ({ ...h, include: true, qtyInput: String(h.qty) })));
       setNeedsYou(miss.map(n => ({ ...n, include: false, qtyInput: String(n.qty), asCustom: true })));
     } catch (e: unknown) {
@@ -169,7 +186,7 @@ export function RegisterReceiptImport({
 
       <label className="flex items-center gap-2 btn-outline text-sm px-3 py-2 cursor-pointer w-fit">
         <FileUp className="w-4 h-4" />
-        {busy ? 'Reading…' : 'Upload register PDF'}
+        {busy ? 'Matching…' : 'Upload register PDF'}
         <input type="file" accept="application/pdf,.pdf" className="hidden"
           disabled={busy}
           onChange={e => onFile(e.target.files?.[0] || null)} />
@@ -177,7 +194,7 @@ export function RegisterReceiptImport({
 
       {busy && (
         <div className="flex items-center gap-2 text-sm text-brand-green/60">
-          <Loader2 className="w-4 h-4 animate-spin" /> Parsing PLUs…
+          <Loader2 className="w-4 h-4 animate-spin" /> Parsing PLUs + matching store catalog…
         </div>
       )}
       {error && <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
@@ -231,7 +248,7 @@ export function RegisterReceiptImport({
                   onChange={e => setNeedsYou(rows => rows && rows.map((x, j) => j === i ? { ...x, include: e.target.checked } : x))} />
                 <div className="flex-1 min-w-0">
                   <div className="font-medium text-brand-navy truncate">{r.description}</div>
-                  <div className="text-[11px] text-amber-800/70">PLU {r.plu} — not in catalog</div>
+                  <div className="text-[11px] text-amber-800/70">PLU {r.plu} — no UPC match in store catalog</div>
                 </div>
                 <input className="input-base w-16 text-center text-sm py-1" value={r.qtyInput}
                   onChange={e => setNeedsYou(rows => rows && rows.map((x, j) => j === i ? { ...x, qtyInput: e.target.value } : x))} />
