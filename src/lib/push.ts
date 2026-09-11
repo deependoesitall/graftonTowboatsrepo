@@ -275,13 +275,16 @@ export async function sendOrderPush(
           title: `Order to shop — ${vessel}`,
           body: line,
           // Full admin Orders + open Shopping Mode — not the retired thin /shop queue.
-          url: `/admin/orders?order=${order.id}&shop=1`,
+          // ⚠️ order.id (UUID), never order_number — the Orders page matches
+          // ?order= against the internal id. A GTS-… number in the URL is a
+          // silent no-op for Shopping Mode.
+          url: `/admin/orders?order=${encodeURIComponent(order.id)}&shop=1`,
           tag: `shop-order-${order.order_number}`,
         }
       : {
           title: `New order — ${vessel}`,
           body: line,
-          url: `/admin/orders?order=${order.id}`,
+          url: `/admin/orders?order=${encodeURIComponent(order.id)}`,
           tag: `order-${order.order_number}`,
         },
   );

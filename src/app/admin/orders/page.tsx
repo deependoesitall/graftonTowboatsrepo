@@ -118,7 +118,8 @@ function OrdersContent() {
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
 
-  // DEEP LINK FROM A PUSH NOTIFICATION — /admin/orders?order=<id>
+  // DEEP LINK FROM A PUSH NOTIFICATION — /admin/orders?order=<uuid>[&shop=1]
+  // Push payloads must use the order UUID (see src/lib/push.ts). order_number also matches as a fallback.
   //
   // Read straight off window.location rather than useSearchParams(): that hook
   // forces the whole page into a Suspense boundary at build time, and this is a
@@ -136,7 +137,9 @@ function OrdersContent() {
     const wanted = params.get('order');
     const wantShop = params.get('shop') === '1';
     if (!wanted) { setDeepLinkDone(true); return; }
-    const match = orders.find(o => o.id === wanted);
+    // Prefer UUID (what push sends). Also accept order_number so a pasted
+    // GTS-… link still opens Shopping Mode instead of silently doing nothing.
+    const match = orders.find(o => o.id === wanted || o.order_number === wanted);
     if (match) {
       setSelectedOrder(match);
       if (wantShop) setDeepLinkShop(true);
@@ -485,8 +488,8 @@ function OrdersContent() {
                             {nextSt && canEditOrders && (
                               <button
                                 onClick={() => advanceStatus(order)}
-                                disabled={isUpdating}
                                 title={`Move to ${STATUS_CONFIG[nextSt]?.label}`}
+                                disabled={isUpdating}
                                 className="flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold bg-brand-steel/10 text-brand-steel hover:bg-brand-steel hover:text-white transition-colors disabled:opacity-50"
                               >
                                 {isUpdating ? <Loader2 className="w-3 h-3 animate-spin" /> : <ArrowRight className="w-3 h-3" />}
