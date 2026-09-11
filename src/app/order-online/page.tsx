@@ -34,7 +34,7 @@ const ACTIONS = [
     href: '/catalog',
     icon: ShoppingCart,
     title: 'Browse & order',
-    blurb: 'Open the full catalog — groceries from Sinclair's Foods, supplies, and write-ins for your boat.',
+    blurb: "Open the full catalog — groceries from Sinclair's Foods, supplies, and write-ins for your boat.",
     cta: 'Start ordering',
     primary: true,
   },
