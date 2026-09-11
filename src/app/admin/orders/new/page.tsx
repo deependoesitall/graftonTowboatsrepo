@@ -196,6 +196,8 @@ export default function NewOrderPage() {
         const j = await defRes.json();
         setVessels(j.vessels || []);
         setTerminals(j.terminals || []);
+      } else {
+        setLoadError('Could not load the boat list. You can still type the details in by hand.');
       }
       setReady(true);
     })();
@@ -719,9 +721,12 @@ function WhoStep({ header, setHeader, vessels, terminals, applyVessel, onNext }:
   // back to the recent boats instead of an empty screen.
   const [hits, setHits] = useState<VesselHeader[] | null>(null);
   const [searching, setSearching] = useState(false);
+  const [lookupError, setLookupError] = useState('');
 
   useEffect(() => {
-    const term = q.trim();
+    // Search on whichever box is being typed in — the box at the top, or the
+    // boat name field below it.
+    const term = (q.trim() || header.vessel_name.trim());
     if (term.length < 2) { setHits(null); setSearching(false); return; }
 
     // ⚠️ DEBOUNCED, AND LATE REPLIES ARE DISCARDED.
@@ -736,18 +741,43 @@ function WhoStep({ header, setHeader, vessels, terminals, applyVessel, onNext }:
       try {
         const res = await adminFetch(`/api/admin/order-defaults?q=${encodeURIComponent(term)}`);
         if (cancelled) return;
-        if (res.ok) {
-          const j = await res.json();
-          setHits(j.vessels || []);
+        if (!res.ok) {
+          setLookupError('The boat lookup is not responding. Type the details in below.');
+          setHits([]);
+          return;
         }
+        const j = await res.json();
+        setLookupError(
+          j.problems?.length
+            ? `Boat lookup had trouble: ${j.problems.join(' · ')}`
+            : '',
+        );
+        setHits(j.vessels || []);
       } finally {
         if (!cancelled) setSearching(false);
       }
     }, 200);
     return () => { cancelled = true; clearTimeout(t); };
-  }, [q]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, header.vessel_name]);
 
   const matches = hits ?? vessels.slice(0, 8);
+  // Everything currently known, for the two datalists below.
+  const knownVessels = hits && hits.length ? hits : vessels;
+
+  /**
+   * Typing a boat's name straight into "Boat name" should do what picking it
+   * from the list does. Without this the two routes through the same screen
+   * behave differently for no reason a person could guess.
+   */
+  useEffect(() => {
+    const typed = header.vessel_name.trim().toLowerCase();
+    if (!typed || header.company_name.trim()) return;
+    const hit = knownVessels.find(v => v.vessel_name.trim().toLowerCase() === typed);
+    if (hit) applyVessel(hit);
+    // applyVessel is stable enough here; re-running on every keystroke is the point.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [header.vessel_name, knownVessels]);
 
   const set = (k: keyof HeaderState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setHeader(h => ({ ...h, [k]: e.target.value } as HeaderState));
@@ -761,9 +791,8 @@ function WhoStep({ header, setHeader, vessels, terminals, applyVessel, onNext }:
             everything below — captain, phone, vessel email, terminal, how it
             gets there — exactly as it was last time. */}
         <p className="text-xs text-gray-500 mb-3">
-          Every boat GTS has ordered for or delivered to. Pick one and the rest of this page
-          fills itself in — completely from a past order, or as far as the delivery ledger
-          knows for a boat that has only ever phoned it in.
+          Start typing a boat or company. Pick one and everything we know about it fills in
+          below.
         </p>
         <div className="relative mb-3">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -790,24 +819,48 @@ function WhoStep({ header, setHeader, vessels, terminals, applyVessel, onNext }:
                 </span>
                 <span className="text-xs text-gray-400 shrink-0 text-right">
                   {v.from_ledger
-                    ? <>{v.order_count} deliver{v.order_count === 1 ? 'y' : 'ies'}<br /><span className="text-[10px] text-gray-300">from the ledger</span></>
+                    ? <>{v.order_count} deliver{v.order_count === 1 ? 'y' : 'ies'}</>
                     : <>{v.order_count} order{v.order_count === 1 ? '' : 's'}</>}
                 </span>
               </button>
             ))}
           </div>
         )}
-        {q.trim().length >= 2 && !searching && matches.length === 0 && (
+        {lookupError && (
+          <p className="text-xs text-amber-700 py-2 leading-relaxed">{lookupError}</p>
+        )}
+        {!lookupError && q.trim().length >= 2 && !searching && matches.length === 0 && (
           <p className="text-xs text-gray-500 py-2">
-            Nothing matching that in past orders or the delivery ledger. Fill the fields in
-            below and this boat will be here next time.
+            No boat called &ldquo;{q.trim()}&rdquo; yet. Fill in the details below and it will be
+            here next time.
           </p>
         )}
       </section>
 
       <section className="card-base p-4 grid gap-3 sm:grid-cols-2">
-        <Field label="Boat name" required value={header.vessel_name} onChange={set('vessel_name')} />
-        <Field label="Company / barge line" required value={header.company_name} onChange={set('company_name')} />
+        {/* ⚠️ THESE HAVE TO AUTOCOMPLETE TOO.
+            Typing "Scott Noble" into the search above and then typing it again
+            here, with nothing happening either time, is the same dead end twice.
+            A <datalist> makes each field suggest from the same boats the search
+            returns, so whichever box someone starts in behaves the same way —
+            and choosing a name here fills the rest of the header exactly as
+            picking from the list above does. */}
+        <Field label="Boat name" required value={header.vessel_name}
+               onChange={set('vessel_name')} list="known-vessels" />
+        <datalist id="known-vessels">
+          {knownVessels.map(v => (
+            <option key={`${v.vessel_name}|${v.company_name}`} value={v.vessel_name}>
+              {v.company_name}
+            </option>
+          ))}
+        </datalist>
+        <Field label="Company / barge line" required value={header.company_name}
+               onChange={set('company_name')} list="known-companies" />
+        <datalist id="known-companies">
+          {[...new Set(knownVessels.map(v => v.company_name).filter(Boolean))].map(c => (
+            <option key={c} value={c} />
+          ))}
+        </datalist>
         <Field label="Captain" value={header.captain_name} onChange={set('captain_name')} />
         <Field label="Captain's phone" value={header.captain_phone} onChange={set('captain_phone')} />
         {/* Required by the order endpoint: the confirmation has to go
@@ -858,8 +911,9 @@ function WhoStep({ header, setHeader, vessels, terminals, applyVessel, onNext }:
   );
 }
 
-function Field({ label, value, onChange, required, hint, type = 'text' }: {
+function Field({ label, value, onChange, required, hint, type = 'text', list }: {
   label: string; value: string; required?: boolean; hint?: string; type?: string;
+  list?: string;
   onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }) {
   const id = `f-${label.toLowerCase().replace(/[^a-z]+/g, '-')}`;
@@ -868,7 +922,8 @@ function Field({ label, value, onChange, required, hint, type = 'text' }: {
       <label className="label-base" htmlFor={id}>
         {label}{required && <span className="text-red-500"> *</span>}
       </label>
-      <input id={id} type={type} className="input-base" value={value} onChange={onChange} />
+      <input id={id} type={type} className="input-base" value={value} onChange={onChange}
+             list={list} autoComplete="off" />
       {hint && <p className="text-xs text-gray-400 mt-1">{hint}</p>}
     </div>
   );

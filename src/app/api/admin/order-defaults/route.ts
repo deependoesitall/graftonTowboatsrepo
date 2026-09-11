@@ -104,12 +104,16 @@ export async function GET(req: NextRequest) {
     ordersQuery = ordersQuery.or(`vessel_name.ilike.%${q}%,company_name.ilike.%${q}%`);
   }
   const { data, error } = await ordersQuery;
-
+  // ⚠️ AN ERROR HERE USED TO RETURN AN EMPTY LIST, WHICH THE SCREEN THEN
+  // PRESENTED AS "no boat by that name". A failed query and a boat that does
+  // not exist looked identical, so a broken lookup was indistinguishable from
+  // a typo — which is exactly what happened with Scott Noble. Both sources are
+  // now independent: whichever one works still answers, and anything that went
+  // wrong is reported rather than swallowed.
+  const problems: string[] = [];
   if (error) {
-    console.error('admin order-defaults error:', error);
-    // Degrade to "no history" rather than failing the builder. Typing a header
-    // by hand is slower, not impossible; a 500 here would stop the order.
-    return NextResponse.json({ vessels: [], terminals: [] });
+    console.error('order-defaults orders error:', error);
+    problems.push(`orders: ${error.message}`);
   }
 
   const rows = (data ?? []) as unknown as HeaderRow[];
@@ -176,14 +180,32 @@ export async function GET(req: NextRequest) {
   // number that was called. That is still most of a header and far better than
   // an empty form — and an order placed for that boat backfills the rest, so
   // the entry improves itself the first time it is used.
+  // Match on the boat OR the company it runs under. Searching "Ingram" should
+  // bring back Ingram's boats, not nothing — the person taking the call often
+  // has the line before they have the vessel.
+  let companyIds: string[] = [];
+  if (searching) {
+    const { data: cos } = await supabase
+      .from('companies').select('id').ilike('name', `%${q}%`).limit(20);
+    companyIds = (cos ?? []).map((c: { id: string }) => c.id);
+  }
+
   let ledgerQuery = supabase
     .from('deliveries')
-    .select('vessel_name, location_delivered, phone_number_used, delivery_date, company:companies(name)')
+    .select('vessel_name, location_delivered, phone_number_used, delivery_date, company_id, company:companies(name)')
     .not('vessel_name', 'is', null)
     .order('delivery_date', { ascending: false })
-    .limit(searching ? 200 : 200);
-  if (searching) ledgerQuery = ledgerQuery.ilike('vessel_name', `%${q}%`);
-  const { data: ledger } = await ledgerQuery;
+    .limit(300);
+  if (searching) {
+    ledgerQuery = companyIds.length
+      ? ledgerQuery.or(`vessel_name.ilike.%${q}%,company_id.in.(${companyIds.join(',')})`)
+      : ledgerQuery.ilike('vessel_name', `%${q}%`);
+  }
+  const { data: ledger, error: ledgerError } = await ledgerQuery;
+  if (ledgerError) {
+    console.error('order-defaults deliveries error:', ledgerError);
+    problems.push(`deliveries: ${ledgerError.message}`);
+  }
 
   for (const row of (ledger ?? []) as unknown as Array<{
     vessel_name: string | null;
@@ -250,8 +272,11 @@ export async function GET(req: NextRequest) {
 
   // Enough to choose from without scrolling past the answer.
   return NextResponse.json({
-    vessels: vessels.slice(0, searching ? 20 : 10),
+    vessels: vessels.slice(0, searching ? 25 : 10),
     terminals: terminals.slice(0, 40),
     query: q,
+    // Empty because nothing matched, or empty because something broke? The
+    // screen has to be able to tell the difference and say so.
+    problems,
   });
 }
