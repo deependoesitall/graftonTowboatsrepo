@@ -254,7 +254,7 @@ export const HOME = {
   sinclairs: {
     lead: "Groceries from Sinclair's Foods.",
     rest:
-      'Ordered and delivered by Grafton Towboat Services. Cold and frozen goods ride refrigerated the whole way.',
+      'You order. Grafton Towboat Services delivers. Cold and frozen goods ride refrigerated the whole way.',
   },
 } as const;
 

@@ -65,6 +65,19 @@ const WIDE_BOX = {
   lg: 'h-11 sm:h-16',
 } as const;
 
+/** GTS lockup reads a touch larger than Sinclair's so our mark doesn't get lost next to theirs. */
+const GTS_WIDE_BOX = {
+  sm: 'h-9',
+  md: 'h-12 sm:h-14',
+  lg: 'h-14 sm:h-[4.75rem]',
+} as const;
+
+const GTS_BOX = {
+  sm: 'h-12',
+  md: 'h-[4.5rem]',
+  lg: 'h-[100px]',
+} as const;
+
 const CROSS = {
   sm: 'text-lg',
   md: 'text-2xl',
@@ -83,22 +96,22 @@ const GLOW = {
 export function PartnerLockup({
   tone = 'dark',
   size = 'md',
-  caption = 'Ordered and delivered by Grafton Towboat Services.',
+  caption = 'You order. Grafton Towboat Services delivers.',
   gtsMark = 'badge',
   className = '',
 }: Props) {
   const dark = tone === 'dark';
   const wide = gtsMark === 'lockup';
-  // Both marks share a height class on purpose — equal height is what makes
-  // two logos read as a pair rather than as one logo and a smaller guest.
-  const mark = `${(wide ? WIDE_BOX : BOX)[size]} w-auto object-contain shrink-0 ${GLOW[tone]}`;
+  // GTS sits a notch larger so the lockup doesn't shrink next to Sinclair's wordmark.
+  const gtsCls = `${(wide ? GTS_WIDE_BOX : GTS_BOX)[size]} w-auto object-contain shrink-0 ${GLOW[tone]}`;
+  const sinCls = `${(wide ? WIDE_BOX : BOX)[size]} w-auto object-contain shrink-0 ${GLOW[tone]}`;
 
   return (
     <div className={`flex flex-col items-center ${className}`}>
       <div className={`flex items-center ${wide ? 'gap-3 sm:gap-5' : 'gap-5 sm:gap-7'}`}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={wide ? '/branding/gts-lockup.png' : '/branding/gts-logo.png'}
-          alt="Grafton Towboat Services" className={mark} />
+          alt="Grafton Towboat Services" className={gtsCls} />
 
         {/* The × is decorative — screen readers get the two alt texts, and
             "Grafton Towboat Services times Sinclair's Foods" would be noise. */}
@@ -110,7 +123,7 @@ export function PartnerLockup({
         </span>
 
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/branding/sinclairs-logo.png" alt="Sinclair's Foods" className={mark} />
+        <img src="/branding/sinclairs-logo.png" alt="Sinclair's Foods" className={sinCls} />
       </div>
 
       {caption && (

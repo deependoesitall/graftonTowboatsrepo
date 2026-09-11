@@ -116,7 +116,7 @@ export default function MarketingHome() {
             tone="dark"
             size="lg"
             gtsMark="lockup"
-            caption="Groceries from Sinclair's Foods — ordered and delivered by Grafton Towboat Services."
+            caption="Groceries from Sinclair's Foods — you order, Grafton Towboat Services delivers."
           />
           <p className="text-brand-yellow/60 font-body text-center text-sm mt-2.5 max-w-md mx-auto leading-snug">
             Cold and frozen goods ride refrigerated the whole way.
