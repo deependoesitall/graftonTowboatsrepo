@@ -133,6 +133,10 @@ export function PaperFormImport({ catalog, setLine, applyLines, appendNotes, add
     try {
       const files = Array.from(list);
       const canvases: HTMLCanvasElement[] = [];
+      // Tracked per page, not per upload: someone can drop the PDF and two
+      // phone shots of the write-in page in the same go, and only the shots
+      // need flattening.
+      const isPhoto: boolean[] = [];
       for (const f of files) {
         if (f.type === 'application/pdf' || /\.pdf$/i.test(f.name)) {
           setProgress({ phase: 'render', page: 0, pages: 0, message: `Opening ${f.name}…` });
@@ -140,9 +144,11 @@ export function PaperFormImport({ catalog, setLine, applyLines, appendNotes, add
             setProgress({ phase: 'render', page, pages, message: `Reading page ${page} of ${pages}…` });
           });
           canvases.push(...pages);
+          for (let i = 0; i < pages.length; i++) isPhoto.push(false);
         } else if (f.type.startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(f.name)) {
           setProgress({ phase: 'render', page: canvases.length + 1, pages: files.length, message: `Opening ${f.name}…` });
           canvases.push(await fileToCanvas(f));
+          isPhoto.push(true);
         } else {
           throw new Error(`Unsupported file: ${f.name}. Use a PDF or photos.`);
         }
@@ -151,6 +157,7 @@ export function PaperFormImport({ catalog, setLine, applyLines, appendNotes, add
 
       const result = await scanPaperPages({
         canvases,
+        isPhoto,
         layoutItems,
         catalog,
         runOcr,

@@ -540,7 +540,7 @@ function borderSkew(canvas: HTMLCanvasElement): number {
   return Math.abs(top - bottom);
 }
 
-export function calibrateQntyColumn(canvases: HTMLCanvasElement[]): QntyColumn {
+export function calibrateQntyColumn(canvases: HTMLCanvasElement[], anyPhotos = true): QntyColumn {
   // Column positions are a shape question, so this runs on probes too. At full
   // size it was reading every pixel of every page a second time purely to find
   // four vertical lines.
@@ -575,12 +575,17 @@ export function calibrateQntyColumn(canvases: HTMLCanvasElement[]): QntyColumn {
   if (!used) return QNTY_COL_DEFAULT;
   // Worst skew across the batch — one bad photo is enough to make fixed
   // fractions unsafe for the whole run.
+  // Skew is a camera problem. Measuring it on pdf.js output only produces false
+  // positives — a faint rule found at one height and a column of text at
+  // another look like a leaning page when nothing is leaning.
   let skew = 0;
-  for (const c of canvases) {
-    if (!c.width || !c.height) continue;
-    const pr = probeOf(c, 700);
-    skew = Math.max(skew, borderSkew(pr));
-    releaseCanvas(pr);
+  if (anyPhotos) {
+    for (const c of canvases) {
+      if (!c.width || !c.height) continue;
+      const pr = probeOf(c, 700);
+      skew = Math.max(skew, borderSkew(pr));
+      releaseCanvas(pr);
+    }
   }
   for (let b = 0; b < BINS; b++) acc[b] /= used;
 
@@ -1020,12 +1025,26 @@ async function extractWriteIns(
 
 export async function scanPaperPages(opts: {
   canvases: HTMLCanvasElement[];
+  /**
+   * Which pages came from a camera, one flag per canvas.
+   *
+   * ⚠️ A PDF PAGE CANNOT BE PERSPECTIVE-DISTORTED. It is rendered from vector
+   * or from a flatbed image by pdf.js, so its columns are vertical by
+   * construction and there is nothing for the rectifier to correct.
+   *
+   * Without this the scanner was guessing, and guessing wrong: it decided 11
+   * pages of a clean 20-page scan had been "photographed at an angle", warped
+   * them, then marked the quantity column untrustworthy — which flagged all 116
+   * marks for review and made the feature useless on the one input it was
+   * built for. Knowing the source removes the guess entirely.
+   */
+  isPhoto?: boolean[];
   layoutItems: FormLayoutItem[];
   catalog: CatalogItem[];
   runOcr?: boolean;
   onProgress?: (p: ScanProgress) => void;
 }): Promise<ScanResult> {
-  const { canvases, layoutItems, catalog, runOcr = true, onProgress } = opts;
+  const { canvases, layoutItems, catalog, runOcr = true, onProgress, isPhoto = [] } = opts;
   const indexes = buildCatalogIndexes(catalog);
   const candidates: ScanCandidate[] = [];
   const writeIns: WriteInCandidate[] = [];
@@ -1051,7 +1070,10 @@ export async function scanPaperPages(opts: {
     //
     // It declines on anything already square, because warping a good scan only
     // costs it sharpness.
-    const rect = rectifyPage(turned);
+    // Photos only. A PDF page goes through untouched.
+    const rect = isPhoto[p]
+      ? rectifyPage(turned)
+      : { canvas: turned, applied: false, skewBefore: 0 };
     const canvas = rect.canvas;
     // ⚠️ HAND THE MEMORY BACK AS WE GO.
     //
@@ -1076,7 +1098,7 @@ export async function scanPaperPages(opts: {
   // A page that is still upside down puts the Category column where the
   // quantity column belongs, and calibrating on that would lock the whole
   // document onto the wrong stripe.
-  const qntyCol = calibrateQntyColumn(oriented);
+  const qntyCol = calibrateQntyColumn(oriented, canvases.some((_, i) => isPhoto[i]));
   onProgress?.({ phase: 'detect', page: 0, pages: oriented.length,
     message: qntyCol.confident
       ? `Found the quantity column (${Math.round(qntyCol.lo * 100)}–${Math.round(qntyCol.hi * 100)}% across)…`

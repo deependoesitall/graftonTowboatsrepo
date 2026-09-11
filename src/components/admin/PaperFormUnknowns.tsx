@@ -4,13 +4,13 @@
 // THE MARKS NOBODY CAN READ FOR YOU.
 //
 // Most of a scanned form resolves itself: a printed row, a pencilled 3, a
-// catalogue match by UPC. What is left over is the part a machine must not
+// catalog match by UPC. What is left over is the part a machine must not
 // decide — a mark reading "Cs", a write-in for something Sinclair's stocks but
 // never printed, a quantity too smudged to call, a COD scribbled in a margin.
 //
 // Those used to sit in the same list as everything else wearing a slightly
 // warmer border, which is the same as not flagging them: a long review list
-// with a few amber rows gets skimmed, and skimming is exactly the behaviour
+// with a few amber rows gets skimmed, and skimming is exactly the behavior
 // that puts the wrong food on a boat.
 //
 // So they get their own panel, above the rest, and each one carries the two
@@ -20,7 +20,7 @@
 //     with the mark itself outlined. Staff have the paper in their hand; the
 //     job is to get their eye to the right line of it.
 //   · WHAT TO DO — three buttons, because there are only ever three answers.
-//     It is a catalogue item, it is something we will hand-write onto the
+//     It is a catalog item, it is something we will hand-write onto the
 //     order, or it is a note for whoever shops it.
 //
 // Every one of those lands in the SAME draft the rest of the import feeds, and
@@ -195,7 +195,7 @@ function UnknownItem({ row, catalog, onResolve, onZoom }: {
       ) : (
         <>
           <div className="mt-3 flex flex-wrap gap-2">
-            <ActionButton icon={Package} label="It's a catalogue item"
+            <ActionButton icon={Package} label="It's a catalog item"
                           active={open === 'catalog'} onClick={() => setOpen(open === 'catalog' ? null : 'catalog')} />
             <ActionButton icon={PencilLine} label="Add as custom line"
                           active={open === 'custom'} onClick={() => setOpen(open === 'custom' ? null : 'custom')} />
@@ -284,7 +284,7 @@ function ResolvedRow({ resolution, onUndo }: { resolution: Resolution; onUndo: (
   );
 }
 
-/* ── resolve: catalogue ── */
+/* ── resolve: catalog ── */
 
 function CatalogPicker({ catalog, initialQuery, initialQty, onPick }: {
   catalog: CatalogItem[];
@@ -347,7 +347,7 @@ function CatalogPicker({ catalog, initialQuery, initialQty, onPick }: {
         ))}
         {q.trim().length >= 2 && results.length === 0 && (
           <p className="text-xs text-gray-500 py-2">
-            Nothing in the catalogue matches. Use <b>Add as custom line</b> instead.
+            Nothing in the catalog matches. Use <b>Add as custom line</b> instead.
           </p>
         )}
       </div>
