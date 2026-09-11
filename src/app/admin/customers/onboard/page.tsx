@@ -141,7 +141,7 @@ export default function OnboardBoatPage() {
           <ArrowLeft className="w-5 h-5" />
         </Link>
         <div>
-          <h1 className="font-display font-bold text-brand-navy text-2xl">Onboard a boat</h1>
+          <h1 className="font-display font-bold text-brand-navy text-2xl">Add customer / boat</h1>
           <p className="text-sm text-brand-green/60 mt-0.5">
             Company → boat → cook logins. Shared history for everyone on the boat.
           </p>
@@ -222,6 +222,7 @@ export default function OnboardBoatPage() {
         </h2>
         <p className="text-xs text-brand-green/50">
           Separate emails/passwords. Same boat history. Type the password — we never generate one.
+          You can also set or reset a cook&apos;s password later from Customers → Logins.
         </p>
 
         {members.length > 0 && (
@@ -254,6 +255,12 @@ export default function OnboardBoatPage() {
           Add login
         </button>
       </section>
+
+      <p className="text-center text-sm text-brand-green/50 pb-4">
+        Done? <Link href="/admin/customers" className="text-brand-river font-semibold hover:underline">Back to Customers</Link>
+        {' · '}
+        <Link href="/admin/customers?tab=logins" className="text-brand-river font-semibold hover:underline">Manage logins</Link>
+      </p>
     </div>
   );
 }

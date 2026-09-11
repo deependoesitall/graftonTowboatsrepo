@@ -1,6 +1,7 @@
-﻿// src/app/api/admin/vessels/[id]/members/route.ts
-// GET  — list members for a vessel
-// POST — create a cook/captain login and link them to the vessel
+// src/app/api/admin/vessels/[id]/members/route.ts
+// GET   — list members for a vessel
+// POST  — create a cook/captain login and link them to the vessel
+// PATCH — set/reset a member's password (typed only; never auto-generated)
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/admin-auth-server';
@@ -109,4 +110,58 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     member,
     vessel: { id: vessel.id, name: vessel.name, company_name: companyName },
   });
+}
+
+export async function PATCH(req: NextRequest, ctx: Ctx) {
+  const session = requireAdmin(req, { gtsOnly: true });
+  if (session instanceof NextResponse) return session;
+  const { id: vesselId } = await ctx.params;
+
+  const body = await req.json().catch(() => ({}));
+  const userId = String(body.user_id || '').trim();
+  const memberId = String(body.member_id || '').trim();
+  const password = String(body.password || '');
+
+  if (password.trim().length < 4) {
+    return NextResponse.json(
+      { error: 'Password must be at least 4 characters' },
+      { status: 400 },
+    );
+  }
+
+  const supabase = createServiceClient();
+
+  // Resolve the membership row — must belong to THIS vessel.
+  let memberQuery = supabase
+    .from('vessel_members')
+    .select('id, user_id, vessel_id, email, display_name')
+    .eq('vessel_id', vesselId);
+
+  if (userId) memberQuery = memberQuery.eq('user_id', userId);
+  else if (memberId) memberQuery = memberQuery.eq('id', memberId);
+  else {
+    return NextResponse.json(
+      { error: 'user_id or member_id required' },
+      { status: 400 },
+    );
+  }
+
+  const { data: member, error: mErr } = await memberQuery.maybeSingle();
+  if (mErr) return NextResponse.json({ error: mErr.message }, { status: 500 });
+  if (!member?.user_id) {
+    return NextResponse.json(
+      { error: 'That login is not a member of this boat' },
+      { status: 404 },
+    );
+  }
+
+  const { error: authErr } = await supabase.auth.admin.updateUserById(
+    member.user_id,
+    { password: password.trim() },
+  );
+  if (authErr) {
+    return NextResponse.json({ error: authErr.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ ok: true });
 }

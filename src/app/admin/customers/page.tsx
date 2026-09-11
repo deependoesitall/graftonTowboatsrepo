@@ -6,10 +6,13 @@ import { useRouter } from 'next/navigation';
 import {
   Lock, RefreshCw, FileText, ChevronDown, ChevronRight, RotateCcw,
   Search, Calendar, X, CheckCircle, AlertCircle, Loader2, Printer,
+  Ship, KeyRound, Users,
 } from 'lucide-react';
+import Link from 'next/link';
 import { vesselReportHtml } from '@/lib/vessel-report';
 import { fetchAdminSession, canAccess, adminFetch } from '@/lib/admin-auth';
 import { formatCurrency, formatDate, formatDateOnly } from '@/lib/utils';
+import { CustomerLoginsPanel } from '@/components/admin/CustomerLoginsPanel';
 
 interface VesselOrderItem {
   product_id: string | null;
@@ -362,6 +365,15 @@ export default function CustomersPage() {
   const [repeatState, setRepeatState] = useState<RepeatState | null>(null);
   const [successOrderNumber, setSuccessOrderNumber] = useState<string | null>(null);
 
+  const [panel, setPanel] = useState<'history' | 'logins'>('history');
+
+  useEffect(() => {
+    try {
+      const tab = new URLSearchParams(window.location.search).get('tab');
+      if (tab === 'logins') setPanel('logins');
+    } catch { /* ignore */ }
+  }, []);
+
   // Auth guard
   useEffect(() => {
     (async () => {
@@ -433,21 +445,49 @@ export default function CustomersPage() {
         <SuccessBanner orderNumber={successOrderNumber} onClose={() => setSuccessOrderNumber(null)} />
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="font-display text-2xl font-bold text-brand-navy">Customers</h1>
-          <p className="text-gray-400 text-sm">Customer &amp; vessel order history</p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="font-display text-2xl font-bold text-brand-navy">Customers &amp; boats</h1>
+          <p className="text-gray-400 text-sm mt-0.5">
+            One place for boat customers, cook logins, and order history.
+          </p>
+          <p className="text-xs text-brand-green/70 mt-2 max-w-xl">
+            Tip: Cooks can also reset their own password from Sign in → Forgot password.
+          </p>
         </div>
-        <div className="flex items-center gap-2">
-          <a href="/admin/customers/onboard" className="btn-primary text-sm px-3 py-2">
-            Onboard a boat
-          </a>
-          <button onClick={fetchReport} className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5">
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
-          </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link href="/admin/customers/onboard"
+            className="btn-primary text-sm px-4 py-2.5 flex items-center gap-2 shadow-sm">
+            <Ship className="w-4 h-4" /> Add customer / boat
+          </Link>
+          {panel === 'history' && (
+            <button onClick={fetchReport} className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5">
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
+            </button>
+          )}
         </div>
       </div>
 
+      {/* Segmented control */}
+      <div className="inline-flex rounded-full bg-gray-100 p-1 gap-0.5">
+        <button type="button" onClick={() => setPanel('history')}
+          className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-bold uppercase tracking-wide transition-colors ${
+            panel === 'history' ? 'bg-brand-navy text-white shadow-sm' : 'text-gray-500 hover:text-brand-navy'
+          }`}>
+          <Users className="w-3.5 h-3.5" /> Boats / history
+        </button>
+        <button type="button" onClick={() => setPanel('logins')}
+          className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-bold uppercase tracking-wide transition-colors ${
+            panel === 'logins' ? 'bg-brand-navy text-white shadow-sm' : 'text-gray-500 hover:text-brand-navy'
+          }`}>
+          <KeyRound className="w-3.5 h-3.5" /> Logins
+        </button>
+      </div>
+
+      {panel === 'logins' && <CustomerLoginsPanel />}
+
+      {panel === 'history' && (
+        <>
       <div className="card-base p-4">
         <div className="flex flex-wrap items-center gap-2">
           {PRESETS.map(p => (
@@ -613,6 +653,8 @@ export default function CustomersPage() {
             className="flex-1 w-full bg-white" />
         </div>,
         document.body,
+      )}
+        </>
       )}
     </div>
   );

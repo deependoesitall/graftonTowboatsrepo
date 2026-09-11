@@ -82,11 +82,16 @@ interface ActivityLog {
 const ROLE_LABELS = {
   owner: 'Owner', gts_manager: 'GTS Manager', manager: "Sinclair's Manager", staff: 'Staff',
 };
-const ROLE_COLORS = {
+const ROLE_COLORS: Record<string, string> = {
   owner: 'bg-brand-orange/10 text-brand-orange border-brand-orange/20',
+  gts_manager: 'bg-brand-green/10 text-brand-green border-brand-green/20',
   manager: 'bg-blue-50 text-blue-700 border-blue-200',
   staff: 'bg-gray-100 text-gray-600 border-gray-200',
 };
+
+function isSinclairStaff(u: { role: string; permissions?: string[] | null }) {
+  return u.role === 'manager' || (u.permissions || []).includes('sinclair');
+}
 
 export default function AdminSettingsPage() {
   const { confirm: confirmDialog, dialog: confirmDialogEl } = useConfirm();
@@ -963,7 +968,10 @@ export default function AdminSettingsPage() {
         <div className="space-y-4">
           <div className="card-base overflow-hidden">
             <div className="bg-brand-navy px-6 py-4 flex items-center justify-between">
-              <h2 className="text-white font-bold">Admin Users</h2>
+              <div>
+                <h2 className="text-white font-bold">Staff logins</h2>
+                <p className="text-white/60 text-xs mt-0.5">GTS team and Sinclair&apos;s team — set passwords without knowing the old one</p>
+              </div>
               <button onClick={() => setShowAddUser(s => !s)}
                 className="flex items-center gap-1.5 bg-brand-gold text-white text-xs font-bold uppercase tracking-wide px-3 py-1.5 rounded-full hover:bg-brand-amber transition-colors">
                 <UserPlus className="w-3.5 h-3.5" /> Add User
@@ -1013,8 +1021,8 @@ export default function AdminSettingsPage() {
                         }));
                       }}>
                       <option value="owner">Owner — Full access</option>
-                      <option value="gts_manager">GTS Manager — everything except admin logs (incl. delivery rates &amp; billing)</option>
-                      <option value="manager">Sinclair&apos;s Manager — products, orders, weekly ad, coupons</option>
+                      <option value="gts_manager">GTS Manager — GTS ops (no admin logs)</option>
+                      <option value="manager">Sinclair's Manager — grocery orders, products, weekly ad, coupons</option>
                       <option value="staff">Staff — Orders only</option>
                     </select>
                     {newUser.role === 'manager' && (
@@ -1061,8 +1069,35 @@ export default function AdminSettingsPage() {
                 <p className="text-xs mt-1">The default owner login uses your ADMIN_PASSWORD env var.</p>
               </div>
             ) : (
-              <div className="divide-y divide-gray-100">
-                {users.map(u => (
+              <div className="space-y-0">
+                {([
+                  {
+                    key: 'gts',
+                    title: 'GTS staff',
+                    hint: 'Owner, GTS Manager, and Staff without Sinclair scope',
+                    list: users.filter(u => !isSinclairStaff(u)),
+                  },
+                  {
+                    key: 'sinclair',
+                    title: "Sinclair's staff",
+                    hint: "Sinclair's Manager role, or anyone with Sinclair permission",
+                    list: users.filter(u => isSinclairStaff(u)),
+                  },
+                ] as const).map(group => (
+                  <div key={group.key}>
+                    <div className={`px-6 py-3 border-b border-gray-100 ${
+                      group.key === 'gts' ? 'bg-brand-navy/5' : 'bg-emerald-50/80'
+                    }`}>
+                      <h3 className="text-xs font-bold uppercase tracking-widest text-brand-navy">
+                        {group.title}
+                      </h3>
+                      <p className="text-[11px] text-gray-400 mt-0.5">{group.hint}</p>
+                    </div>
+                    {group.list.length === 0 ? (
+                      <p className="px-6 py-4 text-xs text-gray-400">Nobody in this group yet.</p>
+                    ) : (
+                      <div className="divide-y divide-gray-100">
+                        {group.list.map(u => (
                   <div key={u.id} className={`px-6 py-4 ${!u.is_active ? 'opacity-50' : ''}`}>
                     <div className="flex items-center justify-between gap-4">
                       <div className="flex items-center gap-3">
@@ -1075,8 +1110,8 @@ export default function AdminSettingsPage() {
                         </div>
                       </div>
                       <div className="flex items-center gap-3 flex-wrap justify-end">
-                        <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${ROLE_COLORS[u.role]}`}>
-                          {ROLE_LABELS[u.role]}
+                        <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${ROLE_COLORS[u.role] || ROLE_COLORS.staff}`}>
+                          {ROLE_LABELS[u.role as keyof typeof ROLE_LABELS] || u.role}
                         </span>
                         {u.permissions?.includes('sinclair') && (
                           <span className="text-xs font-bold px-2.5 py-1 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">
@@ -1098,7 +1133,7 @@ export default function AdminSettingsPage() {
                             setPwResetError('');
                             setPwResetCopied(false);
                           }}
-                          className="text-xs text-gray-400 hover:text-brand-river transition-colors">
+                          className="text-xs font-bold uppercase tracking-wide text-brand-river hover:text-brand-navy transition-colors">
                           {pwResetDone === u.id ? <span className="text-green-600 font-semibold">✓ Password set</span> : 'Set password'}
                         </button>
                         <button onClick={() => toggleUser(u)}
@@ -1112,7 +1147,6 @@ export default function AdminSettingsPage() {
                       </div>
                     </div>
 
-                    {/* Owner reset: set a new password for this user (they forgot theirs) */}
                     {pwResetUser === u.id && (
                       <div className="mt-3 space-y-2">
                         <div className="flex flex-wrap items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg p-2.5">
@@ -1137,14 +1171,18 @@ export default function AdminSettingsPage() {
                         )}
                         {pwResetDone === u.id && !pwResetError && (
                           <p className="text-xs text-green-700 px-1 font-semibold">
-                            ✓ Password set{pwResetCopied ? ' — copied to clipboard' : ''}. Give it to them now, then they can change it under Password.
+                            ✓ Password set{pwResetCopied ? ' — copied to clipboard' : ''}. Give it to them now.
                           </p>
                         )}
                         {pwResetDone !== u.id && (
                           <p className="text-[11px] text-gray-400 px-1">
-                            Type the new password here — shown in plain text so you can pass it along. They can change it later under Password.
+                            Type the new password. Give it to them now. They can change it under Password later.
                           </p>
                         )}
+                      </div>
+                    )}
+                  </div>
+                        ))}
                       </div>
                     )}
                   </div>
@@ -1152,9 +1190,14 @@ export default function AdminSettingsPage() {
               </div>
             )}
 
-            <div className="bg-gray-50 px-6 py-3 text-xs text-gray-400 border-t border-gray-100">
-              Roles: Owner = all access · Sinclair&apos;s Manager = orders + products + weekly ad + coupons + own password · Staff = orders only
-              <span className="ml-3 text-emerald-600">Sinclair permission = scopes order view to grocery items only</span>
+            <div className="bg-gray-50 px-6 py-3 text-xs text-gray-400 border-t border-gray-100 space-y-1">
+              <p>
+                <span className="font-semibold text-brand-navy">Roles:</span>{' '}
+                Owner = all access · GTS Manager = everything except admin logs · Sinclair&apos;s Manager = grocery orders + products + weekly ad + coupons + own password · Staff = orders only
+              </p>
+              <p>
+                <span className="text-emerald-600 font-semibold">Sinclair permission</span> scopes the order list to grocery items (crew-change / service-only hidden).
+              </p>
             </div>
           </div>
         </div>
