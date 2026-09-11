@@ -39,8 +39,8 @@ export function LocalBusinessSchema() {
       // Matches HOME.lede in src/app/site/content.ts — this is what Google
       // shows, so it must not drift from the page it describes.
       "Family-owned, at Grafton, Illinois. Groceries from Sinclair's Foods, towboat supplies and crew change transport, brought out to vessels on the Mississippi and Illinois rivers.",
-    image: `${SITE}/branding/gts-logo.png`,
-    logo: `${SITE}/branding/gts-logo.png`,
+    image: `${SITE}/branding/customer-icon.png`,
+    logo: `${SITE}/branding/gts-lockup.png`,
     address: {
       '@type': 'PostalAddress',
       streetAddress: BUSINESS.street,

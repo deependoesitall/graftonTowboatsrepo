@@ -32,6 +32,7 @@ import { HOME, SERVICES, CTA, BUSINESS, IMAGES } from '@/app/site/content';
 export const metadata: Metadata = {
   title: HOME.meta.title,
   description: HOME.meta.description,
+  alternates: { canonical: 'https://graftontowboatservices.com/' },
   openGraph: {
     title: HOME.meta.title,
     description: HOME.meta.description,

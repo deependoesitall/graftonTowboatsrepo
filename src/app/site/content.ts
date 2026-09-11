@@ -181,6 +181,7 @@ export const NAV = [
   { label: 'Services', href: '/services' },
   { label: 'About', href: '/about' },
   { label: 'Contact', href: '/contact' },
+  { label: 'Order', href: '/order-online' },
 ] as const;
 
 /**
@@ -265,7 +266,7 @@ export const ABOUT = {
   },
   headingLines: ['Small Town and', 'Family Owned'],
   paragraphs: [
-    "We're a small-town, family-owned business with big-business inventory. Our family has been in the marina business for 20 years and has worked on the river for generations.",
+    "We're a small-town, family-owned marine service at Grafton — groceries from Sinclair's Foods, towboat supplies, and crew change, brought out to your vessel. Our family has worked the river for generations.",
     'We have a deep love and respect for the river, and a real understanding of why it matters.',
     "That's why we answer the phone at odd hours, and why we'd rather tell you we can't make a window than promise one we'll miss.",
   ],
@@ -298,6 +299,17 @@ export const CONTACT_PAGE = {
   heading: 'Get In Touch',
   lede:
     "Coming through Grafton? Tell us what you need and when you'll be here. For anything urgent, call — we answer.",
+} as const;
+
+
+export const ORDER_PAGE = {
+  meta: {
+    title: 'Order Online | Grafton Towboat Services',
+    description:
+      "Order groceries from Sinclair's Foods, towboat supplies, and extras for your vessel. Sign in or start as a guest — delivered at Mile Marker 219.",
+  },
+  headingLines: ['Order for', 'your vessel'],
+  lede: "Groceries, deck supplies, and write-ins — built for towboat crews. Start an order online any time, or call if you need a person.",
 } as const;
 
 export const CTA = {

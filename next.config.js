@@ -10,6 +10,19 @@ const nextConfig = {
       { protocol: 'https', hostname: 'images.squarespace-cdn.com' },
     ],
   },
+
+  async redirects() {
+    return [
+      // www and apex were both 200 — Google treated them as near-duplicates
+      // ("omitted similar results"). Sitemap/schema already claim apex.
+      {
+        source: '/:path*',
+        has: [{ type: 'host', value: 'www.graftontowboatservices.com' }],
+        destination: 'https://graftontowboatservices.com/:path*',
+        permanent: true,
+      },
+    ];
+  },
   async headers() {
     const adminSecurityHeaders = [
       // Admin pages should never be indexed.

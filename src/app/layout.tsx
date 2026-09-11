@@ -57,8 +57,12 @@ export const metadata: Metadata = {
   // GTS office phone can both have all three installed, and the light one is
   // always the customer's.
   icons: {
-    icon: '/branding/favicon-gts.png',
-    shortcut: '/branding/favicon-gts.png',
+    icon: [
+      { url: '/favicon.ico', sizes: 'any' },
+      { url: '/branding/favicon-gts.png', type: 'image/png', sizes: '48x48' },
+      { url: '/branding/customer-icon.png', type: 'image/png', sizes: '512x512' },
+    ],
+    shortcut: '/favicon.ico',
     apple: '/branding/customer-icon.png',
   },
   appleWebApp: {

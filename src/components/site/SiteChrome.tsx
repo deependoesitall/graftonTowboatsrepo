@@ -235,7 +235,7 @@ export function SiteNav({ current }: { current?: string }) {
             <span className="hidden sm:inline">Call or Email</span>
             <span className="sm:hidden">Call</span>
           </a>
-          <a href={BUSINESS.orderUrl}
+          <a href="/order-online"
             className="bg-brand-green text-white text-[11px] md:text-xs font-bold uppercase tracking-widest px-4 md:px-5 py-2.5 rounded-full hover:bg-brand-gmed transition-colors flex items-center gap-2 border-2 border-brand-green">
             <ShoppingCart className="w-3.5 h-3.5" />
             Order Now
