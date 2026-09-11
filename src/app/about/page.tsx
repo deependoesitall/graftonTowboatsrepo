@@ -1,7 +1,7 @@
 // src/app/about/page.tsx — marketing About page.
 //
 // THE SISTERS ARE THE PAGE. Not an illustration beside some text — the reason
-// anybody chooses a small operator over a big one. So they get the centre of
+// anybody chooses a small operator over a big one. So they get the center of
 // the layout, at full width, on the gradient, above the fold.
 //
 // Two decisions carried over from the Aug 25 call:

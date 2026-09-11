@@ -29,7 +29,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: `${SITE}/services`, lastModified: now, changeFrequency: 'monthly', priority: 0.9 },
     { url: `${SITE}/about`, lastModified: now, changeFrequency: 'yearly', priority: 0.6 },
     { url: `${SITE}/contact`, lastModified: now, changeFrequency: 'yearly', priority: 0.7 },
-    // The catalogue is the money page — it changes nightly with the Sinclair's
+    // The catalog is the money page — it changes nightly with the Sinclair's
     // sync, and it's where a search for a specific product should land.
     { url: `${SITE}/catalog`, lastModified: now, changeFrequency: 'daily', priority: 0.9 },
     // The customer install page. Listed, unlike /admin/install and

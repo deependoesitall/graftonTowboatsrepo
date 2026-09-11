@@ -225,7 +225,7 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
   // ── THREE SEPARATE JOBS, THREE SEPARATE BLOCKS ──
   // Dave, at the August demo: "we typically have somebody else work on the CODs,
   // somebody else works on the grocery list" — and the CODs get bagged and
-  // labelled per person. Mixed into the walk order they were unfindable, so:
+  // labeled per person. Mixed into the walk order they were unfindable, so:
   //
   //   GROCERY — the boat's order, billed to the company monthly
   //   DECK    — company-billed but invoiced SEPARATELY (doesn't hit the boat's
@@ -247,7 +247,7 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
   //
   // So the grocery block is now a single continuous run and groupByWalkingOrder
   // places every department exactly where the configured zone order says. Meat
-  // and Produce still print as their own labelled groups — they just appear at
+  // and Produce still print as their own labeled groups — they just appear at
   // the right point in the walk instead of at the end.
   const groceryGroups = groupByWalkingOrder(grocery, zoneOrder);
   const deckGroups = groupByWalkingOrder(deck, zoneOrder);
@@ -346,7 +346,7 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
   .sale-honor { display: inline-block; margin-left: 4px; font-weight: 700; white-space: nowrap; }
 
   /* ── Thumbnails ── small enough to keep the grid dense, big enough to
-     recognise a package at arm's length on a moving cart. */
+     recognize a package at arm's length on a moving cart. */
   .thumb { width: 22px; height: 22px; object-fit: contain; flex: 0 0 auto;
            border: 1px solid #e3e3e3; border-radius: 3px; background: #fff; margin-right: 4px; }
   .thumb-empty { display: inline-block; background: repeating-linear-gradient(
@@ -476,7 +476,7 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
 
   ${/* COD — dead last, grouped by the person paying. Dave: "we typically have
         somebody else work on the CODs, somebody else works on the grocery
-        list", and each person's items get bagged and labelled with their name.
+        list", and each person's items get bagged and labeled with their name.
         Mixed into the walk order these were effectively unfindable. */''}
   ${codByPerson.length ? `<section class="dept tone-cod newpage">
     <div class="dept-head"><h2>COD &mdash; collect from each crew member</h2>

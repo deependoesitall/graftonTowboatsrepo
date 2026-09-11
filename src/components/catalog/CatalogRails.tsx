@@ -4,7 +4,7 @@
 // "What's on sale" and "Best sellers" — the two horizontal rails on /catalog.
 //
 // Mirrors the layout of Sinclair's own homepage so a crew that already browses
-// their site recognises it, and reuses the density of the old coupon strip
+// their site recognizes it, and reuses the density of the old coupon strip
 // rather than inventing a third card size.
 //
 // ⚠️ THESE ARE NOT COUPONS. No clip button, no code, no Sinclair login. The
@@ -12,7 +12,7 @@
 // isClipOnly in lib/catalog-rails.ts), because an offer needing a Sinclair's
 // account rings up at full price for a vessel that hasn't got one.
 //
-// Prices are estimates, exactly like everywhere else in the catalogue — the
+// Prices are estimates, exactly like everywhere else in the catalog — the
 // Sinclair's register total is what gets billed, per the Terms.
 
 import { useEffect, useState } from 'react';
@@ -39,7 +39,7 @@ export default function CatalogRails() {
       .catch(() => setRails({ on_sale: [], best_sellers: [] }));
   }, []);
 
-  // NO SKELETON. Rails are supplementary — the catalogue below is the page.
+  // NO SKELETON. Rails are supplementary — the catalog below is the page.
   // A skeleton that never resolves (rail switched off, Freshop empty) leaves a
   // permanent grey ghost, which looks broken. Nothing renders until there is
   // something real to render.
@@ -121,7 +121,7 @@ function RailCard({ product }: { product: RailProduct }) {
     // Same shape ProductGrid uses, so a rail add and a grid add are
     // indistinguishable downstream — one cart, one pick sheet, one register.
     //
-    // NOTE: `price` is the product's own catalogue price, NOT the rail's sale
+    // NOTE: `price` is the product's own catalog price, NOT the rail's sale
     // price. The sale figure is a shop-window estimate from last night's
     // Freshop pull; the register total is what actually gets billed, per the
     // Terms. Writing an estimate into the cart line would make the order

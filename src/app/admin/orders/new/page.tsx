@@ -15,7 +15,7 @@
 // opposite things. Shopping wants discovery — pictures, categories, related
 // items. Transcription wants the eye to never leave the line it is on.
 //
-// So SHEET mode renders the catalogue in the exact order of the paper form
+// So SHEET mode renders the catalog in the exact order of the paper form
 // (products.form_seq, migration 035 — the same ordering the barges asked for),
 // with one quantity box per row. You hold the scan beside the screen, read
 // down, and type. Tab moves to the next row because the boxes are in document
@@ -111,7 +111,7 @@ const digits = (s: string) => s.replace(/\D+/g, '');
 /**
  * UPC match is deliberately forgiving about leading zeros.
  *
- * The printed form, the register and our own catalogue do not agree on whether
+ * The printed form, the register and our own catalog do not agree on whether
  * a 12-digit UPC-A carries its leading zero, and a human typing one off a page
  * will copy whatever is printed. Comparing the significant digits means the
  * person doing the typing never has to care which convention a given row used.
@@ -132,7 +132,7 @@ export default function NewOrderPage() {
   const [terminals, setTerminals] = useState<string[]>([]);
   const [loadError, setLoadError] = useState('');
 
-  // qty by product id. Kept separate from the catalogue so re-filtering the
+  // qty by product id. Kept separate from the catalog so re-filtering the
   // sheet never touches what has been entered.
   const [qty, setQty] = useState<Record<string, number>>({});
   /** Per-line pay attribution from Scan (COD write-ins). Default vessel. */
@@ -148,7 +148,7 @@ export default function NewOrderPage() {
    */
   const [linePay, setLinePay] = useState<Record<string, { paid_by: 'vessel' | 'deck' | 'cod'; cod_name: string }>>({});
   /**
-   * OFF-CATALOGUE LINES, RESOLVED FROM THE SCAN.
+   * OFF-CATALOG LINES, RESOLVED FROM THE SCAN.
    *
    * A write-in for something Sinclair's stocks but never printed on the form
    * has no product row to hang a quantity on, so it cannot live in `qty`. It is
@@ -215,7 +215,7 @@ export default function NewOrderPage() {
   }, [items]);
 
   // Cheap membership test for the repeat picker: a past order can name a
-  // product that has since left the catalogue, and it must say so rather than
+  // product that has since left the catalog, and it must say so rather than
   // drop the line.
   const catalogIds = useMemo(() => new Set(items.map(i => i.id)), [items]);
 
@@ -456,7 +456,7 @@ export default function NewOrderPage() {
           //
           // order_items.product_id is a uuid with a foreign key to products, so
           // there is no id we could invent for something that is not in the
-          // catalogue — a made-up one fails the constraint and a real one would
+          // catalog — a made-up one fails the constraint and a real one would
           // bill the wrong item. The order route already stores null here for
           // its service lines; an empty string takes that same path and the
           // description, price and quantity below carry the line.
@@ -588,7 +588,7 @@ export default function NewOrderPage() {
                 companyName={header.company_name}
                 catalogIds={catalogIds}
                 onApply={(lines, applyMode, carried) => {
-                  // REPLACE clears the catalogue lines only. Custom lines and
+                  // REPLACE clears the catalog lines only. Custom lines and
                   // anything scanned in stay: they were added by hand for THIS
                   // order and a repeat has no opinion about them.
                   if (applyMode === 'replace') { setQty({}); setLinePay({}); }
@@ -1355,7 +1355,7 @@ function ReviewStep({ header, chosen, qty, setLine, total, error, submitting, on
             </button>
           </div>
         ))}
-        {/* Off-catalogue lines are labelled, not blended in: a shopper walking
+        {/* Off-catalog lines are labeled, not blended in: a shopper walking
             the aisles needs to know this one has no shelf tag to scan and no
             price until the till. */}
         {customLines.map((c, i) => (

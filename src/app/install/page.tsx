@@ -10,7 +10,7 @@
 // caption rule — it may never appear in a way that suggests Sinclair's does the
 // delivering — and an install page is all instructions and no room for the
 // nuance. The Sinclair's relationship is made properly on the marketing site
-// and in the catalogue; it does not need restating here.
+// and in the catalog; it does not need restating here.
 //
 // INDEXABLE, unlike the two staff pages. This is a link GTS will hand to
 // captains and put in an email signature; the staff ones are noindex because

@@ -9,7 +9,7 @@
 // time. Thirty seconds later he is gone, and the next trip he does all of it
 // again from a blank page.
 //
-// Every other place to ask — a banner on the catalogue, a card in the footer —
+// Every other place to ask — a banner on the catalog, a card in the footer —
 // asks someone to imagine a benefit. This asks nothing: it names the work he
 // just finished and offers to make it the last time he does it.
 //

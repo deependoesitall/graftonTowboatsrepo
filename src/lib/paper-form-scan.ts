@@ -3,7 +3,7 @@
 // PAPER SCAN → REVIEW CANDIDATES for the staff Order Builder.
 //
 // Client-side (Vercel 30s): render PDF/photos → auto-orient each page →
-// detect inked QNTY cells → match to order-form layout / catalogue →
+// detect inked QNTY cells → match to order-form layout / catalog →
 // OCR write-in blocks on the last page(s). Human always confirms qty.
 
 import type { FormLayoutItem } from '@/lib/form-layout-apply';
@@ -138,7 +138,7 @@ export function matchLayoutToCatalog(
     const key = normDesc(layout.description) + '|' + normPkg(layout.pkg_size);
     const hits = byDescPkg.get(key) || [];
     if (hits.length === 1) { match = hits[0]; how = 'desc+pkg'; confidence = 'high'; }
-    else if (hits.length > 1) flags.push(`Several catalogue sizes match “${layout.description}”.`);
+    else if (hits.length > 1) flags.push(`Several catalog sizes match “${layout.description}”.`);
   }
   if (!match) {
     const hits = byDesc.get(normDesc(layout.description)) || [];
@@ -160,7 +160,7 @@ export function matchLayoutToCatalog(
     flags.push('Matched by form position only — confirm the product.');
   }
   if (!match) {
-    flags.push('No catalogue match for this form row.');
+    flags.push('No catalog match for this form row.');
     confidence = 'needs_review';
   }
   return { match, how, disagreement, confidence, flags };
@@ -192,7 +192,7 @@ export function matchWriteInToCatalog(
     return { match: partial[0], how: 'desc', confidence: 'low', flags };
   }
   if (partial.length > 1) flags.push(`Write-in matched ${partial.length} products — pick one or keep as a note.`);
-  else flags.push('Write-in not in catalogue — will go to order notes unless you match it.');
+  else flags.push('Write-in not in catalog — will go to order notes unless you match it.');
   return { match: null, how: 'unmatched', confidence: 'needs_review', flags };
 }
 
@@ -259,35 +259,14 @@ export function releaseCanvas(canvas: HTMLCanvasElement): void {
   canvas.height = 0;
 }
 
-function orientationScore(canvas: HTMLCanvasElement): number {
-  const { width: w, height: h } = canvas;
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-  const { data } = ctx.getImageData(0, 0, w, h);
-  const y0 = Math.floor(h * 0.12);
-  const y1 = Math.floor(h * 0.9);
-  const x0 = Math.floor(w * 0.1);
-  const x1 = Math.floor(w * 0.9);
-  let rules = 0;
-  for (let y = y0; y < y1; y += 2) {
-    let dark = 0;
-    let n = 0;
-    for (let x = x0; x < x1; x += 2) {
-      const i = (y * w + x) * 4;
-      const lum = (data[i] + data[i + 1] + data[i + 2]) / 3;
-      n++;
-      if (lum < 120) dark++;
-    }
-    if (n && dark / n > 0.28) rules++;
-  }
-  return rules;
-}
+
 
 /**
  * Which edge column is the printed Category column?
  *
  * ⚠️ THIS IS THE ONLY THING THAT CAN TELL 0° FROM 180°.
  *
- * orientationScore() counts horizontal rule lines, and a page turned upside
+ * Rule-density scoring counts horizontal lines, and a page turned upside
  * down has exactly the same horizontal rules as one the right way up. The two
  * scores are identical, the loop keeps the first, and 180° could never be
  * detected — which is not a corner case: a real twenty-page scan of the Scott
@@ -319,27 +298,43 @@ function edgeInkAsymmetry(canvas: HTMLCanvasElement): number {
 }
 
 export function autoOrientCanvas(canvas: HTMLCanvasElement): { canvas: HTMLCanvasElement; rotation: 0 | 90 | 180 | 270 } {
-  // Every decision below is made on a ~500px probe. The full page is rotated
-  // exactly once, at the end, when the answer is already known.
-  const probe = probeOf(canvas);
+  /**
+   * ⚠️ THE SHAPE OF THE PAGE DECIDES THE AXIS. NOT INK DENSITY.
+   *
+   * This used to choose between portrait and landscape by counting horizontal
+   * rule lines, and it got 19 pages out of 20 wrong on a perfectly flat scan of
+   * the Scott Noble order — every one of them turned on its side, which made
+   * every crop below unreadable and every mark uncertain.
+   *
+   * The reason it fails is specific and was never going to show up in a small
+   * test. On a ~500px probe the ruled lines are barely a pixel and mostly
+   * disappear, while the Category column — the word "Meat" or "Produce"
+   * repeated down every row — survives as a solid stripe of ink. Turn that page
+   * on its side and the stripe becomes a long horizontal band that the score
+   * counts as dozens of rules. Sideways beats upright, confidently, on a page
+   * with no ambiguity in it at all.
+   *
+   * The Sinclair order form is printed portrait, so the axis is not a judgement
+   * call: a portrait image is already on the right axis and only ever needs 0
+   * or 180, and a landscape image is a photo taken sideways and needs 90 or 270
+   * to become portrait. Which of the two is then settled by the Category
+   * column, which is what actually distinguishes them.
+   *
+   * This is also what the person using it expects: a page of the order form is
+   * either the right way up or upside down. It is never on its side.
+   */
+  const portrait = canvas.height >= canvas.width;
+  const axis: Array<0 | 90 | 180 | 270> = portrait ? [0, 180] : [90, 270];
 
-  // Step 1 — which AXIS. Rule density separates portrait from landscape and is
-  // the thing orientationScore() is actually good at.
-  const upright = orientationScore(probe);
-  const probe90 = rotateCanvas(probe, 90);
-  const turned = orientationScore(probe90);
-  releaseCanvas(probe90);
-  const axis: Array<0 | 90 | 180 | 270> = turned > upright ? [90, 270] : [0, 180];
-
-  // Step 2 — which WAY UP within that axis. Rule density cannot answer this;
-  // the Category column can.
-  const probeFirst = rotateCanvas(probe, axis[0]);
+  // Both options put the page portrait, so the Category column is now in a
+  // known place and the only question left is which end is the top.
+  const probeFirst = probeOf(rotateCanvas(canvas, axis[0]));
   const asym = edgeInkAsymmetry(probeFirst);
-  if (probeFirst !== probe) releaseCanvas(probeFirst);
-  releaseCanvas(probe);
+  releaseCanvas(probeFirst);
 
-  // A near-zero reading means neither edge is clearly denser — a blank or badly
-  // cropped page. Leave it alone rather than flipping on noise.
+  // Dense left / sparse right means upright. A near-zero reading is a page with
+  // no clear answer — a blank or a bad crop — and is left alone rather than
+  // flipped on noise.
   const best: 0 | 90 | 180 | 270 = asym < -0.012 ? axis[1] : axis[0];
   return { canvas: rotateCanvas(canvas, best), rotation: best };
 }
@@ -796,7 +791,7 @@ export function detectInkedRowsOnPage(
       if (d < bestDist) { bestDist = d; best = i; }
     }
     if (best < 0) continue;
-    // A mark further than a row's height from every row centre is not on a row
+    // A mark further than a row's height from every row center is not on a row
     // — a margin scribble, a staple shadow, the footer.
     const band = bands[best];
     if (bestDist > (band.y1 - band.y0) * 1.2) continue;
@@ -856,8 +851,8 @@ export function needsHumanDecision(c: AnyCandidate): boolean {
 export function decisionReason(c: AnyCandidate): string {
   if (!c.match) {
     return c.kind === 'write_in'
-      ? 'Not found in the catalogue — say what it is, or keep it as a note.'
-      : 'No catalogue row matched this line of the form.';
+      ? 'Not found in the catalog — say what it is, or keep it as a note.'
+      : 'No catalog row matched this line of the form.';
   }
   if (c.kind === 'form_row' && c.markNote && c.suggestedQty == null) {
     return `The mark reads “${c.markNote}”, which is not a quantity.`;
@@ -965,7 +960,7 @@ async function extractWriteIns(
   // "yellow Cornmeal 1 bag" — sit at y 0.60–0.74, above everything it read.
   //
   // Widened rather than re-pinned: how far down the block starts depends on
-  // where the catalogue happened to end on that page, so a generous window that
+  // where the catalog happened to end on that page, so a generous window that
   // certainly contains it beats a tight one that is right for one scan. It also
   // reaches left to the numbered column and right past the quantity words,
   // which are in their own column and are half the meaning of the line.

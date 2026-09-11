@@ -25,7 +25,7 @@ interface Props {
   headline: [string, string];
   eyebrow: string;
   blurb: string;
-  /** The installed app's icon, so people can recognise what they just added. */
+  /** The installed app's icon, so people can recognize what they just added. */
   iconSrc: string;
   /** 'partner' = GTS × Sinclair's. 'gts' = the GTS mark alone. */
   lockup: 'partner' | 'gts';

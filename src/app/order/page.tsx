@@ -68,27 +68,12 @@ type CodPay = { method: CodMethod | ''; handle: string; phone: string; time: str
 /**
  * One person who owes money on this order.
  *
- * `amount` is catalogue COD lines, which have prices. `linked` counts
- * off-catalogue items (a Walmart link) that person is paying for — those have
+ * `amount` is catalog COD lines, which have prices. `linked` counts
+ * off-catalog items (a Walmart link) that person is paying for — those have
  * NO price until someone actually buys them, which is why the two are counted
  * separately and never added together.
  */
 type CodPerson = { name: string; amount: number; linked: number };
-
-/** One boat this account has ordered for before, as of its most recent order. */
-interface VesselDefault {
-  vessel_name: string;
-  vessel_type: string | null;
-  captain_name: string | null;
-  captain_phone: string | null;
-  vessel_email: string | null;
-  company_name: string | null;
-  terminal_name: string | null;
-  delivery_method: 'boat' | 'van' | null;
-  approach_side: string | null;
-  vhf_channel: string | null;
-  last_ordered: string;
-}
 
 /** Errors are keyed by person, so two crew members' problems don't collide. */
 const codErrKey = (name: string, field: 'method' | 'handle' | 'phone') =>
@@ -312,15 +297,6 @@ export default function OrderPage() {
   });
   const [vessel, setVessel] = useState<VesselInfo>(getVesselInfo());
   const [showOrderContact, setShowOrderContact] = useState(false);
-  // Step 2 collapses to a recap when the boat's details are already known
-  // (a Repeat Order, or simply a returning customer whose last order is still
-  // in this browser). Expanded on demand, and never collapsed while there are
-  // errors to read.
-  const [showAllFields, setShowAllFields] = useState(false);
-  // Boats and terminals this account has ordered for before. Empty for guests
-  // and on any failure — every use below degrades to the plain text field.
-  const [defaults, setDefaults] = useState<{ vessels: VesselDefault[]; terminals: string[] }>(
-    { vessels: [], terminals: [] });
   const [showSecondary, setShowSecondary] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -381,25 +357,6 @@ export default function OrderPage() {
       })
       .catch(() => {});
 
-    // Boats + terminals from this account's own past orders. Best-effort: a
-    // guest, an expired session or a 500 all end up as "no history", and the
-    // form is exactly what it was before.
-    (async () => {
-      try {
-        const { data: { session } } = await createClient().auth.getSession();
-        if (!session?.access_token) return;
-        const r = await fetch('/api/customer/order-defaults', {
-          headers: { Authorization: `Bearer ${session.access_token}` },
-        });
-        if (!r.ok) return;
-        const d = await r.json();
-        setDefaults({
-          vessels: Array.isArray(d?.vessels) ? d.vessels : [],
-          terminals: Array.isArray(d?.terminals) ? d.terminals : [],
-        });
-      } catch { /* convenience only */ }
-    })();
-
     // Active digital coupons (empty when the manager toggle is off)
     fetch('/api/active-deals')
       .then(r => r.ok ? r.json() : null)
@@ -431,32 +388,6 @@ export default function OrderPage() {
     document.addEventListener('mousedown', outside);
     return () => document.removeEventListener('mousedown', outside);
   }, [tooltipOpen]);
-
-  /**
-   * Fill the boat's block from a previous order.
-   *
-   * Deliberately does NOT touch arrival date/time, crew change or notes — those
-   * are about this trip, not this boat, and a remembered arrival date is how a
-   * van ends up at a berth the boat left last week.
-   */
-  function applyVessel(v: VesselDefault) {
-    const known = (VESSEL_TYPES as readonly string[]).includes(v.vessel_type || '');
-    setVessel(prev => ({
-      ...prev,
-      vessel_name:       v.vessel_name,
-      vessel_type:       known ? (v.vessel_type || '') : (v.vessel_type ? 'Other' : ''),
-      vessel_type_other: known ? '' : (v.vessel_type || ''),
-      captain_name:      v.captain_name  || prev.captain_name,
-      captain_phone:     v.captain_phone || prev.captain_phone,
-      vessel_email:      v.vessel_email  || prev.vessel_email,
-      company_name:      v.company_name  || prev.company_name,
-      terminal_name:     v.terminal_name || prev.terminal_name,
-      delivery_method:   v.delivery_method || prev.delivery_method,
-      approach_side:     (v.approach_side as VesselInfo['approach_side']) || prev.approach_side,
-      vhf_channel:       v.vhf_channel   || prev.vhf_channel,
-    }));
-    setErrors({});
-  }
 
   function setV(field: keyof VesselInfo, value: string | boolean) {
     setVessel(prev => {
@@ -499,7 +430,7 @@ export default function OrderPage() {
     }
 
     // Payment details are validated PER PERSON. Someone with a linked item and
-    // no catalogue lines still owes money, so they are in this list too.
+    // no catalog lines still owes money, so they are in this list too.
     if (codPeople.length > 0) {
       codPeople.forEach(p => {
         const pay = payFor(p.name);
@@ -655,31 +586,6 @@ export default function OrderPage() {
   const groceryCount   = getCartCount(items);
   const vesselSubtotal = getVesselSubtotal(items);
   const deckSubtotal   = getDeckSubtotal(items);
-  // WHICH REQUIRED HEADER FIELDS ARE STILL EMPTY.
-  //
-  // Deliberately the same list validate() enforces for step 2, minus the two
-  // that are per-trip and must never be remembered — arrival date and time.
-  // If this comes back empty, the only thing standing between a repeat customer
-  // and a submitted order is when the boat gets there.
-  const headerGaps = [
-    ['company name',   vessel.company_name],
-    ['billing contact', vessel.contact_name],
-    ['billing phone',  vessel.phone],
-    ['vessel name',    vessel.vessel_name],
-    ['vessel type',    vessel.vessel_type],
-    ['captain',        vessel.captain_name],
-    ['captain phone',  vessel.captain_phone],
-    ['vessel email',   vessel.vessel_email],
-    ['location',       vessel.terminal_name],
-    ['delivery method', vessel.delivery_method],
-  ].filter(([, v]) => !String(v || '').trim()).map(([label]) => label as string);
-
-  // Collapsing hides fields, so it must never hide a field someone is being
-  // asked to fix — any error at all forces everything back open.
-  const headerCollapsed = headerGaps.length === 0
-    && !showAllFields
-    && Object.keys(errors).length === 0;
-
   const codSubtotal    = getCodSubtotal(items);
   const codItems       = items.filter(i => i.paid_by === 'cod');
   const deckItems      = items.filter(i => i.paid_by === 'deck');
@@ -689,7 +595,7 @@ export default function OrderPage() {
   // CODs are separated PER CREW MEMBER — each person settles their own
   // total at delivery ("that's a Daniel item, that's Janice" — Jen).
   //
-  // LINKED ITEMS COUNT AS A PERSON TOO. An off-catalogue item (a Walmart link)
+  // LINKED ITEMS COUNT AS A PERSON TOO. An off-catalog item (a Walmart link)
   // marked "a crew member" carries a name and creates a real debt, but it has
   // no price until someone buys it. Leaving those people out of this list is
   // how a crew member ends up owing money that no screen ever showed — so they
@@ -912,7 +818,7 @@ export default function OrderPage() {
         )}
 
         {/* COD payment — one method PER PERSON, not one per order.
-            Anyone with a linked (off-catalogue) item appears here too: they
+            Anyone with a linked (off-catalog) item appears here too: they
             owe money even though the amount isn't known until it's bought. */}
         {hasCodPeople && (
           <section className="card-base mb-4 p-5 border-2 border-purple-200">
@@ -1149,44 +1055,6 @@ export default function OrderPage() {
           </div>
         )}
 
-        {/* ── Already known: one line instead of eight fields ──────────────
-            Everything here came from the last order for this boat. It is shown
-            rather than hidden so nobody submits against details they never saw,
-            but it is not eight inputs to tab through again. */}
-        {headerCollapsed && (
-          <section className="card-base mb-4 p-5">
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex items-start gap-3">
-                <span className="mt-0.5 text-brand-green/50"><Ship className="w-4 h-4" /></span>
-                <div className="text-sm leading-relaxed">
-                  <p className="font-bold text-brand-navy">
-                    {vessel.vessel_name}
-                    {vessel.vessel_type && <span className="font-normal text-gray-400"> · {vessel.vessel_type === 'Other' ? (vessel.vessel_type_other || 'Other') : vessel.vessel_type}</span>}
-                  </p>
-                  <p className="text-gray-500">
-                    {vessel.company_name}
-                    {vessel.po_number && <span> · PO {vessel.po_number}</span>}
-                  </p>
-                  <p className="text-gray-500">
-                    Capt. {vessel.captain_name} · {vessel.captain_phone}
-                  </p>
-                  <p className="text-gray-400 text-xs mt-0.5">
-                    Confirmations to {vessel.vessel_email}
-                  </p>
-                </div>
-              </div>
-              <button type="button" onClick={() => setShowAllFields(true)}
-                className="text-xs font-bold text-brand-river hover:underline shrink-0">
-                Edit details
-              </button>
-            </div>
-            <p className="text-xs text-brand-green/60 mt-3 pt-3 border-t border-brand-green/10">
-              Same as your last order. Just set the arrival below.
-            </p>
-          </section>
-        )}
-
-        {!headerCollapsed && (<>
         {/* ── Company Information ── */}
         <section className="card-base mb-4 p-5">
           <SectionHead icon={<ClipboardList className="w-4 h-4" />} title="Company Information" />
@@ -1234,35 +1102,6 @@ export default function OrderPage() {
         {/* ── Vessel Information ── */}
         <section className="card-base mb-4 p-5">
           <SectionHead icon={<Ship className="w-4 h-4" />} title="Vessel Information" />
-
-          {/* ── Boats this account has ordered for before ──────────────────
-              Eight fields become one tap. Only ever an ADDITION to the form —
-              the inputs below stay exactly as they were, so a boat that has
-              never ordered is typed in as normal, and a guest sees nothing at
-              all because the list comes back empty. */}
-          {defaults.vessels.length > 0 && (
-            <div className="mb-4">
-              <p className="text-xs font-bold text-gray-600 mb-1.5">Order for a boat you&apos;ve used before</p>
-              <div className="flex flex-wrap gap-2">
-                {defaults.vessels.map(v => {
-                  const active = vessel.vessel_name.trim().toLowerCase() === v.vessel_name.toLowerCase();
-                  return (
-                    <button key={v.vessel_name} type="button" onClick={() => applyVessel(v)}
-                      className={`px-3 py-1.5 rounded-full border-2 text-xs font-bold transition-all ${
-                        active
-                          ? 'border-brand-green bg-brand-green text-white'
-                          : 'border-gray-200 text-gray-600 hover:border-brand-green/40'
-                      }`}>
-                      {v.vessel_name}
-                    </button>
-                  );
-                })}
-              </div>
-              <p className="text-[11px] text-gray-400 mt-1.5">
-                Fills the captain, phone, vessel email and usual berth. Arrival date and time are always yours to set.
-              </p>
-            </div>
-          )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="Vessel Name" required error={errors.vessel_name}>
               <input type="text" className={`input-base w-full ${errors.vessel_name ? 'border-red-400' : ''}`}
@@ -1335,25 +1174,14 @@ export default function OrderPage() {
           )}
         </section>
 
-        </>)}
-
         {/* ── Delivery Information ── */}
         <section className="card-base mb-4 p-5">
           <SectionHead icon={<MapPin className="w-4 h-4" />} title="Delivery Information" sub="Primary delivery location" />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="Location / Terminal Name" required error={errors.terminal_name} col2>
-              {/* A native datalist, not a custom combobox: it stays a plain text
-                  field, so a brand-new terminal is typed exactly as before and
-                  there is no popup to get wrong on a phone with one bar. */}
-              <input type="text" list="gts-terminals" autoComplete="off"
-                className={`input-base w-full ${errors.terminal_name ? 'border-red-400' : ''}`}
+              <input type="text" className={`input-base w-full ${errors.terminal_name ? 'border-red-400' : ''}`}
                 placeholder="e.g. Mel Price Locks, Alton IL" value={vessel.terminal_name}
                 onChange={e => setV('terminal_name', e.target.value)} />
-              {defaults.terminals.length > 0 && (
-                <datalist id="gts-terminals">
-                  {defaults.terminals.map(t => <option key={t} value={t} />)}
-                </datalist>
-              )}
             </Field>
             <Field label="Estimated Arrival Date" required error={errors.arrival_date}>
               <input type="date" className={`input-base w-full ${errors.arrival_date ? 'border-red-400' : ''}`}

@@ -28,9 +28,9 @@ export type CodMethod = 'cash' | 'venmo' | 'cashapp' | 'credit_card' | '';
 
 export interface CodPaymentRecord {
   name: string;
-  /** Catalogue COD lines only. Linked items have no price yet. */
+  /** Catalog COD lines only. Linked items have no price yet. */
   amount: number;
-  /** Count of off-catalogue items this person is paying for. */
+  /** Count of off-catalog items this person is paying for. */
   linked_items: number;
   method: CodMethod;
   handle: string;
@@ -54,7 +54,7 @@ const num = (v: unknown): number => {
  * Returns [] for every order placed before this existed, for malformed JSON,
  * and for anything that isn't an array of objects — callers treat an empty
  * result as "fall back to the order-level columns", so a bad parse degrades to
- * the old behaviour instead of throwing inside an email send.
+ * the old behavior instead of throwing inside an email send.
  */
 export function readCodPayments(
   extendedInfo: Record<string, unknown> | null | undefined,

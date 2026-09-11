@@ -16,7 +16,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Smartphone, Monitor, Loader2, Trash2, BellOff } from 'lucide-react';
 import { adminFetch } from '@/lib/admin-auth';
-import { formatDateShort } from '@/lib/utils';
 
 interface Device {
   id: string;
@@ -31,7 +30,7 @@ interface Device {
  * A human label from the user agent.
  *
  * Deliberately coarse. UA sniffing is unreliable and the only job here is
- * helping someone recognise their own phone in a list of two or three — "iPhone
+ * helping someone recognize their own phone in a list of two or three — "iPhone
  * · Safari" does that, and an exact version string wouldn't do it better.
  */
 function describe(ua: string | null): { label: string; mobile: boolean } {
@@ -57,7 +56,8 @@ function describe(ua: string | null): { label: string; mobile: boolean } {
 
 const when = (iso: string | null) => {
   if (!iso) return null;
-  return formatDateShort(iso);
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 };
 
 export default function PushDevices() {
@@ -82,7 +82,7 @@ export default function PushDevices() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Which row is the device being used right now, so it can be labelled
+  // Which row is the device being used right now, so it can be labeled
   // instead of the person guessing between two iPhones.
   useEffect(() => {
     (async () => {

@@ -56,7 +56,7 @@ export default function ShopInstallPage() {
       blurb="Add the app to your Home Screen and your phone buzzes when a grocery order comes in — with the list already sorted by aisle."
       iconSrc="/branding/shop-icon.png"
       // Deep green base with warm radial washes picking up Sinclair's red and
-      // gold. Enough colour to feel considered; dark enough that white type
+      // gold. Enough color to feel considered; dark enough that white type
       // stays readable on a phone under shop lighting.
       background={
         'radial-gradient(120% 80% at 15% 0%, rgba(200,16,46,0.28) 0%, transparent 55%),'

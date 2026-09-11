@@ -49,7 +49,7 @@ export function isGtsRole(role: AdminRole): boolean {
  * and service-only jobs are Grafton Towboat work; Sinclair's has no part in
  * them and must never see one. Deriving this from the role rather than the
  * 'sinclair' permission flag means a forgotten checkbox can't expose them:
- * the safe behaviour is the default, and the flag can only ever ADD scoping
+ * the safe behavior is the default, and the flag can only ever ADD scoping
  * (e.g. a GTS account deliberately restricted to the grocery view).
  */
 export function isSinclairScoped(session: AdminSessionPayload): boolean {

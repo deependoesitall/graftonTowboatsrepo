@@ -19,7 +19,7 @@
 // ⚠️ DO NOT render this without its caption, and do not reword the caption to
 // blur who delivers. That is the one thing Dave asked for.
 //
-// ⚠️ DO NOT recolour, crop, or restyle either mark. Both are transparent PNGs
+// ⚠️ DO NOT recolor, crop, or restyle either mark. Both are transparent PNGs
 // rendered at full size with only a drop-shadow for separation — no plates, no
 // tinting, no masking. Restyling a partner's logo to match your palette is the
 // thing brand owners actually object to, and it costs nothing to avoid.

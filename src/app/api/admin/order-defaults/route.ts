@@ -25,8 +25,18 @@ import { requireAdmin } from '@/lib/admin-auth-server';
 export const dynamic = 'force-dynamic';
 
 /** ⚠️ ONE STRING LITERAL — see the note in catalog-sheet/route.ts. */
+/**
+ * ⚠️ THE BILLING ADDRESS IS `customer_email`. THERE IS NO `orders.email`.
+ *
+ * `email` is the name that field has in the SUBMIT PAYLOAD — the zod schema in
+ * /api/orders — and it is stored as customer_email. Asking Postgres for a
+ * column that does not exist fails the whole select, so every orders lookup
+ * returned nothing and the screen said "no boat by that name" about boats that
+ * were plainly there. Same slip cost a production build on the confirm page a
+ * few hours earlier; the payload shape and the row shape are different things.
+ */
 const HEADER_COLUMNS =
-  'company_name, vessel_name, vessel_type, captain_name, captain_phone, vessel_email, email, contact_name, phone, terminal_name, delivery_method, approach_side, vhf_channel, po_number, created_at';
+  'company_name, vessel_name, vessel_type, captain_name, captain_phone, vessel_email, customer_email, contact_name, phone, terminal_name, delivery_method, approach_side, vhf_channel, po_number, created_at';
 
 interface HeaderRow {
   company_name: string | null;
@@ -35,7 +45,7 @@ interface HeaderRow {
   captain_name: string | null;
   captain_phone: string | null;
   vessel_email: string | null;
-  email: string | null;
+  customer_email: string | null;
   contact_name: string | null;
   phone: string | null;
   terminal_name: string | null;
@@ -144,7 +154,7 @@ export async function GET(req: NextRequest) {
           captain_name: (row.captain_name || '').trim(),
           captain_phone: (row.captain_phone || '').trim(),
           vessel_email: (row.vessel_email || '').trim(),
-          billing_email: (row.email || '').trim(),
+          billing_email: (row.customer_email || '').trim(),
           contact_name: (row.contact_name || '').trim(),
           phone: (row.phone || '').trim(),
           terminal_name: (row.terminal_name || '').trim(),

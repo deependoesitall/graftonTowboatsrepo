@@ -363,7 +363,7 @@ export default function DeliveriesPage() {
 // QuickBooks stays the invoice system of record (it owns the numbering and the
 // hosted pay link). What actually costs Mary Karen time is re-deriving each
 // delivery's numbers from three places, hunting down two documents, and then
-// tracking what's keyed in with coloured spreadsheet cells.
+// tracking what's keyed in with colored spreadsheet cells.
 //
 // THE UNIT ON SCREEN IS THE INVOICE, NOT THE DELIVERY.
 // GTS bills one invoice per boat, so a boat's whole week is one invoice — and
@@ -1191,7 +1191,7 @@ function DeliveryEditor({ delivery, companies, serviceTypes, vesselRecords = [],
             <div className="mt-0.5 relative">
               <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-gray-400 pointer-events-none">$</span>
               {/* inputMode="decimal" gives phones a number pad without any of
-                  type="number"'s behaviour. See moneyChars/moneyBlur above. */}
+                  type="number"'s behavior. See moneyChars/moneyBlur above. */}
               <input
                 type="text" inputMode="decimal" autoComplete="off" placeholder="0.00"
                 value={f.delivery_fee ?? ''}

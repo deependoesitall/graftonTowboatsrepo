@@ -37,11 +37,11 @@ export interface ApplyLine {
 }
 
 /**
- * A line with no catalogue row behind it — a write-in for something Sinclair's
+ * A line with no catalog row behind it — a write-in for something Sinclair's
  * stocks but never printed on the form. It reaches the order through the SAME
  * builder draft and the same POST /api/orders as everything else; the only
  * difference on the wire is an empty product_id, which that route already
- * treats as "no catalogue row" for its service lines.
+ * treats as "no catalog row" for its service lines.
  */
 export interface CustomLine {
   description: string;
@@ -57,7 +57,7 @@ export interface PaperFormImportProps {
   /** Optional COD-aware apply (preferred). */
   applyLines?: (lines: ApplyLine[]) => void;
   appendNotes?: (note: string) => void;
-  /** Off-catalogue lines resolved from unreadable marks. */
+  /** Off-catalog lines resolved from unreadable marks. */
   addCustomLines?: (lines: CustomLine[]) => void;
   onApplied?: (count: number) => void;
 }
@@ -378,7 +378,7 @@ export function PaperFormImport({ catalog, setLine, applyLines, appendNotes, add
       else {
         // No custom-line channel on this host — never lose the information.
         // It becomes a note rather than vanishing between two screens.
-        notes.push(...customs.map(c => `Off-catalogue: ${c.qty} × ${c.description}`));
+        notes.push(...customs.map(c => `Off-catalog: ${c.qty} × ${c.description}`));
       }
     }
 
@@ -647,7 +647,7 @@ export function PaperFormImport({ catalog, setLine, applyLines, appendNotes, add
                           />
                         </label>
                         <span className="text-xs text-gray-400 self-center">
-                          {w.match ? `→ ${w.match.description}` : 'No catalogue match — stays in notes if unchecked'}
+                          {w.match ? `→ ${w.match.description}` : 'No catalog match — stays in notes if unchecked'}
                         </span>
                       </div>
                     </div>

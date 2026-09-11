@@ -1,6 +1,6 @@
 // src/components/layout/StoreFooter.tsx
 //
-// The legal footer for the ordering side of the site (catalogue, order form,
+// The legal footer for the ordering side of the site (catalog, order form,
 // confirmation). The marketing site has its own richer footer; this is the
 // minimum a commercial storefront should always show.
 //
@@ -10,7 +10,7 @@
 // standard is reasonable opportunity to review, and a permanent footer link is
 // what makes the notice above the submit button meaningful rather than decorative.
 //
-// It also just answers the obvious question a new customer has on a catalogue
+// It also just answers the obvious question a new customer has on a catalog
 // page: who am I actually buying from, and how do I ring them?
 //
 // Deliberately quiet — small, muted, out of the way. Nothing here should

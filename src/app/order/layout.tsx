@@ -7,7 +7,7 @@
 // appear on all of them — editing three call sites guarantees the fourth step
 // someone adds later quietly won't have it.
 //
-// This matters more here than on the catalogue: this is the page where
+// This matters more here than on the catalog: this is the page where
 // submitting the form agrees to the Terms, and the notice above the button
 // only means something if the Terms are actually reachable from the same page.
 

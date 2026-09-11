@@ -33,7 +33,7 @@ export function generateOrderHTML(order: Order): string {
   // Reads order.extended_info directly — `ext` isn't in scope until later.
   const codPayments   = readCodPayments(order.extended_info);
   const codPayByName  = new Map(codPayments.map(p => [p.name, p]));
-  // Someone whose only COD is a linked item has no catalogue lines, so they
+  // Someone whose only COD is a linked item has no catalog lines, so they
   // never appear in codByName — and this sheet is what the driver collects
   // from. Leaving them off it is how a debt goes uncollected.
   const codLinkedOnly = codPayments.filter(p =>

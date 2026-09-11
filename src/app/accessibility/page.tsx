@@ -41,7 +41,7 @@ export default function AccessibilityPage() {
 
       <LS>What we&apos;ve done</LS>
       <LUL items={[
-        'Text and background colours are chosen for contrast, and body text can be enlarged by your browser without the layout breaking.',
+        'Text and background colors are chosen for contrast, and body text can be enlarged by your browser without the layout breaking.',
         'Every control can be reached and operated with a keyboard alone.',
         'Form fields have real labels attached to them, so screen readers announce what each one is for.',
         'Buttons and links are sized for a thumb, not a mouse pointer — which matters on a boat as much as it does for anyone with limited dexterity.',

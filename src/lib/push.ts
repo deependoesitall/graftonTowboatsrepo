@@ -86,7 +86,7 @@ function deliveryLine(order: Order): string {
     const weekday = DAYS[new Date(Date.UTC(+y, +mo - 1, +d)).getUTCDay()];
     parts.push(`${weekday} ${MONTHS[+mo - 1]} ${+d}`);
   } else if (raw) {
-    // Something we don't recognise — show it rather than silently dropping the
+    // Something we don't recognize — show it rather than silently dropping the
     // one field she asked for.
     parts.push(raw);
   }
@@ -176,7 +176,7 @@ export interface PushAudience {
  *
  * NEVER THROWS. This is called inline from the order POST, and a push failure
  * must not turn a successfully placed order into a 500 for the captain. Every
- * outcome is swallowed and summarised in the return value for logging.
+ * outcome is swallowed and summarized in the return value for logging.
  */
 export async function sendOrderPush(
   order: Order,

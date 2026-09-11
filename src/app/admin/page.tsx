@@ -531,7 +531,7 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
   // the server and client first render agree (localStorage isn't available
   // during SSR — reading it in useState caused hydration errors before).
   const [isGts, setIsGts] = useState(false);
-  // The receipt-bypass below is genuinely owner-only, not just labelled that
+  // The receipt-bypass below is genuinely owner-only, not just labeled that
   // way. GTS Managers can now run the whole billing chain — which is the point,
   // Mary does the invoicing — but skipping Sinclair's receipt means billing a
   // customer off an estimate, and that stays an owner's call. Read after mount

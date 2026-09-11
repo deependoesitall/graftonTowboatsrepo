@@ -141,7 +141,7 @@ const submitSchema = z.object({
    * copy of the order form for weeks. Older clients send only the flat field
    * and must keep working — the refinements below accept either shape.
    *
-   * `amount` is catalogue COD lines. `linked_items` counts off-catalogue
+   * `amount` is catalog COD lines. `linked_items` counts off-catalog
    * requests (a Walmart link) that person is paying for, which have NO price
    * until someone buys them — that's why they're counted, not summed.
    */
@@ -174,7 +174,7 @@ const submitSchema = z.object({
 }, { message: 'COD items ride along with a regular delivery — please add vessel-account groceries, an additional service, or a crew change to this order.' })
 // If anything is COD we need to know how it will be paid.
 //
-// A LINKED ITEM COUNTS. An off-catalogue request marked "a crew member" is a
+// A LINKED ITEM COUNTS. An off-catalog request marked "a crew member" is a
 // real debt with no price yet; letting it through without a payment route just
 // moves the problem to the dock, where someone has to work out who owes what
 // with the boat about to leave.
@@ -345,11 +345,11 @@ export async function POST(req: NextRequest) {
           // ⚠️ EMPTY → NULL, NOT EMPTY STRING.
           //
           // order_items.product_id is a uuid with a foreign key to products.
-          // A write-in resolved from a scanned paper form has no catalogue row
+          // A write-in resolved from a scanned paper form has no catalog row
           // behind it and sends an empty id; passing that straight through
           // fails as `invalid input syntax for type uuid` and takes the whole
           // order down with it. Service lines below already store null here for
-          // exactly the same reason — this puts off-catalogue grocery lines on
+          // exactly the same reason — this puts off-catalog grocery lines on
           // the same footing instead of inventing an id that would bill the
           // wrong product.
           product_id: item.product_id || null,

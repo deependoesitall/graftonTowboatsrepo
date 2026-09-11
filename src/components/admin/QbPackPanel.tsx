@@ -149,7 +149,7 @@ export default function QbPackPanel({ delivery, onClose, onMarked }: {
                     {formatCurrency(l.amount)}
                   </p>
                   {/* The tax flag is the reason this panel exists — it gets
-                      colour and weight, not a quiet grey label. */}
+                      color and weight, not a quiet grey label. */}
                   <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md shrink-0 ${
                     l.taxable
                       ? 'bg-brand-navy text-white'

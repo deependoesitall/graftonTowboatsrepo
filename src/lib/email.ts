@@ -221,7 +221,7 @@ export function buildOrderEmailHtml(
   // order-level codMethodLabel below is the fallback for exactly those.
   const codPayments   = readCodPayments(ext);
   const codPayByName  = new Map(codPayments.map(p => [p.name, p]));
-  // People who owe money ONLY through a linked item have no catalogue lines,
+  // People who owe money ONLY through a linked item have no catalog lines,
   // so they never appear in codByName and would otherwise be invisible to the
   // person collecting payment at the dock.
   const codLinkedOnly = codPayments.filter(p =>

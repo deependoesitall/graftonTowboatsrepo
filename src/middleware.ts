@@ -19,7 +19,7 @@
 //
 // (2) predates the shop work and is the more valuable half of this fix.
 //
-// If you ever see middleware behaviour vanish after a refactor, check this
+// If you ever see middleware behavior vanish after a refactor, check this
 // file's path first. It is the one Next.js convention that fails without
 // telling you.
 

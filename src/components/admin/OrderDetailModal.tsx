@@ -338,7 +338,7 @@ export function OrderDetailModal({
   // order-level block below is the fallback for exactly those).
   const codPayments   = readCodPayments(order.extended_info);
   const codPayByName  = new Map(codPayments.map(p => [p.name, p]));
-  // People who owe only through a linked item have no catalogue lines and so
+  // People who owe only through a linked item have no catalog lines and so
   // never reach codGroups. This modal is where Mary works out who owes what.
   const codLinkedOnly = codPayments.filter(p =>
     p.linked_items > 0 && !codGroups.some(([name]) => name === p.name));

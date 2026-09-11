@@ -1,8 +1,8 @@
 // src/app/api/cron/catalog-rails/route.ts
 //
-// Nightly rebuild of the two catalogue rails.
+// Nightly rebuild of the two catalog rails.
 //
-// Runs after the catalogue sync, because a rail can only point at SKUs we
+// Runs after the catalog sync, because a rail can only point at SKUs we
 // already hold — an item featured by Sinclair's that we haven't imported yet
 // is skipped rather than stored as a dangling reference.
 //

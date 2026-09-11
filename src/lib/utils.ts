@@ -45,7 +45,7 @@ export function formatDate(dateString: string): string {
  * ⚠️ THE DATE PART MUST BE THE LOCAL DATE. getFullYear/getMonth/getDate read
  * the SERVER's clock, which on Vercel is UTC — so every order placed after
  * 7 PM Central (6 PM in winter) was numbered with tomorrow's date. Staff find
- * orders by number and Jen's ledger is organised by day, so a number that
+ * orders by number and Jen's ledger is organized by day, so a number that
  * disagrees with the day the order was placed sends someone looking in the
  * wrong place.
  *
