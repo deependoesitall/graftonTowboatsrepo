@@ -8,6 +8,8 @@
 
 import type { FormLayoutItem } from '@/lib/form-layout-apply';
 
+import { rectifyPage } from '@/lib/paper-form-rectify';
+
 export interface CatalogItem {
   id: string;
   upc: string | null;
@@ -101,6 +103,8 @@ export interface ScanProgress {
 }
 
 export interface ScanResult {
+  /** Where the quantity column was found, and whether to trust it. */
+  qntyColumn: QntyColumn;
   candidates: ScanCandidate[];
   writeIns: WriteInCandidate[];
   pageOrientations: Array<0 | 90 | 180 | 270>;
@@ -423,13 +427,149 @@ function findRowBands(canvas: HTMLCanvasElement): RowBand[] {
  * Upside down, the same window landed on the Category column — a printed word
  * on every row — and it reported 640.
  */
-const QNTY_COL = { lo: 0.640, hi: 0.690 };
+export interface QntyColumn {
+  lo: number;
+  hi: number;
+  /**
+   * Did calibration actually find the table, or is this the fallback?
+   *
+   * ⚠️ THIS IS NOT COSMETIC. Everything downstream measures ink inside this
+   * stripe. Placed wrongly it does not degrade — it reads a different column
+   * and reports confident nonsense, which is the single worst outcome this
+   * feature can produce. When the geometry cannot be trusted the operator is
+   * told and given the control, rather than handed a clean-looking list of
+   * quantities taken from the pack-size column.
+   */
+  confident: boolean;
+  /** How far the table's own borders lean, in page widths. >0.015 ≈ a photo. */
+  skew: number;
+}
 
-function qntyRect(canvas: HTMLCanvasElement, band: RowBand) {
+/** Where the column sits when calibration has nothing to work with. */
+const QNTY_COL_DEFAULT: QntyColumn = { lo: 0.640, hi: 0.690, confident: false, skew: 0 };
+
+/**
+ * CALIBRATE THE COLUMN ONCE, FROM THE WHOLE DOCUMENT.
+ *
+ * Finding the table's rules on a single page does not work: on this scan half
+ * the pages yielded one vertical rule or none at all — photocopied rules simply
+ * come out too faint to peak above the printed text around them. Averaging the
+ * column-ink profile over twenty pages turns those faint rules into clear ones,
+ * because the rules are in the same place on every page and the text is not.
+ *
+ * The profile is resampled into fixed bins first, so pages that were scanned or
+ * photographed at different widths still stack on top of each other.
+ *
+ * From there the table's own edges give a coordinate system that survives any
+ * crop or zoom: the quantity column occupies 0.711–0.775 of the table's width,
+ * and each edge is snapped to a real detected rule when one is close. A form
+ * cropped tighter or photographed at an angle moves in page fractions and stays
+ * put in table fractions.
+ */
+/**
+ * How far the table's left border moves between the top and bottom of a page.
+ *
+ * On a flatbed scan this is a pixel or two. On a hand-held photo the page is
+ * rotated a few degrees and tilted away from the lens, so the border walks
+ * sideways as it goes down — and every column walks with it. A single stripe at
+ * a fixed fraction of the page width then cuts diagonally across the table,
+ * which is exactly how a quantity reader ends up reading pack sizes.
+ */
+function borderSkew(canvas: HTMLCanvasElement): number {
+  const w = canvas.width, h = canvas.height;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+  const edgeAt = (yf: number): number | null => {
+    const y = Math.floor(h * yf);
+    const band = Math.max(4, Math.round(h / 200));
+    const { data } = ctx.getImageData(0, y, Math.floor(w * 0.45), band * 2);
+    const cols = Math.floor(w * 0.45);
+    for (let x = Math.floor(w * 0.01); x < cols; x++) {
+      let dark = 0;
+      for (let r = 0; r < band * 2; r++) {
+        const i = ((r * cols) + x) * 4;
+        if ((data[i] + data[i + 1] + data[i + 2]) / 3 < 150) dark++;
+      }
+      if (dark / (band * 2) > 0.6) return x / w;
+    }
+    return null;
+  };
+  const top = edgeAt(0.20), bottom = edgeAt(0.82);
+  if (top == null || bottom == null) return 1;   // can't see a border at all
+  return Math.abs(top - bottom);
+}
+
+export function calibrateQntyColumn(canvases: HTMLCanvasElement[]): QntyColumn {
+  const BINS = 400;
+  const acc = new Float64Array(BINS);
+  let used = 0;
+
+  for (const canvas of canvases) {
+    const w = canvas.width, h = canvas.height;
+    if (!w || !h) continue;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+    const y0 = Math.floor(h * 0.14), y1 = Math.floor(h * 0.90);
+    const { data } = ctx.getImageData(0, y0, w, Math.max(1, y1 - y0));
+    const rows = Math.max(1, y1 - y0);
+    const sum = new Float64Array(BINS);
+    const cnt = new Float64Array(BINS);
+    for (let x = 0; x < w; x++) {
+      let dark = 0;
+      for (let y = 0; y < rows; y++) {
+        const i = ((y * w) + x) * 4;
+        if ((data[i] + data[i + 1] + data[i + 2]) / 3 < 150) dark++;
+      }
+      const b = Math.min(BINS - 1, Math.floor((x * BINS) / w));
+      sum[b] += dark / rows;
+      cnt[b] += 1;
+    }
+    for (let b = 0; b < BINS; b++) acc[b] += sum[b] / Math.max(1, cnt[b]);
+    used++;
+  }
+  if (!used) return QNTY_COL_DEFAULT;
+  // Worst skew across the batch — one bad photo is enough to make fixed
+  // fractions unsafe for the whole run.
+  let skew = 0;
+  for (const c of canvases) skew = Math.max(skew, borderSkew(c));
+  for (let b = 0; b < BINS; b++) acc[b] /= used;
+
+  const peaks: number[] = [];
+  for (let b = 1; b < BINS - 1; b++) {
+    if (acc[b] > 0.16 && acc[b] >= acc[b - 1] && acc[b] >= acc[b + 1]) {
+      if (!peaks.length || b - peaks[peaks.length - 1] > 3) peaks.push(b);
+    }
+  }
+  if (peaks.length < 4) return { ...QNTY_COL_DEFAULT, skew };
+
+  const left = peaks[0] / BINS;
+  const right = peaks[peaks.length - 1] / BINS;
+  const span = right - left;
+  // A table that came out implausibly narrow or wide means the peaks were text,
+  // not rules. Don't build a coordinate system on it.
+  if (span < 0.45 || span > 0.95) return { ...QNTY_COL_DEFAULT, skew };
+
+  const snap = (target: number): number => {
+    let best = target, dist = Infinity;
+    for (const b of peaks) {
+      const x = b / BINS;
+      const d = Math.abs(x - target);
+      if (d < dist) { dist = d; best = x; }
+    }
+    return dist <= 0.025 ? best : target;
+  };
+
+  const lo = snap(left + span * 0.711);
+  const hi = snap(left + span * 0.775);
+  if (hi - lo < 0.02 || hi - lo > 0.14) return { ...QNTY_COL_DEFAULT, skew };
+  // A leaning table means a fixed vertical stripe cannot follow the column, no
+  // matter how well this run located it at one height.
+  return { lo, hi, skew, confident: skew <= 0.015 };
+}
+
+function qntyRect(canvas: HTMLCanvasElement, band: RowBand, col: QntyColumn) {
   const w = canvas.width;
   return {
-    x0: Math.floor(w * QNTY_COL.lo), y0: band.y0,
-    x1: Math.floor(w * QNTY_COL.hi), y1: band.y1,
+    x0: Math.floor(w * col.lo), y0: band.y0,
+    x1: Math.floor(w * col.hi), y1: band.y1,
   };
 }
 
@@ -446,12 +586,12 @@ function qntyRect(canvas: HTMLCanvasElement, band: RowBand) {
  * ink. Each run is one mark. The row grid is then used only to say WHICH item
  * the mark belongs to, which is the thing it is reliable for.
  */
-function findMarkRuns(canvas: HTMLCanvasElement): Array<{ y0: number; y1: number; ink: number }> {
+function findMarkRuns(canvas: HTMLCanvasElement, col: QntyColumn): Array<{ y0: number; y1: number; ink: number }> {
   const w = canvas.width, h = canvas.height;
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
   const inset = Math.max(4, Math.round(w * 0.004));
-  const x0 = Math.floor(w * QNTY_COL.lo) + inset;
-  const x1 = Math.floor(w * QNTY_COL.hi) - inset;
+  const x0 = Math.floor(w * col.lo) + inset;
+  const x1 = Math.floor(w * col.hi) - inset;
   // Skip the letterhead: on page one the vessel block sits across this same
   // column range and is not a quantity.
   const yTop = Math.floor(h * 0.13);
@@ -470,7 +610,13 @@ function findMarkRuns(canvas: HTMLCanvasElement): Array<{ y0: number; y1: number
   }
 
   const runs: Array<{ y0: number; y1: number; ink: number }> = [];
-  const ON = 0.12;
+  // ⚠️ TUNED FOR RECALL, ON PURPOSE.
+  //
+  // Measured against the Scott Noble order: 0.12 found 11 marks, 0.09 found 27,
+  // 0.07 found 37. Nothing here is ever added without a person confirming it,
+  // so a spare detection costs one tap to dismiss while a missed one is silent
+  // — the boat just doesn't get the item and nobody learns why.
+  const ON = 0.07;
   const MIN_H = Math.max(6, Math.round(h * 0.005));
   let start: number | null = null;
   for (let y = 0; y <= rowInk.length; y++) {
@@ -572,9 +718,11 @@ function rowContextRegion(canvas: HTMLCanvasElement, band: RowBand): CropRegion 
   };
 }
 
-export function detectInkedRowsOnPage(canvas: HTMLCanvasElement, inkThreshold = 0.045) {
+export function detectInkedRowsOnPage(
+  canvas: HTMLCanvasElement,
+  col: QntyColumn = QNTY_COL_DEFAULT,
+) {
   const bands = findRowBands(canvas);
-  void inkThreshold; // kept for callers; runs carry their own ink measure now
   const marked: Array<{
     rowIndex: number; ink: number; cropDataUrl: string;
     contextCropDataUrl: string; contextRegion: CropRegion; markRegion: CropRegion;
@@ -582,7 +730,7 @@ export function detectInkedRowsOnPage(canvas: HTMLCanvasElement, inkThreshold = 
   // One entry per PENCIL MARK, matched to the row it sits on — not one per row
   // that happened to measure dark.
   const used = new Set<number>();
-  for (const run of findMarkRuns(canvas)) {
+  for (const run of findMarkRuns(canvas, col)) {
     const mid = (run.y0 + run.y1) / 2;
     let best = -1, bestDist = Infinity;
     for (let i = 0; i < bands.length; i++) {
@@ -598,7 +746,7 @@ export function detectInkedRowsOnPage(canvas: HTMLCanvasElement, inkThreshold = 
     if (used.has(best)) continue;
     used.add(best);
 
-    const rect = qntyRect(canvas, band);
+    const rect = qntyRect(canvas, band, col);
     const region = rowContextRegion(canvas, band);
     marked.push({
       rowIndex: best,
@@ -829,6 +977,7 @@ export async function scanPaperPages(opts: {
   const indexes = buildCatalogIndexes(catalog);
   const candidates: ScanCandidate[] = [];
   const writeIns: WriteInCandidate[] = [];
+  let rectified = 0;
   const pageOrientations: Array<0 | 90 | 180 | 270> = [];
   const summaryFlags: string[] = [];
   let layoutCursor = 0;
@@ -836,15 +985,55 @@ export async function scanPaperPages(opts: {
   const oriented: HTMLCanvasElement[] = [];
   for (let p = 0; p < canvases.length; p++) {
     onProgress?.({ phase: 'orient', page: p + 1, pages: canvases.length, message: `Straightening page ${p + 1} of ${canvases.length}…` });
-    const { canvas, rotation } = autoOrientCanvas(canvases[p]);
+    const { canvas: turned, rotation } = autoOrientCanvas(canvases[p]);
+
+    // ⚠️ FLATTEN BEFORE ANYTHING MEASURES A POSITION.
+    //
+    // Rotation gets the page the right way up; it does nothing about a page
+    // held at an angle to a phone lens. Every fraction used after this line —
+    // the quantity column, the row bands, the write-in block — assumes the
+    // table's columns are vertical and evenly placed, which is true of a
+    // flatbed scan and false of a photograph. rectifyPage() finds the table's
+    // own borders and maps them back to a rectangle, so a photo arrives here
+    // looking like a scan and one code path serves both.
+    //
+    // It declines on anything already square, because warping a good scan only
+    // costs it sharpness.
+    const rect = rectifyPage(turned);
+    const canvas = rect.canvas;
+    if (rect.applied) {
+      rectified++;
+      onProgress?.({ phase: 'orient', page: p + 1, pages: canvases.length,
+        message: `Flattening page ${p + 1} — the photo was at an angle…` });
+    }
     oriented.push(canvas);
     pageOrientations.push(rotation);
     if (rotation !== 0) summaryFlags.push(`Page ${p + 1} was rotated ${rotation}° automatically.`);
   }
 
+
+  // ⚠️ CALIBRATE AFTER ORIENTING, NEVER BEFORE.
+  // A page that is still upside down puts the Category column where the
+  // quantity column belongs, and calibrating on that would lock the whole
+  // document onto the wrong stripe.
+  const qntyCol = calibrateQntyColumn(oriented);
+  onProgress?.({ phase: 'detect', page: 0, pages: oriented.length,
+    message: qntyCol.confident
+      ? `Found the quantity column (${Math.round(qntyCol.lo * 100)}–${Math.round(qntyCol.hi * 100)}% across)…`
+      : 'Could not lock onto the quantity column — every row will need checking…' });
+  if (!qntyCol.confident) {
+    summaryFlags.push(
+      qntyCol.skew > 0.015
+        ? 'These look like photos rather than a flat scan — the page leans, so the quantity column '
+          + 'could not be located reliably. Marks below may be off by a column: check each one against '
+          + 'its crop, and lay the form flat for a straight-on shot if you can.'
+        : 'The quantity column could not be located on these pages, so a standard position was used. '
+          + 'Check each mark against its crop before applying.',
+    );
+  }
   for (let p = 0; p < oriented.length; p++) {
     onProgress?.({ phase: 'detect', page: p + 1, pages: oriented.length, message: `Reading quantities on page ${p + 1} of ${oriented.length}…` });
-    const { bands, marked } = detectInkedRowsOnPage(oriented[p]);
+    const { bands, marked } = detectInkedRowsOnPage(oriented[p], qntyCol);
     const markedByRow = new Map(marked.map(m => [m.rowIndex, m]));
 
     for (let r = 0; r < bands.length; r++) {
@@ -865,6 +1054,11 @@ export async function scanPaperPages(opts: {
       }
       const { qty, note } = interpretMark(ocrText);
       const rowFlags = [...flags];
+      // The stripe everything was measured in is not trusted, so no row read
+      // through it may present itself as settled.
+      if (!qntyCol.confident) {
+        rowFlags.push('Quantity column position is uncertain on this scan — confirm against the crop.');
+      }
       if (qty == null && note) rowFlags.push(`Handwriting looks like a note (“${note}”), not a number.`);
       // ⚠️ ONLY WHEN WE ACTUALLY TRIED. Pushed unconditionally, this fired on
       // every row of every scan with handwriting reading switched off, which
@@ -918,6 +1112,11 @@ export async function scanPaperPages(opts: {
     const found = await extractWriteIns(oriented[pi], pi, catalog, indexes.byUpc);
     writeIns.push(...found);
   }
+  if (rectified) {
+    summaryFlags.push(
+      `Flattened ${rectified} page${rectified === 1 ? '' : 's'} that were photographed at an angle.`,
+    );
+  }
   const rotated = pageOrientations
     .map((r, i) => ({ r, page: i + 1 }))
     .filter(x => x.r !== 0);
@@ -933,5 +1132,5 @@ export async function scanPaperPages(opts: {
   }
 
   onProgress?.({ phase: 'done', page: oriented.length, pages: oriented.length, message: 'Ready for your review' });
-  return { candidates, writeIns, pageOrientations, summaryFlags };
+  return { qntyColumn: qntyCol, candidates, writeIns, pageOrientations, summaryFlags };
 }
