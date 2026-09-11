@@ -57,7 +57,11 @@ export function SaveOrderPrompt({ order, orderNumber, onCreateAccount }: {
   // The address the confirmation was just sent to. Using it means the account
   // is created against an address he has already proved he reads, and the
   // claim-orders step then finds this very order waiting for him.
-  const email = (order?.vessel_email || order?.email || '').trim();
+  // `customer_email` is the billing address on Order; there is no bare
+  // `email` field. The vessel's own address wins because that is where the
+  // confirmation just went, and matching it is what lets claim-orders pull
+  // this order into the new account.
+  const email = (order?.vessel_email || order?.customer_email || '').trim();
 
   useEffect(() => {
     if (!orderId || !email) return;

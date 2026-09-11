@@ -201,7 +201,7 @@ function ConfirmContent() {
                   </p>
                   <div className="flex items-center gap-2">
                     <button onClick={() => {
-                      setAuthEmail((order?.vessel_email || order?.email || '').trim());
+                      setAuthEmail((order?.vessel_email || order?.customer_email || '').trim());
                       setAuthOpen(true);
                     }}
                       className="bg-brand-orange text-white text-xs font-bold uppercase tracking-wide px-4 py-2 rounded-full hover:bg-brand-ored transition-colors">
