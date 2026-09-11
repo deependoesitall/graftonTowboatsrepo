@@ -49,6 +49,12 @@ export default function OnboardBoatPage() {
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<'cook' | 'captain' | 'other'>('cook');
 
+  // Inline set-password on existing crew rows (same API as Customers → Logins)
+  const [pwFor, setPwFor] = useState<string | null>(null);
+  const [pwValue, setPwValue] = useState('');
+  const [pwSaving, setPwSaving] = useState(false);
+  const [pwDone, setPwDone] = useState<string | null>(null);
+
   useEffect(() => {
     (async () => {
       const s = await fetchAdminSession();
@@ -158,6 +164,40 @@ export default function OnboardBoatPage() {
       );
       await loadLedgerBoats(companyId);
     } finally { setBusy(false); }
+  }
+
+
+  async function setMemberPassword(member: Member) {
+    if (!vessel) { setError('Link the boat first'); return; }
+    const next = pwValue.trim();
+    if (next.length < 4) {
+      setError('Password must be at least 4 characters');
+      return;
+    }
+    setPwSaving(true);
+    setError('');
+    setOk('');
+    try {
+      const res = await adminFetch(`/api/admin/vessels/${vessel.id}/members`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: member.user_id, password: next }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(json.error || 'Could not set password');
+        return;
+      }
+      setPwDone(member.id);
+      setOk(`Password set for ${member.display_name || member.email || 'crew member'}`);
+      setTimeout(() => {
+        setPwFor(null);
+        setPwValue('');
+        setPwDone(null);
+      }, 2500);
+    } finally {
+      setPwSaving(false);
+    }
   }
 
   async function addMember() {
@@ -341,15 +381,70 @@ export default function OnboardBoatPage() {
         </h2>
         <p className="text-xs text-brand-green/50">
           Anyone on the boat who orders — cook, captain, steward, whoever. Separate emails and passwords, shared boat history.
-          Type a password (browsers may suggest one — that is fine). You can also set or reset a crew member&apos;s password later from Customers → Logins.
+          Type a password (browsers may suggest one — that is fine). Use Set password on a row below to change one on the fly — or later from Customers → Logins.
         </p>
 
-        {members.length > 0 && (
+                {members.length > 0 && (
           <ul className="divide-y divide-brand-green/10 rounded-xl border border-brand-green/10 overflow-hidden">
             {members.map(m => (
-              <li key={m.id} className="px-4 py-3 flex justify-between text-sm bg-white">
-                <span className="font-medium text-brand-navy">{m.display_name || m.email}</span>
-                <span className="text-brand-green/50">{m.role} · {m.email}</span>
+              <li key={m.id} className="px-4 py-3 bg-white text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-medium text-brand-navy truncate">{m.display_name || m.email}</p>
+                    <p className="text-brand-green/50 text-xs truncate capitalize">{m.role} · {m.email}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = pwFor === m.id ? null : m.id;
+                      setPwFor(next);
+                      setPwValue('');
+                      setPwDone(null);
+                      setError('');
+                    }}
+                    className="text-xs font-bold uppercase tracking-wide text-brand-river hover:text-brand-navy shrink-0"
+                  >
+                    {pwDone === m.id ? (
+                      <span className="text-green-600">Password set</span>
+                    ) : (
+                      'Set password'
+                    )}
+                  </button>
+                </div>
+                {pwFor === m.id && (
+                  <div className="mt-3 space-y-2">
+                    <div className="flex flex-wrap items-center gap-2 bg-brand-sand/40 border border-brand-green/10 rounded-lg p-2.5">
+                      <input
+                        type="text"
+                        autoFocus
+                        value={pwValue}
+                        onChange={e => setPwValue(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && setMemberPassword(m)}
+                        placeholder="Type new password (min 4)"
+                        className="input-base text-sm flex-1 min-w-[12rem]"
+                        autoComplete="new-password"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setMemberPassword(m)}
+                        disabled={pwSaving || pwValue.trim().length < 4}
+                        className="btn-primary text-xs px-3 py-2 disabled:opacity-50 whitespace-nowrap"
+                      >
+                        {pwSaving ? 'Saving…' : 'Set password'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setPwFor(null); setPwValue(''); }}
+                        className="text-xs text-gray-400 hover:text-gray-600 px-2"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-brand-green/50 px-1">
+                      Type it, read it to them now. They can also use Forgot password on Sign in.
+                    </p>
+                  </div>
+                )}
               </li>
             ))}
           </ul>
