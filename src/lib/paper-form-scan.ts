@@ -1,1 +1,1 @@
-FILE:/workspace/track-b/msi-paper-form-scan.ts
+@/workspace/track-b/msi-paper-form-scan.ts
