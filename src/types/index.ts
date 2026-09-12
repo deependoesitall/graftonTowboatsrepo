@@ -264,6 +264,8 @@ export interface Order {
   /** Sequential GTS invoice number, assigned when the invoice is first generated. */
   invoice_number?: number | null;
   status: OrderStatus;
+  /** Set when a signed-in crew account placed the order. NULL = guest. */
+  user_id?: string | null;
   /** When the boat confirmation email went out at place-time. NULL = never sent. */
   confirmation_email_sent_at?: string | null;
   /** Who sent it, or "skipped — {staff}" when staff opted out on a paper order. */

@@ -61,6 +61,15 @@ function AccountContent() {
     loadBoatLinks();
   }, [user, loading]);
 
+  // Confirmation email deep-link: /account?order=<id>
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const id = new URLSearchParams(window.location.search).get('order');
+    if (!id) return;
+    setTab('orders');
+    setExpandedOrderId(id);
+  }, [user]);
+
   async function loadOrders() {
     setOrdersLoading(true);
     try {

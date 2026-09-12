@@ -124,6 +124,9 @@ export function buildOrderEmailHtml(
     intro?: string;
     buttonText: string;
     buttonUrl: string;
+    /** Optional second CTA (e.g. "Questions? Contact us" under View in dashboard). */
+    secondButtonText?: string;
+    secondButtonUrl?: string;
     footerText: string;
     showSinclairNote?: boolean;
     /** Final email only — renders the GTS delivery charge + grand total. */
@@ -533,9 +536,15 @@ export function buildOrderEmailHtml(
     ${sinclairNote}
 
     <div style="text-align:center;padding:14px;background:#f8f9fa;border-radius:4px;">
-      <a href="${opts.buttonUrl}" style="background:#1E3D1E;color:#D9E84A;padding:10px 24px;border-radius:24px;text-decoration:none;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1px;">
+      <a href="${opts.buttonUrl}" style="background:#1E3D1E;color:#D9E84A;padding:10px 24px;border-radius:24px;text-decoration:none;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1px;display:inline-block;">
         ${opts.buttonText} →
       </a>
+      ${opts.secondButtonUrl && opts.secondButtonText ? `
+      <div style="margin-top:10px;">
+        <a href="${opts.secondButtonUrl}" style="color:#1E3D1E;font-size:12px;font-weight:700;text-decoration:underline;">
+          ${opts.secondButtonText}
+        </a>
+      </div>` : ''}
     </div>
   </div>
 
@@ -661,11 +670,19 @@ export async function sendOrderReceivedEmail(
   // office gets the monthly bill, not per-order noise (July 10 demo decision).
   const confirmTo = order.vessel_email || order.customer_email;
   if (confirmTo) {
+    const hasAccount = !!order.user_id;
+    const portalUrl = `${appUrl}/account?order=${encodeURIComponent(order.id)}`;
     const customerHtml = buildOrderEmailHtml(order, {
       tagline:    'Order Confirmation',
-      intro:      `Thank you for your order, ${order.contact_name}! We've received it and will begin preparing your delivery. A copy of your order is attached to this email.`,
-      buttonText: 'Questions? Contact Us',
-      buttonUrl:  `mailto:${publicContactEmail()}`,
+      intro:      hasAccount
+        ? `Thank you for your order, ${order.contact_name}! We've received it and will begin preparing your delivery. A copy of your order is attached — or open your boat dashboard to track it.`
+        : `Thank you for your order, ${order.contact_name}! We've received it and will begin preparing your delivery. A copy of your order is attached to this email.`,
+      buttonText: hasAccount ? 'View in your boat dashboard' : 'Questions? Contact Us',
+      buttonUrl:  hasAccount ? portalUrl : `mailto:${publicContactEmail()}`,
+      ...(hasAccount ? {
+        secondButtonText: 'Questions? Contact us',
+        secondButtonUrl: `mailto:${publicContactEmail()}`,
+      } : {}),
       footerText: `Grafton Towboat Services · Grafton, IL 62037 · (618) 556-0290 · ${publicContactEmail()}`,
     });
     const customerResult = await getResend().emails.send({
