@@ -678,8 +678,9 @@ export function OrderDetailModal({
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center bg-black/50 sm:p-4">
-        <div className="bg-white sm:rounded-xl shadow-2xl w-full sm:max-w-5xl h-[100dvh] sm:h-auto sm:max-h-[92vh] flex flex-col overflow-hidden animate-fade-in">
+      {/* Near full-screen workspace on desktop — not a centered max-w card. */}
+      <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/50 p-0 sm:p-1.5">
+        <div className="bg-white sm:rounded-lg shadow-2xl w-full h-[100dvh] sm:h-[calc(100dvh-0.75rem)] sm:max-h-[calc(100dvh-0.75rem)] sm:w-full max-w-none flex flex-col overflow-hidden animate-fade-in">
 
           {/* Header */}
           <div className="bg-brand-navy px-4 sm:px-6 py-3 sm:py-4 pt-[max(0.75rem,env(safe-area-inset-top))] sm:pt-4 rounded-none sm:rounded-t-xl flex items-center justify-between gap-2 shrink-0">
@@ -711,7 +712,9 @@ export function OrderDetailModal({
             </div>
           </div>
 
-          <div className="p-4 sm:p-6 pb-[max(1.25rem,env(safe-area-inset-bottom))] space-y-5 overflow-auto min-h-0 flex-1 overscroll-contain">
+          {/* Layout: header (above) stays put; meta+lines scroll; totals/summary/actions pin. */}
+          <div className="flex flex-col flex-1 min-h-0">
+          <div className="p-4 sm:p-6 space-y-5 overflow-y-auto min-h-0 flex-1 overscroll-contain">
 
             {/* Company / Billing */}
             <Section icon={<FileText className="w-3.5 h-3.5" />} title="Company &amp; Billing">
@@ -1806,9 +1809,77 @@ export function OrderDetailModal({
               </div>
             )}
 
+          </div>{/* end scroll region */}
+
+          {/* Pinned bottom chrome — System/Register totals + key actions stay visible
+              on fat orders without scrolling past hundreds of lines. */}
+          <div className="shrink-0 border-t border-gray-200 bg-white px-4 sm:px-6 py-3 space-y-3 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-[0_-6px_12px_-8px_rgba(0,0,0,0.12)]">
+            {groceryItems.length > 0 && (
+              <div className="rounded-xl border border-brand-gold/30 bg-brand-sand/30 p-3 space-y-2">
+                <div className="flex justify-between text-sm font-bold text-brand-navy">
+                  <span>System total</span>
+                  <span>{formatCurrency(subtotal)}</span>
+                </div>
+                <label className="block text-xs font-bold text-gray-500 uppercase">
+                  Register total
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <span>$</span>
+                    <input type="number" step="0.01" min="0" placeholder="0.00"
+                      value={registerTotal}
+                      onChange={e => { setRegisterTotal(e.target.value); setRegisterSaved(false); }}
+                      onKeyDown={e => { if (e.key === 'Enter') confirmRegisterTotal(); }}
+                      className="w-28 min-w-0 input-base font-display font-bold text-brand-navy" />
+                    {registerTotal && Math.abs(parseFloat(registerTotal) - subtotal) > 1 && (
+                      <span className="text-xs font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+                        ⚠ {parseFloat(registerTotal) > subtotal ? '+' : ''}{formatCurrency(parseFloat(registerTotal) - subtotal)} vs system
+                      </span>
+                    )}
+                    <button type="button" onClick={confirmRegisterTotal}
+                      disabled={registerTotalSaving || registerTotal.trim() === '' || registerSaved}
+                      className={`flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded-lg border transition-colors whitespace-nowrap ${
+                        registerSaved
+                          ? 'bg-green-50 text-green-700 border-green-200 cursor-default'
+                          : 'bg-brand-navy text-white border-brand-navy hover:bg-brand-navy/90 disabled:opacity-40 disabled:cursor-not-allowed'
+                      }`}>
+                      {registerTotalSaving
+                        ? <><Loader2 className="w-3 h-3 animate-spin" /> Saving…</>
+                        : registerSaved
+                          ? <><CheckCircle2 className="w-3 h-3" /> Final total saved</>
+                          : <><Check className="w-3 h-3" /> Save final total</>}
+                    </button>
+                  </div>
+                </label>
+                {deckItems.length > 0 && (
+                  <label className="block text-xs font-bold text-teal-700 uppercase">
+                    Deck register
+                    <div className="mt-1 flex items-center gap-2">
+                      <span>$</span>
+                      <input type="number" step="0.01" min="0" placeholder="0.00"
+                        value={deckTotal}
+                        onChange={e => { setDeckTotal(e.target.value); setDeckSaved(false); }}
+                        className="w-28 min-w-0 input-base font-display font-bold text-teal-900" />
+                    </div>
+                  </label>
+                )}
+                {canEdit && order.status !== 'shopped' && order.status !== 'fulfilled' && order.status !== 'cancelled' && (
+                  <button
+                    type="button"
+                    onClick={openFinishShopping}
+                    disabled={fillingAll}
+                    className="flex items-center justify-center gap-1.5 text-xs font-bold text-white bg-brand-green rounded-lg px-3 py-2.5 w-full hover:bg-brand-green/90 disabled:opacity-50"
+                    title="Accept the pick list as ordered, enter the register total, mark Shopped"
+                  >
+                    {fillingAll
+                      ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Working…</>
+                      : <><CheckCircle2 className="w-3.5 h-3.5" /> Finish shopping</>}
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* Sinclair Foods Summary */}
             {groceryItems.length > 0 && (
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
                 <p className="text-xs font-bold text-blue-700 uppercase tracking-wide mb-2 flex items-center gap-1.5">
                   <Printer className="w-3.5 h-3.5" /> Sinclair Foods Summary
                 </p>
@@ -1880,7 +1951,8 @@ export function OrderDetailModal({
               </div>
             )}
 
-          </div>
+          </div>{/* end pin footer */}
+          </div>{/* end body column */}
         </div>
       </div>
 

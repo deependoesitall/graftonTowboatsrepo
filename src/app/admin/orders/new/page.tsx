@@ -215,6 +215,10 @@ export default function NewOrderPage() {
   const openRegisterTape = useCallback(() => {
     setShowRegister(true);
     registerFileInputRef.current?.click();
+    // Reveal match card under the mode panels once the panel mounts.
+    requestAnimationFrame(() => {
+      document.getElementById('register-receipt-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
   }, []);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
