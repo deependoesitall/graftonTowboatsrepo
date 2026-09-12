@@ -5,6 +5,7 @@
 import type { Order } from '@/types';
 import { formatCurrency, formatDate } from './utils';
 import { codFeePercent, codTotalWithFee } from '@/lib/cod-fee';
+import { splitOutsidePickups, groupCodCollect, lineAmount } from '@/lib/outside-pickup';
 
 // ─── Colours / brand ─────────────────────────────────────────
 const DARK_GREEN = '#1E3D1E';
@@ -134,16 +135,21 @@ export async function generateOrderPdfBuffer(order: Order): Promise<Buffer> {
     }
 
     // ── COD ITEMS (per-line paid_by — driver collects payment) ─
-    const codItems = order.items.filter(i => i.item_type !== 'service' && i.paid_by === 'cod');
-    if (codItems.length > 0) {
-      const codBase = codItems.reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0);
+    const groceryCod = order.items.filter(i => i.item_type !== 'service' && i.paid_by === 'cod');
+    const { cod: pickupCod } = splitOutsidePickups(order.items.filter(i => i.item_type === 'service'));
+    const codGroups = groupCodCollect(groceryCod, pickupCod);
+    if (codGroups.length > 0) {
+      const codBase = groceryCod.reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0)
+        + pickupCod.reduce((s, i) => s + lineAmount(i), 0);
       const codFeePct = codFeePercent(order);
       const codTotal = codTotalWithFee(order, codBase);
       const methodLabel = order.cod_payment_method === 'credit_card' ? 'CREDIT CARD — CALL TO COLLECT'
         : order.cod_payment_method === 'venmo' ? `VENMO — REQUEST TO ${order.cod_payment_handle || 'ACCOUNT ON FILE'}`
         : order.cod_payment_method === 'cashapp' ? `CASH APP — REQUEST TO ${order.cod_payment_handle || 'ACCOUNT ON FILE'}`
         : order.cod_payment_method === 'cash' ? 'CASH (LEGACY)' : '';
-      const lines = codItems.map(i => `${i.quantity}x ${i.description} — ${i.cod_name || 'crew member'}`).join('; ');
+      const lines = codGroups.flatMap(([name, list]) =>
+        list.map(i => `${i.quantity}x ${i.description}${i.unpriced ? ' (priced when bought)' : ''} — ${name}`)
+      ).join('; ');
       const detail = [
         lines,
         methodLabel && `Payment: ${methodLabel}${order.cod_payment_method === 'credit_card' && order.cod_preferred_phone ? ` (call ${order.cod_preferred_phone}${order.cod_contact_time ? `, around ${order.cod_contact_time}` : ''})` : ''}`,

@@ -5,6 +5,9 @@ import { formatCurrency, formatDate, formatArrivalTime } from './utils';
 import { generateOrderPdfBuffer } from './pdf-attachment';
 import { codFeePercent, codFeeLabel, codTotalWithFee, allocateCodTotals } from '@/lib/cod-fee';
 import { readCodPayments, codMethodSentence } from '@/lib/cod-payments';
+import {
+  splitOutsidePickups, groupCodCollect, pickupPayLabel, pickupIsPriced, lineAmount,
+} from '@/lib/outside-pickup';
 
 // Lazily construct the Resend client so importing this module (e.g. during
 // `next build` page-data collection) doesn't require RESEND_API_KEY to be set.
@@ -155,17 +158,16 @@ export function buildOrderEmailHtml(
   const ext           = order.extended_info || {};
 
   const codItems = groceryItems.filter(i => i.paid_by === 'cod');
-  const codSubtotal = codItems.reduce((s, i) => s + Number(i.line_total), 0);
+  const { deck: deckPickups, cod: codPickups } = splitOutsidePickups(serviceItems);
+  const groceryCodTotal = codItems.reduce((s, i) => s + Number(i.line_total), 0);
+  const pickupCodTotal = codPickups.reduce((s, i) => s + lineAmount(i), 0);
+  const codSubtotal = groceryCodTotal + pickupCodTotal;
   // Deck lines — company-billed but listed separately from the grocery allowance
   const deckItems = groceryItems.filter(i => i.paid_by === 'deck');
-  const deckSubtotal = deckItems.reduce((s, i) => s + Number(i.line_total), 0);
-  // CODs grouped PER CREW MEMBER — each settles their own total at delivery
-  const codByName = Array.from(codItems.reduce((acc, i) => {
-    const name = (i.cod_name || '').trim() || 'Crew member';
-    if (!acc.has(name)) acc.set(name, [] as typeof codItems);
-    acc.get(name)!.push(i);
-    return acc;
-  }, new Map<string, typeof codItems>()).entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  const deckSubtotal = deckItems.reduce((s, i) => s + Number(i.line_total), 0)
+    + deckPickups.reduce((s, i) => s + lineAmount(i), 0);
+  // CODs grouped PER CREW MEMBER — grocery COD + that person's Price Paid pickups
+  const codByName = groupCodCollect(codItems, codPickups);
   const discounts = order.discounts || [];
   const discountTotal = Number(order.discount_total) || 0;
 
@@ -254,7 +256,7 @@ export function buildOrderEmailHtml(
     p.linked_items > 0 && !codByName.some(([name]) => name === p.name));
   // Cent-exact: the rows are guaranteed to sum to the header total.
   const codShares = allocateCodTotals(order, codByName.map(([name, list]) => ({
-    name, subtotal: list.reduce((s, i) => s + Number(i.line_total), 0),
+    name, subtotal: list.reduce((s, i) => s + i.amount, 0),
   })), codSubtotal);
 
   const codMethodLabel = order.cod_payment_method === 'credit_card' ? 'Credit Card — we’ll call to collect'
@@ -338,7 +340,13 @@ export function buildOrderEmailHtml(
         const details = item.service_type === 'parts_pickup'
           ? [d.pickup_location && `Pickup: ${d.pickup_location}`, d.order_number && `Order #${d.order_number}`, d.contact_name && `Contact: ${d.contact_name}`, d.contact_phone && d.contact_phone].filter(Boolean).join(' · ')
           : item.service_type === 'other_pickup'
-          ? [d.url && `Link: ${d.url}`, d.notes && d.notes, 'Handled by Sinclair’s'].filter(Boolean).join(' · ')
+          ? [
+              d.url && `Link: ${d.url}`,
+              d.notes && d.notes,
+              pickupPayLabel(item),
+              pickupIsPriced(item) ? `Price paid ${formatCurrency(lineAmount(item))}` : 'Price paid — not keyed yet',
+              "Handled by Sinclair's",
+            ].filter(Boolean).join(' · ')
           : [d.description && `Item: ${d.description}`, d.origin && `From: ${d.origin}`, d.contact_name && `Contact: ${d.contact_name}`, d.contact_phone && d.contact_phone].filter(Boolean).join(' · ');
         return `<tr style="border-bottom:1px solid #f0f0f0;">
           <td style="padding:10px;font-size:13px;font-weight:700;color:#1E3D1E;width:35%;">${item.description}</td>
@@ -431,16 +439,17 @@ export function buildOrderEmailHtml(
       <div style="font-size:12px;color:#444;">${order.notes}</div>
     </div>` : ''}
 
-    ${(codItems.length > 0 || codLinkedOnly.length > 0) ? `<div style="background:#faf5ff;border:1px solid #9333ea;padding:10px 14px;border-radius:4px;margin-bottom:20px;">
+    ${(codByName.length > 0 || codLinkedOnly.length > 0) ? `<div style="background:#faf5ff;border:1px solid #9333ea;padding:10px 14px;border-radius:4px;margin-bottom:20px;">
       <div style="font-size:9px;font-weight:800;color:#9333ea;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">COD Items — ${formatCurrency(codTotalWithFee(order, codSubtotal))}${codFeePct > 0 || codFeeLbl(codSubtotal) !== 'no handling fee' ? ` incl. ${codFeeLbl(codSubtotal)}` : ''} (not invoiced) · paid personally, separated by crew member</div>
       ${codByName.map(([name, list]) => {
-        const personTotal = list.reduce((s, i) => s + Number(i.line_total), 0);
+        const personTotal = list.reduce((s, i) => s + i.amount, 0);
         const pay = codPayByName.get(name);
+        const hasPickupLine = list.some(l => l.unpriced || codPickups.some(p => p.id === l.id));
         return `<div style="margin-bottom:6px;">
-          <div style="font-size:12px;font-weight:800;color:#6b21a8;">${name} — ${formatCurrency(codShares.get(name) ?? personTotal)}${codFeePct > 0 ? ' <span style="font-weight:400;color:#9d7bd8;">incl. fee</span>' : ''}${
-            pay && pay.linked_items > 0 ? ` <span style="font-weight:400;color:#9d7bd8;">+ ${pay.linked_items === 1 ? 'linked item' : `${pay.linked_items} linked items`}</span>` : ''
+          <div style="font-size:12px;font-weight:800;color:#6b21a8;">${name} — ${formatCurrency(codShares.get(name) ?? personTotal)}${codFeePct > 0 && personTotal > 0 ? ' <span style="font-weight:400;color:#9d7bd8;">incl. fee</span>' : ''}${
+            pay && pay.linked_items > 0 && !hasPickupLine ? ` <span style="font-weight:400;color:#9d7bd8;">+ ${pay.linked_items === 1 ? 'linked item' : `${pay.linked_items} linked items`}</span>` : ''
           }</div>
-          ${list.map(i => `<div style="font-size:11px;color:#444;padding-left:10px;">${i.quantity}× ${i.description} · ${formatCurrency(Number(i.line_total))}</div>`).join('')}
+          ${list.map(i => `<div style="font-size:11px;color:#444;padding-left:10px;">${i.quantity}× ${i.description} · ${i.unpriced ? 'priced when bought' : formatCurrency(i.amount)}</div>`).join('')}
           ${pay ? `<div style="font-size:11px;color:#6b21a8;padding-left:10px;margin-top:2px;"><strong>Pays by:</strong> ${codMethodSentence(pay)}</div>` : ''}
         </div>`;
       }).join('')}

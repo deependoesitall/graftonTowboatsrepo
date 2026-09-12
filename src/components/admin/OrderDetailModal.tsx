@@ -18,6 +18,10 @@ import { codFeeLabel, codTotalWithFee, allocateCodTotals } from '@/lib/cod-fee';
 import { PickSheetOverlay } from '@/components/admin/PickSheetOverlay';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { readCodPayments, codMethodSentence } from '@/lib/cod-payments';
+import {
+  splitOutsidePickups, pickupPay, pickupPayLabel, pickupLabel,
+  pickupIsPriced, lineAmount, groupCodCollect, BOAT_COD_NAME,
+} from '@/lib/outside-pickup';
 
 interface OrderDetailModalProps {
   order: Order;
@@ -233,7 +237,7 @@ export function OrderDetailModal({
     const v = parseFloat(priceVal);
     if (isNaN(v) || v < 0) { setItemError('Enter what it actually cost.'); return; }
     const r = await itemAction(item.id, { action: 'set_price', unit_price: v });
-    if (r) { setPriceId(null); setPriceVal(''); }
+    if (r) { setPriceId(null); setPriceVal(''); onRefresh(); }
   }
 
   /** Substitutions rendered under the line they replace. */
@@ -459,7 +463,7 @@ export function OrderDetailModal({
   const [svcPkgPhone, setSvcPkgPhone] = useState('');
   const [svcOtherUrl, setSvcOtherUrl] = useState('');
   const [svcOtherNotes, setSvcOtherNotes] = useState('');
-  const [svcOtherPaidBy, setSvcOtherPaidBy] = useState<'grocery' | 'cod'>('grocery');
+  const [svcOtherPaidBy, setSvcOtherPaidBy] = useState<'grocery' | 'deck' | 'cod'>('grocery');
   const [svcOtherCodName, setSvcOtherCodName] = useState('');
   const [addSaving, setAddSaving] = useState(false);
   const [itemError, setItemError] = useState('');
@@ -484,40 +488,35 @@ export function OrderDetailModal({
 
   const groceryItems = localItems.filter(i => i.item_type !== 'service');
   const serviceItems = localItems.filter(i => i.item_type === 'service');
-  const subtotal = groceryItems
+  const grocerySubtotal = groceryItems
     .filter(i => i.shopping_status !== 'out_of_stock')
     .reduce((s, i) => s + (i.actual_total ?? i.unit_price * i.quantity), 0);
   const codItems = groceryItems.filter(i => i.paid_by === 'cod');
-  // OUTSIDE PICKUPS ARE COD TOO — every one of them, whether the boat settles
-  // it or a named crew member does. They have to be in the COD subtotal or the
-  // handling fee is computed on the wrong base. Dave: "the handling fee is for
-  // all of them combined, not per item... You got TV, you got a carton of
-  // cigarettes, you got all this. What's the total? We add in handling fee."
-  const outsidePickups = serviceItems.filter(i => i.service_type === 'other_pickup');
-  const outsideSubtotal = outsidePickups
+  const groceryCodTotal = codItems
     .filter(i => i.shopping_status !== 'out_of_stock')
-    .reduce((s, i) => s + Number(i.actual_total ?? i.unit_price * i.quantity), 0);
-  const codSubtotal = codItems
-    .filter(i => i.shopping_status !== 'out_of_stock')
-    .reduce((s, i) => s + (i.actual_total ?? i.unit_price * i.quantity), 0)
-    + outsideSubtotal;
-  /** Outside pickups still waiting on a price — the fee is wrong until they're keyed. */
-  const unpricedPickups = outsidePickups.filter(i => !Number(i.unit_price));
-  // COD lines grouped per crew member. Hoisted because a FLAT handling fee has
-  // to be apportioned across these people — the split needs to know how many
-  // there are, and the per-person figures must add up to the header total.
-  const codGroups = Array.from(codItems.reduce((acc, i) => {
-    const name = (i.cod_name || '').trim() || 'Crew member';
-    if (!acc.has(name)) acc.set(name, [] as typeof codItems);
-    acc.get(name)!.push(i);
-    return acc;
-  }, new Map<string, typeof codItems>()).entries())
-    .sort((a, b) => a[0].localeCompare(b[0]));
+    .reduce((s, i) => s + lineAmount(i), 0);
+  // Price Paid on an outside pickup follows who the line is billed to —
+  // boat grocery, deck, or a named COD — instead of silently inflating COD.
+  const { all: outsidePickups, vessel: vesselPickups, deck: deckPickups, cod: codPickups } =
+    splitOutsidePickups(serviceItems);
+  const pickupVesselTotal = vesselPickups.reduce((s, i) => s + lineAmount(i), 0);
+  const pickupDeckTotal = deckPickups.reduce((s, i) => s + lineAmount(i), 0);
+  const pickupCodTotal = codPickups.reduce((s, i) => s + lineAmount(i), 0);
+  const codSubtotal = groceryCodTotal + pickupCodTotal;
+  const subtotal = grocerySubtotal + pickupVesselTotal + pickupDeckTotal + pickupCodTotal;
+  const unpricedCodPickups = codPickups.filter(i => !pickupIsPriced(i));
+  const unpricedOtherPickups = [...vesselPickups, ...deckPickups].filter(i => !pickupIsPriced(i));
+  // COD lines grouped per crew member (grocery + that person's Instant Pot).
+  // Unnamed COD pickups get their own "To the boat" block so they never get
+  // baked into Amber/Marcus/Tyler headers.
+  const codGroups = groupCodCollect(codItems, codPickups);
   // Deck lines — company-billed but listed separately from the grocery allowance
   const deckItems = groceryItems.filter(i => i.paid_by === 'deck');
   const deckSubtotal = deckItems
     .filter(i => i.shopping_status !== 'out_of_stock')
-    .reduce((s, i) => s + (i.actual_total ?? i.unit_price * i.quantity), 0);
+    .reduce((s, i) => s + lineAmount(i), 0) + pickupDeckTotal;
+  const groceryDeckOnly = deckSubtotal - pickupDeckTotal;
+  const groceryAllowance = grocerySubtotal - groceryCodTotal - groceryDeckOnly;
   // Per-person payment (empty on orders placed before this existed — the
   // order-level block below is the fallback for exactly those).
   const codPayments   = readCodPayments(order.extended_info);
@@ -565,7 +564,7 @@ export function OrderDetailModal({
   };
   const codShares = allocateCodTotals(liveFee, codGroups.map(([name, list]) => ({
     name,
-    subtotal: list.reduce((s, i) => s + Number(i.actual_total ?? i.unit_price * i.quantity), 0),
+    subtotal: list.reduce((s, i) => s + i.amount, 0),
   })), codSubtotal);
 
   const feeDirty =
@@ -1141,7 +1140,7 @@ export function OrderDetailModal({
             )}
 
             {/* COD items — collected at delivery, NEVER invoiced */}
-            {(codItems.length > 0 || codLinkedOnly.length > 0) && (
+            {(codGroups.length > 0 || codLinkedOnly.length > 0) && (
               <div className="bg-purple-50 border-2 border-purple-300 rounded-lg p-3">
                 <p className="text-xs font-bold text-purple-700 uppercase tracking-wide mb-2">
                   $ COD Items — collect {formatCurrency(codSubtotal + effectiveFee)}{effectiveFee > 0 ? ` incl. ${codFeeLabel(order, codSubtotal)}` : ''} · separated by crew member (not on the company invoice)
@@ -1150,15 +1149,17 @@ export function OrderDetailModal({
                   {codGroups.map(([name, list]) => (
                       <div key={name} className="bg-white/60 rounded-lg px-2.5 py-1.5">
                         <p className="text-sm font-bold text-purple-800 flex justify-between">
-                          <span>{name}</span>
+                          <span>{name === BOAT_COD_NAME ? 'To the boat' : name}</span>
                           <span>
                             {formatCurrency(codShares.get(name) ?? 0)}
-                            {effectiveFee > 0 && <span className="font-normal text-purple-500 text-xs"> incl. fee</span>}
+                            {effectiveFee > 0 && list.some(l => l.amount > 0) && <span className="font-normal text-purple-500 text-xs"> incl. fee</span>}
                           </span>
                         </p>
                         {list.map(i => (
                           <p key={i.id} className="text-xs text-purple-900 pl-2">
-                            {i.quantity}× {i.description} · {formatCurrency(i.actual_total ?? i.unit_price * i.quantity)}
+                            {i.quantity}× {i.description} · {i.unpriced
+                              ? <span className="text-amber-700 font-semibold">priced when bought</span>
+                              : formatCurrency(i.amount)}
                           </p>
                         ))}
                         {codPayByName.get(name) && (
@@ -1203,13 +1204,12 @@ export function OrderDetailModal({
                       no price until Sinclair's has bought the thing, so 5% of a
                       $0 line is $0 and the real cost of the trip is absorbed.
                       A keyed dollar amount overrides the percentage entirely. */}
-                  {unpricedPickups.length > 0 && (
+                  {unpricedCodPickups.length > 0 && (
                     <p className="flex items-start gap-1.5 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
                       <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
                       <span>
-                        {unpricedPickups.length} outside pickup{unpricedPickups.length === 1 ? '' : 's'} still unpriced —
-                        the handling fee is calculated on the COD total, so enter what they cost under
-                        Additional Services before collecting.
+                        {unpricedCodPickups.length} COD outside pickup{unpricedCodPickups.length === 1 ? '' : 's'} still unpriced —
+                        enter Price Paid under Additional Services so the collect total matches what you ring.
                       </span>
                     </p>
                   )}
@@ -1727,27 +1727,50 @@ export function OrderDetailModal({
                       ))}
                     </tbody>
                     <tfoot>
-                      {(codItems.length > 0 || deckItems.length > 0) && (
+                      {(codItems.length > 0 || deckItems.length > 0 || outsidePickups.length > 0) && (
                         <>
                           <tr className="bg-white border-t border-gray-200">
                             <td colSpan={6} className="px-3 py-1.5 text-xs text-gray-500">Grocery — boat allowance (invoiced monthly)</td>
-                            <td className="px-3 py-1.5 text-right text-xs font-bold text-brand-navy">{formatCurrency(subtotal - codSubtotal - deckSubtotal)}</td>
+                            <td className="px-3 py-1.5 text-right text-xs font-bold text-brand-navy">{formatCurrency(groceryAllowance)}</td>
                             {canEdit && <td />}
                           </tr>
-                          {deckItems.length > 0 && (
+                          {vesselPickups.filter(pickupIsPriced).map(i => (
+                            <tr key={i.id} className="bg-white">
+                              <td colSpan={6} className="px-3 py-1.5 text-xs text-gray-600">Outside pickup (boat grocery) — {pickupLabel(i)}</td>
+                              <td className="px-3 py-1.5 text-right text-xs font-bold text-brand-navy">{formatCurrency(lineAmount(i))}</td>
+                              {canEdit && <td />}
+                            </tr>
+                          ))}
+                          {groceryDeckOnly > 0 && (
                             <tr className="bg-white">
                               <td colSpan={6} className="px-3 py-1.5 text-xs text-teal-700">Deck — invoiced separately (not grocery allowance)</td>
-                              <td className="px-3 py-1.5 text-right text-xs font-bold text-teal-700">{formatCurrency(deckSubtotal)}</td>
+                              <td className="px-3 py-1.5 text-right text-xs font-bold text-teal-700">{formatCurrency(groceryDeckOnly)}</td>
                               {canEdit && <td />}
                             </tr>
                           )}
-                          {codItems.length > 0 && (
+                          {deckPickups.filter(pickupIsPriced).map(i => (
+                            <tr key={i.id} className="bg-white">
+                              <td colSpan={6} className="px-3 py-1.5 text-xs text-teal-700">Outside pickup (deck) — {pickupLabel(i)}</td>
+                              <td className="px-3 py-1.5 text-right text-xs font-bold text-teal-700">{formatCurrency(lineAmount(i))}</td>
+                              {canEdit && <td />}
+                            </tr>
+                          ))}
+                          {groceryCodTotal > 0 && (
                             <tr className="bg-white">
                               <td colSpan={6} className="px-3 py-1.5 text-xs text-purple-700">COD (paid personally — never invoiced)</td>
-                              <td className="px-3 py-1.5 text-right text-xs font-bold text-purple-700">{formatCurrency(codSubtotal)}</td>
+                              <td className="px-3 py-1.5 text-right text-xs font-bold text-purple-700">{formatCurrency(groceryCodTotal)}</td>
                               {canEdit && <td />}
                             </tr>
                           )}
+                          {codPickups.filter(pickupIsPriced).map(i => (
+                            <tr key={i.id} className="bg-white">
+                              <td colSpan={6} className="px-3 py-1.5 text-xs text-purple-700">
+                                Outside pickup (COD{pickupPay(i).cod_name ? ` · ${pickupPay(i).cod_name}` : ''}) — {pickupLabel(i)}
+                              </td>
+                              <td className="px-3 py-1.5 text-right text-xs font-bold text-purple-700">{formatCurrency(lineAmount(i))}</td>
+                              {canEdit && <td />}
+                            </tr>
+                          ))}
                         </>
                       )}
                       <tr className="bg-brand-sand/30 border-t-2 border-brand-gold/30">
@@ -1761,7 +1784,7 @@ export function OrderDetailModal({
                       </tr>
                       {/* Register total — entered after scanning the pick sheet at the register */}
                       <tr className={`border-t border-gray-200 ${
-                        registerTotal && Math.abs(parseFloat(registerTotal) - subtotal) > 1
+                        registerTotal && Math.abs(parseFloat(registerTotal) - grocerySubtotal) > 1
                           ? 'bg-amber-50'
                           : 'bg-white'
                       }`}>
@@ -1773,9 +1796,9 @@ export function OrderDetailModal({
                           <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                             <span className="text-sm font-bold text-brand-navy">REGISTER TOTAL</span>
                             <span className="text-xs text-gray-400">(actual amount rung at Sinclair's register)</span>
-                            {registerTotal && Math.abs(parseFloat(registerTotal) - subtotal) > 1 && (
+                            {registerTotal && Math.abs(parseFloat(registerTotal) - grocerySubtotal) > 1 && (
                               <span className="text-xs font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
-                                ⚠ {parseFloat(registerTotal) > subtotal ? '+' : ''}{formatCurrency(parseFloat(registerTotal) - subtotal)} vs system
+                                ⚠ {parseFloat(registerTotal) > grocerySubtotal ? '+' : ''}{formatCurrency(parseFloat(registerTotal) - grocerySubtotal)} vs grocery
                               </span>
                             )}
                             <div className="flex flex-wrap items-center gap-1.5 sm:ml-auto">
@@ -2226,6 +2249,8 @@ export function OrderDetailModal({
                                   <span className="text-xs font-bold text-gray-600">Bill as</span>
                                   <button type="button" onClick={() => setSvcOtherPaidBy('grocery')}
                                     className={`text-[11px] font-bold uppercase px-2 py-1 rounded border ${svcOtherPaidBy === 'grocery' ? 'bg-brand-navy text-white border-brand-navy' : 'bg-white border-gray-200'}`}>Boat</button>
+                                  <button type="button" onClick={() => setSvcOtherPaidBy('deck')}
+                                    className={`text-[11px] font-bold uppercase px-2 py-1 rounded border ${svcOtherPaidBy === 'deck' ? 'bg-teal-100 text-teal-800 border-teal-300' : 'bg-white border-gray-200'}`}>Deck</button>
                                   <button type="button" onClick={() => setSvcOtherPaidBy('cod')}
                                     className={`text-[11px] font-bold uppercase px-2 py-1 rounded border ${svcOtherPaidBy === 'cod' ? 'bg-purple-100 text-purple-800 border-purple-300' : 'bg-white border-gray-200'}`}>COD</button>
                                   {svcOtherPaidBy === 'cod' && (
@@ -2272,6 +2297,15 @@ export function OrderDetailModal({
                 <h3 className="font-display text-base font-bold text-brand-navy mb-3 flex items-center gap-2">
                   <Package className="w-4 h-4 text-brand-orange" /> Additional Services
                 </h3>
+                {unpricedOtherPickups.length > 0 && (
+                  <p className="mb-3 flex items-start gap-1.5 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
+                    <span>
+                      {unpricedOtherPickups.length} outside pickup{unpricedOtherPickups.length === 1 ? '' : 's'} still unpriced —
+                      enter Price Paid so it shows as its own line in the totals.
+                    </span>
+                  </p>
+                )}
                 <div className="space-y-3">
                   {serviceItems.map(item => {
                     const d = item.service_details as Record<string, string> | null;
@@ -2347,12 +2381,41 @@ export function OrderDetailModal({
                                   member's personal purchase and gets rung up
                                   separately — the picker must see this before
                                   the register, not after. */}
-                              <IB
-                                label="Paid By"
-                                value={d.paid_by === 'cod'
-                                  ? `COD — ${d.cod_name || '(no name given)'}`
-                                  : 'COD — to the boat'}
-                              />
+                              {canEdit ? (
+                                <div className="col-span-2">
+                                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Paid By</p>
+                                  <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                                    {(['vessel', 'deck', 'cod'] as const).map(pb => {
+                                      const current = pickupPay(item).paid_by;
+                                      return (
+                                        <button type="button" key={pb}
+                                          disabled={paidByBusyId === item.id}
+                                          onClick={() => {
+                                            if (pb === 'cod') {
+                                              const name = window.prompt('Crew member name for COD:', pickupPay(item).cod_name || '') || '';
+                                              if (!name.trim()) return;
+                                              setItemPaidBy(item, 'cod', name);
+                                            } else {
+                                              setItemPaidBy(item, pb, '');
+                                            }
+                                          }}
+                                          className={`text-[11px] font-bold uppercase px-2 py-1 rounded border ${
+                                            current === pb
+                                              ? pb === 'cod' ? 'bg-purple-100 text-purple-800 border-purple-300'
+                                                : pb === 'deck' ? 'bg-teal-100 text-teal-800 border-teal-300'
+                                                : 'bg-brand-navy text-white border-brand-navy'
+                                              : 'bg-white border-gray-200 text-gray-600'
+                                          }`}>
+                                          {pb === 'vessel' ? 'Boat grocery' : pb === 'deck' ? 'Deck' : 'COD'}
+                                        </button>
+                                      );
+                                    })}
+                                    <span className="text-xs text-gray-500">{pickupPayLabel(item)}</span>
+                                  </div>
+                                </div>
+                              ) : (
+                                <IB label="Paid By" value={pickupPayLabel(item)} />
+                              )}
                               <IB label="Handled By" value="Sinclair's Foods" />
                             </>)}
                           </div>
@@ -2381,7 +2444,7 @@ export function OrderDetailModal({
                   )}
                   {order.eta && <p><strong>ETA:</strong> {order.eta}</p>}
                   <p><strong>Total Items:</strong> {groceryItems.reduce((s, i) => s + i.quantity, 0)}</p>
-                  <p><strong>Order Total:</strong> {formatCurrency(subtotal)}</p>
+                  <p><strong>Order Total:</strong> {formatCurrency(grocerySubtotal)}</p>
                 </div>
               </div>
             )}
@@ -2493,7 +2556,7 @@ export function OrderDetailModal({
               <>
                 <h2 className="font-display text-lg font-bold text-brand-navy">What did the register ring?</h2>
                 <p className="text-sm text-gray-600 leading-relaxed">
-                  System total is {formatCurrency(subtotal)}. The register is the amount this order bills from.
+                  System grocery total is {formatCurrency(grocerySubtotal)}. The register is the amount Sinclair's rang — outside pickups are keyed separately under Price Paid.
                 </p>
                 <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide">
                   Register total
@@ -2521,14 +2584,14 @@ export function OrderDetailModal({
                       />
                     </div>
                     <span className="normal-case font-normal text-[11px] text-teal-800">
-                      Rung separately · system {formatCurrency(deckSubtotal)}
+                      Rung separately · system {formatCurrency(groceryDeckOnly)}
                     </span>
                   </label>
                 )}
-                {registerTotal.trim() && !Number.isNaN(parseFloat(registerTotal)) && Math.abs(parseFloat(registerTotal) - subtotal) > 1 && (
+                {registerTotal.trim() && !Number.isNaN(parseFloat(registerTotal)) && Math.abs(parseFloat(registerTotal) - grocerySubtotal) > 1 && (
                   <p className="text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                    {parseFloat(registerTotal) > subtotal ? '+' : ''}
-                    {formatCurrency(parseFloat(registerTotal) - subtotal)} vs the system total — that is fine if the register is right.
+                    {parseFloat(registerTotal) > grocerySubtotal ? '+' : ''}
+                    {formatCurrency(parseFloat(registerTotal) - grocerySubtotal)} vs grocery — that is fine if the register is right.
                   </p>
                 )}
                 {finishError && <p className="text-sm text-red-600">{finishError}</p>}

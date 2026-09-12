@@ -572,6 +572,8 @@ export async function POST(req: NextRequest) {
             paid_by: entry.paid_by || 'grocery',
             cod_name: (entry.cod_name || '').trim(),
           },
+          paid_by: entry.paid_by === 'cod' ? 'cod' : 'vessel',
+          cod_name: entry.paid_by === 'cod' ? (entry.cod_name || '').trim() : null,
         });
       });
     }

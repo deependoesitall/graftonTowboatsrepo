@@ -54,8 +54,8 @@ const otherPickupSchema = z.object({
   service_type: z.literal('other_pickup'),
   url: z.string().max(500).optional().default(''),
   notes: z.string().max(500).optional().default(''),
-  // other_pickup uses grocery|cod in service_details (place-order shape)
-  paid_by: z.enum(['grocery', 'cod']).optional().default('grocery'),
+  // other_pickup uses grocery|deck|cod in service_details (place-order shape)
+  paid_by: z.enum(['grocery', 'deck', 'cod']).optional().default('grocery'),
   cod_name: z.string().max(80).optional().default(''),
 });
 
@@ -297,7 +297,7 @@ export async function POST(
     };
   } else {
     const o = svc as z.infer<typeof otherPickupSchema>;
-    const paid = o.paid_by === 'cod' ? 'cod' : 'grocery';
+    const paid = o.paid_by === 'cod' ? 'cod' : o.paid_by === 'deck' ? 'deck' : 'grocery';
     row = {
       order_id: orderId,
       product_id: null,
@@ -314,8 +314,8 @@ export async function POST(
         paid_by: paid,
         cod_name: paid === 'cod' ? (o.cod_name || '').trim() : '',
       },
-      paid_by: 'vessel',
-      cod_name: null,
+      paid_by: paid === 'cod' ? 'cod' : paid === 'deck' ? 'deck' : 'vessel',
+      cod_name: paid === 'cod' ? (o.cod_name || '').trim() : null,
       regular_price: null,
       sale_finish_date: null,
     };

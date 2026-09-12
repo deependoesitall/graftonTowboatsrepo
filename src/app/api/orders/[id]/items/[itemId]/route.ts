@@ -246,6 +246,7 @@ export async function PATCH(
       .select()
       .single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    await recalcSubtotal(supabase, orderId);
     await maybeAdvanceToInProgress(supabase, orderId);
     return NextResponse.json({ item: updated });
   }
@@ -278,9 +279,9 @@ export async function PATCH(
   // ── SET PAID_BY (grocery billing flip) ────────────────────────────────────
   if (action === 'set_paid_by') {
     const { paid_by, cod_name } = parsed.data;
-    if (item.item_type === 'service') {
+    if (item.item_type === 'service' && item.service_type !== 'other_pickup') {
       return NextResponse.json(
-        { error: 'Billing on service lines is set in service_details — only grocery lines use paid_by here.' },
+        { error: 'Only grocery lines and outside pickups can change who pays.' },
         { status: 400 },
       );
     }
@@ -290,11 +291,19 @@ export async function PATCH(
         { status: 400 },
       );
     }
+    const details = item.service_type === 'other_pickup'
+      ? {
+          ...((item.service_details || {}) as Record<string, string>),
+          paid_by: paid_by === 'cod' ? 'cod' : paid_by === 'deck' ? 'deck' : 'grocery',
+          cod_name: paid_by === 'cod' ? (cod_name || '').trim() : '',
+        }
+      : undefined;
     const { data: updated, error } = await supabase
       .from('order_items')
       .update({
         paid_by,
         cod_name: paid_by === 'cod' ? (cod_name || '').trim() : null,
+        ...(details ? { service_details: details } : {}),
       })
       .eq('id', itemId)
       .select()
