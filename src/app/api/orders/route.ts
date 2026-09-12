@@ -261,8 +261,10 @@ export async function POST(req: NextRequest) {
         chargeByProduct[p.id] = effectiveCatalogPrice(p).price;
       }
     }
-    const chargeOf = (item: { product_id: string; price: number }) =>
-      chargeByProduct[item.product_id] ?? item.price;
+    // product_id / price are required in the schema, but TS widens them to
+    // optional through the .refine() chain — and write-ins really can omit id.
+    const chargeOf = (item: { product_id?: string; price?: number }) =>
+      (item.product_id ? chargeByProduct[item.product_id] : undefined) ?? item.price ?? 0;
 
     // Combined estimate (vessel + COD). Billing reports split these out and
     // exclude COD lines — they're settled at delivery, never invoiced.
