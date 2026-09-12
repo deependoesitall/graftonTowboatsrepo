@@ -596,18 +596,98 @@ export function OrderDetailModal({
     setItemError('');
   }
 
+  function renderLineEdits(item: OrderItem) {
+    if (!canEdit) return null;
+    if (editingId === item.id) {
+      return (
+        <div className="flex items-center gap-1 flex-wrap">
+          <input
+            type="number"
+            min="0.25"
+            step="0.25"
+            className="w-16 border border-brand-sky rounded px-1.5 py-1 text-center text-sm font-bold focus:outline-none focus:ring-1 focus:ring-brand-sky"
+            value={editQty}
+            onChange={e => setEditQty(e.target.value)}
+            autoFocus
+            onKeyDown={e => {
+              if (e.key === 'Enter') saveQty(item);
+              if (e.key === 'Escape') setEditingId(null);
+            }}
+          />
+          <button onClick={() => saveQty(item)} disabled={editSaving}
+            className="p-2 text-brand-green hover:text-green-700 disabled:opacity-50" title="Save">
+            {editSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+          </button>
+          <button onClick={() => setEditingId(null)}
+            className="p-2 text-gray-400 hover:text-gray-600" title="Cancel">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      );
+    }
+    return (
+      <div className="flex items-center justify-end gap-0.5 flex-wrap">
+        <button
+          onClick={() => markShopped(item)}
+          disabled={rowBusy === item.id}
+          className={`p-2 transition-colors ${
+            item.shopping_status === 'shopped'
+              ? 'text-green-600'
+              : 'text-gray-400 hover:text-green-600'
+          }`}
+          title={item.shopping_status === 'shopped' ? 'Shopped — click to undo' : 'Mark shopped'}
+        >
+          <Check className="w-4 h-4" />
+        </button>
+        {isWeighable(item) && (
+          <button
+            onClick={() => { setWeighId(item.id); setWeighVal(item.actual_weight != null ? String(item.actual_weight) : ''); setItemError(''); }}
+            className={`p-2 transition-colors ${item.actual_weight != null ? 'text-brand-orange' : 'text-gray-400 hover:text-brand-orange'}`}
+            title={item.actual_weight != null ? `Weighed ${item.actual_weight} lb — click to change` : 'Enter actual weight'}
+          >
+            <Scale className="w-4 h-4" />
+          </button>
+        )}
+        <button
+          onClick={() => { setEditingId(item.id); setEditQty(String(item.quantity)); setItemError(''); }}
+          className="p-2 text-gray-400 hover:text-brand-navy transition-colors"
+          title="Edit quantity"
+        >
+          <Pencil className="w-4 h-4" />
+        </button>
+        <button
+          onClick={() => { setSubFor(item); setSubSearch(''); setSubResults([]); setSubPick(null); setSubQty(String(item.quantity)); setItemError(''); }}
+          className="p-2 text-gray-400 hover:text-amber-600 transition-colors"
+          title="Out of stock / substitute"
+        >
+          <Replace className="w-4 h-4" />
+        </button>
+        <button
+          onClick={() => deleteItem(item.id)}
+          disabled={deletingItemId === item.id}
+          className="p-2 text-gray-400 hover:text-red-500 transition-colors disabled:opacity-50"
+          title="Remove item"
+        >
+          {deletingItemId === item.id
+            ? <Loader2 className="w-4 h-4 animate-spin" />
+            : <Trash2 className="w-4 h-4" />}
+        </button>
+      </div>
+    );
+  }
+
   return (
     <>
-      <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 overflow-y-auto py-8 px-4">
-        <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl animate-fade-in">
+      <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center bg-black/50 sm:p-4">
+        <div className="bg-white sm:rounded-xl shadow-2xl w-full sm:max-w-5xl h-[100dvh] sm:h-auto sm:max-h-[92vh] flex flex-col overflow-hidden animate-fade-in">
 
           {/* Header */}
-          <div className="bg-brand-navy px-6 py-4 rounded-t-xl flex items-center justify-between">
-            <div>
+          <div className="bg-brand-navy px-4 sm:px-6 py-3 sm:py-4 pt-[max(0.75rem,env(safe-area-inset-top))] sm:pt-4 rounded-none sm:rounded-t-xl flex items-center justify-between gap-2 shrink-0">
+            <div className="min-w-0">
               <p className="text-brand-sky text-xs uppercase tracking-wide">Order Details</p>
-              <h2 className="text-white font-display text-xl font-bold">{order.order_number}</h2>
+              <h2 className="text-white font-display text-lg sm:text-xl font-bold truncate">{order.order_number}</h2>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
               <button onClick={handlePrintPickSheet}
                 className="text-brand-gold hover:text-brand-amber transition-colors"
                 title="Print Pick Sheet (barcodes)">
@@ -631,7 +711,7 @@ export function OrderDetailModal({
             </div>
           </div>
 
-          <div className="p-6 space-y-5">
+          <div className="p-4 sm:p-6 pb-[max(1.25rem,env(safe-area-inset-bottom))] space-y-5 overflow-auto min-h-0 flex-1 overscroll-contain">
 
             {/* Company / Billing */}
             <Section icon={<FileText className="w-3.5 h-3.5" />} title="Company &amp; Billing">
@@ -932,13 +1012,13 @@ export function OrderDetailModal({
                       await onStatusChange('fulfilled');
                       setMarkingFulfilled(false);
                     }}
-                    className="ml-auto flex items-center gap-1.5 bg-brand-orange text-white text-xs font-bold uppercase tracking-wide px-4 py-2 rounded-lg hover:bg-orange-700 transition-colors disabled:opacity-60">
+                    className="w-full sm:w-auto sm:ml-auto flex items-center justify-center gap-1.5 bg-brand-orange text-white text-xs font-bold uppercase tracking-wide px-4 py-2.5 rounded-lg hover:bg-orange-700 transition-colors disabled:opacity-60">
                     {markingFulfilled ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
                     Mark as Fulfilled
                   </button>
                 ) : (
                   <button onClick={() => setShoppingMode(true)}
-                    className="ml-auto flex items-center gap-1.5 bg-brand-green text-white text-xs font-bold uppercase tracking-wide px-4 py-2 rounded-lg hover:bg-brand-gmed transition-colors">
+                    className="w-full sm:w-auto sm:ml-auto flex items-center justify-center gap-1.5 bg-brand-green text-white text-xs font-bold uppercase tracking-wide px-4 py-2.5 rounded-lg hover:bg-brand-gmed transition-colors">
                     <ShoppingCart className="w-4 h-4" /> Enter Shopping Mode
                   </button>
                 )
@@ -1027,18 +1107,111 @@ export function OrderDetailModal({
                   </div>
                 )}
 
-                <div className="border border-gray-200 rounded-lg overflow-hidden">
-                  <table className="w-full text-sm">
+                {/* Mobile: one card per line so edit controls never clip */}
+                <div className="md:hidden space-y-2">
+                  {groceryItems.map(item => (
+                    <div key={item.id} className={`rounded-xl border border-gray-200 bg-white p-3 ${item.shopping_status === 'out_of_stock' ? 'opacity-50' : ''}`}>
+                      <div className="flex gap-3">
+                        {item.image_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={item.image_url} alt="" loading="lazy" decoding="async"
+                            className="w-14 h-14 object-contain rounded-lg border border-gray-200 bg-white shrink-0" />
+                        ) : (
+                          <div className="w-14 h-14 rounded-lg border border-dashed border-gray-200 bg-gray-50 shrink-0" />
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className={`font-medium text-brand-navy text-sm leading-snug ${item.shopping_status === 'out_of_stock' ? 'line-through' : ''}`}>
+                            {item.description}
+                          </p>
+                          <p className="text-[11px] text-gray-400 mt-0.5 break-all">
+                            {item.upc || 'no UPC'}{item.pkg_size ? ` · ${item.pkg_size}` : ''}
+                            {item.location ? ` · ${item.location}` : ''}
+                          </p>
+                          <p className="text-sm mt-1">
+                            <b>{item.quantity}</b>
+                            <span className="text-gray-400"> × {formatCurrency(item.unit_price)} = </span>
+                            <b className="text-brand-navy">{formatCurrency(item.actual_total ?? item.unit_price * item.quantity)}</b>
+                          </p>
+                        </div>
+                      </div>
+                      {canEdit && (
+                        <div className="mt-2 pt-2 border-t border-gray-100 flex justify-end">
+                          {renderLineEdits(item)}
+                        </div>
+                      )}
+                      {canEdit && weighId === item.id && (
+                        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs bg-orange-50 border border-orange-200 rounded-lg p-2">
+                          <Scale className="w-4 h-4 text-brand-orange shrink-0" />
+                          <input type="number" step="0.01" min="0.01" autoFocus
+                            className="w-24 border border-orange-300 rounded px-2 py-1 text-right font-bold"
+                            placeholder="lb"
+                            value={weighVal}
+                            onChange={e => setWeighVal(e.target.value)} />
+                          <button onClick={() => saveWeight(item)} disabled={rowBusy === item.id || !weighVal}
+                            className="btn-primary text-xs px-3 py-1 disabled:opacity-40">Confirm</button>
+                          <button onClick={() => setWeighId(null)} className="text-gray-500">Cancel</button>
+                        </div>
+                      )}
+                      {subsByParent[item.id]?.map(sub => (
+                        <div key={sub.id} className="mt-2 pl-3 border-l-2 border-amber-300 text-sm">
+                          <p className="text-[10px] font-bold uppercase text-amber-700">Sub</p>
+                          <p className="font-medium text-brand-navy">{sub.description}</p>
+                          <p className="text-xs text-gray-500">{sub.quantity} × {formatCurrency(sub.unit_price)}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                  <div className="rounded-xl border border-brand-gold/30 bg-brand-sand/30 p-3 space-y-2">
+                    <div className="flex justify-between text-sm font-bold text-brand-navy">
+                      <span>System total</span>
+                      <span>{formatCurrency(subtotal)}</span>
+                    </div>
+                    <label className="block text-xs font-bold text-gray-500 uppercase">
+                      Register total
+                      <div className="mt-1 flex items-center gap-2">
+                        <span>$</span>
+                        <input type="number" step="0.01" min="0" placeholder="0.00"
+                          value={registerTotal}
+                          onChange={e => { setRegisterTotal(e.target.value); setRegisterSaved(false); }}
+                          className="flex-1 min-w-0 input-base font-display font-bold text-brand-navy" />
+                        <button type="button" onClick={confirmRegisterTotal}
+                          disabled={registerTotalSaving || registerTotal.trim() === '' || registerSaved}
+                          className="btn-primary text-xs px-3 py-2 shrink-0 disabled:opacity-40">
+                          {registerSaved ? 'Saved' : 'Save'}
+                        </button>
+                      </div>
+                    </label>
+                    {deckItems.length > 0 && (
+                      <label className="block text-xs font-bold text-teal-700 uppercase">
+                        Deck register
+                        <div className="mt-1 flex items-center gap-2">
+                          <span>$</span>
+                          <input type="number" step="0.01" min="0" placeholder="0.00"
+                            value={deckTotal}
+                            onChange={e => { setDeckTotal(e.target.value); setDeckSaved(false); }}
+                            className="flex-1 min-w-0 input-base font-display font-bold text-teal-900" />
+                        </div>
+                      </label>
+                    )}
+                  </div>
+                </div>
+
+                <div className="hidden md:block border border-gray-200 rounded-lg overflow-x-auto max-w-full">
+                  <table className="text-sm min-w-[900px] w-max max-w-none">
                     <thead>
                       <tr className="bg-gray-50">
                         <th className="px-2 py-2 w-14" />
                         <th className="px-3 py-2 text-left text-xs font-bold text-gray-500 uppercase">Item #</th>
-                        <th className="px-3 py-2 text-left text-xs font-bold text-gray-500 uppercase">Item</th>
+                        <th className="px-3 py-2 text-left text-xs font-bold text-gray-500 uppercase min-w-[12rem]">Item</th>
                         <th className="px-3 py-2 text-left text-xs font-bold text-gray-500 uppercase">Pack</th>
                         <th className="px-3 py-2 text-center text-xs font-bold text-gray-500 uppercase">Qty</th>
                         <th className="px-3 py-2 text-right text-xs font-bold text-gray-500 uppercase">Unit</th>
                         <th className="px-3 py-2 text-right text-xs font-bold text-gray-500 uppercase">Total</th>
-                        {canEdit && <th className="px-3 py-2 w-16" />}
+                        {canEdit && (
+                          <th className="px-2 py-2 text-right text-xs font-bold text-gray-500 uppercase sticky right-0 bg-gray-50 min-w-[9.5rem] shadow-[-8px_0_8px_-6px_rgba(0,0,0,0.12)]">
+                            Edit
+                          </th>
+                        )}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
@@ -1128,65 +1301,8 @@ export function OrderDetailModal({
                             {formatCurrency(item.actual_total ?? item.unit_price * item.quantity)}
                           </td>
                           {canEdit && (
-                            <td className="px-3 py-2">
-                              {/* EVERY ACTION ON THE ROW ITSELF. Dave: "what's
-                                  gonna happen is, we're gonna go pick this item.
-                                  And if we don't have it, I want to be able to
-                                  fix it right now. Right there." Substituting
-                                  used to mean deleting the line and re-adding a
-                                  different one from a search panel. */}
-                              <div className="flex items-center justify-end gap-0.5">
-                                {editingId !== item.id && (
-                                  <>
-                                    <button
-                                      onClick={() => markShopped(item)}
-                                      disabled={rowBusy === item.id}
-                                      className={`p-1 transition-colors ${
-                                        item.shopping_status === 'shopped'
-                                          ? 'text-green-600'
-                                          : 'text-gray-300 hover:text-green-600'
-                                      }`}
-                                      title={item.shopping_status === 'shopped' ? 'Shopped — click to undo' : 'Mark shopped'}
-                                    >
-                                      <Check className="w-3.5 h-3.5" />
-                                    </button>
-                                    {isWeighable(item) && (
-                                      <button
-                                        onClick={() => { setWeighId(item.id); setWeighVal(item.actual_weight != null ? String(item.actual_weight) : ''); setItemError(''); }}
-                                        className={`p-1 transition-colors ${item.actual_weight != null ? 'text-brand-orange' : 'text-gray-400 hover:text-brand-orange'}`}
-                                        title={item.actual_weight != null ? `Weighed ${item.actual_weight} lb — click to change` : 'Enter actual weight'}
-                                      >
-                                        <Scale className="w-3.5 h-3.5" />
-                                      </button>
-                                    )}
-                                    <button
-                                      onClick={() => { setEditingId(item.id); setEditQty(String(item.quantity)); setItemError(''); }}
-                                      className="p-1 text-gray-400 hover:text-brand-navy transition-colors"
-                                      title="Edit quantity"
-                                    >
-                                      <Pencil className="w-3.5 h-3.5" />
-                                    </button>
-                                    <button
-                                      onClick={() => { setSubFor(item); setSubSearch(''); setSubResults([]); setSubPick(null); setSubQty(String(item.quantity)); setItemError(''); }}
-                                      className="p-1 text-gray-400 hover:text-amber-600 transition-colors"
-                                      title="Out of stock / substitute"
-                                    >
-                                      <Replace className="w-3.5 h-3.5" />
-                                    </button>
-                                  </>
-                                )}
-                                <button
-                                  onClick={() => deleteItem(item.id)}
-                                  disabled={deletingItemId === item.id}
-                                  className="p-1 text-gray-400 hover:text-red-500 transition-colors disabled:opacity-50"
-                                  title="Remove item"
-                                >
-                                  {deletingItemId === item.id
-                                    ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                    : <Trash2 className="w-3.5 h-3.5" />
-                                  }
-                                </button>
-                              </div>
+                            <td className="px-2 py-2 whitespace-nowrap sticky right-0 bg-white min-w-[9.5rem] shadow-[-8px_0_8px_-6px_rgba(0,0,0,0.12)]">
+                              {renderLineEdits(item)}
                             </td>
                           )}
                         </tr>
@@ -1490,7 +1606,7 @@ export function OrderDetailModal({
                         <button
                           onClick={openFinishShopping}
                           disabled={fillingAll}
-                          className="flex items-center gap-1.5 text-xs font-bold text-white bg-brand-green rounded-lg px-3 py-1.5 hover:bg-brand-green/90 disabled:opacity-50"
+                          className="flex items-center justify-center gap-1.5 text-xs font-bold text-white bg-brand-green rounded-lg px-3 py-2.5 w-full sm:w-auto hover:bg-brand-green/90 disabled:opacity-50"
                           title="Accept the pick list as ordered, enter the register total, mark Shopped"
                         >
                           {fillingAll
@@ -1787,8 +1903,8 @@ export function OrderDetailModal({
       {confirmDialogEl}
 
       {finishStep && createPortal(
-        <div className="fixed inset-0 z-[96] bg-black/60 flex items-end sm:items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md shadow-xl p-5 space-y-4">
+        <div className="fixed inset-0 z-[96] bg-black/60 flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md shadow-xl p-5 space-y-4 max-h-[90dvh] overflow-y-auto">
             {finishStep === 'accept' && (
               <>
                 <h2 className="font-display text-lg font-bold text-brand-navy">Accept as ordered?</h2>
@@ -1800,10 +1916,10 @@ export function OrderDetailModal({
                   {' '}shopped as ordered. Out-of-stock and substitutions you already keyed stay as they are.
                 </p>
                 {finishError && <p className="text-sm text-red-600">{finishError}</p>}
-                <div className="flex flex-wrap gap-2 justify-end">
-                  <button type="button" className="btn-outline text-sm px-3 py-2" disabled={fillingAll}
+                <div className="flex flex-col-reverse sm:flex-row flex-wrap gap-2 sm:justify-end">
+                  <button type="button" className="btn-outline text-sm px-3 py-2.5 w-full sm:w-auto" disabled={fillingAll}
                     onClick={() => setFinishStep(null)}>Cancel</button>
-                  <button type="button" className="btn-primary text-sm px-3 py-2 flex items-center gap-1.5" disabled={fillingAll}
+                  <button type="button" className="btn-primary text-sm px-3 py-2.5 w-full sm:w-auto flex items-center justify-center gap-1.5" disabled={fillingAll}
                     onClick={acceptAsOrdered}>
                     {fillingAll ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                     Accept as ordered
@@ -1855,10 +1971,10 @@ export function OrderDetailModal({
                   </p>
                 )}
                 {finishError && <p className="text-sm text-red-600">{finishError}</p>}
-                <div className="flex flex-wrap gap-2 justify-end">
-                  <button type="button" className="btn-outline text-sm px-3 py-2"
+                <div className="flex flex-col-reverse sm:flex-row flex-wrap gap-2 sm:justify-end">
+                  <button type="button" className="btn-outline text-sm px-3 py-2.5 w-full sm:w-auto"
                     onClick={() => setFinishStep('accept')}>Back</button>
-                  <button type="button" className="btn-primary text-sm px-3 py-2" onClick={continueFromRegister}>
+                  <button type="button" className="btn-primary text-sm px-3 py-2.5 w-full sm:w-auto" onClick={continueFromRegister}>
                     Continue
                   </button>
                 </div>
@@ -1875,12 +1991,12 @@ export function OrderDetailModal({
                   In Progress if you still have a note to key.
                 </p>
                 {finishError && <p className="text-sm text-red-600">{finishError}</p>}
-                <div className="flex flex-wrap gap-2 justify-end">
-                  <button type="button" className="btn-outline text-sm px-3 py-2" disabled={fillingAll}
+                <div className="flex flex-col-reverse sm:flex-row flex-wrap gap-2 sm:justify-end">
+                  <button type="button" className="btn-outline text-sm px-3 py-2.5 w-full sm:w-auto" disabled={fillingAll}
                     onClick={() => finishShopping(false)}>
                     Not yet — stay In Progress
                   </button>
-                  <button type="button" className="btn-primary text-sm px-3 py-2 flex items-center gap-1.5" disabled={fillingAll}
+                  <button type="button" className="btn-primary text-sm px-3 py-2.5 w-full sm:w-auto flex items-center justify-center gap-1.5" disabled={fillingAll}
                     onClick={() => finishShopping(true)}>
                     {fillingAll ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
                     Mark Shopped
