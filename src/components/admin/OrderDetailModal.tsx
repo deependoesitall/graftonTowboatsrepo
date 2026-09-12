@@ -13,7 +13,7 @@ import { Order, OrderItem, OrderStatus, Product } from '@/types';
 import { formatCurrency, formatDate, formatArrivalTime, ORDER_STATUSES } from '@/lib/utils';
 import { DeliverySummary } from '@/components/order/DeliverySummary';
 import { ShoppingModeModal } from '@/components/admin/ShoppingModeModal';
-import { adminFetch, isGtsRole, getAdminRole } from '@/lib/admin-auth';
+import { adminFetch, isGtsRole, getAdminRole, hasAdminPermission } from '@/lib/admin-auth';
 import { codFeeLabel, codTotalWithFee, allocateCodTotals } from '@/lib/cod-fee';
 import { PickSheetOverlay } from '@/components/admin/PickSheetOverlay';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
@@ -31,13 +31,26 @@ interface OrderDetailModalProps {
   /** Trash in the header. Defaults to isOwner; IMP- imports pass true for GTS. */
   canDelete?: boolean;
   deleting?: boolean;
+  /**
+   * Mirrors server isSinclairScoped(). When true: no crew-change editor,
+   * hide GTS-only service adds (parts_pickup / package_delivery). Catalog,
+   * external write-in, and other_pickup remain available.
+   */
+  isSinclairScoped?: boolean;
 }
 
 export function OrderDetailModal({
   order, onClose, onStatusChange, onDownloadPdf,
   onDelete, onRefresh, canEdit = true, isOwner = false, canDelete, deleting = false,
+  isSinclairScoped: isSinclairScopedProp,
 }: OrderDetailModalProps) {
   const showDelete = (canDelete ?? isOwner) && !!onDelete;
+  // Prefer parent flag; fall back to same derivation as admin orders list.
+  const isSinclairScoped = typeof isSinclairScopedProp === 'boolean'
+    ? isSinclairScopedProp
+    : (!isGtsRole(getAdminRole()) || hasAdminPermission('sinclair'));
+  const canEditCrew = canEdit && !isSinclairScoped;
+  const canAddGtsServices = canEdit && !isSinclairScoped;
   const [shoppingMode, setShoppingMode] = useState(false);
   const [markingFulfilled, setMarkingFulfilled] = useState(false);
   const [showPickSheet, setShowPickSheet] = useState(false);
@@ -374,15 +387,52 @@ export function OrderDetailModal({
     } finally { setSubSearching(false); }
   }, []);
 
-  // Add item panel
+  // Add item panel — mode picker: catalog | write-in | service
+  type AddMode = 'catalog' | 'writein' | 'service' | null;
   const [addingItem, setAddingItem] = useState(false);
+  const [addMode, setAddMode] = useState<AddMode>(null);
   const [addSearch, setAddSearch] = useState('');
   const [addResults, setAddResults] = useState<Product[]>([]);
   const [addSearching, setAddSearching] = useState(false);
   const [addSelected, setAddSelected] = useState<Product | null>(null);
   const [addQty, setAddQty] = useState('1');
+  const [addPaidBy, setAddPaidBy] = useState<'vessel' | 'deck' | 'cod'>('vessel');
+  const [addCodName, setAddCodName] = useState('');
+  const [writeDesc, setWriteDesc] = useState('');
+  const [writePrice, setWritePrice] = useState('0');
+  const [svcKind, setSvcKind] = useState<'parts_pickup' | 'package_delivery' | 'other_pickup'>('other_pickup');
+  const [svcPartsLoc, setSvcPartsLoc] = useState('');
+  const [svcPartsOrder, setSvcPartsOrder] = useState('');
+  const [svcPartsContact, setSvcPartsContact] = useState('');
+  const [svcPartsPhone, setSvcPartsPhone] = useState('');
+  const [svcPkgDesc, setSvcPkgDesc] = useState('');
+  const [svcPkgOrigin, setSvcPkgOrigin] = useState('');
+  const [svcPkgContact, setSvcPkgContact] = useState('');
+  const [svcPkgPhone, setSvcPkgPhone] = useState('');
+  const [svcOtherUrl, setSvcOtherUrl] = useState('');
+  const [svcOtherNotes, setSvcOtherNotes] = useState('');
+  const [svcOtherPaidBy, setSvcOtherPaidBy] = useState<'grocery' | 'cod'>('grocery');
+  const [svcOtherCodName, setSvcOtherCodName] = useState('');
   const [addSaving, setAddSaving] = useState(false);
   const [itemError, setItemError] = useState('');
+  const [paidByBusyId, setPaidByBusyId] = useState<string | null>(null);
+
+  // Local crew-change mirror so GTS can edit without waiting on parent refresh
+  const [localCrew, setLocalCrew] = useState({
+    crew_change: order.crew_change ?? 'no',
+    crew_change_notes: order.crew_change_notes ?? '',
+    crew_arriving: order.crew_arriving != null ? String(order.crew_arriving) : '',
+    crew_departing: order.crew_departing != null ? String(order.crew_departing) : '',
+  });
+  const [crewSaving, setCrewSaving] = useState(false);
+  useEffect(() => {
+    setLocalCrew({
+      crew_change: order.crew_change ?? 'no',
+      crew_change_notes: order.crew_change_notes ?? '',
+      crew_arriving: order.crew_arriving != null ? String(order.crew_arriving) : '',
+      crew_departing: order.crew_departing != null ? String(order.crew_departing) : '',
+    });
+  }, [order.id, order.crew_change, order.crew_change_notes, order.crew_arriving, order.crew_departing]);
 
   const groceryItems = localItems.filter(i => i.item_type !== 'service');
   const serviceItems = localItems.filter(i => i.item_type === 'service');
@@ -559,41 +609,189 @@ export function OrderDetailModal({
     }
   }
 
-  // ── Add item ──────────────────────────────────────────────────────────────
-  async function confirmAdd() {
-    if (!addSelected) return;
-    const qty = parseInt(addQty) || 1;
+  // ── Add item (catalog / write-in / service) ───────────────────────────────
+  function resetAddForm() {
+    setAddMode(null);
+    setAddSearch('');
+    setAddResults([]);
+    setAddSelected(null);
+    setAddQty('1');
+    setAddPaidBy('vessel');
+    setAddCodName('');
+    setWriteDesc('');
+    setWritePrice('0');
+    setSvcKind(canAddGtsServices ? 'parts_pickup' : 'other_pickup');
+    setSvcPartsLoc(''); setSvcPartsOrder(''); setSvcPartsContact(''); setSvcPartsPhone('');
+    setSvcPkgDesc(''); setSvcPkgOrigin(''); setSvcPkgContact(''); setSvcPkgPhone('');
+    setSvcOtherUrl(''); setSvcOtherNotes('');
+    setSvcOtherPaidBy('grocery'); setSvcOtherCodName('');
+    setItemError('');
+  }
+
+  function cancelAdd() {
+    setAddingItem(false);
+    resetAddForm();
+  }
+
+  async function postNewItem(body: Record<string, unknown>) {
     setAddSaving(true);
     setItemError('');
     try {
       const res = await adminFetch(`/api/orders/${order.id}/items`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ product_id: addSelected.id, quantity: qty }),
+        body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error('Failed to add item');
-      const { item } = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to add item');
+      const { item } = data;
       setLocalItems(prev => [...prev, item]);
       setAddingItem(false);
-      setAddSearch('');
-      setAddResults([]);
-      setAddSelected(null);
-      setAddQty('1');
+      resetAddForm();
       onRefresh();
-    } catch {
-      setItemError('Failed to add item — please try again');
+    } catch (e) {
+      setItemError(e instanceof Error ? e.message : 'Failed to add item — please try again');
     } finally {
       setAddSaving(false);
     }
   }
 
-  function cancelAdd() {
-    setAddingItem(false);
-    setAddSearch('');
-    setAddResults([]);
-    setAddSelected(null);
-    setAddQty('1');
+  async function confirmAdd() {
+    if (addMode === 'catalog') {
+      if (!addSelected) return;
+      if (addPaidBy === 'cod' && !addCodName.trim()) {
+        setItemError('COD needs the crew member\'s name');
+        return;
+      }
+      const qty = parseFloat(addQty) || 1;
+      await postNewItem({
+        product_id: addSelected.id,
+        quantity: qty,
+        paid_by: addPaidBy,
+        cod_name: addPaidBy === 'cod' ? addCodName.trim() : '',
+      });
+      return;
+    }
+    if (addMode === 'writein') {
+      if (!writeDesc.trim()) { setItemError('Description required'); return; }
+      if (addPaidBy === 'cod' && !addCodName.trim()) {
+        setItemError('COD needs the crew member\'s name');
+        return;
+      }
+      const qty = parseFloat(addQty) || 1;
+      const unit_price = parseFloat(writePrice);
+      if (Number.isNaN(unit_price) || unit_price < 0) {
+        setItemError('Price must be 0 or more (0 = pending register)');
+        return;
+      }
+      await postNewItem({
+        description: writeDesc.trim(),
+        quantity: qty,
+        unit_price,
+        paid_by: addPaidBy,
+        cod_name: addPaidBy === 'cod' ? addCodName.trim() : '',
+        item_type: 'grocery',
+      });
+      return;
+    }
+    if (addMode === 'service') {
+      if (svcKind === 'parts_pickup') {
+        if (!canAddGtsServices) { setItemError('Only GTS can add Parts Pickup'); return; }
+        await postNewItem({
+          item_type: 'service',
+          service_type: 'parts_pickup',
+          pickup_location: svcPartsLoc,
+          order_number: svcPartsOrder,
+          contact_name: svcPartsContact,
+          contact_phone: svcPartsPhone,
+        });
+        return;
+      }
+      if (svcKind === 'package_delivery') {
+        if (!canAddGtsServices) { setItemError('Only GTS can add Package Delivery'); return; }
+        await postNewItem({
+          item_type: 'service',
+          service_type: 'package_delivery',
+          description: svcPkgDesc,
+          origin: svcPkgOrigin,
+          contact_name: svcPkgContact,
+          contact_phone: svcPkgPhone,
+        });
+        return;
+      }
+      // other_pickup
+      if (!svcOtherUrl.trim() && !svcOtherNotes.trim()) {
+        setItemError('Outside pickup needs a link or notes');
+        return;
+      }
+      if (svcOtherPaidBy === 'cod' && !svcOtherCodName.trim()) {
+        setItemError('COD outside pickup needs the crew member\'s name');
+        return;
+      }
+      await postNewItem({
+        item_type: 'service',
+        service_type: 'other_pickup',
+        url: svcOtherUrl.trim(),
+        notes: svcOtherNotes.trim(),
+        paid_by: svcOtherPaidBy,
+        cod_name: svcOtherPaidBy === 'cod' ? svcOtherCodName.trim() : '',
+      });
+    }
+  }
+
+  async function setItemPaidBy(item: OrderItem, paid_by: 'vessel' | 'deck' | 'cod', cod_name: string) {
+    if (paid_by === 'cod' && !cod_name.trim()) {
+      setItemError('COD needs the crew member\'s name');
+      return;
+    }
+    setPaidByBusyId(item.id);
     setItemError('');
+    try {
+      const res = await adminFetch(`/api/orders/${order.id}/items/${item.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'set_paid_by', paid_by, cod_name: paid_by === 'cod' ? cod_name.trim() : '' }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to update billing');
+      setLocalItems(prev => prev.map(i => i.id === data.item.id ? data.item : i));
+      onRefresh();
+    } catch (e) {
+      setItemError(e instanceof Error ? e.message : 'Failed to update billing');
+    } finally {
+      setPaidByBusyId(null);
+    }
+  }
+
+  async function saveCrewChange() {
+    if (!canEditCrew) return;
+    setCrewSaving(true);
+    setItemError('');
+    try {
+      const body: Record<string, unknown> = {
+        crew_change: localCrew.crew_change,
+        crew_change_notes: localCrew.crew_change === 'no' ? null : (localCrew.crew_change_notes || null),
+      };
+      if (localCrew.crew_change === 'yes') {
+        body.crew_arriving = localCrew.crew_arriving.trim() === '' ? null : parseInt(localCrew.crew_arriving, 10);
+        body.crew_departing = localCrew.crew_departing.trim() === '' ? null : parseInt(localCrew.crew_departing, 10);
+      } else {
+        body.crew_arriving = null;
+        body.crew_departing = null;
+      }
+      const res = await adminFetch(`/api/orders/${order.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to save crew change');
+      onRefresh();
+    } catch (e) {
+      setItemError(e instanceof Error ? e.message : 'Failed to save crew change');
+    } finally {
+      setCrewSaving(false);
+    }
   }
 
   function renderLineEdits(item: OrderItem) {
@@ -627,6 +825,28 @@ export function OrderDetailModal({
     }
     return (
       <div className="flex items-center justify-end gap-0.5 flex-wrap">
+        {item.item_type !== 'service' && (
+          <select
+            className="text-[10px] font-bold border border-gray-200 rounded px-1 py-1 max-w-[6.5rem] bg-white text-gray-700"
+            title="Bill as"
+            disabled={paidByBusyId === item.id}
+            value={item.paid_by === 'cod' ? 'cod' : item.paid_by === 'deck' ? 'deck' : 'vessel'}
+            onChange={async (e) => {
+              const pb = e.target.value as 'vessel' | 'deck' | 'cod';
+              if (pb === 'cod') {
+                const name = window.prompt('Crew member name for COD:', item.cod_name || '') || '';
+                if (!name.trim()) { e.target.value = item.paid_by === 'cod' ? 'cod' : item.paid_by === 'deck' ? 'deck' : 'vessel'; return; }
+                await setItemPaidBy(item, 'cod', name);
+              } else {
+                await setItemPaidBy(item, pb, '');
+              }
+            }}
+          >
+            <option value="vessel">Boat</option>
+            <option value="deck">Deck</option>
+            <option value="cod">COD</option>
+          </select>
+        )}
         <button
           onClick={() => markShopped(item)}
           disabled={rowBusy === item.id}
@@ -781,28 +1001,95 @@ export function OrderDetailModal({
               </Section>
             )}
 
-            {/* Crew Change */}
-            {order.crew_change === 'yes' && (
+            {/* Crew Change — GTS editable; Sinclair display-only when already set */}
+            {canEditCrew ? (
               <Section icon={<Users className="w-3.5 h-3.5" />} title="Crew Change">
-                <span className="inline-block mb-2 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded bg-orange-100 text-brand-orange border border-orange-200">Yes</span>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  {order.crew_arriving  != null && <IB label="Arriving"  value={String(order.crew_arriving)} />}
-                  {order.crew_departing != null && <IB label="Departing" value={String(order.crew_departing)} />}
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {([
+                    ['no', 'No'],
+                    ['maybe', 'Maybe'],
+                    ['yes', 'Yes'],
+                  ] as const).map(([val, label]) => (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => setLocalCrew(c => ({ ...c, crew_change: val }))}
+                      className={`text-xs font-bold uppercase tracking-wide px-2.5 py-1 rounded border transition-colors ${
+                        localCrew.crew_change === val
+                          ? val === 'yes'
+                            ? 'bg-orange-100 text-brand-orange border-orange-300'
+                            : val === 'maybe'
+                              ? 'bg-amber-100 text-amber-700 border-amber-300'
+                              : 'bg-gray-100 text-gray-700 border-gray-300'
+                          : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
-                {order.crew_change_notes && (
-                  <p className="text-sm text-gray-600 mt-2">{order.crew_change_notes}</p>
+                {localCrew.crew_change === 'yes' && (
+                  <div className="grid grid-cols-2 gap-2 mb-2">
+                    <label className="text-xs font-bold text-gray-500 uppercase">
+                      Arriving
+                      <input type="number" min="0" className="input-base mt-0.5"
+                        value={localCrew.crew_arriving}
+                        onChange={e => setLocalCrew(c => ({ ...c, crew_arriving: e.target.value }))} />
+                    </label>
+                    <label className="text-xs font-bold text-gray-500 uppercase">
+                      Departing
+                      <input type="number" min="0" className="input-base mt-0.5"
+                        value={localCrew.crew_departing}
+                        onChange={e => setLocalCrew(c => ({ ...c, crew_departing: e.target.value }))} />
+                    </label>
+                  </div>
                 )}
-              </Section>
-            )}
-            {order.crew_change === 'maybe' && (
-              <Section icon={<Users className="w-3.5 h-3.5" />} title="Crew Change">
-                <span className="inline-block mb-2 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-300">Maybe — to be confirmed</span>
-                {order.crew_change_notes ? (
-                  <p className="text-sm text-gray-600">{order.crew_change_notes}</p>
-                ) : (
-                  <p className="text-sm text-gray-400 italic">Customer may need a crew change — confirm before arrival.</p>
+                {localCrew.crew_change !== 'no' && (
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-2">
+                    Notes
+                    <textarea
+                      className="input-base mt-0.5 text-sm font-normal normal-case"
+                      rows={2}
+                      value={localCrew.crew_change_notes}
+                      onChange={e => setLocalCrew(c => ({ ...c, crew_change_notes: e.target.value }))}
+                      placeholder={localCrew.crew_change === 'maybe' ? 'To be confirmed…' : 'Crew change details'}
+                    />
+                  </label>
                 )}
+                <button
+                  type="button"
+                  onClick={saveCrewChange}
+                  disabled={crewSaving}
+                  className="btn-primary text-xs px-3 py-1.5 disabled:opacity-50"
+                >
+                  {crewSaving ? 'Saving…' : 'Save crew change'}
+                </button>
               </Section>
+            ) : (
+              <>
+                {localCrew.crew_change === 'yes' && (
+                  <Section icon={<Users className="w-3.5 h-3.5" />} title="Crew Change">
+                    <span className="inline-block mb-2 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded bg-orange-100 text-brand-orange border border-orange-200">Yes</span>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      {order.crew_arriving  != null && <IB label="Arriving"  value={String(order.crew_arriving)} />}
+                      {order.crew_departing != null && <IB label="Departing" value={String(order.crew_departing)} />}
+                    </div>
+                    {order.crew_change_notes && (
+                      <p className="text-sm text-gray-600 mt-2">{order.crew_change_notes}</p>
+                    )}
+                  </Section>
+                )}
+                {localCrew.crew_change === 'maybe' && (
+                  <Section icon={<Users className="w-3.5 h-3.5" />} title="Crew Change">
+                    <span className="inline-block mb-2 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-300">Maybe — to be confirmed</span>
+                    {order.crew_change_notes ? (
+                      <p className="text-sm text-gray-600">{order.crew_change_notes}</p>
+                    ) : (
+                      <p className="text-sm text-gray-400 italic">Customer may need a crew change — confirm before arrival.</p>
+                    )}
+                  </Section>
+                )}
+              </>
             )}
 
             {/* COD items — collected at delivery, NEVER invoiced */}
@@ -1103,11 +1390,11 @@ export function OrderDetailModal({
               </div>
             )}
 
-            {/* Grocery Items */}
-            {groceryItems.length > 0 && (
+            {/* Grocery Items (+ mid-fulfill add even when empty) */}
+            {(groceryItems.length > 0 || canEdit) && (
               <div>
                 <h3 className="font-display text-base font-bold text-brand-navy mb-3">
-                  Grocery Items ({groceryItems.length} lines)
+                  Grocery Items{groceryItems.length > 0 ? ` (${groceryItems.length} lines)` : ''}
                 </h3>
 
                 {/* Item error banner */}
@@ -1601,16 +1888,16 @@ export function OrderDetailModal({
                   </div>
                 )}
 
-                {/* Add Item */}
+                {/* Add Item — catalog / external write-in / service */}
                 {canEdit && (
                   <div className="mt-2 flex flex-wrap items-center gap-3">
                     {!addingItem ? (
                       <>
                       <button
-                        onClick={() => { setAddingItem(true); setItemError(''); }}
+                        onClick={() => { setAddingItem(true); setAddMode(null); setItemError(''); }}
                         className="flex items-center gap-1.5 text-xs font-bold text-brand-river hover:text-brand-navy transition-colors py-1"
                       >
-                        <Plus className="w-3.5 h-3.5" /> Add Item
+                        <Plus className="w-3.5 h-3.5" /> Add to order
                       </button>
                       {canEdit && order.status !== 'shopped' && order.status !== 'fulfilled' && order.status !== 'cancelled' && (
                         <button
@@ -1626,91 +1913,277 @@ export function OrderDetailModal({
                       )}
                       </>
                     ) : (
-                      <div className="mt-3 border border-brand-sky/30 rounded-lg bg-blue-50/40 p-3 space-y-2">
-                        <p className="text-xs font-bold text-brand-navy uppercase tracking-wide">Add Item to Order</p>
+                      <div className="mt-3 w-full border border-brand-sky/30 rounded-lg bg-blue-50/40 p-3 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-xs font-bold text-brand-navy uppercase tracking-wide">Add to order</p>
+                          <button onClick={cancelAdd} className="text-xs text-gray-500 hover:text-gray-700">Cancel</button>
+                        </div>
 
-                        {!addSelected ? (
-                          <>
-                            <div className="relative">
-                              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                              <input
-                                type="text"
-                                className="input-base pl-9"
-                                placeholder="Search products…"
-                                value={addSearch}
-                                autoFocus
-                                onChange={e => { setAddSearch(e.target.value); searchProducts(e.target.value); }}
-                              />
-                              {addSearching && (
-                                <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 animate-spin text-gray-400" />
+                        {/* Mode picker */}
+                        <div className="flex flex-wrap gap-1.5">
+                          {([
+                            ['catalog', 'Catalog'],
+                            ['writein', 'External / write-in'],
+                            ['service', 'Service'],
+                          ] as const).map(([mode, label]) => (
+                            <button
+                              key={mode}
+                              type="button"
+                              onClick={() => {
+                                setAddMode(mode);
+                                setItemError('');
+                                if (mode === 'writein') {
+                                  setAddPaidBy('cod');
+                                } else if (mode === 'catalog') {
+                                  setAddPaidBy('vessel');
+                                } else if (mode === 'service') {
+                                  setSvcKind(canAddGtsServices ? 'parts_pickup' : 'other_pickup');
+                                }
+                              }}
+                              className={`text-xs font-bold px-2.5 py-1.5 rounded-lg border transition-colors ${
+                                addMode === mode
+                                  ? 'bg-brand-navy text-white border-brand-navy'
+                                  : 'bg-white text-brand-navy border-gray-200 hover:border-brand-sky'
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+
+                        {addMode === 'catalog' && (
+                          <div className="space-y-2">
+                            {!addSelected ? (
+                              <>
+                                <div className="relative">
+                                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                  <input
+                                    type="text"
+                                    className="input-base pl-9"
+                                    placeholder="Search products…"
+                                    value={addSearch}
+                                    autoFocus
+                                    onChange={e => { setAddSearch(e.target.value); searchProducts(e.target.value); }}
+                                  />
+                                  {addSearching && (
+                                    <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 animate-spin text-gray-400" />
+                                  )}
+                                </div>
+                                {addResults.length > 0 && (
+                                  <div className="border border-gray-200 rounded-lg overflow-hidden max-h-48 overflow-y-auto bg-white">
+                                    {addResults.map(prod => (
+                                      <button
+                                        key={prod.id}
+                                        onClick={() => { setAddSelected(prod); setAddResults([]); }}
+                                        className="w-full text-left px-3 py-2 hover:bg-brand-sand/40 border-b border-gray-100 last:border-0 flex items-center justify-between gap-2"
+                                      >
+                                        <div>
+                                          <p className="text-sm font-semibold text-brand-navy">{prod.description}</p>
+                                          <p className="text-xs text-gray-400">{prod.category}{prod.pkg_size ? ` · ${prod.pkg_size}` : ''}</p>
+                                        </div>
+                                        <div className="text-right shrink-0">
+                                          <p className="text-sm font-bold text-brand-green">{formatCurrency(prod.price)}</p>
+                                          <p className="text-xs text-gray-400">{prod.uom || 'EACH'}</p>
+                                        </div>
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </>
+                            ) : (
+                              <>
+                                <div className="bg-white rounded-lg border border-brand-green/30 px-3 py-2 flex items-center justify-between">
+                                  <div>
+                                    <p className="text-sm font-bold text-brand-navy">{addSelected.description}</p>
+                                    <p className="text-xs text-gray-400">
+                                      {addSelected.category} · {formatCurrency(addSelected.price)}/{addSelected.uom || 'EACH'}
+                                    </p>
+                                  </div>
+                                  <button
+                                    onClick={() => { setAddSelected(null); setAddSearch(''); }}
+                                    className="text-gray-400 hover:text-gray-600 text-xs underline ml-2 shrink-0"
+                                  >
+                                    Change
+                                  </button>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <label className="text-xs font-bold text-gray-600 shrink-0">Qty</label>
+                                  <input
+                                    type="number"
+                                    min="0.25"
+                                    step="0.25"
+                                    className="input-base w-20 text-center font-bold"
+                                    value={addQty}
+                                    onChange={e => setAddQty(e.target.value)}
+                                  />
+                                  <p className="text-xs text-gray-500">
+                                    = {formatCurrency(addSelected.price * (parseFloat(addQty) || 1))}
+                                  </p>
+                                </div>
+                              </>
+                            )}
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-xs font-bold text-gray-600">Bill as</span>
+                              {(['vessel', 'deck', 'cod'] as const).map(pb => (
+                                <button key={pb} type="button" onClick={() => setAddPaidBy(pb)}
+                                  className={`text-[11px] font-bold uppercase px-2 py-1 rounded border ${
+                                    addPaidBy === pb
+                                      ? pb === 'cod' ? 'bg-purple-100 text-purple-800 border-purple-300'
+                                        : pb === 'deck' ? 'bg-teal-100 text-teal-800 border-teal-300'
+                                        : 'bg-brand-navy text-white border-brand-navy'
+                                      : 'bg-white text-gray-600 border-gray-200'
+                                  }`}>
+                                  {pb === 'vessel' ? 'Boat' : pb === 'deck' ? 'Deck' : 'COD'}
+                                </button>
+                              ))}
+                              {addPaidBy === 'cod' && (
+                                <input
+                                  className="input-base flex-1 min-w-[8rem] text-sm"
+                                  placeholder="Crew name"
+                                  value={addCodName}
+                                  onChange={e => setAddCodName(e.target.value)}
+                                />
                               )}
                             </div>
-                            {addResults.length > 0 && (
-                              <div className="border border-gray-200 rounded-lg overflow-hidden max-h-48 overflow-y-auto bg-white">
-                                {addResults.map(p => (
-                                  <button
-                                    key={p.id}
-                                    onClick={() => { setAddSelected(p); setAddResults([]); }}
-                                    className="w-full text-left px-3 py-2 hover:bg-brand-sand/40 border-b border-gray-100 last:border-0 flex items-center justify-between gap-2"
-                                  >
-                                    <div>
-                                      <p className="text-sm font-semibold text-brand-navy">{p.description}</p>
-                                      <p className="text-xs text-gray-400">{p.category}{p.pkg_size ? ` · ${p.pkg_size}` : ''}</p>
-                                    </div>
-                                    <div className="text-right shrink-0">
-                                      <p className="text-sm font-bold text-brand-green">{formatCurrency(p.price)}</p>
-                                      <p className="text-xs text-gray-400">{p.uom || 'EACH'}</p>
-                                    </div>
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                          </>
-                        ) : (
-                          <>
-                            <div className="bg-white rounded-lg border border-brand-green/30 px-3 py-2 flex items-center justify-between">
-                              <div>
-                                <p className="text-sm font-bold text-brand-navy">{addSelected.description}</p>
-                                <p className="text-xs text-gray-400">
-                                  {addSelected.category} · {formatCurrency(addSelected.price)}/{addSelected.uom || 'EACH'}
-                                </p>
-                              </div>
-                              <button
-                                onClick={() => { setAddSelected(null); setAddSearch(''); }}
-                                className="text-gray-400 hover:text-gray-600 text-xs underline ml-2 shrink-0"
-                              >
-                                Change
-                              </button>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <label className="text-xs font-bold text-gray-600 shrink-0">Quantity</label>
-                              <input
-                                type="number"
-                                min="1"
-                                className="input-base w-24 text-center font-bold"
-                                value={addQty}
-                                onChange={e => setAddQty(e.target.value)}
-                              />
-                              <p className="text-xs text-gray-500">
-                                = {formatCurrency(addSelected.price * (parseInt(addQty) || 1))}
-                              </p>
-                            </div>
-                          </>
+                          </div>
                         )}
 
-                        <div className="flex gap-2 pt-1">
-                          <button
-                            onClick={confirmAdd}
-                            disabled={addSaving || !addSelected}
-                            className="flex items-center gap-1.5 bg-brand-navy text-white text-xs font-bold px-4 py-2 rounded-lg hover:bg-brand-steel transition-colors disabled:opacity-50"
-                          >
-                            {addSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
-                            Add to Order
-                          </button>
-                          <button onClick={cancelAdd} className="text-sm text-gray-500 hover:text-gray-700 px-2">
-                            Cancel
-                          </button>
-                        </div>
+                        {addMode === 'writein' && (
+                          <div className="space-y-2">
+                            <p className="text-[11px] text-gray-500">Sinclair will pick up off-shelf (cigarettes, etc.). Price can be 0 until register.</p>
+                            <label className="block text-xs font-bold text-gray-600">
+                              Item name
+                              <input className="input-base mt-0.5" value={writeDesc} onChange={e => setWriteDesc(e.target.value)}
+                                placeholder="e.g. Marlboro Red carton" autoFocus />
+                            </label>
+                            <div className="flex flex-wrap gap-2">
+                              <label className="text-xs font-bold text-gray-600">
+                                Qty
+                                <input type="number" min="0.25" step="0.25" className="input-base mt-0.5 w-20 text-center font-bold"
+                                  value={addQty} onChange={e => setAddQty(e.target.value)} />
+                              </label>
+                              <label className="text-xs font-bold text-gray-600">
+                                Unit price ($)
+                                <input type="number" min="0" step="0.01" className="input-base mt-0.5 w-24 text-right font-bold"
+                                  value={writePrice} onChange={e => setWritePrice(e.target.value)} />
+                              </label>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-xs font-bold text-gray-600">Bill as</span>
+                              {(['vessel', 'deck', 'cod'] as const).map(pb => (
+                                <button key={pb} type="button" onClick={() => setAddPaidBy(pb)}
+                                  className={`text-[11px] font-bold uppercase px-2 py-1 rounded border ${
+                                    addPaidBy === pb
+                                      ? pb === 'cod' ? 'bg-purple-100 text-purple-800 border-purple-300'
+                                        : pb === 'deck' ? 'bg-teal-100 text-teal-800 border-teal-300'
+                                        : 'bg-brand-navy text-white border-brand-navy'
+                                      : 'bg-white text-gray-600 border-gray-200'
+                                  }`}>
+                                  {pb === 'vessel' ? 'Boat' : pb === 'deck' ? 'Deck' : 'COD'}
+                                </button>
+                              ))}
+                              {addPaidBy === 'cod' && (
+                                <input
+                                  className="input-base flex-1 min-w-[8rem] text-sm"
+                                  placeholder="Crew name"
+                                  value={addCodName}
+                                  onChange={e => setAddCodName(e.target.value)}
+                                />
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {addMode === 'service' && (
+                          <div className="space-y-2">
+                            <div className="flex flex-wrap gap-1.5">
+                              {canAddGtsServices && (
+                                <>
+                                  <button type="button" onClick={() => setSvcKind('parts_pickup')}
+                                    className={`text-[11px] font-bold px-2 py-1 rounded border ${svcKind === 'parts_pickup' ? 'bg-brand-navy text-white border-brand-navy' : 'bg-white border-gray-200'}`}>
+                                    Parts Pickup
+                                  </button>
+                                  <button type="button" onClick={() => setSvcKind('package_delivery')}
+                                    className={`text-[11px] font-bold px-2 py-1 rounded border ${svcKind === 'package_delivery' ? 'bg-brand-navy text-white border-brand-navy' : 'bg-white border-gray-200'}`}>
+                                    Package / Other Delivery
+                                  </button>
+                                </>
+                              )}
+                              <button type="button" onClick={() => setSvcKind('other_pickup')}
+                                className={`text-[11px] font-bold px-2 py-1 rounded border ${svcKind === 'other_pickup' ? 'bg-brand-navy text-white border-brand-navy' : 'bg-white border-gray-200'}`}>
+                                Outside pickup
+                              </button>
+                            </div>
+                            {!canAddGtsServices && (
+                              <p className="text-[11px] text-gray-500">Sinclair: outside pickups only (Walmart / off-catalog). Parts &amp; package delivery are GTS.</p>
+                            )}
+                            {svcKind === 'parts_pickup' && canAddGtsServices && (
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <label className="text-xs font-bold text-gray-600">Pickup location
+                                  <input className="input-base mt-0.5" value={svcPartsLoc} onChange={e => setSvcPartsLoc(e.target.value)} /></label>
+                                <label className="text-xs font-bold text-gray-600">Order #
+                                  <input className="input-base mt-0.5" value={svcPartsOrder} onChange={e => setSvcPartsOrder(e.target.value)} /></label>
+                                <label className="text-xs font-bold text-gray-600">Contact
+                                  <input className="input-base mt-0.5" value={svcPartsContact} onChange={e => setSvcPartsContact(e.target.value)} /></label>
+                                <label className="text-xs font-bold text-gray-600">Phone
+                                  <input className="input-base mt-0.5" value={svcPartsPhone} onChange={e => setSvcPartsPhone(e.target.value)} /></label>
+                              </div>
+                            )}
+                            {svcKind === 'package_delivery' && canAddGtsServices && (
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <label className="text-xs font-bold text-gray-600 sm:col-span-2">Description
+                                  <input className="input-base mt-0.5" value={svcPkgDesc} onChange={e => setSvcPkgDesc(e.target.value)} /></label>
+                                <label className="text-xs font-bold text-gray-600">From / origin
+                                  <input className="input-base mt-0.5" value={svcPkgOrigin} onChange={e => setSvcPkgOrigin(e.target.value)} /></label>
+                                <label className="text-xs font-bold text-gray-600">Contact
+                                  <input className="input-base mt-0.5" value={svcPkgContact} onChange={e => setSvcPkgContact(e.target.value)} /></label>
+                                <label className="text-xs font-bold text-gray-600">Phone
+                                  <input className="input-base mt-0.5" value={svcPkgPhone} onChange={e => setSvcPkgPhone(e.target.value)} /></label>
+                              </div>
+                            )}
+                            {svcKind === 'other_pickup' && (
+                              <div className="space-y-2">
+                                <label className="block text-xs font-bold text-gray-600">Item link (URL)
+                                  <input className="input-base mt-0.5" value={svcOtherUrl} onChange={e => setSvcOtherUrl(e.target.value)}
+                                    placeholder="https://…" /></label>
+                                <label className="block text-xs font-bold text-gray-600">Details (size, color, qty)
+                                  <input className="input-base mt-0.5" value={svcOtherNotes} onChange={e => setSvcOtherNotes(e.target.value)} /></label>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="text-xs font-bold text-gray-600">Bill as</span>
+                                  <button type="button" onClick={() => setSvcOtherPaidBy('grocery')}
+                                    className={`text-[11px] font-bold uppercase px-2 py-1 rounded border ${svcOtherPaidBy === 'grocery' ? 'bg-brand-navy text-white border-brand-navy' : 'bg-white border-gray-200'}`}>Boat</button>
+                                  <button type="button" onClick={() => setSvcOtherPaidBy('cod')}
+                                    className={`text-[11px] font-bold uppercase px-2 py-1 rounded border ${svcOtherPaidBy === 'cod' ? 'bg-purple-100 text-purple-800 border-purple-300' : 'bg-white border-gray-200'}`}>COD</button>
+                                  {svcOtherPaidBy === 'cod' && (
+                                    <input className="input-base flex-1 min-w-[8rem] text-sm" placeholder="Crew name"
+                                      value={svcOtherCodName} onChange={e => setSvcOtherCodName(e.target.value)} />
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {itemError && addMode && (
+                          <p className="text-xs text-red-600 font-semibold">{itemError}</p>
+                        )}
+
+                        {addMode && (
+                          <div className="flex gap-2 pt-1">
+                            <button
+                              onClick={confirmAdd}
+                              disabled={
+                                addSaving
+                                || (addMode === 'catalog' && !addSelected)
+                                || (addMode === 'writein' && !writeDesc.trim())
+                              }
+                              className="flex items-center gap-1.5 bg-brand-navy text-white text-xs font-bold px-4 py-2 rounded-lg hover:bg-brand-steel transition-colors disabled:opacity-50"
+                            >
+                              {addSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                              Add to Order
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

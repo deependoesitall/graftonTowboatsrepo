@@ -83,7 +83,7 @@ interface VesselHeader {
   phone: string;
   terminal_name: string;
   delivery_method: 'boat' | 'van' | '';
-  approach_side: string;
+  approach_side: '' | 'port' | 'starboard' | 'either';
   vhf_channel: string;
   po_number: string;
   last_ordered: string;
@@ -497,7 +497,9 @@ export default function NewOrderPage() {
       phone: v.phone || v.captain_phone,
       terminal_name: v.terminal_name,
       delivery_method: v.delivery_method,
-      approach_side: v.approach_side,
+      approach_side: (v.approach_side === 'port' || v.approach_side === 'starboard' || v.approach_side === 'either')
+        ? v.approach_side
+        : ('' as const),
       vhf_channel: v.vhf_channel,
       // PO is per-delivery, NOT per-boat. Carrying last month's number forward
       // would put it on an invoice Ingram's AP would then reject.

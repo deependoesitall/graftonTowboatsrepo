@@ -52,6 +52,12 @@ const bodySchema = z.discriminatedUnion('action', [
     action: z.literal('set_price'),
     unit_price: z.number().min(0).max(100000),
   }),
+  // Flip billing on an existing grocery line without delete/re-add (COD / deck / boat).
+  z.object({
+    action: z.literal('set_paid_by'),
+    paid_by: z.enum(['vessel', 'deck', 'cod']),
+    cod_name: z.string().max(80).optional().default(''),
+  }),
 ]);
 
 /** If the order is still 'new', advance it to 'in_progress' (first item action). */
@@ -266,6 +272,35 @@ export async function PATCH(
 
     await recalcSubtotal(supabase, orderId);
 
+    return NextResponse.json({ item: updated });
+  }
+
+  // ── SET PAID_BY (grocery billing flip) ────────────────────────────────────
+  if (action === 'set_paid_by') {
+    const { paid_by, cod_name } = parsed.data;
+    if (item.item_type === 'service') {
+      return NextResponse.json(
+        { error: 'Billing on service lines is set in service_details — only grocery lines use paid_by here.' },
+        { status: 400 },
+      );
+    }
+    if (paid_by === 'cod' && !(cod_name || '').trim()) {
+      return NextResponse.json(
+        { error: 'COD items need the crew member\'s name (cod_name).' },
+        { status: 400 },
+      );
+    }
+    const { data: updated, error } = await supabase
+      .from('order_items')
+      .update({
+        paid_by,
+        cod_name: paid_by === 'cod' ? (cod_name || '').trim() : null,
+      })
+      .eq('id', itemId)
+      .select()
+      .single();
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    // Subtotal unchanged — billing attribution only.
     return NextResponse.json({ item: updated });
   }
 

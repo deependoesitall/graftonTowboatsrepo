@@ -200,9 +200,20 @@ export default async function CatalogPage({ searchParams }: PageProps) {
     query = query.eq('category', category);
   }
 
-  // Counts for the barge/full-store toggle — both scoped to the current
-  // search + category so the numbers match what each view would show.
-  const scopedCount = (storeOnly: boolean) => {
+  // Scope-toggle tab counts = FULL unfiltered barge/store totals.
+  // Never search-scoped — a UPC miss must not read as "0 everyday items"
+  // (empty-store feel). Match counts for search live separately near results.
+  const scopeTotalCount = (storeOnly: boolean) =>
+    supabase
+      .from('products')
+      .select('id', { count: 'exact', head: true })
+      .eq('is_active', true)
+      .eq('is_available', true)
+      .eq('store_only', storeOnly);
+
+  // Expander CTA ("N more matches in the full store") stays search/category
+  // scoped so cooks aren't dumped into all 20k items (Dave).
+  const scopedMatchCount = (storeOnly: boolean) => {
     let q = supabase
       .from('products')
       .select('id', { count: 'exact', head: true })
@@ -228,20 +239,22 @@ export default async function CatalogPage({ searchParams }: PageProps) {
       }))
     : Promise.resolve(null);
 
-  const [{ data: products, count }, { data: catCounts }, { data: pageSettings }, bargeCountRes, storeCountRes, storeCats] = await Promise.all([
+  const [{ data: products, count }, { data: catCounts }, { data: pageSettings }, bargeCountRes, storeCountRes, storeMatchRes, storeCats] = await Promise.all([
     query,
     supabase.rpc('get_category_counts'),
     // admin_settings is RLS-locked to the service role — the anon client read
     // null here, which meant the fleet CTA toggle silently never worked.
     createServiceClient().from('admin_settings').select('fleet_cta_enabled').single(),
-    scopedCount(false),  // barge order form
-    scopedCount(true),   // everything beyond the order form
+    scopeTotalCount(false),  // barge tab — full everyday total
+    scopeTotalCount(true),   // store tab — full "more items" total
+    scopedMatchCount(true),  // expander CTA only (search/category aware)
     storeCategoryCounts,
   ]);
   const fleetCtaEnabled = !!pageSettings?.fleet_cta_enabled;
   const bargeCount = bargeCountRes?.count || 0;
   const storeCount = storeCountRes?.count || 0;
-  const storeMatchCount = storeCount;                 // items only in the store view
+  const storeMatchCount = storeMatchRes?.count || 0;
+  const matchCount = count || 0;
   const sidebarCounts = storeAll ? (storeCats || []) : (catCounts || []);
 
   // Helper to rebuild the current URL with store=all (keeps search/category)
@@ -368,6 +381,14 @@ export default async function CatalogPage({ searchParams }: PageProps) {
           )}
 
           <SearchBar initialSearch={search} />
+          {search && (
+            <p className="mt-2 text-sm text-gray-600">
+              <span className="font-bold text-brand-navy">{matchCount.toLocaleString()}</span>
+              {' '}match{matchCount === 1 ? '' : 'es'} for &ldquo;{search}&rdquo;
+              {storeAll ? ' in More from Sinclair\'s' : ' on the barge order form'}
+              {category && category !== 'All' ? ` · ${category}` : ''}
+            </p>
+          )}
           <div className="flex flex-col md:flex-row gap-5 mt-5">
             <aside className="w-full md:w-52 shrink-0">
               <CategoryFilter

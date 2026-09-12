@@ -1,7 +1,7 @@
 // src/app/api/orders/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
-import { requireAdmin, isGtsRole } from '@/lib/admin-auth-server';
+import { requireAdmin, isGtsRole, isSinclairScoped } from '@/lib/admin-auth-server';
 import { hydrateOrderItemCatalog } from '@/lib/order-item-catalog';
 
 export async function GET(
@@ -50,6 +50,31 @@ export async function PATCH(
       { error: "Only Grafton Towboat can mark an order fulfilled — that happens on delivery. Confirm the register total to mark it Shopped." },
       { status: 403 },
     );
+  }
+
+  // Crew change is GTS work. Sinclair-scoped sessions must never set it —
+  // even if a client UI is patched to show the editor.
+  const crewKeys = ['crew_change', 'crew_change_notes', 'crew_arriving', 'crew_departing'] as const;
+  const touchingCrew = crewKeys.some((k) => k in body && body[k] !== undefined);
+  if (touchingCrew && isSinclairScoped(session)) {
+    return NextResponse.json(
+      { error: 'Only Grafton Towboat staff can set crew change.' },
+      { status: 403 },
+    );
+  }
+  if ('crew_change' in body && body.crew_change != null) {
+    const cc = body.crew_change;
+    if (cc !== 'yes' && cc !== 'maybe' && cc !== 'no') {
+      return NextResponse.json({ error: 'crew_change must be yes, maybe, or no' }, { status: 400 });
+    }
+    if (cc !== 'yes') {
+      // Clear counts when not a firm yes (mirrors place-order).
+      body.crew_arriving = null;
+      body.crew_departing = null;
+    }
+    if (cc === 'no') {
+      body.crew_change_notes = null;
+    }
   }
 
   const supabase = createServiceClient();

@@ -651,6 +651,7 @@ function OrdersContent() {
             canDelete={canDeleteOrder(selectedOrder.order_number)}
             deleting={deletingId === selectedOrder.id}
             onDelete={() => deleteOrder(selectedOrder.id, selectedOrder.order_number)}
+            isSinclairScoped={isSinclair}
           />
         )}
     </div>
