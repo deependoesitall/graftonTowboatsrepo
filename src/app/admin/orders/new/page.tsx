@@ -502,6 +502,7 @@ export default function NewOrderPage() {
       // PO is per-delivery, NOT per-boat. Carrying last month's number forward
       // would put it on an invoice Ingram's AP would then reject.
       po_number: '',
+      crew_change: 'no', crew_arriving: '', crew_departing: '', crew_change_notes: '',
     }));
   }
 
@@ -1085,12 +1086,76 @@ function WhoStep({ header, setHeader, vessels, terminals, applyVessel, onNext, c
         </div>
         <Field label="PO number" value={header.po_number} onChange={set('po_number')}
                hint="Ingram's AP asks for this" />
+        <div>
+          <label className="label-base" htmlFor="side">Approach side</label>
+          <select id="side" className="input-base" value={header.approach_side} onChange={set('approach_side')}>
+            <option value="">Not specified</option>
+            <option value="port">Port</option>
+            <option value="starboard">Starboard</option>
+            <option value="either">Either</option>
+          </select>
+        </div>
+        <Field label="VHF channel" value={header.vhf_channel} onChange={set('vhf_channel')} />
         <div className="sm:col-span-2">
           <label className="label-base" htmlFor="notes">Notes</label>
           <textarea id="notes" className="input-base min-h-[72px]" value={header.notes}
                     onChange={e => setHeader(h => ({ ...h, notes: e.target.value }))}
                     placeholder="Anything written on the sheet that doesn't fit a field" />
         </div>
+      </section>
+
+      <section className="card-base p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Users className="w-4 h-4 text-gray-400" />
+          <h2 className="font-bold text-brand-navy text-sm">Crew change</h2>
+        </div>
+        <p className="text-xs text-gray-500">
+          Paper forms often mark this. Sinclair&apos;s never sees it — GTS only.
+        </p>
+        <div className="flex gap-2">
+          {([['no', 'No'], ['maybe', 'Maybe'], ['yes', 'Yes']] as const).map(([val, lbl]) => (
+            <button
+              key={val}
+              type="button"
+              onClick={() => setHeader(h => ({ ...h, crew_change: val }))}
+              className={`flex-1 py-2 rounded-xl border-2 text-sm font-bold transition-all ${
+                header.crew_change === val
+                  ? val === 'maybe'
+                    ? 'border-amber-500 bg-amber-500 text-white'
+                    : 'border-brand-navy bg-brand-navy text-white'
+                  : 'border-gray-200 text-gray-500 hover:border-gray-300'
+              }`}
+            >
+              {lbl}
+            </button>
+          ))}
+        </div>
+        {header.crew_change === 'yes' && (
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="# Arriving" value={header.crew_arriving} onChange={set('crew_arriving')} />
+            <Field label="# Departing" value={header.crew_departing} onChange={set('crew_departing')} />
+            <div className="col-span-2">
+              <label className="label-base" htmlFor="crew-notes">Notes</label>
+              <textarea
+                id="crew-notes"
+                className="input-base min-h-[64px]"
+                value={header.crew_change_notes}
+                onChange={e => setHeader(h => ({ ...h, crew_change_notes: e.target.value }))}
+              />
+            </div>
+          </div>
+        )}
+        {header.crew_change === 'maybe' && (
+          <div>
+            <label className="label-base" htmlFor="crew-notes-m">Notes</label>
+            <textarea
+              id="crew-notes-m"
+              className="input-base min-h-[64px]"
+              value={header.crew_change_notes}
+              onChange={e => setHeader(h => ({ ...h, crew_change_notes: e.target.value }))}
+            />
+          </div>
+        )}
       </section>
 
       {header.vessel_name.trim().length >= 2 && (
@@ -1512,9 +1577,19 @@ function ReviewStep({ header, chosen, qty, setLine, total, error, submitting, on
         </p>
         <p className="text-xs text-gray-500 mt-0.5">
           {[header.terminal_name, header.arrival_date, formatArrivalTime(header.arrival_time),
-            header.delivery_method === 'boat' ? 'by boat' : header.delivery_method === 'van' ? 'by van' : '']
+            header.delivery_method === 'boat' ? 'by boat' : header.delivery_method === 'van' ? 'by van' : '',
+            header.approach_side || '',
+            header.vhf_channel ? `VHF ${header.vhf_channel}` : '']
             .filter(Boolean).join(' · ') || 'No delivery details yet'}
         </p>
+        {header.crew_change !== 'no' && (
+          <p className="text-xs font-semibold text-amber-800 mt-1">
+            Crew change: {header.crew_change === 'maybe' ? 'maybe' : 'yes'}
+            {header.crew_change === 'yes' && (header.crew_arriving || header.crew_departing)
+              ? ` · ${header.crew_arriving || '0'} in / ${header.crew_departing || '0'} out`
+              : ''}
+          </p>
+        )}
         <p className="text-xs text-gray-500 mt-1">
           {sendConfirmation
             ? <>Confirmation to {header.vessel_email || header.billing_email || <span className="text-red-600">nobody — add an email</span>}</>
