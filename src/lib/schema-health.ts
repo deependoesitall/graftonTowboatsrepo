@@ -68,6 +68,11 @@ const REQUIRED: Requirement[] = [
     migration: '078_confirmation_email.sql',
     breaks: 'Staff cannot skip (or later prove) the boat confirmation email on paper-entered orders.',
   },
+  {
+    table: 'vessel_carts',
+    migration: '081_boat_history_and_shared_cart.sql',
+    breaks: 'Crew on the same boat cannot share one grocery cart, and new logins may miss that boat’s older orders.',
+  },
 ];
 
 export interface SchemaIssue {

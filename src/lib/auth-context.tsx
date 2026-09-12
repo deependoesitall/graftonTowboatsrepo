@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { User } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/client';
+import { startBoatCartSync, stopBoatCartSync } from '@/lib/boat-cart-sync';
 
 export interface CustomerProfile {
   first_name: string | null;
@@ -69,7 +70,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
       setLoading(false);
-      if (session?.user) loadProfile();
+      if (session?.user) {
+        loadProfile();
+        startBoatCartSync();
+      }
     });
   }, []);
 
@@ -91,6 +95,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(data.user);
           setLoading(false);
           await loadProfile();
+          startBoatCartSync();
         }
       }
       return { error: null, needsConfirmation: !data.session };
@@ -108,6 +113,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(data.user);
         setLoading(false);
         await loadProfile();
+        startBoatCartSync();
       }
       return { error: null };
     } catch (e: any) {
@@ -127,6 +133,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function signOut() {
+    stopBoatCartSync();
     await supabase.auth.signOut();
     setProfile(null);
     setUser(null);

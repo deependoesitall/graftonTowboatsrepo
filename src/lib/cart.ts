@@ -45,6 +45,9 @@ export function updateCartItem(product_id: string, quantity: number) {
 }
 
 export function removeFromCart(product_id: string) {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('cart-item-removed', { detail: { product_id } }));
+  }
   saveCart(getCart().filter(i => i.product_id !== product_id));
 }
 
@@ -59,6 +62,7 @@ export function clearCart() {
   if (typeof window === 'undefined') return;
   localStorage.removeItem(CART_KEY);
   window.dispatchEvent(new CustomEvent('cart-updated'));
+  window.dispatchEvent(new CustomEvent('boat-cart-clear'));
 }
 
 export function getCartTotal(items: CartItem[]): number {

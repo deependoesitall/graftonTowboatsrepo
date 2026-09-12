@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/admin-auth-server';
+import { vesselNameKey, orderMatchesVessel } from '@/lib/vessel-membership';
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -104,6 +105,23 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   if (mErr) {
     return NextResponse.json({ error: mErr.message }, { status: 500 });
+  }
+
+  // Link this boat's existing orders so the new login sees history on first sign-in.
+  if (companyName) {
+    const key = vesselNameKey(vessel.name);
+    const { data: hist } = await supabase
+      .from('orders')
+      .select('id, company_name, vessel_name, vessel_id')
+      .is('vessel_id', null)
+      .ilike('company_name', companyName);
+    const ids = (hist || [])
+      .filter((o: { vessel_name: string | null; company_name: string | null }) =>
+        orderMatchesVessel(o, companyName, key))
+      .map((o: { id: string }) => o.id);
+    if (ids.length) {
+      await supabase.from('orders').update({ vessel_id: vesselId }).in('id', ids);
+    }
   }
 
   return NextResponse.json({
