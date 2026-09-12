@@ -101,22 +101,17 @@ function OrdersContent() {
     const res = await adminFetch(`/api/orders?${params.toString()}`);
     if (res.ok) {
       const data = await res.json();
-      let fetchedOrders: Order[] = data.orders || [];
-      // Sinclair users see orders sorted by arrival date (soonest first)
-      if (isSinclair) {
-        fetchedOrders = [...fetchedOrders].sort((a, b) => {
-          if (!a.arrival_date && !b.arrival_date) return 0;
-          if (!a.arrival_date) return 1;
-          if (!b.arrival_date) return -1;
-          return a.arrival_date.localeCompare(b.arrival_date);
-        });
-      }
+      const fetchedOrders: Order[] = [...(data.orders || [])].sort((a, b) => {
+        const ta = new Date(a.created_at).getTime();
+        const tb = new Date(b.created_at).getTime();
+        return tb - ta;
+      });
       setOrders(fetchedOrders);
       setTotal(data.total || 0);
       setStatusCounts(data.status_counts || {});
     }
     setLoading(false);
-  }, [page, search, statusFilter, isSinclair]);
+  }, [page, search, statusFilter]);
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
 
