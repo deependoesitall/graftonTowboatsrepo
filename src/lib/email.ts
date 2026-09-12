@@ -8,6 +8,7 @@ import { readCodPayments, codMethodSentence } from '@/lib/cod-payments';
 import {
   splitOutsidePickups, groupCodCollect, pickupPayLabel, pickupIsPriced, lineAmount,
 } from '@/lib/outside-pickup';
+import { ESTIMATED_EXPLANATION } from '@/lib/estimated-copy';
 
 // Lazily construct the Resend client so importing this module (e.g. during
 // `next build` page-data collection) doesn't require RESEND_API_KEY to be set.
@@ -390,14 +391,16 @@ export function buildOrderEmailHtml(
         <td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Company</div>
           <div style="font-size:14px;font-weight:800;color:#1E3D1E;">${order.company_name}</div></td>
         <td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Billing Contact</div>
-          <div style="font-size:14px;font-weight:800;color:#1E3D1E;">${order.contact_name}</div></td>
+          <div style="font-size:14px;font-weight:800;color:#1E3D1E;">${order.contact_name}</div>
+          ${order.customer_email ? `<div style="font-size:12px;font-weight:600;color:#1E3D1E;margin-top:2px;">${order.customer_email}</div>` : ''}
+        </td>
         <td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Phone</div>
           <div style="font-size:14px;font-weight:800;color:#1E3D1E;">${order.phone}</div></td>
       </tr>
-      ${order.po_number || order.eta ? `<tr>
+      ${order.po_number || order.eta || order.vessel_email ? `<tr>
         ${order.po_number ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">PO Number</div><div style="font-size:13px;font-weight:600;">${order.po_number}</div></td>` : '<td></td>'}
         ${order.eta ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">ETA</div><div style="font-size:13px;font-weight:700;color:#E8640A;">${order.eta}</div></td>` : '<td></td>'}
-        <td></td>
+        ${order.vessel_email ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Vessel Email</div><div style="font-size:13px;font-weight:600;">${order.vessel_email}</div></td>` : '<td></td>'}
       </tr>` : ''}
     </table>
 
@@ -412,27 +415,33 @@ export function buildOrderEmailHtml(
       ${ext.order_contact_name ? `<tr>
         <td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Order Contact</div><div style="font-size:13px;font-weight:600;">${ext.order_contact_name}${ext.order_contact_title ? ` (${ext.order_contact_title})` : ''}</div></td>
         ${ext.order_contact_phone ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Contact Phone</div><div style="font-size:13px;font-weight:600;">${ext.order_contact_phone}</div></td>` : '<td></td>'}
-        <td></td>
+        ${ext.order_contact_email ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Contact Email</div><div style="font-size:13px;font-weight:600;">${ext.order_contact_email}</div></td>` : '<td></td>'}
       </tr>` : ''}
     </table>` : ''}
 
     <!-- Delivery info (if provided) -->
-    ${(order.terminal_name || order.arrival_date) ? `
+    ${(order.terminal_name || order.arrival_date || order.arrival_time || deliveryMethodLabel || order.vhf_channel || order.approach_side || (order.crew_change && order.crew_change !== 'no') || ext.secondary_terminal_name || ext.secondary_arrival_date) ? `
     <div style="background:#fff8f0;border-left:3px solid #E8640A;padding:14px;border-radius:0 4px 4px 0;margin-bottom:16px;">
+      <div style="font-size:9px;font-weight:800;color:#E8640A;text-transform:uppercase;letter-spacing:1px;padding:0 12px 6px;">Delivery</div>
       <table width="100%" style="border-spacing:0;">
         <tr>
           ${order.terminal_name ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Deliver To</div><div style="font-size:15px;font-weight:900;color:#E8640A;">${order.terminal_name}</div></td>` : '<td></td>'}
           ${order.arrival_date  ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Arrival Date</div><div style="font-size:15px;font-weight:900;color:#E8640A;">${order.arrival_date}</div></td>` : '<td></td>'}
           ${order.arrival_time  ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Arrival Time</div><div style="font-size:15px;font-weight:900;color:#E8640A;">${formatArrivalTime(order.arrival_time)}</div></td>` : '<td></td>'}
         </tr>
-        ${(deliveryMethodLabel || order.crew_change !== 'no') ? `<tr>
+        ${(deliveryMethodLabel || order.vhf_channel || order.approach_side || (order.crew_change && order.crew_change !== 'no')) ? `<tr>
           ${deliveryMethodLabel ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Method</div><div style="font-size:13px;font-weight:700;">${deliveryMethodLabel}${approachLabel ? ` · ${approachLabel} side` : ''}</div></td>` : '<td></td>'}
           ${order.vhf_channel ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">VHF</div><div style="font-size:13px;font-weight:600;">${order.vhf_channel}</div></td>` : '<td></td>'}
           ${order.crew_change === 'yes'
-            ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Crew Change</div><div style="font-size:13px;font-weight:700;color:#E8640A;">YES — ${order.crew_arriving ?? 0} in / ${order.crew_departing ?? 0} out</div></td>`
+            ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Crew Change</div><div style="font-size:13px;font-weight:700;color:#E8640A;">YES — ${order.crew_arriving ?? 0} in / ${order.crew_departing ?? 0} out${order.crew_change_notes ? `<div style="font-size:11px;font-weight:500;color:#444;margin-top:2px;">${order.crew_change_notes}</div>` : ''}</div></td>`
             : order.crew_change === 'maybe'
             ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Crew Change</div><div style="font-size:13px;font-weight:700;color:#B45309;">MAYBE${order.crew_change_notes ? ` — ${order.crew_change_notes}` : ''}</div></td>`
             : '<td></td>'}
+        </tr>` : ''}
+        ${(ext.secondary_terminal_name || ext.secondary_arrival_date) ? `<tr>
+          ${ext.secondary_terminal_name ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Second Stop</div><div style="font-size:13px;font-weight:700;color:#E8640A;">${ext.secondary_terminal_name}</div></td>` : '<td></td>'}
+          ${ext.secondary_arrival_date ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Second Date</div><div style="font-size:13px;font-weight:700;">${ext.secondary_arrival_date}${ext.secondary_arrival_time ? ` · ${formatArrivalTime(ext.secondary_arrival_time)}` : ''}</div></td>` : '<td></td>'}
+          ${ext.secondary_delivery_method ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Second Method</div><div style="font-size:13px;font-weight:600;">${ext.secondary_delivery_method === 'boat' ? 'Boat' : ext.secondary_delivery_method === 'van' ? 'Van' : ext.secondary_delivery_method}</div></td>` : '<td></td>'}
         </tr>` : ''}
       </table>
     </div>` : ''}
@@ -521,6 +530,9 @@ export function buildOrderEmailHtml(
         <tr style="background:#D9E84A;">
           <td colspan="5" style="padding:10px;font-size:14px;font-weight:900;color:#1E3D1E;text-transform:uppercase;">ESTIMATED TOTAL</td>
           <td style="padding:10px;text-align:right;font-size:16px;font-weight:900;color:#1E3D1E;">${formatCurrency(order.subtotal)}</td>
+        </tr>
+        <tr>
+          <td colspan="6" style="padding:8px 10px;font-size:10px;color:#555;line-height:1.55;background:#f7f8ef;">${ESTIMATED_EXPLANATION}</td>
         </tr>`}
         ${discountTotal > 0 ? `<tr style="background:#dcfce7;">
           <td colspan="5" style="padding:8px 10px;font-size:12px;font-weight:900;color:#15803d;text-transform:uppercase;">After estimated coupon savings (−${formatCurrency(discountTotal)})</td>

@@ -25,9 +25,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/lib/auth-context';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { OtherPickupCard } from '@/components/catalog/OtherPickupCard';
-
-const ESTIMATED_EXPLANATION =
-  'Some orders may display an estimated total at checkout. This is because certain items are sold by weight, market prices may change, or substitutions may be necessary if an item is unavailable. Your final invoice will reflect the actual items delivered, including any approved substitutions, quantity adjustments, or weighted products. We make every effort to keep pricing accurate and will contact you if there are any significant changes to your order. If you have any questions, please contact us at (618) 556-0290 or GraftonTowboatServices@gmail.com.';
+import { ESTIMATED_EXPLANATION } from '@/lib/estimated-copy';
 
 // ─── Step indicator ────────────────────────────────────────────
 function StepIndicator({ step }: { step: 1 | 2 | 3 }) {

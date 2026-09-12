@@ -12,24 +12,9 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { HelpCircle, X } from 'lucide-react';
+import { ESTIMATED_EXPLANATION, AD_CHANGE_NOTICE } from '@/lib/estimated-copy';
 
-export const ESTIMATED_EXPLANATION =
-  'Some orders may display an estimated total at checkout. This is because certain items are sold by weight, market prices may change, or substitutions may be necessary if an item is unavailable. Your final invoice will reflect the actual items delivered, including any approved substitutions, quantity adjustments, or weighted products. We make every effort to keep pricing accurate and will contact you if there are any significant changes to your order. If you have any questions, please contact us at (618) 556-0290 or GraftonTowboatServices@gmail.com.';
-
-/**
- * Sinclair's weekly ad turns over at MIDNIGHT TUESDAY.
- *
- * Dave: "prices change at midnight on Tuesday night. So we need a disclaimer on
- * there... it's only going to be the vessels that turn in an order on Monday or
- * Tuesday and they want it picked up on Wednesday or Thursday."
- *
- * Worth saying in his framing too, because it's both true and reassuring: sale
- * items that expire aren't a price increase, they're a saving the crew missed —
- * "You're not paying more because it went off sale. You just didn't get to pay
- * less." Nobody is being charged above shelf price.
- */
-export const AD_CHANGE_NOTICE =
-  'Sinclair’s weekly ad changes at midnight Tuesday. If you order Monday or Tuesday for delivery Wednesday or later, some sale prices may have ended by the time your order is rung up — those items ring at the regular shelf price. You’re never charged more than shelf price; the register total is always final.';
+export { ESTIMATED_EXPLANATION, AD_CHANGE_NOTICE };
 
 const PANEL_WIDTH = 320;
 const GAP = 8;
