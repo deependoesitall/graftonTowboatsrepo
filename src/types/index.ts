@@ -69,6 +69,9 @@ export type PaidBy = 'vessel' | 'deck' | 'cod';
 // Dave: "cash is never going to be an option").
 export type CodPaymentMethod = 'venmo' | 'cashapp' | 'credit_card' | 'cash';
 
+/** Customer preferred substitution if the line is OOS (signed-in cooks only). */
+export type PreferredSubMode = 'product' | 'none' | 'store_choice';
+
 export interface CartItem {
   product_id: string;
   description: string;
@@ -87,6 +90,11 @@ export interface CartItem {
   paid_by?: PaidBy;
   /** Crew member name — required when paid_by === 'cod'. */
   cod_name?: string;
+  /** Preferred sub if OOS — only set for signed-in customers. */
+  preferred_sub_mode?: PreferredSubMode | null;
+  preferred_sub_product_id?: string | null;
+  /** Snapshot of preferred product name at cart time. */
+  preferred_sub_description?: string | null;
 }
 
 export interface Cart {
@@ -290,6 +298,10 @@ export interface OrderItem {
   actual_total: number | null;
   is_substitution: boolean;
   substitutes_item_id: string | null;
+  /** Customer preferred sub (place-time). NULL for guests / unset. */
+  preferred_sub_product_id?: string | null;
+  preferred_sub_mode?: PreferredSubMode | null;
+  preferred_sub_description?: string | null;
   item_type: 'grocery' | 'service';
   service_type: 'parts_pickup' | 'package_delivery' | 'other_pickup' | null;
   service_details: Record<string, string> | null;

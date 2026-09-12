@@ -8,6 +8,7 @@
 
 import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
+import { applyEffectiveCatalogPricing } from '@/lib/catalog-price';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,7 +39,8 @@ export async function GET() {
     .select(`
       rail, position, sale_price, regular_price,
       product:products!inner (
-        id, description, pkg_size, uom, price, image_url,
+        id, description, pkg_size, uom, price, regular_price,
+        sale_start_date, sale_finish_date, image_url,
         billed_by_weight, quantity_step, quantity_label,
         is_active, is_available
       )
@@ -62,10 +64,19 @@ export async function GET() {
     // must not: adding it to a cart would fail at checkout.
     if (!r.product || r.product.is_active === false || r.product.is_available === false) continue;
 
+    const product = applyEffectiveCatalogPricing(r.product as {
+      price?: number | null; regular_price?: number | null;
+      sale_start_date?: string | null; sale_finish_date?: string | null;
+    });
+
+    // Drop expired / not-yet-started sales from the on_sale rail even when the
+    // nightly Freshop snapshot is stale.
+    if (r.rail === 'on_sale' && !product.onSale) continue;
+
     rails[r.rail]?.push({
-      ...r.product,
-      rail_sale_price: r.sale_price,
-      rail_regular_price: r.regular_price,
+      ...product,
+      rail_sale_price: product.onSale ? product.price : null,
+      rail_regular_price: product.onSale ? product.regular_price : null,
     });
   }
 

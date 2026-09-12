@@ -1,6 +1,7 @@
 // src/app/api/orders/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
+import { effectiveCatalogPrice } from '@/lib/catalog-price';
 import { createClient as createSupabaseJs } from '@supabase/supabase-js';
 
 async function getUserIdFromToken(req: NextRequest): Promise<string | null> {
@@ -99,6 +100,10 @@ const submitSchema = z.object({
     // deck = company-billed but listed separately (not part of the grocery allowance)
     paid_by: z.enum(['vessel', 'deck', 'cod']).optional().default('vessel'),
     cod_name: z.string().optional().default(''),
+    // Freshop-style preferred substitution (signed-in customers only; stripped for guests)
+    preferred_sub_mode: z.enum(['product', 'none', 'store_choice']).nullable().optional(),
+    preferred_sub_product_id: z.string().uuid().nullable().optional(),
+    preferred_sub_description: z.string().max(240).nullable().optional(),
   })).default([]),
   services: z.object({
     parts_pickup: z.object({
@@ -242,9 +247,26 @@ export async function POST(req: NextRequest) {
 
     const orderNumber = generateOrderNumber();
     const userId = await getUserIdFromToken(req);
+
+    // Resolve effective catalog prices BEFORE subtotal / insert so an expired
+    // sale left in products (or a stale cart) cannot under-charge the boat.
+    const earlyProductIds = items.map(i => i.product_id).filter(Boolean);
+    const chargeByProduct: Record<string, number> = {};
+    if (earlyProductIds.length > 0) {
+      const { data: pricedRows } = await supabase
+        .from('products')
+        .select('id, price, regular_price, sale_start_date, sale_finish_date')
+        .in('id', earlyProductIds);
+      for (const p of pricedRows || []) {
+        chargeByProduct[p.id] = effectiveCatalogPrice(p).price;
+      }
+    }
+    const chargeOf = (item: { product_id: string; price: number }) =>
+      chargeByProduct[item.product_id] ?? item.price;
+
     // Combined estimate (vessel + COD). Billing reports split these out and
     // exclude COD lines — they're settled at delivery, never invoiced.
-    const subtotal = items.reduce((s, i) => s + i.price * i.quantity, 0);
+    const subtotal = items.reduce((s, i) => s + chargeOf(i) * i.quantity, 0);
     const hasCodItems = items.some(i => i.paid_by === 'cod');
 
     // COD handling fee — toggleable feature. Snapshot the effective percent
@@ -384,22 +406,26 @@ export async function POST(req: NextRequest) {
 
     if (items.length > 0) {
       const productIds = items.map(i => i.product_id).filter(Boolean);
-      const { data: products } = await supabase.from('products').select('id, upc, location, location_seq, image_url, freshop_id, regular_price, sale_finish_date').in('id', productIds);
+      const { data: products } = await supabase.from('products').select('id, upc, location, location_seq, image_url, freshop_id, price, regular_price, sale_start_date, sale_finish_date').in('id', productIds);
       const upcMap: Record<string, string | null> = {};
       const locationMap: Record<string, string | null> = {};
       const locationSeqMap: Record<string, number | null> = {};
       const imageMap: Record<string, string | null> = {};
       // Sale snapshot — what the crew was quoted, frozen onto the line.
-      const saleMap: Record<string, { regular_price: number | null; sale_finish_date: string | null }> = {};
-      (products || []).forEach((p: { id: string; upc: string | null; location: string | null; location_seq: number | null; image_url: string | null; freshop_id?: string | null; regular_price?: number | null; sale_finish_date?: string | null }) => {
+      const saleMap: Record<string, { price: number; regular_price: number | null; sale_finish_date: string | null }> = {};
+      (products || []).forEach((p: { id: string; upc: string | null; location: string | null; location_seq: number | null; image_url: string | null; freshop_id?: string | null; price?: number | null; regular_price?: number | null; sale_start_date?: string | null; sale_finish_date?: string | null }) => {
         upcMap[p.id] = p.upc;
         locationMap[p.id] = p.location;
         locationSeqMap[p.id] = p.location_seq;
         imageMap[p.id] = p.image_url;
         freshopMap[p.id] = p.freshop_id ?? null;
+        // READ-TIME sale expiry — never trust a stale cart price or a leftover
+        // regular_price after sale_finish_date (America/Chicago).
+        const eff = effectiveCatalogPrice(p);
         saleMap[p.id] = {
-          regular_price: (p as { regular_price?: number | null }).regular_price ?? null,
-          sale_finish_date: (p as { sale_finish_date?: string | null }).sale_finish_date ?? null,
+          price: eff.price,
+          regular_price: eff.regular_price,
+          sale_finish_date: eff.sale_finish_date,
         };
       });
 
@@ -425,9 +451,9 @@ export async function POST(req: NextRequest) {
           location: locationMap[item.product_id] ?? null,
           location_seq: locationSeqMap[item.product_id] ?? null,
           image_url: item.image_url || imageMap[item.product_id] || null,
-          unit_price: item.price,
+          unit_price: saleMap[item.product_id]?.price ?? item.price,
           quantity: item.quantity,
-          line_total: item.price * item.quantity,
+          line_total: (saleMap[item.product_id]?.price ?? item.price) * item.quantity,
           item_type: 'grocery',
           service_type: null,
           service_details: null,
@@ -435,6 +461,39 @@ export async function POST(req: NextRequest) {
           cod_name: item.paid_by === 'cod' ? (item.cod_name || null) : null,
           regular_price: saleMap[item.product_id]?.regular_price ?? null,
           sale_finish_date: saleMap[item.product_id]?.sale_finish_date ?? null,
+          // Preferred sub: authenticated customers only. Guests have no UI and
+          // must not smuggle preferences onto the order record.
+          ...(userId ? (() => {
+            const mode = item.preferred_sub_mode ?? null;
+            if (!mode) return {
+              preferred_sub_mode: null,
+              preferred_sub_product_id: null,
+              preferred_sub_description: null,
+            };
+            if (mode === 'product' && item.preferred_sub_product_id) {
+              return {
+                preferred_sub_mode: 'product' as const,
+                preferred_sub_product_id: item.preferred_sub_product_id,
+                preferred_sub_description: (item.preferred_sub_description || '').trim() || null,
+              };
+            }
+            if (mode === 'none' || mode === 'store_choice') {
+              return {
+                preferred_sub_mode: mode,
+                preferred_sub_product_id: null,
+                preferred_sub_description: null,
+              };
+            }
+            return {
+              preferred_sub_mode: null,
+              preferred_sub_product_id: null,
+              preferred_sub_description: null,
+            };
+          })() : {
+            preferred_sub_mode: null,
+            preferred_sub_product_id: null,
+            preferred_sub_description: null,
+          }),
         });
       });
     }
@@ -533,6 +592,7 @@ export async function POST(req: NextRequest) {
         'location', 'location_seq', 'image_url', 'unit_price', 'quantity', 'line_total',
         'item_type', 'service_type', 'service_details', 'paid_by', 'cod_name',
         'regular_price', 'sale_finish_date',
+        'preferred_sub_mode', 'preferred_sub_product_id', 'preferred_sub_description',
       ] as const;
       const normalisedItems = allOrderItems.map(row =>
         Object.fromEntries(ITEM_COLUMNS.map(col => [

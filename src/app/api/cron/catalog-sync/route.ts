@@ -161,6 +161,11 @@ async function handle(req: NextRequest) {
 
   const started = Date.now();
   const supabase = createServiceClient();
+
+  // Cheap expire sweep every poke — does not need Freshop. No-op when nothing
+  // is past sale_finish_date (America/Chicago). Migration 080 installs the RPC.
+  try { await supabase.rpc('expire_stale_product_sales'); } catch { /* migration pending */ }
+
   const today = chicagoDay();
 
   // ── Load checkpoint ──
@@ -250,7 +255,7 @@ async function handle(req: NextRequest) {
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase
       .from('products')
-      .select('id, upc, details, image_url, billed_by_weight, location, location_seq, location_manual, manual_fields, price, quantity_step, quantity_label, quantity_size_ratio, freshop_id, popularity, is_active, is_available')
+      .select('id, upc, details, image_url, billed_by_weight, location, location_seq, location_manual, manual_fields, price, regular_price, sale_start_date, sale_finish_date, quantity_step, quantity_label, quantity_size_ratio, freshop_id, popularity, is_active, is_available')
       .eq('store_only', false)
       .range(from, from + 999);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -553,6 +558,20 @@ async function handle(req: NextRequest) {
   // ── Finished every department? Re-apply the order-form layout + log once ──
   const finished = state.depts.every(d => d.done.length >= d.pages);
   if (finished) {
+    // ── EXPIRE STALE SALES ── products keep expired sale prices until Freshop
+    // re-touches them. Clear them here (America/Chicago) so charge paths that
+    // still trust products.price cannot keep ringing last week's ad.
+    try {
+      const { data: expiredN, error: expErr } = await supabase.rpc('expire_stale_product_sales');
+      if (expErr) {
+        console.error('expire_stale_product_sales FAILED:', expErr.message);
+      } else if (expiredN) {
+        console.log('expire_stale_product_sales cleared', expiredN, 'rows');
+      }
+    } catch (e) {
+      console.error('expire_stale_product_sales threw:', e instanceof Error ? e.message : e);
+    }
+
     // ── RECONCILE ── only now, with every department walked, is "absent from
     // the roster" trustworthy. Store items Sinclair's no longer lists go
     // is_available = false, which the customer catalog already filters on, so

@@ -7,11 +7,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/admin-auth-server';
+import { effectiveCatalogPrice } from '@/lib/catalog-price';
 
 export const dynamic = 'force-dynamic';
 
 /** One literal — supabase-js infers row shape from the select string. */
-const COLUMNS = 'id, upc, description, price, is_active, category, pkg_size, uom, image_url';
+const COLUMNS = 'id, upc, description, price, regular_price, sale_start_date, sale_finish_date, is_active, category, pkg_size, uom, image_url';
 
 const PAGE = 1000;
 
@@ -50,7 +51,7 @@ export async function GET(req: NextRequest) {
         id: r.id,
         upc,
         description: r.description || '',
-        price: Number(r.price) || 0,
+        price: effectiveCatalogPrice(r).price,
         is_active: r.is_active !== false,
         category: r.category || null,
         pkg_size: r.pkg_size || null,

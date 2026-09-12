@@ -109,17 +109,64 @@ function isWeighable(i: OrderItem): boolean {
   return isPoundQty(i.uom, i.quantity) || isWeighableUpc(i.upc);
 }
 
-function itemCard(i: OrderItem, today: string): string {
+/** Build parent → substitution children map (Freshop pairing). */
+function subsByParent(items: OrderItem[]): Map<string, OrderItem[]> {
+  const m = new Map<string, OrderItem[]>();
+  for (const i of items) {
+    if (!i.is_substitution || !i.substitutes_item_id) continue;
+    const k = i.substitutes_item_id;
+    const list = m.get(k) || [];
+    list.push(i);
+    m.set(k, list);
+  }
+  return m;
+}
+
+function preferredNoteHtml(i: OrderItem): string {
+  const mode = i.preferred_sub_mode;
+  if (!mode) return '';
+  if (mode === 'none') {
+    return `<div class="pref-note">CUSTOMER: DO NOT SUBSTITUTE</div>`;
+  }
+  if (mode === 'store_choice') {
+    return `<div class="pref-note">CUSTOMER: STORE CHOOSES SUBSTITUTE</div>`;
+  }
+  if (mode === 'product') {
+    const name = (i.preferred_sub_description || '').trim() || 'preferred product';
+    return `<div class="pref-note">CUSTOMER PREFERRED SUB: ${esc(name)}</div>`;
+  }
+  return '';
+}
+
+function matchedCustomerPreferred(original: OrderItem | undefined, sub: OrderItem): boolean {
+  if (!original) return false;
+  if (original.preferred_sub_mode !== 'product' || !original.preferred_sub_product_id) return false;
+  return !!sub.product_id && sub.product_id === original.preferred_sub_product_id;
+}
+
+function itemCard(
+  i: OrderItem,
+  today: string,
+  opts: {
+    original?: OrderItem;
+    /** Nested under an OOS/original card (Freshop pairing). */
+    nested?: boolean;
+  } = {},
+): string {
   const weighable = isWeighable(i);
   const qtyLabel = formatQty(i.quantity, isPoundQty(i.uom, i.quantity));
   // Sized for first-scan reliability: at print resolution this yields bars
   // ~0.4mm wide × ~12mm tall — comfortably above UPC-A scanner minimums, so
   // even a toner-tired office printer produces gun-readable codes.
-  const svg = weighable ? null : upcASvg(i.upc, { moduleWidth: 2, height: 46 });
+  // KEEP restored sizes: moduleWidth 2 / height 52 / CSS .bc svg 42px / thumbs 38px / 4-col.
+  const svg = weighable ? null : upcASvg(i.upc, { moduleWidth: 2, height: 52 });
   const scanTimes = !weighable && svg && Number.isInteger(i.quantity) && i.quantity > 0
     ? `Scan<br/><b>&times;${i.quantity}</b>` : '';
   const cod = i.paid_by === 'cod';
   const oos = i.shopping_status === 'out_of_stock';
+  const isSub = !!i.is_substitution;
+  const orig = opts.original;
+  const customerPref = isSub && matchedCustomerPreferred(orig, i);
 
   // Out-of-stock lines NEVER print a barcode — after shopping, this sheet
   // goes to the register, and a dimmed-but-scannable code invites mis-rings.
@@ -135,29 +182,56 @@ function itemCard(i: OrderItem, today: string): string {
       : `<div class="wgt"><div class="wgt-note">No barcode — key in at register</div>
          ${i.upc ? `<div class="upc-raw">UPC: ${esc(i.upc)}</div>` : ''}</div>`;
 
-  // Compact card: qty + name on one line, meta on the next, then a single
-  // row holding barcode · scan count · picked box. No dead rows — Deepen
-  // (July 19): "as many scannable barcodes on a single piece of paper as
-  // possible, minimize the dead spaces."
-  // Thumbnail on every line. Dave: "I do think that every item needs a picture...
-  // you shop pictures, you don't shop words." Freshop puts one left of the
-  // department on each row; a blank box is itself useful — it tells whoever is
-  // walking the store that this line has no photo to match against.
   const thumb = i.image_url
     ? `<img class="thumb" src="${esc(i.image_url)}" alt=""/>`
     : `<span class="thumb thumb-empty"></span>`;
 
-  return `<div class="item${cod ? ' cod' : ''}${oos ? ' oos' : ''}">
-    <div class="line1">${thumb}<span class="qty">${esc(qtyLabel)}</span><span class="desc">${esc(i.description)}</span></div>
+  const descClass = oos ? 'desc struck' : 'desc';
+  const subForTag = isSub
+    ? `<div class="sub-tag">SUB FOR: ${esc(orig?.description || 'original item')}${
+        customerPref ? ' · CUSTOMER PREFERRED' : ''
+      }</div>`
+    : '';
+  // Pending (not yet shopped) preferred note so Sinclair sees it while walking
+  const prefPending =
+    !oos && !isSub && i.shopping_status === 'pending' ? preferredNoteHtml(i) : '';
+  // Also show preferred on OOS card when a sub has not been applied yet
+  const prefOnOos =
+    oos && !isSub ? preferredNoteHtml(i) : '';
+
+  const classes = [
+    'item',
+    cod ? 'cod' : '',
+    oos ? 'oos' : '',
+    isSub ? 'is-sub' : '',
+    opts.nested ? 'nested' : '',
+  ].filter(Boolean).join(' ');
+
+  return `<div class="${classes}">
+    <div class="line1">${thumb}<span class="qty">${esc(qtyLabel)}</span><span class="${descClass}">${esc(i.description)}</span></div>
     <div class="sub">${esc(i.pkg_size || '')}${i.pkg_size ? ' · ' : ''}${
       salePriceHtml(i, today) || formatCurrency(i.unit_price)
     }${i.uom === 'LB' ? '/lb' : ''}${i.location ? ` · <b>${esc(i.location)}</b>` : ''}</div>
     ${cod ? `<div class="cod-tag">$ COD — ${esc(i.cod_name || 'crew member')} · ring separately</div>` : ''}
     ${i.paid_by === 'deck' ? `<div class="deck-tag">DECK — separate invoice line</div>` : ''}
-    ${i.is_substitution ? `<div class="sub-tag">SUB</div>` : ''}
+    ${subForTag}
+    ${prefPending}${prefOnOos}
     ${expiredSaleHtml(i, today)}
     <div class="scanrow">${barcodeBlock}<span class="check">&#9744;</span></div>
   </div>`;
+}
+
+/** Render primary line + any linked substitution cards nested under it. */
+function itemPairHtml(
+  i: OrderItem,
+  today: string,
+  byParent: Map<string, OrderItem[]>,
+): string {
+  const kids = byParent.get(i.id) || [];
+  const primary = itemCard(i, today);
+  if (!kids.length) return primary;
+  const nested = kids.map(s => itemCard(s, today, { original: i, nested: true })).join('');
+  return `<div class="pair">${primary}${nested}</div>`;
 }
 
 function sectionHtml(
@@ -165,9 +239,16 @@ function sectionHtml(
   note: string,
   groups: LocationGroup<OrderItem>[],
   today: string,
-  opts: { subtotal?: number; tone?: 'grocery' | 'deck' | 'cod'; newPage?: boolean } = {},
+  opts: {
+    subtotal?: number;
+    tone?: 'grocery' | 'deck' | 'cod';
+    newPage?: boolean;
+    /** Parent → subs map so OOS originals keep their swap cards nearby. */
+    byParent?: Map<string, OrderItem[]>;
+  } = {},
 ): string {
   if (!groups.some(g => g.items.length)) return '';
+  const byParent = opts.byParent || new Map<string, OrderItem[]>();
   const lines = groups.reduce((s, g) => s + g.items.length, 0);
   return `<section class="dept${opts.tone ? ` tone-${opts.tone}` : ''}${opts.newPage ? ' newpage' : ''}">
     <div class="dept-head"><h2>${esc(title)}</h2><span class="dept-note">${esc(note)}</span>
@@ -177,7 +258,7 @@ function sectionHtml(
     ${groups.map(g => `
       <div class="loc-group">
         <div class="loc-head">${esc(g.label)} <span class="loc-count">${g.items.length} line${g.items.length === 1 ? '' : 's'}</span></div>
-        <div class="grid">${g.items.map(i => itemCard(i, today)).join('')}</div>
+        <div class="grid">${g.items.map(i => itemPairHtml(i, today, byParent)).join('')}</div>
       </div>`).join('')}
   </section>`;
 }
@@ -220,6 +301,15 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
   // that these two can differ by several days.
   const today = shoppingDay();
   const allStock = order.items.filter(i => i.item_type !== 'service');
+  const byParent = subsByParent(allStock);
+  // Substitutions nest under their OOS original (Freshop). Keep them out of the
+  // walk-order grid so they don't float to a different aisle as orphan cards.
+  // Orphans (parent missing) still print standalone so nothing is lost.
+  const parentIds = new Set(allStock.map(i => i.id));
+  const walkStock = allStock.filter(i => {
+    if (!i.is_substitution || !i.substitutes_item_id) return true;
+    return !parentIds.has(i.substitutes_item_id);
+  });
   const services = order.items.filter(i => i.item_type === 'service' && i.service_type === 'other_pickup');
 
   // ── THREE SEPARATE JOBS, THREE SEPARATE BLOCKS ──
@@ -234,9 +324,13 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
   //
   // Each block carries its own subtotal, which is what makes keying two register
   // totals (grocery + deck) straightforward at the till.
-  const grocery = allStock.filter(i => i.paid_by !== 'deck' && i.paid_by !== 'cod');
-  const deck    = allStock.filter(i => i.paid_by === 'deck');
-  const cod     = allStock.filter(i => i.paid_by === 'cod');
+  const grocery = walkStock.filter(i => i.paid_by !== 'deck' && i.paid_by !== 'cod');
+  const deck    = walkStock.filter(i => i.paid_by === 'deck');
+  const cod     = walkStock.filter(i => i.paid_by === 'cod');
+  // Totals/counts still include nested substitution lines (billed) from allStock.
+  const groceryAll = allStock.filter(i => i.paid_by !== 'deck' && i.paid_by !== 'cod');
+  const deckAll    = allStock.filter(i => i.paid_by === 'deck');
+  const codAll     = allStock.filter(i => i.paid_by === 'cod');
 
   // ── ONE WALK, IN THE ORDER THE MANAGER CONFIGURED ──
   // This used to pull Meat and Produce out into their own sections printed
@@ -266,16 +360,16 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
   const lineTotal = (i: OrderItem) => Number(i.actual_total ?? i.line_total ?? 0);
   const sumOf = (list: OrderItem[]) =>
     list.filter(i => i.shopping_status !== 'out_of_stock').reduce((s, i) => s + lineTotal(i), 0);
-  const grocerySubtotal = sumOf(grocery);
-  const deckSubtotal = sumOf(deck);
-  const codSubtotal = sumOf(cod);
+  const grocerySubtotal = sumOf(groceryAll);
+  const deckSubtotal = sumOf(deckAll);
+  const codSubtotal = sumOf(codAll);
 
   // Freshop's header counts: distinct lines vs units in the basket.
   const uniqueItemCount = allStock.length;
   const totalItemCount = allStock.reduce((s, i) => s + (Number.isInteger(i.quantity) ? i.quantity : 1), 0);
   const totalLines = uniqueItemCount;
   const totalUnits = totalItemCount;
-  const codCount = cod.length;
+  const codCount = codAll.length;
   const weighCount = allStock.filter(isWeighable).length;
   const noBarcodeCount = allStock.filter(i => !isWeighable(i) && !normalizeUpcA(i.upc)).length;
 
@@ -287,10 +381,9 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: Arial, Helvetica, sans-serif; color: #000; font-size: 9.5px; padding: 8px; }
-  /* LANDSCAPE. Dave, on the portrait sheet I brought: "this should have been
-     landscaped, so that there's more barcodes on it." Five cards per row
-     on landscape (was 4) — denser sheet, barcodes stay moduleWidth 2. */
-  @page { size: letter landscape; margin: 6mm; }
+  /* LANDSCAPE. Dave: more barcodes across the page. Four cards per row —
+     room for gun-readable codes + identifiable thumbs. moduleWidth 2. */
+  @page { size: letter landscape; margin: 7.5mm; }
   @media print {
     body { padding: 0; }
     .bc, .bc svg { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
@@ -322,14 +415,20 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
               padding: 1px 5px; margin-top: 2px; }
   .loc-count { font-weight: normal; color: #444; font-size: 8px; margin-left: 4px; }
 
-  .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px; padding: 2px 0; }
-  .item { border: 1px solid #000; border-radius: 0; padding: 2px 3px;
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; padding: 3px 0; }
+  .item { border: 1px solid #000; border-radius: 0; padding: 3px 4px;
           break-inside: avoid; page-break-inside: avoid; background: #fff; }
   .item.cod { border: 2px solid #000; background: #fff; }
-  .item.oos { opacity: .5; }
-  .line1 { display: flex; gap: 3px; align-items: baseline; }
-  .qty { font-size: 12px; font-weight: 900; color: #000; white-space: nowrap; }
-  .desc { font-weight: bold; font-size: 8.5px; line-height: 1.1; }
+  .item.oos { opacity: .72; }
+  .item.is-sub { border-style: dashed; }
+  .item.nested { margin-top: 2px; border-left: 3px solid #000; }
+  .pair { display: contents; }
+  .line1 { display: flex; gap: 4px; align-items: center; }
+  .qty { font-size: 13px; font-weight: 900; color: #000; white-space: nowrap; }
+  .desc { font-weight: bold; font-size: 9.5px; line-height: 1.15; }
+  .desc.struck { text-decoration: line-through; }
+  .pref-note { color: #000; font-weight: 900; font-size: 7.5px; text-transform: uppercase;
+               border: 1px solid #000; padding: 1px 3px; margin-top: 1px; }
   .sub { color: #222; font-size: 7.5px; }
   .cod-tag { color: #000; font-weight: 900; font-size: 7.5px; text-transform: uppercase; letter-spacing: .3px; }
   .deck-tag { color: #000; font-weight: 900; font-size: 7.5px; text-transform: uppercase; letter-spacing: .3px; }
@@ -347,10 +446,10 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
   .sale-diff { font-weight: 800; }
   .sale-honor { display: inline-block; margin-left: 3px; font-weight: 800; white-space: nowrap; }
 
-  /* ── Thumbnails ── smaller for 5-col density; still identify a package. */
-  .thumb { width: 16px; height: 16px; object-fit: contain; flex: 0 0 auto;
-           border: 1px solid #000; border-radius: 0; background: #fff; margin-right: 2px; }
-  .thumb-empty { display: inline-block; background: #eee; }
+  /* ── Thumbnails ── big enough to read a package at arm's length. */
+  .thumb { width: 38px; height: 38px; object-fit: contain; flex: 0 0 auto;
+           border: 1px solid #000; border-radius: 0; background: #fff; margin-right: 3px; }
+  .thumb-empty { display: inline-block; background: #e8e8e8; }
 
   /* ── Section tones ── a shopper holding three stapled blocks needs to know
      which one they're in without reading the header. */
@@ -377,8 +476,8 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
   .cod-bag { margin-left: auto; font-size: 8.5px; color: #000; font-weight: 700; }
   .sub-tag { color: #000; font-weight: 900; font-size: 7.5px; }
 
-  .scanrow { display: flex; align-items: center; gap: 3px; margin-top: 1px; }
-  .bc svg { height: 34px; width: auto; display: block; }
+  .scanrow { display: flex; align-items: center; gap: 5px; margin-top: 2px; }
+  .bc svg { height: 42px; width: auto; display: block; }
   .bc svg rect[fill="#fff"], .bc svg rect:first-child { fill: #fff; }
   .scan { font-size: 7.5px; line-height: 1.05; color: #000; text-align: center; font-weight: 700; }
   .scan b { font-size: 11px; }
@@ -465,7 +564,7 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
     'Walk order — start here · boat allowance · billed monthly',
     groceryGroups,
     today,
-    { subtotal: grocerySubtotal, tone: 'grocery' },
+    { subtotal: grocerySubtotal, tone: 'grocery', byParent },
   )}
 
   ${/* DECK — company-billed but invoiced separately, so it is bagged and rung
@@ -476,7 +575,7 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
     'Bag & ring SEPARATELY — not part of the boat’s grocery allowance',
     deckGroups,
     today,
-    { subtotal: deckSubtotal, tone: 'deck', newPage: true },
+    { subtotal: deckSubtotal, tone: 'deck', newPage: true, byParent },
   )}
 
   ${/* COD — dead last, grouped by the person paying. Dave: "we typically have
@@ -488,7 +587,8 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
       <span class="dept-note">Paid personally &middot; NEVER on the company invoice &middot; bag &amp; label per person</span>
       <span class="dept-total">${cod.length} line${cod.length === 1 ? '' : 's'} &middot; <b>${formatCurrency(codSubtotal)}</b></span></div>
     ${codByPerson.map(([name, list]) => {
-      const personTotal = list
+      const withSubs = list.flatMap(i => [i, ...(byParent.get(i.id) || [])]);
+      const personTotal = withSubs
         .filter(i => i.shopping_status !== 'out_of_stock')
         .reduce((s, i) => s + lineTotal(i), 0);
       return `<div class="cod-person">
@@ -499,7 +599,7 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
         </div>
         <div class="grid">${groupByWalkingOrder(list, zoneOrder)
           .flatMap(g => g.items)
-          .map(i => itemCard(i, today)).join('')}</div>
+          .map(i => itemPairHtml(i, today, byParent)).join('')}</div>
       </div>`;
     }).join('')}
   </section>` : ''}

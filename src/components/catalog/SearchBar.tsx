@@ -23,7 +23,7 @@ import { useToast } from '@/hooks/use-toast';
 
 interface SearchBarProps { initialSearch: string; }
 
-const CACHE_KEY = 'gts_search_index_v1';
+const CACHE_KEY = 'gts_search_index_v2';
 
 export function SearchBar({ initialSearch }: SearchBarProps) {
   const router = useRouter();

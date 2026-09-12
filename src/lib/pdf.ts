@@ -11,13 +11,28 @@ export function generateOrderHTML(order: Order): string {
       .filter(i => i.shopping_status === 'out_of_stock')
       .map(i => [i.id, i.description])
   );
+  const itemById = new Map(order.items.map(i => [i.id, i]));
+  const subsByParent = order.items
+    .filter(i => i.is_substitution && i.substitutes_item_id)
+    .reduce((acc, i) => {
+      const k = i.substitutes_item_id as string;
+      (acc[k] ||= []).push(i);
+      return acc;
+    }, {} as Record<string, typeof order.items>);
 
-  const groceryItems = order.items.filter(i => i.item_type !== 'service' && i.shopping_status !== 'out_of_stock');
+  // FULL AUDIT: keep OOS originals (struck) + substitutions. Do not hide OOS.
+  const groceryItems = order.items.filter(i => i.item_type !== 'service');
+  // Walk primaries first; nest subs under parents so the boat sees the pair.
+  const parentIds = new Set(groceryItems.map(i => i.id));
+  const primaryGrocery = groceryItems.filter(i => {
+    if (!i.is_substitution || !i.substitutes_item_id) return true;
+    return !parentIds.has(i.substitutes_item_id);
+  });
   const serviceItems = order.items.filter(i => i.item_type === 'service');
-  const codItems     = groceryItems.filter(i => i.paid_by === 'cod');
+  const codItems     = groceryItems.filter(i => i.paid_by === 'cod' && i.shopping_status !== 'out_of_stock');
   const codSubtotal  = codItems.reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0);
   // Deck lines — company-billed but listed separately from the grocery allowance
-  const deckItems    = groceryItems.filter(i => i.paid_by === 'deck');
+  const deckItems    = groceryItems.filter(i => i.paid_by === 'deck' && i.shopping_status !== 'out_of_stock');
   const deckSubtotal = deckItems.reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0);
   // CODs separated per crew member — each settles their own total
   const codByName = Array.from(codItems.reduce((acc, i) => {
@@ -49,48 +64,75 @@ export function generateOrderHTML(order: Order): string {
     : order.cod_payment_method === 'cash' ? 'Cash (legacy)' : null;
   const codFeePct = codFeePercent(order);
   const isFulfilled       = order.status === 'fulfilled';
-  const itemCount         = groceryItems.reduce((s, i) => s + i.quantity, 0);
+  const itemCount         = groceryItems
+    .filter(i => i.shopping_status !== 'out_of_stock')
+    .reduce((s, i) => s + i.quantity, 0);
   const isCrewChangeOnly  = order.crew_change !== 'no' && groceryItems.length === 0;
 
-  // Group groceries by category
-  const grouped = groceryItems.reduce((acc, item) => {
-    const cat = item.category || 'General';
-    if (!acc[cat]) acc[cat] = [];
-    acc[cat].push(item);
-    return acc;
-  }, {} as Record<string, typeof groceryItems>);
-
-  const categoryRows = Object.entries(grouped).map(([cat, items]) => {
-    const catRows = items.map((item, idx) => {
-      const isSub          = item.is_substitution;
-      const effectiveTotal = item.actual_total ?? item.line_total;
-      const origDesc       = isSub && item.substitutes_item_id
-        ? outOfStockMap.get(item.substitutes_item_id) : null;
-      const subLabel = isSub
-        ? `<div style="font-size:9px;color:#E8640A;font-weight:700;margin-top:2px;">SUBSTITUTED FOR: ${origDesc || 'original item'}</div>`
-        : '';
-      const weightLabel = item.actual_weight
-        ? `<div style="font-size:9px;color:#555;margin-top:2px;">Actual weight: ${item.actual_weight} lbs</div>`
-        : '';
-      const codLabel = item.paid_by === 'cod'
-        ? `<div style="font-size:9px;color:#9333ea;font-weight:700;margin-top:2px;">COD &mdash; ${item.cod_name || 'crew member'} pays personally (not invoiced)</div>`
-        : item.paid_by === 'deck'
-        ? `<div style="font-size:9px;color:#0f766e;font-weight:700;margin-top:2px;">DECK &mdash; company-billed, listed separately (not grocery allowance)</div>`
-        : '';
-      const rowBg    = isSub ? '#fff8ec' : (idx % 2 === 0 ? '#ffffff' : '#f8f9fa');
-      const bdrLeft  = isSub ? 'border-left:3px solid #E8640A;' : '';
-      return `
+  function renderGroceryRow(item: typeof groceryItems[number], idx: number, nested = false): string {
+    const isSub          = !!item.is_substitution;
+    const isOos          = item.shopping_status === 'out_of_stock';
+    const effectiveTotal = isOos ? 0 : (item.actual_total ?? item.line_total);
+    const orig = isSub && item.substitutes_item_id ? itemById.get(item.substitutes_item_id) : undefined;
+    const origDesc = orig?.description || (item.substitutes_item_id ? outOfStockMap.get(item.substitutes_item_id) : null);
+    const matchedPref = !!(orig && orig.preferred_sub_mode === 'product'
+      && orig.preferred_sub_product_id && item.product_id === orig.preferred_sub_product_id);
+    const subLabel = isSub
+      ? `<div style="font-size:9px;color:#E8640A;font-weight:700;margin-top:2px;">SUBSTITUTED FOR: ${origDesc || 'original item'}${matchedPref ? ' · CUSTOMER PREFERRED' : ''}</div>`
+      : '';
+    const oosLabel = isOos
+      ? `<div style="font-size:9px;color:#888;font-weight:700;margin-top:2px;">OUT OF STOCK — not billed</div>`
+      : '';
+    const prefLabel = !isSub && !isOos && item.preferred_sub_mode === 'product'
+      ? `<div style="font-size:9px;color:#92400e;font-weight:700;margin-top:2px;">Preferred if OOS: ${item.preferred_sub_description || 'selected product'}</div>`
+      : !isSub && item.preferred_sub_mode === 'none'
+      ? `<div style="font-size:9px;color:#92400e;font-weight:700;margin-top:2px;">Do not substitute</div>`
+      : !isSub && item.preferred_sub_mode === 'store_choice'
+      ? `<div style="font-size:9px;color:#92400e;font-weight:700;margin-top:2px;">Store chooses substitute</div>`
+      : '';
+    const weightLabel = item.actual_weight
+      ? `<div style="font-size:9px;color:#555;margin-top:2px;">Actual weight: ${item.actual_weight} lbs</div>`
+      : '';
+    const codLabel = item.paid_by === 'cod'
+      ? `<div style="font-size:9px;color:#9333ea;font-weight:700;margin-top:2px;">COD &mdash; ${item.cod_name || 'crew member'} pays personally (not invoiced)</div>`
+      : item.paid_by === 'deck'
+      ? `<div style="font-size:9px;color:#0f766e;font-weight:700;margin-top:2px;">DECK &mdash; company-billed, listed separately (not grocery allowance)</div>`
+      : '';
+    const rowBg    = isOos ? '#f3f4f6' : isSub ? '#fff8ec' : (idx % 2 === 0 ? '#ffffff' : '#f8f9fa');
+    const bdrLeft  = isSub || nested ? 'border-left:3px solid #E8640A;' : isOos ? 'border-left:3px solid #9ca3af;' : '';
+    const descStyle = isOos
+      ? 'text-decoration:line-through;color:#6b7280;'
+      : isSub ? 'color:#E8640A;font-weight:700;' : 'color:#555;';
+    return `
       <tr style="background:${rowBg};${bdrLeft}">
-        <td style="padding:6px 8px;font-size:10px;color:#888;border-bottom:1px solid #eee;font-family:monospace;">${item.upc || '—'}</td>
-        <td style="padding:6px 8px;font-size:11px;color:${isSub ? '#E8640A' : '#555'};font-weight:${isSub ? '700' : 'normal'};border-bottom:1px solid #eee;">
-          ${item.description}${subLabel}${weightLabel}${codLabel}
+        <td style="padding:6px 8px;font-size:10px;color:#888;border-bottom:1px solid #eee;font-family:monospace;">${isOos ? '—' : (item.upc || '—')}</td>
+        <td style="padding:6px 8px;font-size:11px;${descStyle}border-bottom:1px solid #eee;">
+          ${item.description}${oosLabel}${subLabel}${prefLabel}${weightLabel}${codLabel}
         </td>
         <td style="padding:6px 8px;font-size:11px;color:#666;border-bottom:1px solid #eee;text-align:center;">${item.pkg_size || '—'}</td>
         <td style="padding:6px 8px;font-size:11px;color:#666;border-bottom:1px solid #eee;text-align:center;">${item.uom || '—'}</td>
         <td style="padding:6px 8px;font-size:12px;font-weight:700;color:#1E3D1E;border-bottom:1px solid #eee;text-align:center;">${item.quantity}</td>
-        <td style="padding:6px 8px;font-size:11px;color:#333;border-bottom:1px solid #eee;text-align:right;">${formatCurrency(item.unit_price)}</td>
-        <td style="padding:6px 8px;font-size:12px;font-weight:700;color:#1E3D1E;border-bottom:1px solid #eee;text-align:right;">${formatCurrency(effectiveTotal)}</td>
+        <td style="padding:6px 8px;font-size:11px;color:#333;border-bottom:1px solid #eee;text-align:right;">${isOos ? '—' : formatCurrency(item.unit_price)}</td>
+        <td style="padding:6px 8px;font-size:12px;font-weight:700;color:#1E3D1E;border-bottom:1px solid #eee;text-align:right;">${isOos ? '—' : formatCurrency(effectiveTotal)}</td>
       </tr>`;
+  }
+
+  // Group primaries by category; nest linked substitutions under each OOS/original.
+  const grouped = primaryGrocery.reduce((acc, item) => {
+    const cat = item.category || 'General';
+    if (!acc[cat]) acc[cat] = [];
+    acc[cat].push(item);
+    return acc;
+  }, {} as Record<string, typeof primaryGrocery>);
+
+  const categoryRows = Object.entries(grouped).map(([cat, items]) => {
+    let idx = 0;
+    const catRows = items.map(item => {
+      const rows = [renderGroceryRow(item, idx++)];
+      for (const sub of (subsByParent[item.id] || [])) {
+        rows.push(renderGroceryRow(sub, idx++, true));
+      }
+      return rows.join('');
     }).join('');
     return `
       <tr>

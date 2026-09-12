@@ -135,7 +135,23 @@ export function buildOrderEmailHtml(
     !!url && (opts.linkedDocs ?? []).some(d => d.url === url);
   const groceryItems  = order.items.filter(i => i.item_type !== 'service');
   const serviceItems  = order.items.filter(i => i.item_type === 'service');
-  const itemCount     = groceryItems.reduce((s, i) => s + i.quantity, 0);
+  // Delivered/units count excludes OOS; the item list still shows the full audit.
+  const itemCount     = groceryItems
+    .filter(i => i.shopping_status !== 'out_of_stock')
+    .reduce((s, i) => s + i.quantity, 0);
+  const itemById = new Map(groceryItems.map(i => [i.id, i]));
+  const subsByParent = groceryItems
+    .filter(i => i.is_substitution && i.substitutes_item_id)
+    .reduce((acc, i) => {
+      const k = i.substitutes_item_id as string;
+      (acc[k] ||= []).push(i);
+      return acc;
+    }, {} as Record<string, typeof groceryItems>);
+  const parentIds = new Set(groceryItems.map(i => i.id));
+  const primaryGrocery = groceryItems.filter(i => {
+    if (!i.is_substitution || !i.substitutes_item_id) return true;
+    return !parentIds.has(i.substitutes_item_id);
+  });
   const ext           = order.extended_info || {};
 
   const codItems = groceryItems.filter(i => i.paid_by === 'cod');
@@ -248,21 +264,56 @@ export function buildOrderEmailHtml(
   const codFeePct = codFeePercent(order);
   const codFeeLbl = (sub: number) => codFeeLabel(order, sub);
 
-  const itemRows = groceryItems.map(item => `
-    <tr style="border-bottom:1px solid #f0f0f0;">
-      <td style="padding:8px 10px;font-size:11px;color:#888;">${item.upc || '—'}</td>
-      <td style="padding:8px 10px;font-size:13px;color:#1E3D1E;font-weight:600;">${item.description}${
-        item.paid_by === 'cod'
-          ? `<span style="display:inline-block;margin-left:6px;font-size:9px;font-weight:800;color:#9333ea;background:#faf5ff;border:1px solid #9333ea;border-radius:3px;padding:1px 4px;text-transform:uppercase;">COD${item.cod_name ? ` · ${item.cod_name}` : ''}</span>`
-          : item.paid_by === 'deck'
-          ? `<span style="display:inline-block;margin-left:6px;font-size:9px;font-weight:800;color:#0f766e;background:#f0fdfa;border:1px solid #0f766e;border-radius:3px;padding:1px 4px;text-transform:uppercase;">DECK</span>`
-          : ''
-      }</td>
+  function emailGroceryRow(item: typeof groceryItems[number], nested = false): string {
+    const isOos = item.shopping_status === 'out_of_stock';
+    const isSub = !!item.is_substitution;
+    const orig = isSub && item.substitutes_item_id ? itemById.get(item.substitutes_item_id) : undefined;
+    const matchedPref = !!(orig && orig.preferred_sub_mode === 'product'
+      && orig.preferred_sub_product_id && item.product_id === orig.preferred_sub_product_id);
+    const badges = [
+      item.paid_by === 'cod'
+        ? `<span style="display:inline-block;margin-left:6px;font-size:9px;font-weight:800;color:#9333ea;background:#faf5ff;border:1px solid #9333ea;border-radius:3px;padding:1px 4px;text-transform:uppercase;">COD${item.cod_name ? ` · ${item.cod_name}` : ''}</span>`
+        : item.paid_by === 'deck'
+        ? `<span style="display:inline-block;margin-left:6px;font-size:9px;font-weight:800;color:#0f766e;background:#f0fdfa;border:1px solid #0f766e;border-radius:3px;padding:1px 4px;text-transform:uppercase;">DECK</span>`
+        : '',
+      isOos
+        ? `<div style="font-size:10px;color:#6b7280;font-weight:700;margin-top:2px;">OUT OF STOCK — not billed</div>`
+        : '',
+      isSub
+        ? `<div style="font-size:10px;color:#E8640A;font-weight:700;margin-top:2px;">SUBSTITUTED FOR: ${orig?.description || 'original item'}${matchedPref ? ' · CUSTOMER PREFERRED' : ''}</div>`
+        : '',
+      !isSub && item.preferred_sub_mode === 'product'
+        ? `<div style="font-size:10px;color:#92400e;font-weight:700;margin-top:2px;">Preferred if OOS: ${item.preferred_sub_description || 'selected product'}</div>`
+        : !isSub && item.preferred_sub_mode === 'none'
+        ? `<div style="font-size:10px;color:#92400e;font-weight:700;margin-top:2px;">Do not substitute</div>`
+        : !isSub && item.preferred_sub_mode === 'store_choice'
+        ? `<div style="font-size:10px;color:#92400e;font-weight:700;margin-top:2px;">Store chooses substitute</div>`
+        : '',
+    ].join('');
+    const descStyle = isOos
+      ? 'color:#6b7280;font-weight:600;text-decoration:line-through;'
+      : isSub
+      ? 'color:#E8640A;font-weight:700;'
+      : 'color:#1E3D1E;font-weight:600;';
+    const rowBg = isOos ? '#f3f4f6' : isSub || nested ? '#fff8ec' : 'transparent';
+    const total = isOos ? '—' : formatCurrency(Number(item.actual_total ?? item.line_total));
+    const price = isOos ? '—' : formatCurrency(item.unit_price);
+    return `
+    <tr style="border-bottom:1px solid #f0f0f0;background:${rowBg};${nested || isSub ? 'border-left:3px solid #E8640A;' : ''}">
+      <td style="padding:8px 10px;font-size:11px;color:#888;">${isOos ? '—' : (item.upc || '—')}</td>
+      <td style="padding:8px 10px;font-size:13px;${descStyle}">${item.description}${badges}</td>
       <td style="padding:8px 10px;font-size:12px;color:#666;text-align:center;">${item.pkg_size || '—'}</td>
       <td style="padding:8px 10px;font-size:13px;font-weight:800;color:#1E3D1E;text-align:center;">${item.quantity}</td>
-      <td style="padding:8px 10px;font-size:12px;text-align:right;">${formatCurrency(item.unit_price)}</td>
-      <td style="padding:8px 10px;font-size:13px;font-weight:700;text-align:right;">${formatCurrency(item.line_total)}</td>
-    </tr>`).join('');
+      <td style="padding:8px 10px;font-size:12px;text-align:right;">${price}</td>
+      <td style="padding:8px 10px;font-size:13px;font-weight:700;text-align:right;">${total}</td>
+    </tr>`;
+  }
+
+  const itemRows = primaryGrocery.map(item => {
+    const rows = [emailGroceryRow(item)];
+    for (const sub of (subsByParent[item.id] || [])) rows.push(emailGroceryRow(sub, true));
+    return rows.join('');
+  }).join('');
 
   const sinclairNote = opts.showSinclairNote
     ? `<div style="background:#f0f7f0;border:1px solid #1E3D1E;padding:12px 16px;border-radius:4px;margin:16px 0;">

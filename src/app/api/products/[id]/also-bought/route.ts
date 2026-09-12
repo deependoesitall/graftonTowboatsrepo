@@ -18,13 +18,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { Product } from '@/types';
+import { applyEffectiveCatalogPricing } from '@/lib/catalog-price';
 
 const LIMIT = 8;
 
 const SELECT =
   'id, category, sub_category, upc, description, details, image_url, location, ' +
   'location_seq, quantity_step, quantity_label, quantity_size_ratio, pkg_size, ' +
-  'uom, price, tags, is_active, is_available, billed_by_weight, form_section, ' +
+  'uom, price, regular_price, sale_start_date, sale_finish_date, tags, is_active, is_available, billed_by_weight, form_section, ' +
   'form_subsection, form_seq, store_only, freshop_id, popularity';
 
 export async function GET(
@@ -78,5 +79,5 @@ export async function GET(
     }
   }
 
-  return NextResponse.json({ products: Array.from(picked.values()).slice(0, LIMIT) });
+  return NextResponse.json({ products: Array.from(picked.values()).slice(0, LIMIT).map(p => applyEffectiveCatalogPricing(p)) });
 }

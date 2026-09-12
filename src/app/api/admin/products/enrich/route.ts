@@ -13,6 +13,7 @@ import { requireAdmin } from '@/lib/admin-auth-server';
 
 const ALLOWED_FIELDS = new Set([
   'details', 'image_url', 'billed_by_weight', 'location', 'location_seq', 'price',
+  'regular_price', 'sale_start_date', 'sale_finish_date',
   'quantity_step', 'quantity_label', 'quantity_size_ratio', 'freshop_id',
 ]);
 const MAX_UPDATES = 3000;

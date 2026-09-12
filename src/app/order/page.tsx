@@ -16,7 +16,7 @@ import {
   getCodPayments, saveCodPayments,
 } from '@/lib/cart';
 import { formatCurrency, formatLb, formatQty, isPoundQty, lbStepsFor, usesLbSteps, formatArrivalTime } from '@/lib/utils';
-import { CartItem, VesselInfo, AdditionalServices, VESSEL_TYPES } from '@/types';
+import { CartItem, VesselInfo, AdditionalServices, VESSEL_TYPES, PreferredSubMode, Product } from '@/types';
 import { SiteHeader } from '@/components/layout/SiteHeader';
 import { ContactPhones } from '@/components/layout/ContactPhones';
 import { AuthModal } from '@/components/auth/AuthModal';
@@ -150,12 +150,57 @@ function ReviewRow({ label, value }: { label: string; value?: string | null }) {
 }
 
 // ─── Cart item row (step 1) ────────────────────────────────────
-function CartItemRow({ item, onUpdate, onRemove, onPatch, codNameError }: {
+function CartItemRow({ item, onUpdate, onRemove, onPatch, codNameError, isLoggedIn, onNeedSignIn }: {
   item: CartItem; onUpdate: (qty: number) => void; onRemove: () => void;
   onPatch: (patch: Partial<CartItem>) => void; codNameError?: boolean;
+  isLoggedIn: boolean;
+  onNeedSignIn: () => void;
 }) {
   const [draft, setDraft] = useState(String(item.quantity));
   useEffect(() => { setDraft(String(item.quantity)); }, [item.quantity]);
+  const [prefOpen, setPrefOpen] = useState(false);
+  const [prefSearch, setPrefSearch] = useState('');
+  const [prefResults, setPrefResults] = useState<Product[]>([]);
+  const [prefSearching, setPrefSearching] = useState(false);
+
+  async function searchPreferred(q: string) {
+    if (q.trim().length < 2) { setPrefResults([]); return; }
+    setPrefSearching(true);
+    try {
+      const res = await fetch(`/api/products?search=${encodeURIComponent(q)}&per_page=8`);
+      if (res.ok) {
+        const d = await res.json();
+        setPrefResults((d.products || []).filter((p: Product) => p.id !== item.product_id));
+      }
+    } finally { setPrefSearching(false); }
+  }
+
+  function setPrefMode(mode: PreferredSubMode | null) {
+    if (!isLoggedIn) { onNeedSignIn(); return; }
+    if (!mode) {
+      onPatch({ preferred_sub_mode: null, preferred_sub_product_id: null, preferred_sub_description: null });
+      setPrefOpen(false);
+      return;
+    }
+    if (mode === 'product') {
+      setPrefOpen(true);
+      onPatch({ preferred_sub_mode: 'product' });
+      return;
+    }
+    onPatch({ preferred_sub_mode: mode, preferred_sub_product_id: null, preferred_sub_description: null });
+    setPrefOpen(false);
+  }
+
+  function pickPreferred(prod: Product) {
+    onPatch({
+      preferred_sub_mode: 'product',
+      preferred_sub_product_id: prod.id,
+      preferred_sub_description: prod.description,
+    });
+    setPrefOpen(false);
+    setPrefSearch('');
+    setPrefResults([]);
+  }
 
   function commit() {
     const n = parseInt(draft, 10);
@@ -199,7 +244,6 @@ function CartItemRow({ item, onUpdate, onRemove, onPatch, codNameError }: {
             <Trash2 className="w-4 h-4" />
           </button>
           {usesLbSteps(item.quantity_step) ? (
-            /* Deli scale items pick from the same preset amounts Sinclair's offers */
             <select
               value={String(item.quantity)}
               onChange={e => onUpdate(parseFloat(e.target.value))}
@@ -233,11 +277,6 @@ function CartItemRow({ item, onUpdate, onRemove, onPatch, codNameError }: {
         </div>
       </div>
 
-      {/* Paid By — Grocery (vessel account / boat allowance) vs Deck (company-billed,
-          listed separately, not part of the grocery allowance) vs COD (crew member
-          pays personally). Deck tab = Dave's ask: "some vessels have a separate
-          grocery from deck order… both get charged to the company but needs to be
-          listed separate." */}
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Paid by</span>
         <div className="flex rounded-lg border border-gray-200 overflow-hidden">
@@ -279,6 +318,82 @@ function CartItemRow({ item, onUpdate, onRemove, onPatch, codNameError }: {
       {isCod && codNameError && (
         <p className="text-[11px] text-red-500 mt-1">Whose COD is this? Add the crew member&apos;s name.</p>
       )}
+
+      <div className="mt-2.5 border-t border-gray-100 pt-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">If out of stock…</span>
+          {!isLoggedIn ? (
+            <button type="button" onClick={onNeedSignIn}
+              className="text-[11px] font-semibold text-brand-river hover:underline">
+              Sign in to set a preferred substitute
+            </button>
+          ) : (
+            <div className="flex flex-wrap gap-1">
+              <button type="button"
+                onClick={() => setPrefMode('product')}
+                className={`px-2 py-0.5 rounded text-[11px] font-bold border ${
+                  item.preferred_sub_mode === 'product'
+                    ? 'bg-amber-600 text-white border-amber-600'
+                    : 'bg-white text-gray-600 border-gray-200 hover:bg-amber-50'
+                }`}>
+                Preferred product
+              </button>
+              <button type="button"
+                onClick={() => setPrefMode('store_choice')}
+                className={`px-2 py-0.5 rounded text-[11px] font-bold border ${
+                  item.preferred_sub_mode === 'store_choice'
+                    ? 'bg-amber-600 text-white border-amber-600'
+                    : 'bg-white text-gray-600 border-gray-200 hover:bg-amber-50'
+                }`}>
+                Store chooses
+              </button>
+              <button type="button"
+                onClick={() => setPrefMode('none')}
+                className={`px-2 py-0.5 rounded text-[11px] font-bold border ${
+                  item.preferred_sub_mode === 'none'
+                    ? 'bg-amber-600 text-white border-amber-600'
+                    : 'bg-white text-gray-600 border-gray-200 hover:bg-amber-50'
+                }`}>
+                Don&apos;t substitute
+              </button>
+              {item.preferred_sub_mode && (
+                <button type="button" onClick={() => setPrefMode(null)}
+                  className="text-[11px] text-gray-400 hover:text-gray-600 px-1">Clear</button>
+              )}
+            </div>
+          )}
+        </div>
+        {isLoggedIn && item.preferred_sub_mode === 'product' && item.preferred_sub_description && !prefOpen && (
+          <p className="text-[11px] text-amber-800 font-semibold mt-1">
+            Preferred: {item.preferred_sub_description}
+            <button type="button" className="ml-2 text-brand-river underline font-bold" onClick={() => setPrefOpen(true)}>change</button>
+          </p>
+        )}
+        {isLoggedIn && (prefOpen || (item.preferred_sub_mode === 'product' && !item.preferred_sub_product_id)) && (
+          <div className="mt-1.5 space-y-1">
+            <input
+              type="text"
+              value={prefSearch}
+              onChange={e => { setPrefSearch(e.target.value); void searchPreferred(e.target.value); }}
+              placeholder="Search a preferred replacement…"
+              className="input-base text-xs py-1.5 w-full"
+              autoFocus
+            />
+            {prefSearching && <p className="text-[11px] text-gray-400">Searching…</p>}
+            {!!prefResults.length && (
+              <div className="max-h-36 overflow-y-auto border border-amber-200 rounded bg-white divide-y divide-gray-100">
+                {prefResults.map(prod => (
+                  <button key={prod.id} type="button" onClick={() => pickPreferred(prod)}
+                    className="w-full text-left px-2.5 py-1.5 hover:bg-amber-50">
+                    <span className="block text-xs font-semibold text-brand-navy truncate">{prod.description}</span>
+                    <span className="block text-[11px] text-gray-400">{prod.pkg_size || ''}{prod.pkg_size ? ' · ' : ''}{formatCurrency(prod.price)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -699,6 +814,8 @@ export default function OrderPage() {
                 <CartItemRow
                   key={item.product_id}
                   item={item}
+                  isLoggedIn={isLoggedIn}
+                  onNeedSignIn={() => setAuthOpen(true)}
                   onUpdate={qty => { updateCartItem(item.product_id, qty); setItems(getCart()); }}
                   onRemove={() => { removeFromCart(item.product_id); setItems(getCart()); }}
                   onPatch={patch => {
@@ -1394,6 +1511,17 @@ export default function OrderPage() {
                         <span className="block text-[10px] font-bold uppercase tracking-wide text-teal-700">
                           Deck — billed separately
                         </span>
+                      )}
+                      {item.preferred_sub_mode === 'product' && (
+                        <span className="block text-[10px] font-bold text-amber-800">
+                          If OOS → {item.preferred_sub_description || 'preferred product'}
+                        </span>
+                      )}
+                      {item.preferred_sub_mode === 'none' && (
+                        <span className="block text-[10px] font-bold text-amber-800">If OOS → don&apos;t substitute</span>
+                      )}
+                      {item.preferred_sub_mode === 'store_choice' && (
+                        <span className="block text-[10px] font-bold text-amber-800">If OOS → store chooses</span>
                       )}
                     </div>
                   </div>

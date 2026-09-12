@@ -4,6 +4,7 @@
 // and additional services — mirroring place-order snapshot fields.
 
 import { NextRequest, NextResponse } from 'next/server';
+import { effectiveCatalogPrice } from '@/lib/catalog-price';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin, isSinclairScoped } from '@/lib/admin-auth-server';
 import { z } from 'zod';
@@ -150,7 +151,7 @@ export async function POST(
 
     const { data: product, error: prodErr } = await supabase
       .from('products')
-      .select('id, description, category, pkg_size, uom, upc, price, location, location_seq, image_url, is_active, regular_price, sale_finish_date')
+      .select('id, description, category, pkg_size, uom, upc, price, location, location_seq, image_url, is_active, regular_price, sale_start_date, sale_finish_date')
       .eq('id', product_id)
       .eq('is_active', true)
       .single();
@@ -160,7 +161,13 @@ export async function POST(
     }
 
     const billing = normalizePaidBy(paid_by, cod_name);
-    const lineTotal = product.price * quantity;
+    // Staff add-to-order must honour Chicago sale windows — raw products.price
+    // can still hold last week's sale until sync re-touches the SKU.
+    const eff = effectiveCatalogPrice(product as {
+      price?: number | null; regular_price?: number | null;
+      sale_start_date?: string | null; sale_finish_date?: string | null;
+    });
+    const lineTotal = eff.price * quantity;
 
     const { data: newItem, error } = await supabase
       .from('order_items')
@@ -175,7 +182,7 @@ export async function POST(
         location: product.location || null,
         location_seq: product.location_seq ?? null,
         image_url: product.image_url || null,
-        unit_price: product.price,
+        unit_price: eff.price,
         quantity,
         line_total: lineTotal,
         item_type: 'grocery',
@@ -183,8 +190,8 @@ export async function POST(
         service_details: null,
         paid_by: billing.paid_by,
         cod_name: billing.cod_name,
-        regular_price: (product as { regular_price?: number | null }).regular_price ?? null,
-        sale_finish_date: (product as { sale_finish_date?: string | null }).sale_finish_date ?? null,
+        regular_price: eff.regular_price,
+        sale_finish_date: eff.sale_finish_date,
       })
       .select()
       .single();

@@ -47,7 +47,7 @@ export function AdminNav() {
       <div className="h-1 bg-gts-gradient" />
 
       <div className="bg-brand-green text-white">
-        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
+        <div className="w-full max-w-none mx-auto px-4 lg:px-6 h-16 flex items-center justify-between gap-3 lg:gap-4">
           {/* Logo / title */}
           <Link href="/admin" className="flex items-center gap-3 shrink-0">
             {/* ⚠️ THE EMBLEM, NOT THE FULL LOGO. gts-logo.png carries the
@@ -74,7 +74,8 @@ export function AdminNav() {
           </Link>
 
           {/* Nav links */}
-          <nav className="flex items-center gap-1 overflow-x-auto">
+          {/* Scroll only on narrow viewports; hide scrollbar chrome. Desktop: no tab scroller. */}
+          <nav className="flex items-center gap-1 min-w-0 flex-1 justify-center overflow-x-auto lg:overflow-visible [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
             {visibleNav.map(({ href, label, icon: Icon }) => {
               const active = path === href || (href !== '/admin' && path.startsWith(href));
               return (

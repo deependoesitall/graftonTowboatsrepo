@@ -12,13 +12,15 @@
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { applyEffectiveCatalogPricing } from '@/lib/catalog-price';
 
 // Re-fetched at most every 10 minutes; the browser also caches it per session.
 export const revalidate = 600;
 
 const FIELDS = [
   'id', 'description', 'details', 'category', 'sub_category', 'pkg_size',
-  'uom', 'price', 'image_url', 'upc', 'billed_by_weight', 'quantity_step',
+  'uom', 'price', 'regular_price', 'sale_start_date', 'sale_finish_date',
+  'image_url', 'upc', 'billed_by_weight', 'quantity_step',
   'quantity_label', 'quantity_size_ratio', 'popularity',
   // Extra searchable signal: admin tags + the paper form's own groupings
   // ("Meat" / "Beef"), which are natural keywords crews already think in.
@@ -43,8 +45,14 @@ export async function GET() {
     if (!data || data.length < 1000) break;
   }
 
+  // Recompute charge price at read time so an expired sale left in the DB
+  // cannot keep ringing in the barge offline index until Freshop re-touches it.
+  const priced = (products as Record<string, unknown>[]).map(p =>
+    applyEffectiveCatalogPricing(p as { price?: number | null; regular_price?: number | null; sale_start_date?: string | null; sale_finish_date?: string | null }),
+  );
+
   return NextResponse.json(
-    { products, generated_at: new Date().toISOString() },
+    { products: priced, generated_at: new Date().toISOString() },
     {
       headers: {
         // Cache hard at the edge + on device; a stale index for a few minutes

@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Product } from '@/types';
 import { formatCurrency, formatLb, lbStepsFor, usesLbSteps, productDisplayName, buildVariantSet } from '@/lib/utils';
+import { applyEffectiveCatalogPricing } from '@/lib/catalog-price';
 import { addToCart } from '@/lib/cart';
 import { Plus, Minus, ShoppingCart, Package, Check, Star, X, Scale, Tag } from 'lucide-react';
 import Link from 'next/link';
@@ -193,14 +194,19 @@ function ProductCard({ product, variants, isLoggedIn, favIds, onOpenDetail }: {
   product: Product; variants?: Product[]; isLoggedIn: boolean;
   favIds: Set<string>; onOpenDetail: (p: Product, variants?: Product[]) => void;
 }) {
+  // Defence in depth: even if a server path forgot to apply Chicago sale
+  // expiry, never let an expired regular_price keep charging the sale.
+  const pricedProduct = applyEffectiveCatalogPricing(product);
+  const pricedVariants = variants?.map(v => applyEffectiveCatalogPricing(v));
+
   // ── Size chooser ────────────────────────────────────────────
   // When this card stands for a group, `active` is the size the cook has
   // picked and everything below — price, photo, cart line — follows it. The
   // other sizes stay real rows in the database; we're only choosing which one
   // this card is currently offering.
-  const set = variants ? buildVariantSet(variants, p => productDisplayName(p)) : null;
-  const [selectedId, setSelectedId] = useState<string>(set ? set.options[0].id : product.id);
-  const active = set ? (set.options.find(o => o.id === selectedId) ?? set.options[0]) : product;
+  const set = pricedVariants ? buildVariantSet(pricedVariants, p => productDisplayName(p)) : null;
+  const [selectedId, setSelectedId] = useState<string>(set ? set.options[0].id : pricedProduct.id);
+  const active = set ? (set.options.find(o => o.id === selectedId) ?? set.options[0]) : pricedProduct;
 
   const [qty, setQty] = useState(1);
   const [justAdded, setJustAdded] = useState(false);
@@ -354,7 +360,10 @@ function ProductCard({ product, variants, isLoggedIn, favIds, onOpenDetail }: {
             </p>
           )}
           <div className="flex items-center justify-between gap-1 mb-2">
-            <span className="text-base font-bold text-brand-navy font-body">
+            <span className="text-base font-bold text-brand-navy font-body inline-flex items-baseline gap-1.5">
+              {active.regular_price != null && Number(active.regular_price) > Number(active.price) && (
+                <span className="text-xs font-semibold text-gray-400 line-through">{formatCurrency(Number(active.regular_price))}</span>
+              )}
               {formatCurrency(active.price)}{byWeight && <span className="text-[10px] font-semibold text-gray-400"> /lb</span>}
             </span>
             {/* Qty stepper (count items) — fractional-lb items pick pounds below */}
@@ -570,6 +579,9 @@ function ProductDetailModal({ product, variants, onClose, onSelectProduct }: {
 
           <div className="flex items-center justify-between border-t border-gray-100 pt-3">
             <span className="text-xl font-bold text-brand-navy">
+{active.regular_price != null && Number(active.regular_price) > Number(active.price) && (
+                <span className="text-sm font-semibold text-gray-400 line-through mr-1.5">{formatCurrency(Number(active.regular_price))}</span>
+              )}
               {formatCurrency(active.price)}{byWeight && <span className="text-xs font-semibold text-gray-400"> /lb</span>}
             </span>
             {!lbSteps && (

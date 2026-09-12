@@ -6,6 +6,7 @@ import { Newspaper, BadgePercent, Ship, Truck, Anchor, Phone } from 'lucide-reac
 import { CouponStrip } from '@/components/catalog/CouponStrip';
 import CatalogRails from '@/components/catalog/CatalogRails';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
+import { applyEffectiveCatalogPricingList } from '@/lib/catalog-price';
 import { ProductGrid } from '@/components/catalog/ProductGrid';
 import { CategoryFilter } from '@/components/catalog/CategoryFilter';
 import { SearchBar } from '@/components/catalog/SearchBar';
@@ -416,7 +417,7 @@ export default async function CatalogPage({ searchParams }: PageProps) {
             <div className="flex-1 min-w-0">
               <Suspense fallback={<ProductGridSkeleton />}>
                 <ProductGrid
-                  products={products || []}
+                  products={applyEffectiveCatalogPricingList(products || [])}
                   totalCount={count || 0}
                   page={page}
                   totalPages={totalPages}

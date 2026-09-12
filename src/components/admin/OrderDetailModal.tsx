@@ -217,6 +217,8 @@ export function OrderDetailModal({
   const [subSearching, setSubSearching] = useState(false);
   const [subPick, setSubPick] = useState<Product | null>(null);
   const [subQty, setSubQty] = useState('1');
+  /** Customer preferred-sub guidance when opening the OOS panel. */
+  const [preferredHint, setPreferredHint] = useState<string>('');
   const [fillingAll, setFillingAll] = useState(false);
   const [finishStep, setFinishStep] = useState<null | 'accept' | 'register' | 'shopped'>(null);
   const [finishError, setFinishError] = useState('');
@@ -298,7 +300,51 @@ export function OrderDetailModal({
       body.substitution = { product_id: subPick.id, quantity: q };
     }
     const r = await itemAction(subFor.id, body);
-    if (r) { setSubFor(null); setSubPick(null); setSubSearch(''); setSubResults([]); }
+    if (r) { setSubFor(null); setSubPick(null); setSubSearch(''); setSubResults([]); setPreferredHint(''); }
+  }
+
+  /**
+   * Open OOS / substitute panel. If the cook set a preferred product and it is
+   * still active, pre-select it. mode=none defaults the shopper toward
+   * "No replacement"; store can still override.
+   */
+  async function openSubPanel(item: OrderItem) {
+    setSubFor(item);
+    setSubSearch('');
+    setSubResults([]);
+    setSubPick(null);
+    setSubQty(String(item.quantity));
+    setItemError('');
+    setPreferredHint('');
+
+    const mode = item.preferred_sub_mode;
+    if (mode === 'none') {
+      setPreferredHint('Customer asked: do not substitute — default is drop the line (you can still override).');
+      return;
+    }
+    if (mode === 'store_choice') {
+      setPreferredHint('Customer said: store chooses the substitute.');
+      return;
+    }
+    if (mode === 'product' && item.preferred_sub_product_id) {
+      const label = (item.preferred_sub_description || '').trim() || 'preferred product';
+      setPreferredHint(`Customer preferred: ${label}`);
+      try {
+        const q = encodeURIComponent(item.preferred_sub_description || item.preferred_sub_product_id);
+        const res = await adminFetch(`/api/products?search=${q}&status=active&per_page=24`);
+        if (!res.ok) return;
+        const d = await res.json();
+        const match = (d.products || []).find((p: Product) => p.id === item.preferred_sub_product_id);
+        if (match) {
+          setSubPick(match);
+          setSubSearch(match.description);
+        } else {
+          setPreferredHint(`Customer preferred: ${label} — not currently active in catalog; pick another or drop the line.`);
+        }
+      } catch {
+        /* shopper can still search manually */
+      }
+    }
   }
 
   /**
@@ -878,7 +924,7 @@ export function OrderDetailModal({
           <Pencil className="w-4 h-4" />
         </button>
         <button
-          onClick={() => { setSubFor(item); setSubSearch(''); setSubResults([]); setSubPick(null); setSubQty(String(item.quantity)); setItemError(''); }}
+          onClick={() => { void openSubPanel(item); }}
           className="p-2 text-gray-400 hover:text-amber-600 transition-colors"
           title="Out of stock / substitute"
         >
@@ -1551,6 +1597,15 @@ export function OrderDetailModal({
                             <p className={`font-medium text-brand-navy text-xs ${item.shopping_status === 'out_of_stock' ? 'line-through' : ''}`}>
                               {item.description}
                             </p>
+                            {item.preferred_sub_mode === 'product' && (
+                              <p className="text-[10px] font-bold text-amber-800">Preferred sub: {item.preferred_sub_description || 'selected product'}</p>
+                            )}
+                            {item.preferred_sub_mode === 'none' && (
+                              <p className="text-[10px] font-bold text-amber-800">Do not substitute</p>
+                            )}
+                            {item.preferred_sub_mode === 'store_choice' && (
+                              <p className="text-[10px] font-bold text-amber-800">Store chooses substitute</p>
+                            )}
                             <p className="text-xs text-gray-400">
                               {item.category}
                               {item.location && (
@@ -1827,9 +1882,20 @@ export function OrderDetailModal({
                           {subFor.paid_by === 'deck' && <span className="ml-2 text-teal-700 font-bold">DECK</span>}
                         </p>
                       </div>
-                      <button onClick={() => { setSubFor(null); setSubPick(null); }}
+                      <button onClick={() => { setSubFor(null); setSubPick(null); setPreferredHint(''); }}
                         className="text-gray-400 hover:text-gray-600"><X className="w-4 h-4" /></button>
                     </div>
+
+                    {preferredHint && (
+                      <p className="text-xs font-semibold text-amber-900 bg-amber-100/80 border border-amber-300 rounded px-2.5 py-1.5">
+                        {preferredHint}
+                      </p>
+                    )}
+                    {subFor.preferred_sub_mode === 'none' && !subPick && (
+                      <p className="text-[11px] text-amber-800">
+                        Prefer <strong>No replacement — drop the line</strong> unless you have a reason to override.
+                      </p>
+                    )}
 
                     <div className="relative">
                       <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
@@ -2529,7 +2595,7 @@ function IB({ label, value, highlight }: { label: string; value: string; highlig
   return (
     <div>
       <p className="text-xs text-gray-400 uppercase tracking-wide mb-0.5">{label}</p>
-      <p className={`text-sm font-bold break-words ${highlight ? 'text-brand-gold' : 'text-brand-navy'}`}>{value}</p>
+      <p className={`text-sm font-bold break-all ${highlight ? 'text-brand-gold' : 'text-brand-navy'}`}>{value}</p>
     </div>
   );
 }

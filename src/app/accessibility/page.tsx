@@ -67,8 +67,8 @@ export default function AccessibilityPage() {
       <LS>Tell us</LS>
       <LP>
         If you hit a problem, we want to hear about it — including what device and
-        browser you were using, if you know. That&apos;s usually the difference
-        between us guessing and us actually fixing it.
+        browser you were using, if you know. We&apos;ll work to get it resolved
+        and get you back up and running.
       </LP>
       <LP>
         {BUSINESS.legalName}<br />

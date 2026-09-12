@@ -306,13 +306,13 @@ export const ORDER_PAGE = {
   meta: {
     title: 'Order Online | Grafton Towboat Services',
     description:
-      "Order groceries from Sinclair's Foods, towboat supplies, and extras for your vessel. Sign in or start as a guest — delivered at Mile Marker 219.",
+      "Order groceries from Sinclair's Foods, supplies, and extras for any vessel at Grafton. Sign in or start as a guest — delivered at Mile Marker 219.",
   },
   headingLines: ['Order for', 'your vessel'],
-  lede: "Groceries, deck supplies, and write-ins — built for towboat crews. Start an order online any time, or call if you need a person.",
+  lede: "Groceries, supplies, and write-ins — for any vessel at Grafton, not just the tows. Order online any time, or call if you need a person.",
 } as const;
 
 export const CTA = {
   heading: 'Coming Through Grafton?',
-  lede: 'Order online any time, or call and talk to a person. Both work — most crews do both.',
+  lede: 'Order online any time, or call and talk to a person. Both work — towboats, barges, dredges, whatever keeps you afloat.',
 } as const;

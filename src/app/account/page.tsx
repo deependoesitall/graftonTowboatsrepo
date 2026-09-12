@@ -1,5 +1,6 @@
 'use client';
 // src/app/account/page.tsx
+import { effectiveCatalogPrice } from '@/lib/catalog-price';
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -37,6 +38,7 @@ function AccountContent() {
 
   // Past orders
   const [orders, setOrders] = useState<Order[]>([]);
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
   const [ordersLoading, setOrdersLoading] = useState(false);
 
   // Favorites
@@ -219,7 +221,7 @@ function AccountContent() {
         const chunk = ids.slice(i, i + CHUNK);
         const { data } = await supabase
           .from('products')
-          .select('id, price, description, details, category, pkg_size, uom, image_url, is_active, is_available')
+          .select('id, price, regular_price, sale_start_date, sale_finish_date, description, details, category, pkg_size, uom, image_url, is_active, is_available')
           .in('id', chunk);
         for (const row of (data || []) as LiveProduct[]) {
           liveById.set(row.id, row);
@@ -242,7 +244,7 @@ function AccountContent() {
           category: live.category,
           pkg_size: live.pkg_size,
           uom: live.uom,
-          price: live.price,
+          price: effectiveCatalogPrice(live).price,
           quantity: item.quantity,
           image_url: live.image_url,
           // Who was paying stays who was paying.
@@ -449,7 +451,7 @@ function AccountContent() {
           ) : (
             <div className="space-y-3">
               {orders.map(order => (
-                <div key={order.id} className="card-base p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+                <div key={order.id} className="card-base p-4 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       <span className="font-mono text-sm font-bold text-brand-green">{order.order_number}</span>
@@ -489,11 +491,89 @@ function AccountContent() {
                       className="flex items-center gap-1.5 bg-brand-orange text-white text-xs font-bold uppercase tracking-wide px-3.5 py-2 rounded-full hover:bg-brand-ored transition-colors">
                       <RotateCcw className="w-3.5 h-3.5" /> Repeat Order
                     </button>
-                    <a href={`/api/orders/${order.id}/pdf`} target="_blank"
+                    <button
+                      type="button"
+                      onClick={() => setExpandedOrderId(expandedOrderId === order.id ? null : order.id)}
+                      className="flex items-center gap-1 text-xs text-brand-green/50 hover:text-brand-green font-semibold transition-colors"
+                    >
+                      {expandedOrderId === order.id ? 'Hide lines' : 'View lines'} <ChevronRight className={`w-3.5 h-3.5 transition-transform ${expandedOrderId === order.id ? 'rotate-90' : ''}`} />
+                    </button>
+                    <a href={`/api/orders/${order.id}/pdf`} target="_blank" rel="noreferrer"
                       className="flex items-center gap-1 text-xs text-brand-green/50 hover:text-brand-green font-semibold transition-colors">
-                      Details <ChevronRight className="w-3.5 h-3.5" />
+                      PDF
                     </a>
                   </div>
+                  {expandedOrderId === order.id && (
+                    <div className="w-full basis-full mt-3 border-t border-brand-green/10 pt-3 space-y-1.5">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-brand-green/50 mb-1">Full substitution record</p>
+                      {(() => {
+                        const lines = (order.items || []).filter(i => i.item_type !== 'service');
+                        const byParent = lines
+                          .filter(i => i.is_substitution && i.substitutes_item_id)
+                          .reduce((acc, i) => {
+                            const k = i.substitutes_item_id as string;
+                            (acc[k] ||= []).push(i);
+                            return acc;
+                          }, {} as Record<string, typeof lines>);
+                        const ids = new Set(lines.map(i => i.id));
+                        const primaries = lines.filter(i => {
+                          if (!i.is_substitution || !i.substitutes_item_id) return true;
+                          return !ids.has(i.substitutes_item_id);
+                        });
+                        if (!primaries.length) {
+                          return <p className="text-xs text-brand-green/50">No grocery lines on this order.</p>;
+                        }
+                        return primaries.map(item => {
+                          const oos = item.shopping_status === 'out_of_stock';
+                          const kids = byParent[item.id] || [];
+                          return (
+                            <div key={item.id} className="text-sm">
+                              <div className={`flex gap-2 items-start ${oos ? 'opacity-70' : ''}`}>
+                                <span className="text-xs font-bold text-brand-green/60 w-8 shrink-0">{item.quantity}×</span>
+                                <div className="min-w-0 flex-1">
+                                  <p className={`font-semibold text-brand-navy text-xs leading-snug ${oos ? 'line-through' : ''}`}>
+                                    {item.description}
+                                  </p>
+                                  {oos && (
+                                    <p className="text-[10px] font-bold text-gray-500 uppercase">Out of stock — not billed</p>
+                                  )}
+                                  {item.preferred_sub_mode === 'product' && (
+                                    <p className="text-[10px] font-bold text-amber-800">Preferred if OOS: {item.preferred_sub_description || 'selected product'}</p>
+                                  )}
+                                  {item.preferred_sub_mode === 'none' && (
+                                    <p className="text-[10px] font-bold text-amber-800">Do not substitute</p>
+                                  )}
+                                  {item.preferred_sub_mode === 'store_choice' && (
+                                    <p className="text-[10px] font-bold text-amber-800">Store chooses substitute</p>
+                                  )}
+                                  {!oos && (
+                                    <p className="text-[11px] text-brand-green/50">{formatCurrency(Number(item.actual_total ?? item.line_total))}</p>
+                                  )}
+                                </div>
+                              </div>
+                              {kids.map(sub => {
+                                const matched = item.preferred_sub_mode === 'product'
+                                  && item.preferred_sub_product_id
+                                  && sub.product_id === item.preferred_sub_product_id;
+                                return (
+                                  <div key={sub.id} className="flex gap-2 items-start ml-6 mt-1 border-l-2 border-amber-400 pl-2">
+                                    <span className="text-xs font-bold text-amber-700 w-8 shrink-0">{sub.quantity}×</span>
+                                    <div className="min-w-0 flex-1">
+                                      <p className="font-semibold text-amber-800 text-xs leading-snug">{sub.description}</p>
+                                      <p className="text-[10px] font-bold text-amber-700 uppercase">
+                                        Substituted for original{matched ? ' · Customer preferred' : ''}
+                                      </p>
+                                      <p className="text-[11px] text-brand-green/50">{formatCurrency(Number(sub.actual_total ?? sub.line_total))}</p>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

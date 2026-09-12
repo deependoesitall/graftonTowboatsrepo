@@ -92,6 +92,9 @@ export interface SyncableProduct {
    * survive seasonal items going inactive and coming back. */
   manual_fields?: string[] | null;
   price: number;
+  regular_price?: number | null;
+  sale_start_date?: string | null;
+  sale_finish_date?: string | null;
   quantity_step: number | null;
   quantity_label: string | null;
   quantity_size_ratio: number | null;
@@ -165,13 +168,26 @@ function locationSeqFrom(p: FreshopProduct): number | null {
 }
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+/** America/Chicago YYYY-MM-DD — never UTC via Date#toISOString (wrong near midnight). */
+export function chicagoCalendarDate(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Chicago',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now);
+}
+
 /** Is the advertised sale live today? Freshop keeps finished offers on the
- *  record, so the dates have to be checked rather than trusted by presence. */
-export function saleIsActive(p: FreshopProduct, today = new Date()): boolean {
+ *  record, so the dates have to be checked rather than trusted by presence.
+ *  Calendar day is America/Chicago, matching Sinclair's ad turnover. */
+export function saleIsActive(p: FreshopProduct, today: Date | string = new Date()): boolean {
   if (typeof p.offer_sale_price !== 'number' || !isFinite(p.offer_sale_price)) return false;
-  const day = today.toISOString().slice(0, 10);
-  if (p.sale_start_date && day < p.sale_start_date) return false;
-  if (p.sale_finish_date && day > p.sale_finish_date) return false;
+  const day = typeof today === 'string' ? today.slice(0, 10) : chicagoCalendarDate(today);
+  const start = (p.sale_start_date || '').slice(0, 10);
+  const finish = (p.sale_finish_date || '').slice(0, 10);
+  if (start && day < start) return false;
+  if (finish && day > finish) return false;
   return true;
 }
 
@@ -248,17 +264,36 @@ export function computeFields(
       stats.locations++;
     }
   }
-  const newPrice = priceFrom(hit);
-  if (!locked.has('price') && newPrice != null && Math.abs(newPrice - Number(product.price)) >= 0.005) {
-    fields.price = newPrice;
-    stats.prices++;
-  }
   // Sale display fields ride along with price. ALWAYS written — including back
   // to null — because a finished sale has to stop showing a struck-through
-  // price the moment it expires. Sinclair's ad turns over at midnight Tuesday.
+  // price the moment it expires. Sinclair's ad turns over at midnight Tuesday
+  // (America/Chicago). When Freshop reports the sale inactive we MUST clear
+  // regular_price + dates even if only one of them drifted, and put shelf
+  // back into products.price so charge paths that still trust the column
+  // don't keep ringing the expired sale until the next touch.
   if (!locked.has('price')) {
     const sale = saleFieldsFrom(hit);
-    if (sale.regular_price !== (product as { regular_price?: number | null }).regular_price) {
+    let newPrice = priceFrom(hit);
+    // If Freshop omitted shelf while clearing a sale, fall back to the
+    // regular we already stored so we never leave price stuck on the sale
+    // number with regular_price nulled.
+    if (newPrice == null && sale.regular_price == null) {
+      const prevReg = Number((product as { regular_price?: number | null }).regular_price);
+      if (Number.isFinite(prevReg) && prevReg > 0) newPrice = round2(prevReg);
+    }
+    if (newPrice != null && Math.abs(newPrice - Number(product.price)) >= 0.005) {
+      fields.price = newPrice;
+      stats.prices++;
+    }
+    const prevReg = (product as { regular_price?: number | null }).regular_price ?? null;
+    const prevStart = String((product as { sale_start_date?: string | null }).sale_start_date ?? '').slice(0, 10) || null;
+    const prevFinish = String((product as { sale_finish_date?: string | null }).sale_finish_date ?? '').slice(0, 10) || null;
+    const prevRegN = prevReg == null ? null : Number(prevReg);
+    const saleRegN = sale.regular_price == null ? null : Number(sale.regular_price);
+    const regChanged = prevRegN !== saleRegN;
+    const startChanged = prevStart !== (sale.sale_start_date || null);
+    const finishChanged = prevFinish !== (sale.sale_finish_date || null);
+    if (regChanged || startChanged || finishChanged) {
       fields.regular_price = sale.regular_price;
       fields.sale_start_date = sale.sale_start_date;
       fields.sale_finish_date = sale.sale_finish_date;
