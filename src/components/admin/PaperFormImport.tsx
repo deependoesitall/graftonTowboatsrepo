@@ -34,8 +34,18 @@ const layoutItems = (layoutJson as { items: FormLayoutItem[] }).items;
 export interface ApplyLine {
   productId: string;
   qty: number;
-  paid_by?: 'vessel' | 'cod';
+  paid_by?: 'vessel' | 'deck' | 'cod';
   cod_name?: string;
+  /** Present for register-tape / full-store matches that are not on the paper form.
+   *  Without these, applyLines writes qty against an id the sheet never renders
+   *  and the draft stays at 0 lines. */
+  description?: string;
+  price?: number;
+  category?: string;
+  pkg_size?: string | null;
+  uom?: string | null;
+  image_url?: string | null;
+  upc?: string | null;
 }
 
 /**

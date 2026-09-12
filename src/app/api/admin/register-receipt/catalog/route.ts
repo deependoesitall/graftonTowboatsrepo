@@ -11,7 +11,7 @@ import { requireAdmin } from '@/lib/admin-auth-server';
 export const dynamic = 'force-dynamic';
 
 /** One literal — supabase-js infers row shape from the select string. */
-const COLUMNS = 'id, upc, description, price, is_active';
+const COLUMNS = 'id, upc, description, price, is_active, category, pkg_size, uom, image_url';
 
 const PAGE = 1000;
 
@@ -21,7 +21,10 @@ export async function GET(req: NextRequest) {
   if (session instanceof NextResponse) return session;
 
   const supabase = createServiceClient();
-  const items: { id: string; upc: string; description: string; price: number; is_active: boolean }[] = [];
+  const items: {
+    id: string; upc: string; description: string; price: number; is_active: boolean;
+    category: string | null; pkg_size: string | null; uom: string | null; image_url: string | null;
+  }[] = [];
 
   for (let from = 0; from < 50000; from += PAGE) {
     const to = from + PAGE - 1;
@@ -49,6 +52,10 @@ export async function GET(req: NextRequest) {
         description: r.description || '',
         price: Number(r.price) || 0,
         is_active: r.is_active !== false,
+        category: r.category || null,
+        pkg_size: r.pkg_size || null,
+        uom: r.uom || null,
+        image_url: r.image_url || null,
       });
     }
     if (rows.length < PAGE) break;

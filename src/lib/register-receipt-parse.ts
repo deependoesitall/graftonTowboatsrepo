@@ -27,6 +27,10 @@ export interface CatalogRow {
   price: number;
   /** Prefer active when several catalog rows share a UPC key. */
   is_active?: boolean | null;
+  category?: string | null;
+  pkg_size?: string | null;
+  uom?: string | null;
+  image_url?: string | null;
 }
 
 export interface MatchedReceiptLine {
@@ -37,6 +41,11 @@ export interface MatchedReceiptLine {
   productId: string;
   catalogDescription: string;
   catalogPrice: number;
+  category?: string | null;
+  pkg_size?: string | null;
+  uom?: string | null;
+  image_url?: string | null;
+  upc?: string | null;
 }
 
 export interface UnmatchedReceiptLine {
@@ -191,6 +200,11 @@ export function matchReceiptToCatalog(lines: ReceiptRawLine[], catalog: CatalogR
         productId: hit.id,
         catalogDescription: hit.description,
         catalogPrice: hit.price,
+        category: hit.category ?? null,
+        pkg_size: hit.pkg_size ?? null,
+        uom: hit.uom ?? null,
+        image_url: hit.image_url ?? null,
+        upc: hit.upc ?? null,
       });
     } else {
       needsYou.push({

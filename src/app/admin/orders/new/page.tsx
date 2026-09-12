@@ -43,11 +43,11 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Search, Loader2, Check, X, Plus, Minus, ClipboardPaste, RotateCcw,
-  Keyboard, ListOrdered, ChevronRight, AlertCircle, Ship, Camera,
+  Keyboard, ListOrdered, ChevronRight, AlertCircle, Ship, Camera, FileUp,
 } from 'lucide-react';
 import { adminFetch, fetchAdminSession } from '@/lib/admin-auth';
 import { formatCurrency } from '@/lib/utils';
-import { PaperFormImport, type CustomLine } from '@/components/admin/PaperFormImport';
+import { PaperFormImport, type ApplyLine, type CustomLine } from '@/components/admin/PaperFormImport';
 import { RegisterReceiptImport } from '@/components/admin/RegisterReceiptImport';
 import { RepeatOrderPicker, MissingLinesNotice } from '@/components/admin/RepeatOrderPicker';
 
@@ -93,6 +93,43 @@ interface VesselHeader {
 }
 
 type Mode = 'sheet' | 'quick' | 'paste' | 'scan' | 'repeat';
+
+/**
+ * A register-tape match whose product is not on the paper form (store_only,
+ * inactive, or a UPC the sheet never listed). qty is also stored in `qty`;
+ * this row is what `chosen` needs so the line is not silently dropped.
+ */
+interface ExtraDraft {
+  product_id: string;
+  description: string;
+  category: string;
+  pkg_size: string | null;
+  uom: string | null;
+  price: number;
+  quantity: number;
+  image_url: string | null;
+  upc: string | null;
+}
+
+function extraToSheet(e: ExtraDraft): SheetItem {
+  return {
+    id: e.product_id,
+    upc: e.upc,
+    description: e.description,
+    category: e.category || 'Grocery',
+    sub_category: null,
+    pkg_size: e.pkg_size,
+    uom: e.uom,
+    price: e.price,
+    quantity_step: 1,
+    billed_by_weight: false,
+    form_section: 'From register tape',
+    form_subsection: null,
+    form_seq: null,
+    image_url: e.image_url,
+    is_available: true,
+  };
+}
 
 /** The order header, exactly the fields /api/orders takes for a vessel. */
 interface HeaderState {
@@ -159,10 +196,26 @@ export default function NewOrderPage() {
    */
   const [customLines, setCustomLines] = useState<CustomLine[]>([]);
   const [repeatMissing, setRepeatMissing] = useState<string[]>([]);
+  const [extraById, setExtraById] = useState<Record<string, ExtraDraft>>({});
 
   const [mode, setMode] = useState<Mode>('sheet');
   const [filter, setFilter] = useState('');
   const [step, setStep] = useState<'who' | 'what' | 'check'>('who');
+  /**
+   * Register tape is not a 6th tab. Jen asked for a quicker button so she
+   * does not have to open Scan form (paper QNTY photos — a different job)
+   * to upload a Sinclair PLU PDF. `showRegister` reveals the match panel
+   * in whatever mode she is already in; the hidden file input opens the
+   * picker on the same click.
+   */
+  const [showRegister, setShowRegister] = useState(false);
+  const [registerFile, setRegisterFile] = useState<File | null>(null);
+  const registerFileInputRef = useRef<HTMLInputElement>(null);
+
+  const openRegisterTape = useCallback(() => {
+    setShowRegister(true);
+    registerFileInputRef.current?.click();
+  }, []);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
@@ -220,10 +273,16 @@ export default function NewOrderPage() {
   // drop the line.
   const catalogIds = useMemo(() => new Set(items.map(i => i.id)), [items]);
 
-  const chosen = useMemo(
-    () => items.filter(i => (qty[i.id] || 0) > 0),
-    [items, qty],
-  );
+  const chosen = useMemo(() => {
+    const fromExtra = Object.values(extraById)
+      .filter(e => (qty[e.product_id] || e.quantity || 0) > 0)
+      .map(extraToSheet);
+    const extraIds = new Set(fromExtra.map(i => i.id));
+    const fromSheet = items.filter(i => (qty[i.id] || 0) > 0 && !extraIds.has(i.id));
+    return [...fromSheet, ...fromExtra];
+  }, [items, qty, extraById]);
+
+  const lineCount = chosen.length + customLines.length;
 
   const total = useMemo(
     () => chosen.reduce((s, i) => s + i.price * (qty[i.id] || 0), 0)
@@ -291,15 +350,21 @@ export default function NewOrderPage() {
         delete next[id];
         return next;
       });
+      setExtraById(prev => {
+        if (!(id in prev)) return prev;
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    } else {
+      setExtraById(prev => {
+        if (!(id in prev)) return prev;
+        return { ...prev, [id]: { ...prev[id], quantity: Math.min(999, n) } };
+      });
     }
   }, []);
 
-  const applyLines = useCallback((lines: Array<{
-    productId: string;
-    qty: number;
-    paid_by?: 'vessel' | 'deck' | 'cod';
-    cod_name?: string;
-  }>) => {
+  const applyLines = useCallback((lines: ApplyLine[]) => {
     setQty(prev => {
       const next = { ...prev };
       for (const l of lines) {
@@ -329,7 +394,41 @@ export default function NewOrderPage() {
       }
       return next;
     });
-  }, []);
+    // Off-sheet matches (full store / inactive) are invisible if we only
+    // write `qty[id]` — `chosen` used to be `items.filter(qty)` and `items`
+    // is the paper form. Keep a parallel row so Review and the sticky bar
+    // actually move.
+    setExtraById(prev => {
+      const next = { ...prev };
+      for (const l of lines) {
+        if (!l.qty || l.qty <= 0) {
+          delete next[l.productId];
+          continue;
+        }
+        // Paper-form apply only sends productId+qty. Those stay on the sheet.
+        // Register apply sends description+tape price — keep a row even when
+        // the id is on the sheet, so the draft uses the register price and
+        // never silently drops store_only / inactive matches.
+        if (!l.description && catalogIds.has(l.productId)) {
+          delete next[l.productId];
+          continue;
+        }
+        const prior = next[l.productId];
+        next[l.productId] = {
+          product_id: l.productId,
+          description: l.description || prior?.description || 'Register item',
+          category: l.category || prior?.category || '',
+          pkg_size: l.pkg_size ?? prior?.pkg_size ?? null,
+          uom: l.uom ?? prior?.uom ?? null,
+          price: l.price ?? prior?.price ?? 0,
+          quantity: Math.min(999, l.qty),
+          image_url: l.image_url ?? prior?.image_url ?? null,
+          upc: l.upc ?? prior?.upc ?? null,
+        };
+      }
+      return next;
+    });
+  }, [catalogIds]);
 
   const bump = useCallback((id: string, by: number, step: number) => {
     setQty(prev => {
@@ -386,7 +485,7 @@ export default function NewOrderPage() {
       setStep('who');
       return;
     }
-    if (!chosen.length && !customLines.length) {
+    if (!lineCount) {
       setSubmitError('Nothing has been added to this order yet.');
       setStep('what');
       return;
@@ -554,7 +653,7 @@ export default function NewOrderPage() {
         </div>
       )}
 
-      <StepTabs step={step} setStep={setStep} lines={chosen.length} />
+      <StepTabs step={step} setStep={setStep} lines={lineCount} />
 
       {step === 'who' && (
         <WhoStep
@@ -567,7 +666,52 @@ export default function NewOrderPage() {
 
       {step === 'what' && (
         <>
-          <ModeTabs mode={mode} setMode={setMode} />
+          <ModeTabs mode={mode} setMode={setMode} onRegisterTape={openRegisterTape} />
+          <input
+            ref={registerFileInputRef}
+            type="file"
+            accept="application/pdf,.pdf"
+            className="hidden"
+            onChange={e => {
+              const f = e.target.files?.[0] || null;
+              e.target.value = '';
+              if (!f) return;
+              setShowRegister(true);
+              setRegisterFile(f);
+            }}
+          />
+          {/* Paper-form scan stays under Scan form. Register tape panel
+              mounts here so the shortcut can show it without switching tabs. */}
+          {mode === 'scan' && (
+            <PaperFormImport
+              catalog={items}
+              setLine={setLine}
+              applyLines={applyLines}
+              addCustomLines={(lines) => setCustomLines(prev => [...prev, ...lines])}
+              appendNotes={(note) => setHeader(h => ({
+                ...h,
+                notes: h.notes.trim() ? `${h.notes.trim()}\n${note}` : note,
+              }))}
+            />
+          )}
+          {(mode === 'scan' || showRegister) && (
+            <div className={mode === 'scan' ? 'mt-4 mb-4' : 'mb-4'}>
+              <RegisterReceiptImport
+                catalog={items.map(it => ({ id: it.id, upc: it.upc, description: it.description, price: it.price }))}
+                setLine={setLine}
+                applyLines={applyLines}
+                addCustomLines={(lines) => setCustomLines(prev => [...prev, ...lines])}
+                appendNotes={(note) => setHeader(h => ({
+                  ...h,
+                  notes: h.notes.trim() ? `${h.notes.trim()}\n${note}` : note,
+                }))}
+                companyName={header.company_name}
+                vesselName={header.vessel_name}
+                incomingFile={registerFile}
+                onIncomingConsumed={() => setRegisterFile(null)}
+              />
+            </div>
+          )}
           {mode === 'sheet' && (
             <SheetMode
               rows={rows} qty={qty} filter={filter} setFilter={setFilter}
@@ -592,7 +736,7 @@ export default function NewOrderPage() {
                   // REPLACE clears the catalog lines only. Custom lines and
                   // anything scanned in stay: they were added by hand for THIS
                   // order and a repeat has no opinion about them.
-                  if (applyMode === 'replace') { setQty({}); setLinePay({}); }
+                  if (applyMode === 'replace') { setQty({}); setLinePay({}); setExtraById({}); }
                   applyLines(lines);
                   // A line whose product has left the printed form is still a
                   // thing the boat ordered. It comes across as a write-in with
@@ -611,34 +755,7 @@ export default function NewOrderPage() {
               />
             </div>
           )}
-          {mode === 'scan' && (
-            <>
-            <PaperFormImport
-              catalog={items}
-              setLine={setLine}
-              applyLines={applyLines}
-              addCustomLines={(lines) => setCustomLines(prev => [...prev, ...lines])}
-              appendNotes={(note) => setHeader(h => ({
-                ...h,
-                notes: h.notes.trim() ? `${h.notes.trim()}\n${note}` : note,
-              }))}
-            />
-          <div className="mt-4">
-            <RegisterReceiptImport
-              catalog={items.map(it => ({ id: it.id, upc: it.upc, description: it.description, price: it.price }))}
-              setLine={setLine}
-              applyLines={applyLines}
-              addCustomLines={(lines) => setCustomLines(prev => [...prev, ...lines])}
-              appendNotes={(note) => setHeader(h => ({
-                ...h,
-                notes: h.notes.trim() ? `${h.notes.trim()}\n${note}` : note,
-              }))}
-              companyName={header.company_name}
-              vesselName={header.vessel_name}
-            />
-          </div>
-            </>
-          )}
+
         </>
       )}
 
@@ -656,7 +773,7 @@ export default function NewOrderPage() {
       )}
 
       <StickyBar
-        lines={chosen.length} total={total} step={step}
+        lines={lineCount} total={total} step={step}
         onReview={() => setStep('check')}
         onNext={() => setStep('what')}
       />
@@ -691,7 +808,9 @@ function StepTabs({ step, setStep, lines }: {
   );
 }
 
-function ModeTabs({ mode, setMode }: { mode: Mode; setMode: (m: Mode) => void }) {
+function ModeTabs({ mode, setMode, onRegisterTape }: {
+  mode: Mode; setMode: (m: Mode) => void; onRegisterTape: () => void;
+}) {
   const tabs: Array<{ id: Mode; label: string; icon: typeof ListOrdered; hint: string }> = [
     { id: 'sheet', label: 'Order form', icon: ListOrdered, hint: 'Same order as the paper' },
     { id: 'repeat', label: 'Send again', icon: RotateCcw, hint: 'Start from one of this boat\u2019s past orders' },
@@ -718,6 +837,19 @@ function ModeTabs({ mode, setMode }: { mode: Mode; setMode: (m: Mode) => void })
           </button>
         );
       })}
+      {/* Not a tab — dashed so it does not look like a 6th mode. Click opens
+          the PDF picker immediately; match UI appears without leaving this mode. */}
+      <button
+        type="button"
+        onClick={onRegisterTape}
+        className="rounded-lg border border-dashed border-brand-navy/30 bg-brand-navy/[0.03] px-3 py-2 text-left text-sm flex items-center gap-2 text-brand-navy hover:border-brand-navy/60 hover:bg-brand-navy/[0.06]"
+      >
+        <FileUp className="w-4 h-4 shrink-0" />
+        <span>
+          <span className="font-semibold block leading-tight">Register tape</span>
+          <span className="text-xs text-gray-400">Upload Sinclair PDF</span>
+        </span>
+      </button>
     </div>
   );
 }
@@ -1356,6 +1488,11 @@ function ReviewStep({ header, chosen, qty, setLine, total, error, submitting, on
                 {linePay[it.id]?.paid_by === 'deck' && (
                   <span className="ml-2 text-[10px] font-bold uppercase tracking-wider text-blue-700 bg-blue-100 rounded px-1.5 py-0.5">
                     Deck
+                  </span>
+                )}
+                {it.form_section === 'From register tape' && (
+                  <span className="ml-2 text-[10px] font-bold uppercase tracking-wider text-brand-navy bg-brand-navy/10 rounded px-1.5 py-0.5">
+                    Register
                   </span>
                 )}
               </span>

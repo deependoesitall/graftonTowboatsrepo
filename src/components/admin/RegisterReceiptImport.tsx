@@ -3,7 +3,7 @@
 // Staff upload of Sinclair's itemized REGISTER receipt (PLU tape).
 // Human reviews matches; unmatched stay in Needs you. Never auto-submits.
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { FileUp, Loader2, Check, AlertTriangle, Trash2 } from 'lucide-react';
 import { adminFetch } from '@/lib/admin-auth';
 import { extractPdfText } from '@/lib/register-receipt-pdf';
@@ -20,13 +20,29 @@ import {
 export interface RegisterReceiptImportProps {
   catalog: CatalogRow[];
   setLine?: (productId: string, qty: number) => void;
-  applyLines?: (lines: { productId: string; qty: number }[]) => void;
+  applyLines?: (lines: {
+    productId: string;
+    qty: number;
+    description?: string;
+    price?: number;
+    category?: string;
+    pkg_size?: string | null;
+    uom?: string | null;
+    image_url?: string | null;
+    upc?: string | null;
+  }[]) => void;
   addCustomLines?: (lines: { description: string; qty: number; price: number }[]) => void;
   appendNotes?: (note: string) => void;
   onApplied?: (count: number) => void;
   vesselId?: string;
   companyName?: string;
   vesselName?: string;
+  /**
+   * File chosen by the Items-step shortcut (page-level picker). Consumed once
+   * then the parent clears it. Same path as the in-panel upload button.
+   */
+  incomingFile?: File | null;
+  onIncomingConsumed?: () => void;
 }
 
 type MatchRow = MatchedReceiptLine & { include: boolean; qtyInput: string };
@@ -46,6 +62,8 @@ export function RegisterReceiptImport({
   vesselId,
   companyName,
   vesselName,
+  incomingFile,
+  onIncomingConsumed,
 }: RegisterReceiptImportProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -53,6 +71,8 @@ export function RegisterReceiptImport({
   const [matched, setMatched] = useState<MatchRow[] | null>(null);
   const [needsYou, setNeedsYou] = useState<NeedRow[] | null>(null);
   const [meta, setMeta] = useState<{ vesselHint: string | null; amount: number | null; dateHint: string | null } | null>(null);
+  const matchTopRef = useRef<HTMLDivElement>(null);
+  const incomingSeen = useRef<File | null>(null);
 
   async function onFile(file: File | null) {
     if (!file) return;
@@ -87,6 +107,9 @@ export function RegisterReceiptImport({
       const { matched: hits, needsYou: miss } = matchReceiptToCatalog(lines, matchCatalog);
       setMatched(hits.map(h => ({ ...h, include: true, qtyInput: String(h.qty) })));
       setNeedsYou(miss.map(n => ({ ...n, include: false, qtyInput: String(n.qty), asCustom: true })));
+      requestAnimationFrame(() => {
+        matchTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to read PDF');
     } finally {
@@ -94,13 +117,38 @@ export function RegisterReceiptImport({
     }
   }
 
+  useEffect(() => {
+    if (!incomingFile || incomingSeen.current === incomingFile) return;
+    incomingSeen.current = incomingFile;
+    onIncomingConsumed?.();
+    void onFile(incomingFile);
+  }, [incomingFile]);
+
   function applyToDraft() {
     if (!matched) return;
     setError(''); setOk('');
     const lines = matched
       .filter(r => r.include)
-      .map(r => ({ productId: r.productId, qty: Math.max(0, parseFloat(r.qtyInput) || 0) }))
+      .map(r => ({
+        productId: r.productId,
+        qty: Math.max(0, parseFloat(r.qtyInput) || 0),
+        // Full-store / inactive rows are not on the paper sheet. Description +
+        // tape price must ride along or the builder writes qty against an id
+        // it never renders and the sticky bar stays at 0 lines / $0.00.
+        description: r.catalogDescription || r.description,
+        price: r.unitPrice ?? r.catalogPrice,
+        category: r.category || undefined,
+        pkg_size: r.pkg_size ?? null,
+        uom: r.uom ?? null,
+        image_url: r.image_url ?? null,
+        upc: r.upc || r.plu,
+      }))
       .filter(l => l.qty > 0);
+
+    if (!lines.length && !(needsYou || []).some(r => r.include)) {
+      setError('Nothing checked to add. Tick the lines you want, then try again.');
+      return;
+    }
 
     if (applyLines) applyLines(lines);
     else if (setLine) lines.forEach(l => setLine(l.productId, l.qty));
@@ -127,7 +175,7 @@ export function RegisterReceiptImport({
     if (noteBits.length && appendNotes) appendNotes(noteBits.join(' · '));
 
     const count = lines.length + customs.length;
-    setOk(`Added ${count} line${count === 1 ? '' : 's'} to the draft. Review before submitting.`);
+    setOk(`Added ${count} line${count === 1 ? '' : 's'} to this new order. Review in the bar below is now available.`);
     onApplied?.(count);
   }
 
@@ -170,14 +218,14 @@ export function RegisterReceiptImport({
       });
       const json = await res.json();
       if (!res.ok) { setError(json.error || 'Import failed'); return; }
-      setOk(`Saved past order ${json.order_number} (${json.line_count} lines). No email sent.`);
+      setOk(`Saved ${json.order_number} (${json.line_count} lines) to ${ves}'s order history. No email sent. This new order is still empty — tap Add to order draft to put the same lines here.`);
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <div className="rounded-2xl border border-brand-green/15 bg-white p-4 space-y-4">
+    <div ref={matchTopRef} id="register-receipt-panel" className="rounded-2xl border border-brand-green/15 bg-white p-4 space-y-4">
       <div>
         <h3 className="font-display font-bold text-brand-navy text-base">Sinclair register receipt</h3>
         <p className="text-xs text-brand-green/50 mt-0.5">
@@ -190,7 +238,11 @@ export function RegisterReceiptImport({
         {busy ? 'Matching…' : 'Upload register PDF'}
         <input type="file" accept="application/pdf,.pdf" className="hidden"
           disabled={busy}
-          onChange={e => onFile(e.target.files?.[0] || null)} />
+          onChange={e => {
+            const f = e.target.files?.[0] || null;
+            e.target.value = '';
+            void onFile(f);
+          }} />
       </label>
 
       {busy && (
@@ -265,15 +317,21 @@ export function RegisterReceiptImport({
       )}
 
       {matched && (
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className="btn-primary text-sm" disabled={busy} onClick={applyToDraft}>
-            Add to order draft
-          </button>
-          {(vesselId || (companyName && vesselName)) && (
-            <button type="button" className="btn-outline text-sm" disabled={busy} onClick={saveAsPastOrder}>
-              Save as past boat order
+        <div className="space-y-2">
+          <p className="text-[11px] text-brand-green/60 leading-snug">
+            <b>Add to order draft</b> puts these lines on the order you are building now (Review unlocks).
+            {' '}<b>Save as past boat order</b> only writes history — it does not fill this draft.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="btn-primary text-sm" disabled={busy} onClick={applyToDraft}>
+              Add to order draft
             </button>
-          )}
+            {(vesselId || (companyName && vesselName)) && (
+              <button type="button" className="btn-outline text-sm" disabled={busy} onClick={saveAsPastOrder}>
+                Save as past boat order
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>
