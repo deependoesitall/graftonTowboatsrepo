@@ -123,7 +123,7 @@ function RepeatOrderModal({
     };
 
     try {
-      const res = await fetch('/api/orders', {
+      const res = await adminFetch('/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -357,6 +357,7 @@ function isImportOrder(orderNumber: string) {
 export default function CustomersPage() {
   const router = useRouter();
   const [denied, setDenied] = useState(false);
+  const [isGts, setIsGts] = useState(false);
   const [ready, setReady] = useState(false);
   const [canRemoveImport, setCanRemoveImport] = useState(false);
   const [canRemoveAny, setCanRemoveAny] = useState(false);
@@ -405,9 +406,10 @@ export default function CustomersPage() {
     (async () => {
       const session = await fetchAdminSession();
       if (!session) { router.push('/admin'); return; }
-      if (!canAccess(session.role, 'reports')) { setDenied(true); return; }
+      if (!canAccess(session.role, 'customers')) { setDenied(true); return; }
       setCanRemoveAny(session.role === 'owner');
       setCanRemoveImport(isGtsRole(session.role));
+      setIsGts(isGtsRole(session.role));
       setReady(true);
     })();
   }, [router]);
@@ -538,7 +540,7 @@ export default function CustomersPage() {
       </div>
       <h2 className="font-bold text-brand-navy text-lg mb-1">Access Restricted</h2>
       <p className="text-gray-400 text-sm max-w-xs">
-        Customer data is only available to Owner accounts. Contact an owner if you need this data.
+        Customer lookup is for Grafton Towboat staff and Sinclair&apos;s managers. Contact an owner if you need access.
       </p>
     </div>
   );
@@ -569,17 +571,23 @@ export default function CustomersPage() {
         <div className="min-w-0">
           <h1 className="font-display text-2xl font-bold text-brand-navy">Customers &amp; boats</h1>
           <p className="text-gray-400 text-sm mt-0.5">
-            One place for boat customers, crew logins, and order history.
+            {isGts
+              ? 'One place for boat customers, crew logins, and order history.'
+              : 'Look up a boat and repeat a past grocery order.'}
           </p>
+          {isGts && (
           <p className="text-xs text-brand-green/70 mt-2 max-w-xl">
             Tip: Crew can also reset their own password from Sign in → Forgot password.
           </p>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {isGts && (
           <Link href="/admin/customers/onboard"
             className="btn-primary text-sm px-4 py-2.5 flex items-center gap-2 shadow-sm">
             <Ship className="w-4 h-4" /> Add customer / boat
           </Link>
+          )}
           {panel === 'history' && (
             <button onClick={fetchReport} className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5">
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
@@ -588,7 +596,7 @@ export default function CustomersPage() {
         </div>
       </div>
 
-      {/* Segmented control */}
+      {isGts && (
       <div className="inline-flex rounded-full bg-gray-100 p-1 gap-0.5">
         <button type="button" onClick={() => setPanel('history')}
           className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-bold uppercase tracking-wide transition-colors ${
@@ -603,6 +611,7 @@ export default function CustomersPage() {
           <KeyRound className="w-3.5 h-3.5" /> Logins
         </button>
       </div>
+      )}
 
       {panel === 'logins' && <CustomerLoginsPanel />}
 
@@ -641,12 +650,14 @@ export default function CustomersPage() {
         <div className="card-base overflow-hidden">
           <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between flex-wrap gap-3">
             <h2 className="font-display font-bold text-brand-navy">Customer / Vessel Lookup</h2>
+            {isGts && (
             <button onClick={openVesselReport}
               disabled={!data?.vessels?.length}
               title="A branded, printable summary of what each barge line has ordered"
               className="btn-outline text-xs px-3 py-1.5 flex items-center gap-1.5 disabled:opacity-40">
               <FileText className="w-3.5 h-3.5" /> Vessel Activity Report
             </button>
+            )}
           </div>
           <div className="p-4 border-b border-gray-100">
             <div className="relative max-w-md">
@@ -717,7 +728,7 @@ export default function CustomersPage() {
                         <div className="bg-white rounded-xl border border-gray-100 p-4 mb-4">
                           <div className="flex items-center justify-between gap-3 mb-3">
                             <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wide">Boat details</h3>
-                            {editingKey !== key && (
+                            {editingKey !== key && isGts && (
                               <button type="button" onClick={() => startEdit(key, v)}
                                 className="text-[11px] font-bold uppercase tracking-wide text-brand-navy hover:text-brand-steel flex items-center gap-1">
                                 <Pencil className="w-3.5 h-3.5" /> Edit names

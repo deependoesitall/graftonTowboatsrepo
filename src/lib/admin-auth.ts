@@ -131,13 +131,13 @@ export function clearAdminUiState() {
 
 // Permission matrix — for UI show/hide only. The server enforces its own
 // authoritative copy of this matrix on every request.
-export function canAccess(role: AdminRole | null, area: 'orders' | 'products' | 'settings' | 'reports' | 'logs'): boolean {
+export function canAccess(role: AdminRole | null, area: 'orders' | 'products' | 'settings' | 'reports' | 'logs' | 'customers'): boolean {
   if (!role) return false;
   if (role === 'owner') return true;
   // GTS manager: everything the Sinclair's manager gets, plus 'reports' —
   // the Deliveries ledger and rate cards live there.
   if (role === 'gts_manager') return area !== 'logs';
-  if (role === 'manager') return area === 'orders' || area === 'products' || area === 'settings';
+  if (role === 'manager') return area === 'orders' || area === 'products' || area === 'settings' || area === 'customers';
   if (role === 'staff') return area === 'orders';
   return false;
 }

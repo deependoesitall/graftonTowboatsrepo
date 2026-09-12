@@ -1,7 +1,7 @@
 // src/app/api/admin/reports/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
-import { requireAdmin } from '@/lib/admin-auth-server';
+import { requireAdmin, canAccess } from '@/lib/admin-auth-server';
 
 
 interface OrderRow {
@@ -34,8 +34,13 @@ interface OrderRow {
 }
 
 export async function GET(req: NextRequest) {
-  const session = requireAdmin(req, { area: 'reports' });
+  const session = requireAdmin(req);
   if (session instanceof NextResponse) return session;
+  // Vessel lookup (Customers) and the Reports dashboard share this feed.
+  // Sinclair's managers need lookup + Repeat; billing PDFs stay on /reports/billing.
+  if (!canAccess(session.role, 'reports') && !canAccess(session.role, 'customers')) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
 
   const { searchParams } = new URL(req.url);
   const from = searchParams.get('from'); // ISO date string

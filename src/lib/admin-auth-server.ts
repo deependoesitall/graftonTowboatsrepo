@@ -20,7 +20,7 @@ import jwt from 'jsonwebtoken';
 
 export type AdminRole = 'owner' | 'gts_manager' | 'manager' | 'staff';
 export type AdminPermission = 'sinclair';
-export type Area = 'orders' | 'products' | 'settings' | 'reports' | 'logs';
+export type Area = 'orders' | 'products' | 'settings' | 'reports' | 'logs' | 'customers';
 
 export const SESSION_COOKIE = 'gts_admin_session';
 /** Short session — matches today's die-on-close default when not remembering. */
@@ -153,7 +153,7 @@ export function clearedCookieOptions() {
 export function canAccess(role: AdminRole, area: Area): boolean {
   if (role === 'owner') return true;
   if (role === 'gts_manager') return area !== 'logs';
-  if (role === 'manager') return area === 'orders' || area === 'products' || area === 'settings';
+  if (role === 'manager') return area === 'orders' || area === 'products' || area === 'settings' || area === 'customers';
   if (role === 'staff') return area === 'orders';
   return false;
 }
