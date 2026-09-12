@@ -93,6 +93,74 @@ function isSinclairStaff(u: { role: string; permissions?: string[] | null }) {
   return u.role === 'manager' || (u.permissions || []).includes('sinclair');
 }
 
+function logActionLabel(log: ActivityLog) {
+  if (log.action === 'order_deleted') {
+    return (
+      <span className="inline-flex items-center gap-1 text-red-500 font-semibold">
+        <Trash2 className="w-3 h-3" />
+        Deleted
+        {log.from_value && (
+          <span className="text-gray-400 font-normal capitalize">
+            (was {log.from_value.replace(/_/g, ' ')})
+          </span>
+        )}
+      </span>
+    );
+  }
+  if (log.action === 'status_change' && log.from_value && log.to_value) {
+    return (
+      <span className="inline-flex items-center gap-1">
+        <span className="capitalize">{log.from_value.replace(/_/g, ' ')}</span>
+        <ArrowRight className="w-3 h-3" />
+        <span className="capitalize font-semibold text-brand-navy">{log.to_value.replace(/_/g, ' ')}</span>
+      </span>
+    );
+  }
+  if (log.action === 'order_placed') {
+    const who = log.from_value === 'staff' ? 'staff' : 'online';
+    return (
+      <span className="font-semibold text-brand-navy">
+        Placed ({who})
+        {log.to_value ? <span className="font-normal text-gray-400"> · {log.to_value}</span> : null}
+      </span>
+    );
+  }
+  if (log.action === 'register_import') {
+    return (
+      <span className="font-semibold text-brand-navy">
+        Imported register tape
+        {log.to_value ? <span className="font-normal text-gray-400"> · {log.to_value}</span> : null}
+      </span>
+    );
+  }
+  if (log.action === 'confirmation_email_sent') {
+    return (
+      <span className="font-semibold text-brand-navy">
+        Sent confirmation email
+        {log.to_value ? <span className="font-normal text-gray-400"> → {log.to_value}</span> : null}
+      </span>
+    );
+  }
+  if (log.action === 'final_email_sent') {
+    return (
+      <span className="font-semibold text-brand-navy">
+        Sent shopped email
+        {log.to_value ? <span className="font-normal text-gray-400"> → {log.to_value}</span> : null}
+      </span>
+    );
+  }
+  if (log.from_value && log.to_value) {
+    return (
+      <span className="inline-flex items-center gap-1">
+        <span className="capitalize">{log.from_value.replace(/_/g, ' ')}</span>
+        <ArrowRight className="w-3 h-3" />
+        <span className="capitalize font-semibold text-brand-navy">{log.to_value.replace(/_/g, ' ')}</span>
+      </span>
+    );
+  }
+  return <span className="capitalize">{log.action.replace(/_/g, ' ')}</span>;
+}
+
 export default function AdminSettingsPage() {
   const { confirm: confirmDialog, dialog: confirmDialogEl } = useConfirm();
   const router = useRouter();
@@ -535,7 +603,7 @@ export default function AdminSettingsPage() {
                 <ScrollText className="w-8 h-8 mx-auto mb-2 text-gray-300" />
                 <p className="text-sm text-gray-400">No activity yet</p>
                 <p className="text-xs text-gray-300 mt-1">
-                  Order status changes made by admin users will appear here.
+                  Imports, placements, status changes, emails, and deletions will appear here.
                 </p>
               </div>
             ) : (
@@ -557,26 +625,14 @@ export default function AdminSettingsPage() {
                           )}
                         </p>
                         <p className="text-xs text-gray-400 truncate">
-                          Order <span className="font-mono font-semibold text-gray-500">{log.order_number}</span>
-                          {log.action === 'order_deleted' ? (
-                            <span className="inline-flex items-center gap-1 ml-1.5 text-red-500 font-semibold">
-                              <Trash2 className="w-3 h-3" />
-                              Deleted
-                              {log.from_value && (
-                                <span className="text-gray-400 font-normal capitalize">
-                                  (was {log.from_value.replace('_', ' ')})
-                                </span>
-                              )}
-                            </span>
-                          ) : log.from_value && log.to_value ? (
-                            <span className="inline-flex items-center gap-1 ml-1.5">
-                              <span className="capitalize">{log.from_value.replace('_', ' ')}</span>
-                              <ArrowRight className="w-3 h-3" />
-                              <span className="capitalize font-semibold text-brand-navy">{log.to_value.replace('_', ' ')}</span>
-                            </span>
+                          {log.order_number ? (
+                            <>Order <span className="font-mono font-semibold text-gray-500">{log.order_number}</span></>
                           ) : (
-                            <span className="ml-1.5 capitalize">{log.action.replace('_', ' ')}</span>
+                            <span className="font-semibold text-gray-500">System</span>
                           )}
+                          <span className="ml-1.5 inline-flex items-center gap-1">
+                            {logActionLabel(log)}
+                          </span>
                         </p>
                         {(log.company_name || log.contact_name || log.po_number) && (
                           <p className="text-[11px] text-gray-300 truncate mt-0.5">
@@ -674,7 +730,7 @@ export default function AdminSettingsPage() {
             )}
 
             <div className="bg-gray-50 px-6 py-3 text-xs text-gray-400 border-t border-gray-100">
-              Tracks order status changes and deletions made by admin users. Search by order #, vessel/company, contact name, phone, PO number, or staff name. Visible to Owners only.
+              Imports, placements, status changes, emails, and deletions. Search by order #, vessel/company, contact, phone, PO, or staff name.
             </div>
           </div>
         </div>

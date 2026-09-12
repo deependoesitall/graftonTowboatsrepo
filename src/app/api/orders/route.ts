@@ -28,6 +28,7 @@ import { sendOrderPush } from '@/lib/push';
 import { Order } from '@/types';
 import { requireAdmin, isSinclairScoped, getAdminSession } from '@/lib/admin-auth-server';
 import { hydrateOrderItemCatalog } from '@/lib/order-item-catalog';
+import { logActivity } from '@/lib/activity-log';
 import { z } from 'zod';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -667,6 +668,24 @@ export async function POST(req: NextRequest) {
       const staffLabel = adminSession
         ? (adminSession.display_name || adminSession.username)
         : 'customer storefront';
+
+      await logActivity(supabase, {
+        order_id: order.id,
+        order_number: orderNumber,
+        action: 'order_placed',
+        from_value: adminSession ? 'staff' : 'customer',
+        to_value: `${items.length} line${items.length === 1 ? '' : 's'}`,
+        admin_username: adminSession?.username ?? null,
+        admin_display_name: adminSession?.display_name || (adminSession ? adminSession.username : 'Customer'),
+        admin_role: adminSession?.role ?? null,
+        company_name: vessel.company_name,
+        contact_name: vessel.contact_name || vessel.vessel_name || null,
+        phone: vessel.phone,
+        po_number: vessel.po_number || null,
+        note: adminSession
+          ? (skipBoatEmail ? 'Staff builder — confirmation skipped' : 'Staff builder')
+          : 'Online catalog',
+      });
 
       if (skipBoatEmail) {
         const { error: stampErr } = await supabase.from('orders').update({

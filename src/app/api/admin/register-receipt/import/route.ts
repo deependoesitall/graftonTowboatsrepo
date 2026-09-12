@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/admin-auth-server';
 import { vesselNameKey } from '@/lib/vessel-membership';
+import { logActivity } from '@/lib/activity-log';
 
 export async function POST(req: NextRequest) {
   const session = requireAdmin(req, { gtsOnly: true });
@@ -124,6 +125,22 @@ export async function POST(req: NextRequest) {
   if (iErr) {
     return NextResponse.json({ error: iErr.message }, { status: 500 });
   }
+
+  await logActivity(supabase, {
+    order_id: order.id,
+    order_number: order.order_number,
+    action: 'register_import',
+    from_value: null,
+    to_value: `${items.length} line${items.length === 1 ? '' : 's'}`,
+    admin_username: session.username,
+    admin_display_name: session.display_name,
+    admin_role: session.role,
+    company_name: companyName,
+    contact_name: vesselName,
+    phone: null,
+    po_number: null,
+    note: `Saved as past boat order · ${vesselName}`,
+  });
 
   return NextResponse.json({
     order_id: order.id,

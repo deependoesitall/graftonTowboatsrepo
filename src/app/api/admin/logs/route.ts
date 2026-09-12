@@ -10,7 +10,7 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/admin-auth-server';
 
 // Actions a Sinclair manager may see — the store side of the operation.
-const MANAGER_ACTIONS = ['status_change', 'catalog_enriched', 'catalog_import'];
+const MANAGER_ACTIONS = ['status_change', 'order_placed', 'catalog_enriched', 'catalog_import'];
 
 export async function GET(req: NextRequest) {
   const session = requireAdmin(req, { area: 'settings' });
@@ -47,6 +47,8 @@ export async function GET(req: NextRequest) {
         `contact_name.ilike.%${term}%`,
         `phone.ilike.%${term}%`,
         `po_number.ilike.%${term}%`,
+        `action.ilike.%${term}%`,
+        `note.ilike.%${term}%`,
       ].join(',')
     );
   }
