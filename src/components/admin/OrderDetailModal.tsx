@@ -2529,7 +2529,7 @@ function IB({ label, value, highlight }: { label: string; value: string; highlig
   return (
     <div>
       <p className="text-xs text-gray-400 uppercase tracking-wide mb-0.5">{label}</p>
-      <p className={`text-sm font-bold break-all ${highlight ? 'text-brand-gold' : 'text-brand-navy'}`}>{value}</p>
+      <p className={`text-sm font-bold break-words ${highlight ? 'text-brand-gold' : 'text-brand-navy'}`}>{value}</p>
     </div>
   );
 }
