@@ -1,7 +1,7 @@
 // src/lib/email.ts
 import { Resend } from 'resend';
 import { Order } from '@/types';
-import { formatCurrency, formatDate } from './utils';
+import { formatCurrency, formatDate, formatArrivalTime } from './utils';
 import { generateOrderPdfBuffer } from './pdf-attachment';
 import { codFeePercent, codFeeLabel, codTotalWithFee, allocateCodTotals } from '@/lib/cod-fee';
 import { readCodPayments, codMethodSentence } from '@/lib/cod-payments';
@@ -361,7 +361,7 @@ export function buildOrderEmailHtml(
         <tr>
           ${order.terminal_name ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Deliver To</div><div style="font-size:15px;font-weight:900;color:#E8640A;">${order.terminal_name}</div></td>` : '<td></td>'}
           ${order.arrival_date  ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Arrival Date</div><div style="font-size:15px;font-weight:900;color:#E8640A;">${order.arrival_date}</div></td>` : '<td></td>'}
-          ${order.arrival_time  ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Arrival Time</div><div style="font-size:15px;font-weight:900;color:#E8640A;">${order.arrival_time}</div></td>` : '<td></td>'}
+          ${order.arrival_time  ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Arrival Time</div><div style="font-size:15px;font-weight:900;color:#E8640A;">${formatArrivalTime(order.arrival_time)}</div></td>` : '<td></td>'}
         </tr>
         ${(deliveryMethodLabel || order.crew_change !== 'no') ? `<tr>
           ${deliveryMethodLabel ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Method</div><div style="font-size:13px;font-weight:700;">${deliveryMethodLabel}${approachLabel ? ` · ${approachLabel} side` : ''}</div></td>` : '<td></td>'}

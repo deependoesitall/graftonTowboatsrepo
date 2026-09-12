@@ -10,7 +10,7 @@ import {
   Scale, Replace, CornerDownRight, PackageX, AlertTriangle, Mail,
 } from 'lucide-react';
 import { Order, OrderItem, OrderStatus, Product } from '@/types';
-import { formatCurrency, formatDate, ORDER_STATUSES } from '@/lib/utils';
+import { formatCurrency, formatDate, formatArrivalTime, ORDER_STATUSES } from '@/lib/utils';
 import { DeliverySummary } from '@/components/order/DeliverySummary';
 import { ShoppingModeModal } from '@/components/admin/ShoppingModeModal';
 import { adminFetch, isGtsRole, getAdminRole } from '@/lib/admin-auth';
@@ -678,9 +678,8 @@ export function OrderDetailModal({
 
   return (
     <>
-      {/* Near full-screen workspace on desktop — not a centered max-w card. */}
-      <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/50 p-0 sm:p-1.5">
-        <div className="bg-white sm:rounded-lg shadow-2xl w-full h-[100dvh] sm:h-[calc(100dvh-0.75rem)] sm:max-h-[calc(100dvh-0.75rem)] sm:w-full max-w-none flex flex-col overflow-hidden animate-fade-in">
+      <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center bg-black/50 sm:p-4">
+        <div className="bg-white sm:rounded-xl shadow-2xl w-full sm:max-w-7xl h-[100dvh] sm:h-auto sm:max-h-[94dvh] flex flex-col overflow-hidden animate-fade-in">
 
           {/* Header */}
           <div className="bg-brand-navy px-4 sm:px-6 py-3 sm:py-4 pt-[max(0.75rem,env(safe-area-inset-top))] sm:pt-4 rounded-none sm:rounded-t-xl flex items-center justify-between gap-2 shrink-0">
@@ -712,9 +711,7 @@ export function OrderDetailModal({
             </div>
           </div>
 
-          {/* Layout: header (above) stays put; meta+lines scroll; totals/summary/actions pin. */}
-          <div className="flex flex-col flex-1 min-h-0">
-          <div className="p-4 sm:p-6 space-y-5 overflow-y-auto min-h-0 flex-1 overscroll-contain">
+          <div className="p-4 sm:p-6 pb-[max(1.25rem,env(safe-area-inset-bottom))] space-y-5 overflow-auto min-h-0 flex-1 overscroll-contain">
 
             {/* Company / Billing */}
             <Section icon={<FileText className="w-3.5 h-3.5" />} title="Company &amp; Billing">
@@ -763,7 +760,7 @@ export function OrderDetailModal({
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   {order.terminal_name && <IB label="Terminal / Location" value={order.terminal_name} highlight />}
                   {order.arrival_date  && <IB label="Arrival Date"        value={order.arrival_date}  highlight />}
-                  {order.arrival_time  && <IB label="Arrival Time"        value={order.arrival_time}  highlight />}
+                  {order.arrival_time  && <IB label="Arrival Time"        value={formatArrivalTime(order.arrival_time)}  highlight />}
                   {deliveryMethodLabel && <IB label="Method"              value={deliveryMethodLabel} />}
                   {approachLabel       && <IB label="Approach Side"       value={approachLabel} />}
                   {order.vhf_channel   && <IB label="VHF Channel"         value={order.vhf_channel} />}
@@ -774,7 +771,7 @@ export function OrderDetailModal({
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                       <IB label="Terminal" value={ext.secondary_terminal_name} />
                       {ext.secondary_arrival_date && <IB label="Arrival Date" value={ext.secondary_arrival_date} />}
-                      {ext.secondary_arrival_time && <IB label="Arrival Time" value={ext.secondary_arrival_time} />}
+                      {ext.secondary_arrival_time && <IB label="Arrival Time" value={formatArrivalTime(ext.secondary_arrival_time)} />}
                       {ext.secondary_delivery_method && (
                         <IB label="Method" value={ext.secondary_delivery_method === 'boat' ? 'Boat Delivery' : 'Van Delivery'} />
                       )}
@@ -976,7 +973,17 @@ export function OrderDetailModal({
               {canEdit ? (
                 <div className="flex flex-wrap items-center gap-2">
                   <select className="border border-gray-200 rounded px-3 py-1.5 text-sm font-semibold bg-white"
-                    value={order.status} onChange={e => onStatusChange(e.target.value as OrderStatus)}>
+                    value={order.status} onChange={async e => {
+                      const next = e.target.value as OrderStatus;
+                      if (next === 'cancelled' && order.status !== 'cancelled') {
+                        if (!(await confirmDialog({
+                          title: `Cancel ${order.order_number}?`,
+                          message: 'It drops out of the shopping queue. You can still reopen it from Cancelled if this was a test.',
+                          danger: true,
+                        }))) return;
+                      }
+                      onStatusChange(next);
+                    }}>
                     {/* Sinclair's cannot select Fulfilled — that means Grafton
                         delivered AND sent the customer their final email, which
                         carries GTS's delivery fee. The server rejects it too;
@@ -1089,7 +1096,7 @@ export function OrderDetailModal({
                   {(order.terminal_name || order.arrival_date) && (
                     <p className="text-xs text-gray-500 mt-2">
                       {order.terminal_name && <span><strong>Location:</strong> {order.terminal_name}&nbsp;&nbsp;</span>}
-                      {order.arrival_date  && <span><strong>Date:</strong> {order.arrival_date}{order.arrival_time ? ` at ${order.arrival_time}` : ''}</span>}
+                      {order.arrival_date  && <span><strong>Date:</strong> {order.arrival_date}{order.arrival_time ? ` at ${formatArrivalTime(order.arrival_time)}` : ''}</span>}
                     </p>
                   )}
                 </div>
@@ -1199,19 +1206,19 @@ export function OrderDetailModal({
                   </div>
                 </div>
 
-                <div className="hidden md:block border border-gray-200 rounded-lg overflow-x-auto max-w-full">
-                  <table className="text-sm min-w-[900px] w-max max-w-none">
+                <div className="hidden md:block border border-gray-200 rounded-lg overflow-x-auto w-full">
+                  <table className="text-sm w-full">
                     <thead>
                       <tr className="bg-gray-50">
                         <th className="px-2 py-2 w-14" />
-                        <th className="px-3 py-2 text-left text-xs font-bold text-gray-500 uppercase">Item #</th>
-                        <th className="px-3 py-2 text-left text-xs font-bold text-gray-500 uppercase min-w-[12rem]">Item</th>
-                        <th className="px-3 py-2 text-left text-xs font-bold text-gray-500 uppercase">Pack</th>
-                        <th className="px-3 py-2 text-center text-xs font-bold text-gray-500 uppercase">Qty</th>
-                        <th className="px-3 py-2 text-right text-xs font-bold text-gray-500 uppercase">Unit</th>
-                        <th className="px-3 py-2 text-right text-xs font-bold text-gray-500 uppercase">Total</th>
+                        <th className="px-3 py-2 text-left text-xs font-bold text-gray-500 uppercase w-[11%]">Item #</th>
+                        <th className="px-3 py-2 text-left text-xs font-bold text-gray-500 uppercase w-[42%]">Item</th>
+                        <th className="px-3 py-2 text-left text-xs font-bold text-gray-500 uppercase w-[12%]">Pack</th>
+                        <th className="px-3 py-2 text-center text-xs font-bold text-gray-500 uppercase w-[8%]">Qty</th>
+                        <th className="px-3 py-2 text-right text-xs font-bold text-gray-500 uppercase w-[10%]">Unit</th>
+                        <th className="px-3 py-2 text-right text-xs font-bold text-gray-500 uppercase w-[10%]">Total</th>
                         {canEdit && (
-                          <th className="px-2 py-2 text-right text-xs font-bold text-gray-500 uppercase sticky right-0 bg-gray-50 min-w-[9.5rem] shadow-[-8px_0_8px_-6px_rgba(0,0,0,0.12)]">
+                          <th className="px-2 py-2 text-right text-xs font-bold text-gray-500 uppercase sticky right-0 bg-gray-50 w-[12%] shadow-[-8px_0_8px_-6px_rgba(0,0,0,0.12)]">
                             Edit
                           </th>
                         )}
@@ -1252,7 +1259,7 @@ export function OrderDetailModal({
                                 DECK
                               </span>
                             )}
-                            <p className={`font-medium text-brand-navy text-xs inline ${item.shopping_status === 'out_of_stock' ? 'line-through' : ''}`}>
+                            <p className={`font-medium text-brand-navy text-xs ${item.shopping_status === 'out_of_stock' ? 'line-through' : ''}`}>
                               {item.description}
                             </p>
                             <p className="text-xs text-gray-400">
@@ -1809,77 +1816,10 @@ export function OrderDetailModal({
               </div>
             )}
 
-          </div>{/* end scroll region */}
-
-          {/* Pinned bottom chrome — System/Register totals + key actions stay visible
-              on fat orders without scrolling past hundreds of lines. */}
-          <div className="shrink-0 border-t border-gray-200 bg-white px-4 sm:px-6 py-3 space-y-3 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-[0_-6px_12px_-8px_rgba(0,0,0,0.12)]">
-            {groceryItems.length > 0 && (
-              <div className="rounded-xl border border-brand-gold/30 bg-brand-sand/30 p-3 space-y-2">
-                <div className="flex justify-between text-sm font-bold text-brand-navy">
-                  <span>System total</span>
-                  <span>{formatCurrency(subtotal)}</span>
-                </div>
-                <label className="block text-xs font-bold text-gray-500 uppercase">
-                  Register total
-                  <div className="mt-1 flex flex-wrap items-center gap-2">
-                    <span>$</span>
-                    <input type="number" step="0.01" min="0" placeholder="0.00"
-                      value={registerTotal}
-                      onChange={e => { setRegisterTotal(e.target.value); setRegisterSaved(false); }}
-                      onKeyDown={e => { if (e.key === 'Enter') confirmRegisterTotal(); }}
-                      className="w-28 min-w-0 input-base font-display font-bold text-brand-navy" />
-                    {registerTotal && Math.abs(parseFloat(registerTotal) - subtotal) > 1 && (
-                      <span className="text-xs font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
-                        ⚠ {parseFloat(registerTotal) > subtotal ? '+' : ''}{formatCurrency(parseFloat(registerTotal) - subtotal)} vs system
-                      </span>
-                    )}
-                    <button type="button" onClick={confirmRegisterTotal}
-                      disabled={registerTotalSaving || registerTotal.trim() === '' || registerSaved}
-                      className={`flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded-lg border transition-colors whitespace-nowrap ${
-                        registerSaved
-                          ? 'bg-green-50 text-green-700 border-green-200 cursor-default'
-                          : 'bg-brand-navy text-white border-brand-navy hover:bg-brand-navy/90 disabled:opacity-40 disabled:cursor-not-allowed'
-                      }`}>
-                      {registerTotalSaving
-                        ? <><Loader2 className="w-3 h-3 animate-spin" /> Saving…</>
-                        : registerSaved
-                          ? <><CheckCircle2 className="w-3 h-3" /> Final total saved</>
-                          : <><Check className="w-3 h-3" /> Save final total</>}
-                    </button>
-                  </div>
-                </label>
-                {deckItems.length > 0 && (
-                  <label className="block text-xs font-bold text-teal-700 uppercase">
-                    Deck register
-                    <div className="mt-1 flex items-center gap-2">
-                      <span>$</span>
-                      <input type="number" step="0.01" min="0" placeholder="0.00"
-                        value={deckTotal}
-                        onChange={e => { setDeckTotal(e.target.value); setDeckSaved(false); }}
-                        className="w-28 min-w-0 input-base font-display font-bold text-teal-900" />
-                    </div>
-                  </label>
-                )}
-                {canEdit && order.status !== 'shopped' && order.status !== 'fulfilled' && order.status !== 'cancelled' && (
-                  <button
-                    type="button"
-                    onClick={openFinishShopping}
-                    disabled={fillingAll}
-                    className="flex items-center justify-center gap-1.5 text-xs font-bold text-white bg-brand-green rounded-lg px-3 py-2.5 w-full hover:bg-brand-green/90 disabled:opacity-50"
-                    title="Accept the pick list as ordered, enter the register total, mark Shopped"
-                  >
-                    {fillingAll
-                      ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Working…</>
-                      : <><CheckCircle2 className="w-3.5 h-3.5" /> Finish shopping</>}
-                  </button>
-                )}
-              </div>
-            )}
 
             {/* Sinclair Foods Summary */}
             {groceryItems.length > 0 && (
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                 <p className="text-xs font-bold text-blue-700 uppercase tracking-wide mb-2 flex items-center gap-1.5">
                   <Printer className="w-3.5 h-3.5" /> Sinclair Foods Summary
                 </p>
@@ -1889,7 +1829,7 @@ export function OrderDetailModal({
                   {order.captain_name && <p><strong>Captain:</strong> {order.captain_name} {order.captain_phone ? `· ${order.captain_phone}` : ''}</p>}
                   {order.terminal_name && <p><strong>Deliver To:</strong> {order.terminal_name}</p>}
                   {(order.arrival_date || order.arrival_time) && (
-                    <p><strong>Arrival:</strong> {[order.arrival_date, order.arrival_time].filter(Boolean).join(', ')}</p>
+                    <p><strong>Arrival:</strong> {[order.arrival_date, formatArrivalTime(order.arrival_time)].filter(Boolean).join(', ')}</p>
                   )}
                   {order.eta && <p><strong>ETA:</strong> {order.eta}</p>}
                   <p><strong>Total Items:</strong> {groceryItems.reduce((s, i) => s + i.quantity, 0)}</p>
@@ -1951,8 +1891,9 @@ export function OrderDetailModal({
               </div>
             )}
 
-          </div>{/* end pin footer */}
-          </div>{/* end body column */}
+
+          </div>
+
         </div>
       </div>
 

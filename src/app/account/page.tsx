@@ -52,7 +52,7 @@ function AccountContent() {
   // Only trigger data loading once we're sure user is logged in
   useEffect(() => {
     if (loading) return;
-    if (!user) return; // just show the sign-in prompt â" don't auto-open modal
+    if (!user) return; // just show the sign-in prompt — don't auto-open modal
     loadOrders();
     loadFavorites();
     loadProfile();

@@ -1,5 +1,20 @@
 # Tonight's test — what "working" looks like
 
+## Staff builder (the path you're actually on)
+
+Paper / register-tape orders typed in **Admin → New order**. After you place one, the order should **open itself** with a green banner: confirmation sent or skipped.
+
+1. **Run `078_confirmation_email.sql`** in Supabase if skip/sent stamps don't save.
+2. Pick Scott Noble → past orders should appear on the Boat step.
+3. Register tape → **Add to order draft** (not only Save as past). Review should unlock.
+4. Check step: leave **Send confirmation email** off unless you want the boat notified.
+5. Order opens → **Emails** panel shows skipped vs sent. **Finish shopping** asks register total, then Shopped.
+6. **Cancelled** now asks before it sticks. **Remove IMP tests** clears register-tape imports on the current page.
+
+---
+
+# Emails / live domain (earlier script)
+
 Based on exactly two env vars being set: `EMAIL_FROM` and `SINCLAIRS_ORDER_EMAILS`.
 `PUBLIC_CONTACT_EMAIL` and `BUSINESS_EMAIL` are deliberately **not** set yet, so
 customer-facing addresses still show the Gmail. That's expected tonight.

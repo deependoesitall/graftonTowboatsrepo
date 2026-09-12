@@ -62,6 +62,12 @@ const REQUIRED: Requirement[] = [
     migration: '060_sale_prices.sql',
     breaks: 'Orders fail to save, or save with no items.',
   },
+  {
+    table: 'orders',
+    columns: ['confirmation_email_sent_at', 'confirmation_email_sent_by'],
+    migration: '078_confirmation_email.sql',
+    breaks: 'Staff cannot skip (or later prove) the boat confirmation email on paper-entered orders.',
+  },
 ];
 
 export interface SchemaIssue {

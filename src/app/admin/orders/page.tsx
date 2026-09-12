@@ -2,7 +2,7 @@
 // src/app/admin/orders/page.tsx
 import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, Download, Eye, Loader2, RefreshCw, Package, ArrowRight, Trash2, Users, Wrench, Printer, Plus, Mail, MailX, MailCheck } from 'lucide-react';
+import { Search, Download, Eye, Loader2, RefreshCw, Package, ArrowRight, Trash2, Users, Wrench, Printer, Plus, Mail, MailX, MailCheck, CheckCircle2 } from 'lucide-react';
 import { PickSheetOverlay } from '@/components/admin/PickSheetOverlay';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { formatCurrency, formatDate, ORDER_STATUSES } from '@/lib/utils';
@@ -132,20 +132,42 @@ function OrdersContent() {
   // modal. Consumed from the URL afterwards so a refresh doesn't reopen it
   // over whatever the person moved on to.
   const [deepLinkDone, setDeepLinkDone] = useState(false);
+  const [placedNote, setPlacedNote] = useState<{ number: string; email: string } | null>(null);
   useEffect(() => {
-    if (deepLinkDone || orders.length === 0) return;
+    if (deepLinkDone) return;
     const params = new URLSearchParams(window.location.search);
     const wanted = params.get('order');
     const wantShop = params.get('shop') === '1';
+    const placed = params.get('placed') === '1';
+    const emailFlag = params.get('email') || '';
     if (!wanted) { setDeepLinkDone(true); return; }
+
     const match = orders.find(o => o.id === wanted);
     if (match) {
       setSelectedOrder(match);
       if (wantShop) setDeepLinkShop(true);
+      if (placed) setPlacedNote({ number: match.order_number, email: emailFlag });
+      setDeepLinkDone(true);
+      window.history.replaceState({}, '', '/admin/orders');
+      return;
     }
-    setDeepLinkDone(true);
-    window.history.replaceState({}, '', '/admin/orders');
-  }, [orders, deepLinkDone]);
+    if (loading) return;
+
+    let cancelled = false;
+    (async () => {
+      const res = await adminFetch(`/api/orders/${wanted}`);
+      if (cancelled) return;
+      if (res.ok) {
+        const o = await res.json();
+        setSelectedOrder(o);
+        if (wantShop) setDeepLinkShop(true);
+        if (placed) setPlacedNote({ number: o.order_number, email: emailFlag });
+      }
+      setDeepLinkDone(true);
+      window.history.replaceState({}, '', '/admin/orders');
+    })();
+    return () => { cancelled = true; };
+  }, [orders, deepLinkDone, loading]);
 
   async function advanceStatus(order: Order) {
     const next = nextStatus(order.status, roleFlags.isGts);
@@ -198,6 +220,20 @@ function OrdersContent() {
     fetchOrders();
   }
 
+  async function wipeImportTests() {
+    if (!(await confirmDialog({
+      title: 'Remove every IMP- test import on this page?',
+      message: 'Only register-tape imports (IMP-…) are deleted. Real GTS- orders stay.',
+      danger: true,
+    }))) return;
+    const imports = orders.filter(o => String(o.order_number).startsWith('IMP-'));
+    for (const o of imports) {
+      await adminFetch(`/api/orders/${o.id}`, { method: 'DELETE' });
+    }
+    if (selectedOrder && String(selectedOrder.order_number).startsWith('IMP-')) setSelectedOrder(null);
+    fetchOrders();
+  }
+
   async function deleteOrder(orderId: string, orderNumber: string) {
     if (!(await confirmDialog({
       title: `Permanently delete order ${orderNumber}?`,
@@ -230,7 +266,13 @@ function OrdersContent() {
             <h1 className="font-display text-2xl font-bold text-brand-navy">Orders</h1>
             <p className="text-gray-400 text-sm">{total.toLocaleString()} total</p>
           </div>
-          <div className="flex gap-2 self-start">
+          <div className="flex flex-wrap gap-2 self-start">
+            {roleFlags.isGts && orders.some(o => String(o.order_number).startsWith('IMP-')) && (
+              <button type="button" onClick={wipeImportTests}
+                className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5 text-red-700 border-red-200 hover:bg-red-50">
+                <Trash2 className="w-4 h-4" /> Remove IMP tests
+              </button>
+            )}
             {/* THE MISSING DOOR.
                 There was no way to create an order from inside admin at all —
                 Jen's only route for a boat that phoned or faxed was to open the
@@ -253,6 +295,23 @@ function OrdersContent() {
             </button>
           </div>
         </div>
+
+        {placedNote && (
+          <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 flex items-start gap-3">
+            <CheckCircle2 className="w-5 h-5 text-emerald-700 shrink-0 mt-0.5" />
+            <div className="min-w-0 flex-1 text-sm">
+              <p className="font-bold text-emerald-900">Placed {placedNote.number}</p>
+              <p className="text-emerald-800/90 text-xs mt-0.5">
+                {placedNote.email === 'skipped'
+                  ? 'Boat confirmation was not sent — you can send it from this order if you want.'
+                  : placedNote.email === 'failed'
+                    ? 'The order saved, but the confirmation email failed. Check Resend, or send it from this screen.'
+                    : 'Boat confirmation email was sent.'}
+              </p>
+            </div>
+            <button type="button" className="text-xs font-bold text-emerald-800 shrink-0" onClick={() => setPlacedNote(null)}>Dismiss</button>
+          </div>
+        )}
 
         {/* ⚠️ ORDER ALERTS HAVE TO BE REACHABLE FROM HERE.
             Sinclair's sessions are redirected to /admin/orders the moment they

@@ -20,6 +20,7 @@ async function getUserIdFromToken(req: NextRequest): Promise<string | null> {
 
 import { generateOrderNumber } from '@/lib/utils';
 import { vesselKey } from '@/lib/vessel';
+import { vesselNameKey } from '@/lib/vessel-membership';
 import { fetchActiveDeals, computeDiscounts } from '@/lib/sinclair-offers';
 import { sendOrderReceivedEmail } from '@/lib/email';
 import { sendOrderPush } from '@/lib/push';
@@ -306,6 +307,28 @@ export async function POST(req: NextRequest) {
         const want = vesselKey(vessel.vessel_name);
         const hit = boats.find(b => b.name_key === want || vesselKey(b.name) === want);
         if (hit) resolvedVesselId = hit.id;
+      }
+    }
+
+    // Staff Build-an-order has an admin JWT, not a crew login — so the block
+    // above never fires. Still attach the onboarded boat so this order shows
+    // in that vessel's history (crew logins, repeat, reports).
+    if (!resolvedVesselId && vessel.vessel_name) {
+      const key = vesselNameKey(vessel.vessel_name);
+      if (key) {
+        const { data: vesselRows } = await supabase
+          .from('vessels')
+          .select('id, name, company:companies(name)')
+          .eq('name_key', key);
+        const coLower = (vessel.company_name || '').toLowerCase().trim();
+        const hit = (vesselRows || []).find((row: {
+          id: string;
+          company?: { name?: string } | { name?: string }[] | null;
+        }) => {
+          const co = Array.isArray(row.company) ? row.company[0]?.name : row.company?.name;
+          return (co || '').toLowerCase().trim() === coLower;
+        }) || (vesselRows || [])[0];
+        if (hit?.id) resolvedVesselId = String(hit.id);
       }
     }
 
@@ -658,6 +681,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       order_id: order.id,
       order_number: orderNumber,
+      confirmation_email: skipBoatEmail ? 'skipped' : (emailDebug?.ok ? 'sent' : 'failed'),
       ...(debugEnabled ? { _emailDebug: emailDebug } : {}),
     });
   } catch (err) {

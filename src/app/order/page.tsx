@@ -15,7 +15,7 @@ import {
   updateCartItemFields, getVesselSubtotal, getCodSubtotal, getDeckSubtotal,
   getCodPayments, saveCodPayments,
 } from '@/lib/cart';
-import { formatCurrency, formatLb, formatQty, isPoundQty, lbStepsFor, usesLbSteps } from '@/lib/utils';
+import { formatCurrency, formatLb, formatQty, isPoundQty, lbStepsFor, usesLbSteps, formatArrivalTime } from '@/lib/utils';
 import { CartItem, VesselInfo, AdditionalServices, VESSEL_TYPES } from '@/types';
 import { SiteHeader } from '@/components/layout/SiteHeader';
 import { ContactPhones } from '@/components/layout/ContactPhones';
@@ -1565,7 +1565,7 @@ export default function OrderPage() {
               <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1.5">Primary Delivery</p>
               <div className="grid grid-cols-2 gap-1">
                 <ReviewRow label="Terminal" value={vessel.terminal_name} />
-                <ReviewRow label="Arrival" value={[vessel.arrival_date, vessel.arrival_time].filter(Boolean).join(', ')} />
+                <ReviewRow label="Arrival" value={[vessel.arrival_date, formatArrivalTime(vessel.arrival_time)].filter(Boolean).join(', ')} />
                 <ReviewRow label="Method" value={vessel.delivery_method === 'boat' ? 'Boat Delivery' : vessel.delivery_method === 'van' ? 'Van Delivery' : ''} />
                 {vessel.delivery_method === 'boat' && vessel.approach_side && (
                   <ReviewRow label="Approach" value={vessel.approach_side.charAt(0).toUpperCase() + vessel.approach_side.slice(1)} />
@@ -1578,7 +1578,7 @@ export default function OrderPage() {
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1.5">Secondary Delivery</p>
                 <div className="grid grid-cols-2 gap-1">
                   <ReviewRow label="Terminal" value={vessel.secondary_terminal_name} />
-                  <ReviewRow label="Arrival" value={[vessel.secondary_arrival_date, vessel.secondary_arrival_time].filter(Boolean).join(', ')} />
+                  <ReviewRow label="Arrival" value={[vessel.secondary_arrival_date, formatArrivalTime(vessel.secondary_arrival_time)].filter(Boolean).join(', ')} />
                   {vessel.secondary_delivery_method && (
                     <ReviewRow label="Method" value={vessel.secondary_delivery_method === 'boat' ? 'Boat' : 'Van'} />
                   )}

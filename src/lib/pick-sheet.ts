@@ -17,7 +17,7 @@
 //  - COD lines flagged loudly (collected from the crew member, never invoiced).
 
 import { Order, OrderItem } from '@/types';
-import { formatCurrency, formatQty, isPoundQty } from '@/lib/utils';
+import { formatCurrency, formatQty, isPoundQty, formatArrivalTime } from '@/lib/utils';
 import { groupByWalkingOrder, LocationGroup, DEFAULT_ZONE_ORDER } from '@/lib/store-layout';
 import { upcASvg, isWeighableUpc, normalizeUpcA } from '@/lib/barcode';
 
@@ -422,7 +422,7 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
   <div class="facts">
     <span><b>Vessel:</b> ${esc(order.vessel_name || order.company_name)}</span>
     ${order.company_name && order.vessel_name ? `<span><b>Company:</b> ${esc(order.company_name)}</span>` : ''}
-    ${order.arrival_date ? `<span><b>Arrival:</b> ${esc(order.arrival_date)}${order.arrival_time ? ` ${esc(order.arrival_time)}` : ''}</span>` : ''}
+    ${order.arrival_date ? `<span><b>Arrival:</b> ${esc(order.arrival_date)}${order.arrival_time ? ` ${esc(formatArrivalTime(order.arrival_time))}` : ''}</span>` : ''}
     ${order.terminal_name ? `<span><b>Deliver to:</b> ${esc(order.terminal_name)}</span>` : ''}
     ${codCount ? `<span style="color:#7c3aed"><b>COD lines:</b> ${codCount}</span>` : ''}
     ${services.length ? `<span style="color:#b45309"><b>Outside pickups:</b> ${services.length} (separate trip)</span>` : ''}

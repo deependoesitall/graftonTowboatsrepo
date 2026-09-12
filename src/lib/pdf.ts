@@ -1,7 +1,7 @@
 // src/lib/pdf.ts
 // Generates a clean, branded, print-ready HTML order sheet for Sinclair Foods
 import { Order } from '@/types';
-import { formatCurrency, formatDate } from './utils';
+import { formatCurrency, formatDate, formatArrivalTime } from './utils';
 import { codFeePercent, codFeeLabel, codTotalWithFee, allocateCodTotals } from '@/lib/cod-fee';
 import { readCodPayments, codMethodSentence } from '@/lib/cod-payments';
 
@@ -219,7 +219,7 @@ ${(order.terminal_name || order.arrival_date) ? `
     <tr>
       ${order.terminal_name ? `<td width="40%" style="padding-bottom:6px;"><div style="font-size:9px;color:#666;">DELIVER TO</div><div style="font-size:13px;font-weight:900;color:#E8640A;">${order.terminal_name}</div></td>` : '<td></td>'}
       ${order.arrival_date ? `<td width="30%" style="padding-bottom:6px;"><div style="font-size:9px;color:#666;">ARRIVAL DATE</div><div style="font-size:13px;font-weight:700;color:#E8640A;">${order.arrival_date}</div></td>` : '<td></td>'}
-      ${order.arrival_time ? `<td width="30%" style="padding-bottom:6px;"><div style="font-size:9px;color:#666;">ARRIVAL TIME</div><div style="font-size:13px;font-weight:700;color:#E8640A;">${order.arrival_time}</div></td>` : '<td></td>'}
+      ${order.arrival_time ? `<td width="30%" style="padding-bottom:6px;"><div style="font-size:9px;color:#666;">ARRIVAL TIME</div><div style="font-size:13px;font-weight:700;color:#E8640A;">${formatArrivalTime(order.arrival_time)}</div></td>` : '<td></td>'}
     </tr>
     ${deliveryMethod || order.vhf_channel || order.crew_change !== 'no' ? `<tr>
       ${deliveryMethod ? `<td style="padding-bottom:4px;"><div style="font-size:9px;color:#666;">METHOD</div><div style="font-size:11px;font-weight:700;">${deliveryMethod}${approachSide ? ` &middot; ${approachSide} side` : ''}</div></td>` : '<td></td>'}
@@ -233,7 +233,7 @@ ${(order.terminal_name || order.arrival_date) ? `
     ${ext.secondary_terminal_name ? `<tr>
       <td colspan="3" style="padding-top:6px;border-top:1px solid #eee;">
         <div style="font-size:9px;color:#666;">SECONDARY DELIVERY</div>
-        <div style="font-size:11px;font-weight:600;">${ext.secondary_terminal_name}${ext.secondary_arrival_date ? ` &middot; ${ext.secondary_arrival_date}` : ''}${ext.secondary_arrival_time ? ` ${ext.secondary_arrival_time}` : ''}</div>
+        <div style="font-size:11px;font-weight:600;">${ext.secondary_terminal_name}${ext.secondary_arrival_date ? ` &middot; ${ext.secondary_arrival_date}` : ''}${ext.secondary_arrival_time ? ` ${formatArrivalTime(ext.secondary_arrival_time)}` : ''}</div>
       </td>
     </tr>` : ''}
     ${order.eta ? `<tr><td colspan="3" style="padding-top:4px;"><div style="font-size:9px;color:#666;">ETA NOTE</div><div style="font-size:11px;">${order.eta}</div></td></tr>` : ''}
@@ -267,7 +267,7 @@ ${order.crew_change === 'yes' ? `
   ${order.crew_change_notes ? `<div style="margin-top:8px;font-size:11px;color:#555;"><strong>Notes:</strong> ${order.crew_change_notes}</div>` : ''}
   ${order.terminal_name || order.arrival_date ? `<div style="margin-top:10px;padding-top:10px;border-top:1px solid #f0d0b0;font-size:11px;color:#555;">
     ${order.terminal_name ? `<strong>Location:</strong> ${order.terminal_name}&nbsp;&nbsp;` : ''}
-    ${order.arrival_date ? `<strong>Date:</strong> ${order.arrival_date}${order.arrival_time ? ` at ${order.arrival_time}` : ''}` : ''}
+    ${order.arrival_date ? `<strong>Date:</strong> ${order.arrival_date}${order.arrival_time ? ` at ${formatArrivalTime(order.arrival_time)}` : ''}` : ''}
   </div>` : ''}
 </div>` : ''}
 ${order.crew_change === 'maybe' ? `
@@ -383,7 +383,7 @@ ${groceryItems.length > 0 ? `
     FOR SINCLAIR FOODS &mdash; Jerseyville, IL &middot; (618) 498-6856 &middot; sinclairfoods@jerseyville-il.net
   </div>
   <div style="font-size:11px;color:#444;line-height:1.6;">
-    Please prepare the items above for delivery to <strong>${vesselName}</strong>${order.terminal_name ? ` at ${order.terminal_name}` : ''}${order.arrival_date ? `, arriving ${order.arrival_date}${order.arrival_time ? ` ${order.arrival_time}` : ''}` : ''}.<br>
+    Please prepare the items above for delivery to <strong>${vesselName}</strong>${order.terminal_name ? ` at ${order.terminal_name}` : ''}${order.arrival_date ? `, arriving ${order.arrival_date}${order.arrival_time ? ` ${formatArrivalTime(order.arrival_time)}` : ''}` : ''}.<br>
     This order was placed through Grafton Towboat Services online ordering system.<br>
     Questions: (618) 556-0290 &middot; GraftonTowboatServices@gmail.com
   </div>

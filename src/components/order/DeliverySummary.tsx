@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 // Shared delivery card for customer confirm (incl. guests) and admin.
 import { Anchor, MapPin, Radio, Users, Package, Ship, Phone, Mail, FileText } from 'lucide-react';
 import { Order } from '@/types';
-import { formatDateOnly } from '@/lib/utils';
+import { formatDateOnly, formatArrivalTime } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 
 export interface DeliverySummaryProps {
@@ -104,8 +104,8 @@ export function DeliverySummary({ order, variant = 'customer', className }: Deli
                 label="Arrival"
                 value={
                   order.arrival_date
-                    ? `${formatDateOnly(order.arrival_date)}${order.arrival_time ? ` · ${order.arrival_time}` : ''}`
-                    : order.arrival_time || null
+                    ? `${formatDateOnly(order.arrival_date)}${order.arrival_time ? ` · ${formatArrivalTime(order.arrival_time)}` : ''}`
+                    : (order.arrival_time ? formatArrivalTime(order.arrival_time) : null)
                 }
                 highlight
               />
@@ -130,8 +130,8 @@ export function DeliverySummary({ order, variant = 'customer', className }: Deli
                 label="Arrival"
                 value={
                   ext?.secondary_arrival_date
-                    ? `${formatDateOnly(ext.secondary_arrival_date)}${ext.secondary_arrival_time ? ` · ${ext.secondary_arrival_time}` : ''}`
-                    : ext?.secondary_arrival_time || null
+                    ? `${formatDateOnly(ext.secondary_arrival_date)}${ext.secondary_arrival_time ? ` · ${formatArrivalTime(ext.secondary_arrival_time)}` : ''}`
+                    : (ext?.secondary_arrival_time ? formatArrivalTime(ext.secondary_arrival_time) : null)
                 }
               />
             </div>

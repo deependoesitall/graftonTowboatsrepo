@@ -83,6 +83,45 @@ export function formatTimeOnly(dateString: string): string {
  * answer per person. Parsing and formatting both in UTC is the only way a
  * date with no time attached survives the round trip unchanged.
  */
+/**
+ * Display-only: turn a stored 24h arrival time (from <input type="time">) into
+ * 12-hour clock with AM/PM. Storage stays HH:mm — never write this back.
+ *
+ *   10:00 → 10:00 AM
+ *   22:00 → 10:00 PM
+ *   00:00 → 12:00 AM
+ *   12:00 → 12:00 PM
+ *
+ * Tolerates HH:mm:ss by using the first five chars. Strings that already include
+ * AM/PM are returned normalized. Empty / null / undefined → ''.
+ */
+export function formatArrivalTime(hhmm: string | null | undefined): string {
+  if (hhmm == null) return '';
+  const raw = String(hhmm).trim();
+  if (!raw) return '';
+
+  const already = raw.match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)\s*$/i);
+  if (already) {
+    let h = parseInt(already[1], 10);
+    const min = already[2];
+    const ap = already[3].toUpperCase();
+    if (Number.isNaN(h) || h < 0 || h > 23) return raw;
+    // If someone stored 24h with a trailing AM/PM by mistake, still show 12h.
+    if (h === 0) h = 12;
+    else if (h > 12) h = h - 12;
+    return `${h}:${min} ${ap}`;
+  }
+
+  const m = raw.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+  if (!m) return raw;
+  const hour24 = parseInt(m[1], 10);
+  const min = m[2];
+  if (Number.isNaN(hour24) || hour24 < 0 || hour24 > 23) return raw;
+  const ap = hour24 >= 12 ? 'PM' : 'AM';
+  const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
+  return `${hour12}:${min} ${ap}`;
+}
+
 export function formatCalendarDate(ymd: string): string {
   if (!ymd) return '';
   const d = new Date(`${ymd.slice(0, 10)}T00:00:00Z`);

@@ -43,10 +43,10 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Search, Loader2, Check, X, Plus, Minus, ClipboardPaste, RotateCcw,
-  Keyboard, ListOrdered, ChevronRight, AlertCircle, Ship, Camera, FileUp, Mail,
+  Keyboard, ListOrdered, ChevronRight, AlertCircle, Ship, Camera, FileUp, Mail, Users,
 } from 'lucide-react';
 import { adminFetch, fetchAdminSession } from '@/lib/admin-auth';
-import { formatCurrency } from '@/lib/utils';
+import { formatCurrency, formatArrivalTime } from '@/lib/utils';
 import { PaperFormImport, type ApplyLine, type CustomLine } from '@/components/admin/PaperFormImport';
 import { RegisterReceiptImport } from '@/components/admin/RegisterReceiptImport';
 import { RepeatOrderPicker, MissingLinesNotice } from '@/components/admin/RepeatOrderPicker';
@@ -138,7 +138,12 @@ interface HeaderState {
   contact_name: string; phone: string;
   terminal_name: string; arrival_date: string; arrival_time: string;
   delivery_method: '' | 'boat' | 'van';
-  approach_side: string; vhf_channel: string; po_number: string; notes: string;
+  approach_side: '' | 'port' | 'starboard' | 'either';
+  vhf_channel: string; po_number: string; notes: string;
+  crew_change: 'yes' | 'no' | 'maybe';
+  crew_arriving: string;
+  crew_departing: string;
+  crew_change_notes: string;
 }
 
 /* ───────────────────────── helpers ───────────────────────── */
@@ -232,6 +237,7 @@ export default function NewOrderPage() {
     terminal_name: '', arrival_date: '', arrival_time: '',
     delivery_method: '',
     approach_side: '', vhf_channel: '', po_number: '', notes: '',
+    crew_change: 'no', crew_arriving: '', crew_departing: '', crew_change_notes: '',
   });
 
   /* ── load ── */
@@ -568,7 +574,10 @@ export default function NewOrderPage() {
           delivery_method: header.delivery_method,
           approach_side: header.approach_side,
           vhf_channel: header.vhf_channel.trim(),
-          crew_change: 'no',
+          crew_change: header.crew_change,
+          crew_change_notes: header.crew_change_notes.trim(),
+          crew_arriving: header.crew_arriving.trim(),
+          crew_departing: header.crew_departing.trim(),
           notes: notesWithCod,
         },
         items: [...chosen.map(i => {
@@ -580,7 +589,7 @@ export default function NewOrderPage() {
             pkg_size: i.pkg_size,
             uom: i.uom,
             price: i.price,
-            quantity: qty[i.id],
+            quantity: qty[i.id] || extraById[i.id]?.quantity || 0,
             image_url: i.image_url,
             paid_by: (pay?.paid_by === 'cod' ? 'cod'
                       : pay?.paid_by === 'deck' ? 'deck'
@@ -652,7 +661,10 @@ export default function NewOrderPage() {
       }
 
       const j = await res.json();
-      router.push(`/admin/orders?order=${j.order_id}`);
+      const email = j.confirmation_email === 'skipped' || j.confirmation_email === 'failed'
+        ? j.confirmation_email
+        : 'sent';
+      router.push(`/admin/orders?order=${encodeURIComponent(j.order_id)}&placed=1&email=${email}`);
     } catch {
       setSubmitError('Could not reach the server. Your lines are still on screen — try again in a moment.');
     } finally {
@@ -1499,7 +1511,7 @@ function ReviewStep({ header, chosen, qty, setLine, total, error, submitting, on
           {header.company_name ? ` · ${header.company_name}` : ''}
         </p>
         <p className="text-xs text-gray-500 mt-0.5">
-          {[header.terminal_name, header.arrival_date, header.arrival_time,
+          {[header.terminal_name, header.arrival_date, formatArrivalTime(header.arrival_time),
             header.delivery_method === 'boat' ? 'by boat' : header.delivery_method === 'van' ? 'by van' : '']
             .filter(Boolean).join(' · ') || 'No delivery details yet'}
         </p>
