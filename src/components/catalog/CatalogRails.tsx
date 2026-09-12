@@ -45,7 +45,12 @@ export default function CatalogRails() {
   // something real to render.
   if (!rails) return null;
 
-  const hasSale = rails.on_sale.length > 0;
+  // Sinclair's homepage no longer has a "What's on sale" tab (Sept 2026) —
+  // they show "You Might Also Like" instead. Our rail is leftover shelf-sale
+  // cards after clip-coupons and expired dates are stripped. Three lonely
+  // cards look broken; hide the rail until there is a real week of specials.
+  const MIN_SALE_CARDS = 8;
+  const hasSale = rails.on_sale.length >= MIN_SALE_CARDS;
   const hasBest = rails.best_sellers.length > 0;
   if (!hasSale && !hasBest) return null;
 

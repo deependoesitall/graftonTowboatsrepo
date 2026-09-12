@@ -179,7 +179,7 @@ export default function AdminSettingsPage() {
     email_button_url: '/admin/orders',
     weekly_ad_url: '',
     show_digital_coupons: true,
-    show_sale_rail: true,
+    show_sale_rail: false,
     show_best_sellers_rail: true,
     cod_fee_enabled: true,
     cod_fee_percent: 5,
@@ -771,15 +771,18 @@ export default function AdminSettingsPage() {
             <div>
               <h2 className="font-bold text-brand-navy">Sinclair&apos;s Catalog Rails</h2>
               <p className="text-xs text-gray-400 mt-1 leading-relaxed">
-                Two rows on the ordering catalog that mirror Sinclair&apos;s own homepage, refreshed
-                nightly. <strong className="text-brand-navy">These are shelf sales, not digital
-                coupons</strong> — clip-to-save and loyalty offers are filtered out automatically,
-                because crews have no account to clip with. Either team can switch a rail off.
+                Two optional rows on the ordering catalog, refreshed nightly.
+                <strong className="text-brand-navy"> These are shelf sales, not digital
+                coupons</strong> — clip-to-save and loyalty offers are filtered out, because crews
+                have no Sinclair&apos;s account to clip with. Sinclair&apos;s own shop no longer
+                has a &ldquo;What&apos;s on sale&rdquo; tab (they show &ldquo;You Might Also Like&rdquo;),
+                so that rail stays off unless a week has enough real shelf specials to fill it.
+                Either team can switch a rail off.
               </p>
             </div>
 
             {([
-              ['show_sale_rail', "What's on sale", 'This week’s shelf specials, biggest saving first.'],
+              ['show_sale_rail', "What's on sale", 'Shelf specials only — hidden automatically when Sinclair’s week is too thin to look like a real sale row.'],
               ['show_best_sellers_rail', 'Best sellers', 'Sinclair’s featured items, ordered by how much the store sells.'],
             ] as const).map(([key, label, hint]) => (
               <div key={key} className="flex items-start justify-between gap-4 border-t border-gray-100 pt-4 first:border-0 first:pt-0">

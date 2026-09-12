@@ -22,7 +22,7 @@ export async function GET() {
 
   // Default TRUE when the row or column is missing — matches the migration's
   // default, so the rails work before anyone visits Settings.
-  const showSale = settings?.show_sale_rail ?? true;
+  const showSale = settings?.show_sale_rail ?? false;
   const showBest = settings?.show_best_sellers_rail ?? true;
 
   if (!showSale && !showBest) {
