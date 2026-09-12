@@ -186,19 +186,86 @@ function AccountContent() {
       if (!ok) return;
     }
 
-    saveCart(lines.map(item => ({
-      product_id: item.product_id,
-      description: item.description,
-      category: item.category,
-      pkg_size: item.pkg_size,
-      uom: item.uom,
-      price: item.unit_price,
-      quantity: item.quantity,
-      image_url: item.image_url,
-      // Who was paying stays who was paying.
-      paid_by: item.paid_by ?? 'vessel',
-      cod_name: item.cod_name ?? '',
-    })));
+    // Live catalog prices — past-order unit_price is a snapshot and goes stale.
+    // Batch-fetch products by id; active+available lines get current price/desc/
+    // image/pkg/uom/category. Missing / inactive / unavailable / write-ins keep
+    // the last known description + unit_price so the line doesn't vanish.
+    const ids = Array.from(
+      new Set(
+        lines
+          .map(i => i.product_id)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0),
+      ),
+    );
+
+    type LiveProduct = {
+      id: string;
+      price: number;
+      description: string;
+      details?: string | null;
+      category: string;
+      pkg_size: string | null;
+      uom: string | null;
+      image_url: string | null;
+      is_active: boolean | null;
+      is_available: boolean | null;
+    };
+    const liveById = new Map<string, LiveProduct>();
+
+    if (ids.length > 0) {
+      const supabase = createClient();
+      const CHUNK = 100;
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        const chunk = ids.slice(i, i + CHUNK);
+        const { data } = await supabase
+          .from('products')
+          .select('id, price, description, details, category, pkg_size, uom, image_url, is_active, is_available')
+          .in('id', chunk);
+        for (const row of (data || []) as LiveProduct[]) {
+          liveById.set(row.id, row);
+        }
+      }
+    }
+
+    let staleCount = 0;
+    saveCart(lines.map(item => {
+      const live = item.product_id ? liveById.get(item.product_id) : undefined;
+      const usable =
+        !!live &&
+        live.is_active !== false &&
+        live.is_available !== false;
+
+      if (usable && live) {
+        return {
+          product_id: item.product_id,
+          description: productDisplayName(live),
+          category: live.category,
+          pkg_size: live.pkg_size,
+          uom: live.uom,
+          price: live.price,
+          quantity: item.quantity,
+          image_url: live.image_url,
+          // Who was paying stays who was paying.
+          paid_by: item.paid_by ?? 'vessel',
+          cod_name: item.cod_name ?? '',
+        };
+      }
+
+      if (item.product_id) staleCount += 1;
+      return {
+        product_id: item.product_id,
+        description: item.description,
+        category: item.category,
+        pkg_size: item.pkg_size,
+        uom: item.uom,
+        price: item.unit_price,
+        quantity: item.quantity,
+        image_url: item.image_url,
+        // Who was paying stays who was paying.
+        paid_by: item.paid_by ?? 'vessel',
+        cod_name: item.cod_name ?? '',
+      };
+    }));
 
     // â"â" The header â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"
     //
@@ -265,11 +332,14 @@ function AccountContent() {
       clearCodPayments();
     }
 
+    const staleNote = staleCount > 0
+      ? ` ${staleCount} item${staleCount !== 1 ? 's' : ''} kept last-known price (missing or unavailable in catalog).`
+      : '';
     toast({
       title: `${lines.length} item${lines.length !== 1 ? 's' : ''} added to cart`,
-      description: droppedServices > 0
+      description: (droppedServices > 0
         ? `From ${order.order_number}. ${droppedServices} service line${droppedServices !== 1 ? 's' : ''} not repeated â" add those again if you need them.`
-        : `From ${order.order_number}. Vessel and delivery details are filled in â" just set the date and time.`,
+        : `From ${order.order_number}. Vessel and delivery details are filled in â" just set the date and time.`) + staleNote,
       variant: 'success',
     });
     router.push('/order');
