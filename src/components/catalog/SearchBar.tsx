@@ -16,7 +16,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import { Search, X, Loader2, Plus, Check, WifiOff, CornerDownLeft } from 'lucide-react';
-import { buildIndex, searchProducts, type SearchProduct, type IndexedProduct } from '@/lib/product-search';
+import { buildIndex, searchProducts, isUpcLikeQuery, type SearchProduct, type IndexedProduct } from '@/lib/product-search';
 import { formatCurrency, productDisplayName } from '@/lib/utils';
 import { addToCart } from '@/lib/cart';
 import { useToast } from '@/hooks/use-toast';
@@ -83,12 +83,29 @@ export function SearchBar({ initialSearch }: SearchBarProps) {
   // ── Server search — the "see everything, including the full store" path ──
   const submitToServer = useCallback((term: string) => {
     const params = new URLSearchParams(searchParams.toString());
-    if (term) { params.set('search', term); params.delete('category'); }
-    else params.delete('search');
+    if (term) {
+      params.set('search', term);
+      params.delete('category');
+      // UPC/PLU: drop barge/store exclusivity so the server searches both.
+      // (catalog page also ignores store_only for digit queries.)
+      if (isUpcLikeQuery(term)) params.delete('store');
+    } else {
+      params.delete('search');
+    }
     params.delete('page');
     setOpen(false);
     router.push(`/catalog?${params.toString()}`);
   }, [router, searchParams]);
+
+  // Store UPCs aren't in the barge-only offline index. When a digit/UPC query
+  // returns nothing locally, fall through to full-catalog server search.
+  useEffect(() => {
+    const term = value.trim();
+    if (!index || !term || !isUpcLikeQuery(term)) return;
+    if (results.length > 0) return;
+    const t = window.setTimeout(() => submitToServer(term), 350);
+    return () => window.clearTimeout(t);
+  }, [index, value, results.length, submitToServer]);
 
   // Close on outside click
   useEffect(() => {
@@ -173,11 +190,17 @@ export function SearchBar({ initialSearch }: SearchBarProps) {
         <div className="absolute z-40 mt-2 w-full bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden">
           {results.length === 0 ? (
             <div className="p-4 text-center">
-              <p className="text-sm text-gray-500">Nothing on the order form matches &ldquo;{value}&rdquo;</p>
-              <button onClick={() => submitToServer(value)}
-                className="mt-2 text-xs font-bold text-brand-river hover:underline">
-                Search the full Sinclair&apos;s store →
-              </button>
+              <p className="text-sm text-gray-500">
+                {isUpcLikeQuery(value)
+                  ? <>Looking up UPC/PLU in the full store…</>
+                  : <>Nothing on the order form matches &ldquo;{value}&rdquo;</>}
+              </p>
+              {!isUpcLikeQuery(value) && (
+                <button onClick={() => submitToServer(value)}
+                  className="mt-2 text-xs font-bold text-brand-river hover:underline">
+                  Search the full Sinclair&apos;s store →
+                </button>
+              )}
             </div>
           ) : (
             <>

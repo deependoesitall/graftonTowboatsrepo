@@ -178,6 +178,12 @@ function scoreOne(item: IndexedProduct, qTokens: string[], qRaw: string): number
   return total;
 }
 
+/** Digits-heavy query (UPC/PLU) — at least 4 digits after stripping non-digits. */
+export function isUpcLikeQuery(query: string | null | undefined): boolean {
+  const digits = String(query ?? '').replace(/\D/g, '');
+  return digits.length >= 4 && digits.length >= String(query ?? '').replace(/\s/g, '').length * 0.7;
+}
+
 /** Rank products for a query. Empty query → empty result. */
 export function searchProducts(
   index: IndexedProduct[],
@@ -186,16 +192,18 @@ export function searchProducts(
 ): SearchProduct[] {
   const qRaw = normalize(query);
   if (!qRaw) return [];
-  const qTokens = tokens(query).filter(t => !STOP.has(t) || tokens(query).length === 1);
-  if (!qTokens.length) return [];
 
-  // A pure digit query is a UPC lookup — match those directly.
-  if (/^\d{4,}$/.test(qRaw)) {
+  // UPC/PLU before token gate — pure digits often have no word tokens.
+  if (isUpcLikeQuery(query)) {
+    const digits = String(query).replace(/\D/g, '');
     return index
-      .filter(i => (i.product.upc || '').replace(/\D/g, '').includes(qRaw))
+      .filter(i => (i.product.upc || '').replace(/\D/g, '').includes(digits))
       .slice(0, limit)
       .map(i => i.product);
   }
+
+  const qTokens = tokens(query).filter(t => !STOP.has(t) || tokens(query).length === 1);
+  if (!qTokens.length) return [];
 
   const scored: Array<{ p: SearchProduct; s: number }> = [];
   for (const item of index) {

@@ -51,6 +51,8 @@ export function OrderDetailModal({
     : (!isGtsRole(getAdminRole()) || hasAdminPermission('sinclair'));
   const canEditCrew = canEdit && !isSinclairScoped;
   const canAddGtsServices = canEdit && !isSinclairScoped;
+  /** Mid-fulfill phone-add: hide once delivered or voided. Shopped still OK. */
+  const canAddToOrder = canEdit && order.status !== 'fulfilled' && order.status !== 'cancelled';
   const [shoppingMode, setShoppingMode] = useState(false);
   const [markingFulfilled, setMarkingFulfilled] = useState(false);
   const [showPickSheet, setShowPickSheet] = useState(false);
@@ -1391,7 +1393,7 @@ export function OrderDetailModal({
             )}
 
             {/* Grocery Items (+ mid-fulfill add even when empty) */}
-            {(groceryItems.length > 0 || canEdit) && (
+            {(groceryItems.length > 0 || canAddToOrder) && (
               <div>
                 <h3 className="font-display text-base font-bold text-brand-navy mb-3">
                   Grocery Items{groceryItems.length > 0 ? ` (${groceryItems.length} lines)` : ''}
@@ -1889,8 +1891,14 @@ export function OrderDetailModal({
                 )}
 
                 {/* Add Item — catalog / external write-in / service */}
-                {canEdit && (
-                  <div className="mt-2 flex flex-wrap items-center gap-3">
+                {canAddToOrder && (
+                  <div className="mt-2 flex flex-col gap-1.5">
+                    {(order.status === 'new' || order.status === 'in_progress') && !addingItem && (
+                      <p className="text-[11px] text-gray-500">
+                        Customer called after placing? Add items, COD, or a service here.
+                      </p>
+                    )}
+                  <div className="flex flex-wrap items-center gap-3">
                     {!addingItem ? (
                       <>
                       <button
@@ -2186,6 +2194,7 @@ export function OrderDetailModal({
                         )}
                       </div>
                     )}
+                  </div>
                   </div>
                 )}
               </div>

@@ -15,6 +15,7 @@ import { AdditionalServicesTab } from '@/components/catalog/AdditionalServicesTa
 import { OtherPickupCard } from '@/components/catalog/OtherPickupCard';
 import { fetchSinclairCoupons } from '@/lib/sinclair-coupons';
 import { MAIN_CATEGORIES, formatCalendarDate } from '@/lib/utils';
+import { isUpcLikeQuery } from '@/lib/product-search';
 
 
 export const metadata: Metadata = {
@@ -187,13 +188,24 @@ export default async function CatalogPage({ searchParams }: PageProps) {
   //
   // An explicit id list overrides that split — a sale spans both, and someone
   // following "View all on sale" wants the sale, not one half of it.
+  // Digit/UPC/PLU search must hit the FULL catalog (barge + store). The barge
+  // view's store_only=false filter otherwise hides Wright's bacon etc.
+  const upcLike = isUpcLikeQuery(search);
   if (ids.length) query = query.in('id', ids);
-  else query = query.eq('store_only', storeAll);
+  else if (!upcLike) query = query.eq('store_only', storeAll);
+  // upcLike: leave store_only unfiltered
 
   if (search) {
-    // search_text is a stored generated column: lower(description || ' ' || category || ' ' || tags).
-    // A single ilike covers product name, category, AND admin-defined keyword tags.
-    query = query.ilike('search_text', `%${search}%`);
+    if (upcLike) {
+      const digits = search.replace(/\D/g, '');
+      // search_text may omit UPC — match upc column too (contains + exact).
+      query = query.or(
+        `search_text.ilike.%${search}%,upc.ilike.%${digits}%,upc.eq.${digits}`,
+      );
+    } else {
+      // search_text is a stored generated column: lower(description || ' ' || category || ' ' || tags).
+      query = query.ilike('search_text', `%${search}%`);
+    }
   }
 
   if (category && category !== 'All') {
@@ -385,7 +397,11 @@ export default async function CatalogPage({ searchParams }: PageProps) {
             <p className="mt-2 text-sm text-gray-600">
               <span className="font-bold text-brand-navy">{matchCount.toLocaleString()}</span>
               {' '}match{matchCount === 1 ? '' : 'es'} for &ldquo;{search}&rdquo;
-              {storeAll ? ' in More from Sinclair\'s' : ' on the barge order form'}
+              {upcLike
+                ? ' across barge + full store (UPC/PLU)'
+                : storeAll
+                  ? " in More from Sinclair's"
+                  : ' on the barge order form'}
               {category && category !== 'All' ? ` · ${category}` : ''}
             </p>
           )}
