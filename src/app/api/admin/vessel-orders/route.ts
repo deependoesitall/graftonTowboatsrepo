@@ -75,10 +75,21 @@ export async function GET(req: NextRequest) {
   // same name, and an order typed from a paper form may have left it blank.
   if (company) q = q.ilike('company_name', company);
 
-  const { data: orders, error } = await q;
+  let { data: orders, error } = await q;
   if (error) {
     console.error('vessel-orders error:', error);
     return NextResponse.json({ orders: [] });
+  }
+  // Company spelling drifts ("Ingram" vs "Ingram Barge"). Don't hide a boat's
+  // history because the last header used a slightly different company string.
+  if (company && !(orders || []).length) {
+    const retry = await supabase
+      .from('orders')
+      .select(ORDER_COLUMNS)
+      .ilike('vessel_name', vessel)
+      .order('created_at', { ascending: false })
+      .limit(10);
+    if (!retry.error) orders = retry.data;
   }
   const rows = (orders ?? []) as unknown as Array<{
     id: string; order_number: string; created_at: string; status: string;

@@ -6,6 +6,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { FileUp, Loader2, Check, AlertTriangle, Trash2 } from 'lucide-react';
 import { adminFetch } from '@/lib/admin-auth';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { extractPdfText } from '@/lib/register-receipt-pdf';
 import {
   parseRegisterReceiptText,
@@ -73,6 +74,8 @@ export function RegisterReceiptImport({
   const [meta, setMeta] = useState<{ vesselHint: string | null; amount: number | null; dateHint: string | null } | null>(null);
   const matchTopRef = useRef<HTMLDivElement>(null);
   const incomingSeen = useRef<File | null>(null);
+  const [lastImport, setLastImport] = useState<{ id: string; number: string } | null>(null);
+  const { confirm: confirmDialog, dialog: confirmDialogEl } = useConfirm();
 
   async function onFile(file: File | null) {
     if (!file) return;
@@ -218,7 +221,27 @@ export function RegisterReceiptImport({
       });
       const json = await res.json();
       if (!res.ok) { setError(json.error || 'Import failed'); return; }
+      setLastImport({ id: json.order_id, number: json.order_number });
       setOk(`Saved ${json.order_number} (${json.line_count} lines) to ${ves}'s order history. No email sent. This new order is still empty — tap Add to order draft to put the same lines here.`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function undoLastImport() {
+    if (!lastImport) return;
+    if (!(await confirmDialog({
+      title: `Remove ${lastImport.number}?`,
+      message: 'Takes it off the boat’s history. No email was sent.',
+      danger: true,
+    }))) return;
+    setBusy(true); setError('');
+    try {
+      const res = await adminFetch(`/api/orders/${lastImport.id}`, { method: 'DELETE' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(json.error || 'Could not remove that import'); return; }
+      setOk(`Removed ${lastImport.number} from history.`);
+      setLastImport(null);
     } finally {
       setBusy(false);
     }
@@ -226,6 +249,7 @@ export function RegisterReceiptImport({
 
   return (
     <div ref={matchTopRef} id="register-receipt-panel" className="rounded-2xl border border-brand-green/15 bg-white p-4 space-y-4">
+      {confirmDialogEl}
       <div>
         <h3 className="font-display font-bold text-brand-navy text-base">Sinclair register receipt</h3>
         <p className="text-xs text-brand-green/50 mt-0.5">
@@ -253,7 +277,14 @@ export function RegisterReceiptImport({
       {error && <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
       {ok && (
         <div className="text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 flex items-center gap-2">
-          <Check className="w-4 h-4" /> {ok}
+          <Check className="w-4 h-4 shrink-0" />
+          <span className="flex-1">{ok}</span>
+          {lastImport && (
+            <button type="button" className="text-red-700 text-xs font-bold uppercase tracking-wide shrink-0 hover:underline disabled:opacity-40"
+              disabled={busy} onClick={undoLastImport}>
+              Remove it
+            </button>
+          )}
         </div>
       )}
 

@@ -2,7 +2,7 @@
 // src/app/admin/orders/page.tsx
 import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, Download, Eye, Loader2, RefreshCw, Package, ArrowRight, Trash2, Users, Wrench, Printer, Plus } from 'lucide-react';
+import { Search, Download, Eye, Loader2, RefreshCw, Package, ArrowRight, Trash2, Users, Wrench, Printer, Plus, Mail, MailX, MailCheck } from 'lucide-react';
 import { PickSheetOverlay } from '@/components/admin/PickSheetOverlay';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { formatCurrency, formatDate, ORDER_STATUSES } from '@/lib/utils';
@@ -77,7 +77,9 @@ function OrdersContent() {
       isSinclair: !isGtsRole(getAdminRole()) || hasAdminPermission('sinclair'),
     });
   }, []);
-  const { canEditOrders, isOwner, isSinclair } = roleFlags;
+  const { canEditOrders, isOwner, isSinclair, isGts } = roleFlags;
+  const canDeleteOrder = (orderNumber: string) =>
+    isOwner || (isGts && String(orderNumber).startsWith('IMP-'));
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Auth guard — verify the session cookie with the server
@@ -425,6 +427,19 @@ function OrdersContent() {
                           <span className="font-mono text-sm font-bold text-brand-navy">
                             {order.order_number}
                           </span>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            {order.confirmation_email_sent_at ? (
+                              <span title={`Confirmation sent${order.confirmation_email_sent_by ? ` · ${order.confirmation_email_sent_by}` : ''}`}
+                                className="text-emerald-600"><Mail className="w-3.5 h-3.5" /></span>
+                            ) : (order.confirmation_email_sent_by || '').toLowerCase().startsWith('skipped') ? (
+                              <span title={order.confirmation_email_sent_by || 'Confirmation not sent'}
+                                className="text-amber-600"><MailX className="w-3.5 h-3.5" /></span>
+                            ) : null}
+                            {order.shopped_email_sent_at && !(order.shopped_email_sent_by || '').toLowerCase().startsWith('dismissed') ? (
+                              <span title={`Final email sent${order.shopped_email_sent_by ? ` · ${order.shopped_email_sent_by}` : ''}`}
+                                className="text-brand-navy"><MailCheck className="w-3.5 h-3.5" /></span>
+                            ) : null}
+                          </div>
                         </td>
                         <td className="px-4 py-3.5">
                           <p className="text-sm font-semibold text-brand-navy truncate max-w-[160px]">{order.company_name}</p>
@@ -514,12 +529,12 @@ function OrdersContent() {
                             >
                               <Download className="w-4 h-4" />
                             </button>
-                            {isOwner && (
+                            {canDeleteOrder(order.order_number) && (
                               <button
                                 onClick={() => deleteOrder(order.id, order.order_number)}
                                 disabled={deletingId === order.id}
                                 className="p-1.5 text-gray-400 hover:text-red-500 transition-colors disabled:opacity-50"
-                                title="Delete Order"
+                                title={order.order_number.startsWith('IMP-') ? 'Remove imported order' : 'Delete Order'}
                               >
                                 {deletingId === order.id
                                   ? <Loader2 className="w-4 h-4 animate-spin" />
@@ -574,6 +589,7 @@ function OrdersContent() {
             onRefresh={fetchOrders}
             canEdit={canEditOrders}
             isOwner={isOwner}
+            canDelete={canDeleteOrder(selectedOrder.order_number)}
             deleting={deletingId === selectedOrder.id}
             onDelete={() => deleteOrder(selectedOrder.id, selectedOrder.order_number)}
           />

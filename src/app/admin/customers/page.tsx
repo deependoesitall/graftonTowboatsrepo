@@ -6,11 +6,12 @@ import { useRouter } from 'next/navigation';
 import {
   Lock, RefreshCw, FileText, ChevronDown, ChevronRight, RotateCcw,
   Search, Calendar, X, CheckCircle, AlertCircle, Loader2, Printer,
-  Ship, KeyRound, Users,
+  Ship, KeyRound, Users, Trash2, Pencil,
 } from 'lucide-react';
 import Link from 'next/link';
 import { vesselReportHtml } from '@/lib/vessel-report';
-import { fetchAdminSession, canAccess, adminFetch } from '@/lib/admin-auth';
+import { fetchAdminSession, canAccess, adminFetch, isGtsRole } from '@/lib/admin-auth';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { formatCurrency, formatDate, formatDateOnly } from '@/lib/utils';
 import { CustomerLoginsPanel } from '@/components/admin/CustomerLoginsPanel';
 
@@ -31,8 +32,10 @@ interface VesselOrder {
   status: string;
   created_at: string;
   customer_email: string | null;
+  vessel_email?: string | null;
   vessel_name: string | null;
   vessel_type: string | null;
+  terminal_name?: string | null;
   arrival_date: string | null;
   arrival_time: string | null;
   notes: string | null;
@@ -347,10 +350,33 @@ function getPresetRange(preset: PresetKey, customFrom?: string, customTo?: strin
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
+function isImportOrder(orderNumber: string) {
+  return String(orderNumber).startsWith('IMP-');
+}
+
 export default function CustomersPage() {
   const router = useRouter();
   const [denied, setDenied] = useState(false);
   const [ready, setReady] = useState(false);
+  const [canRemoveImport, setCanRemoveImport] = useState(false);
+  const [canRemoveAny, setCanRemoveAny] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const { confirm: confirmDialog, dialog: confirmDialogEl } = useConfirm();
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState('');
+  const [editOk, setEditOk] = useState('');
+  const [editFrom, setEditFrom] = useState({ company_name: '', vessel_name: '', phone: '' });
+  const [editIds, setEditIds] = useState<string[]>([]);
+  const [editForm, setEditForm] = useState({
+    company_name: '',
+    vessel_name: '',
+    contact_name: '',
+    phone: '',
+    terminal_name: '',
+    customer_email: '',
+    vessel_email: '',
+  });
 
   const [preset, setPreset] = useState<PresetKey>('all_time');
   const [customFrom, setCustomFrom] = useState('');
@@ -380,6 +406,8 @@ export default function CustomersPage() {
       const session = await fetchAdminSession();
       if (!session) { router.push('/admin'); return; }
       if (!canAccess(session.role, 'reports')) { setDenied(true); return; }
+      setCanRemoveAny(session.role === 'owner');
+      setCanRemoveImport(isGtsRole(session.role));
       setReady(true);
     })();
   }, [router]);
@@ -403,6 +431,97 @@ export default function CustomersPage() {
   // (house rule: no popup windows) with Print / Save as PDF.
   const [reportHtml, setReportHtml] = useState<string | null>(null);
   const reportFrameRef = useRef<HTMLIFrameElement>(null);
+
+  function startEdit(key: string, v: Vessel) {
+    const latest = v.orders[0];
+    setEditingKey(key);
+    setEditError('');
+    setEditOk('');
+    setEditFrom({
+      company_name: v.company_name,
+      vessel_name: latest?.vessel_name || '',
+      phone: v.phone || '',
+    });
+    setEditIds(v.orders.map(o => o.id));
+    setEditForm({
+      company_name: v.company_name,
+      vessel_name: latest?.vessel_name || '',
+      contact_name: v.contact_name || '',
+      phone: v.phone || '',
+      terminal_name: latest?.terminal_name || '',
+      customer_email: latest?.customer_email || '',
+      vessel_email: latest?.vessel_email || '',
+    });
+  }
+
+  async function saveEdit() {
+    setEditSaving(true);
+    setEditError('');
+    setEditOk('');
+    try {
+      const res = await adminFetch('/api/admin/vessel-header', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: editFrom, to: editForm, ids: editIds }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setEditError(json.error || 'Could not save those names.');
+        return;
+      }
+      setEditOk(`Updated ${json.updated} order${json.updated === 1 ? '' : 's'}. Next time this boat is picked, the spelling will be right.`);
+      setEditingKey(null);
+      fetchReport();
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
+  function canRemoveOrder(orderNumber: string) {
+    return canRemoveAny || (canRemoveImport && isImportOrder(orderNumber));
+  }
+
+  async function removeOrder(orderId: string, orderNumber: string) {
+    const imported = isImportOrder(orderNumber);
+    if (!(await confirmDialog({
+      title: imported
+        ? `Remove imported order ${orderNumber}?`
+        : `Permanently delete order ${orderNumber}?`,
+      message: imported
+        ? 'This was a staff import (no email was sent). It will drop off this boat’s history.'
+        : 'This cannot be undone.',
+      danger: true,
+    }))) return;
+    setDeletingId(orderId);
+    const res = await adminFetch(`/api/orders/${orderId}`, { method: 'DELETE' });
+    setDeletingId(null);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      await confirmDialog({
+        title: 'Could not remove that order',
+        message: j.error || 'Try again in a moment.',
+        actions: [{ id: 'ok', label: 'OK', variant: 'neutral' }],
+      });
+      return;
+    }
+    fetchReport();
+  }
+
+  async function removeImportedOnVessel(vessel: Vessel) {
+    const imports = vessel.orders.filter(o => isImportOrder(o.order_number));
+    if (!imports.length) return;
+    if (!(await confirmDialog({
+      title: `Remove ${imports.length} imported order${imports.length === 1 ? '' : 's'}?`,
+      message: `Deletes ${imports.map(o => o.order_number).join(', ')} from this boat’s history. Real GTS orders are left alone.`,
+      danger: true,
+    }))) return;
+    setDeletingId('bulk');
+    for (const o of imports) {
+      await adminFetch(`/api/orders/${o.id}`, { method: 'DELETE' });
+    }
+    setDeletingId(null);
+    fetchReport();
+  }
 
   function openVesselReport() {
     const rows = (data?.vessels || []).filter(v => v.orderCount > 0);
@@ -434,6 +553,7 @@ export default function CustomersPage() {
 
   return (
     <div className="space-y-6">
+      {confirmDialogEl}
       {repeatState && (
         <RepeatOrderModal
           state={repeatState}
@@ -594,20 +714,106 @@ export default function CustomersPage() {
                           </div>
                         </div>
 
+                        <div className="bg-white rounded-xl border border-gray-100 p-4 mb-4">
+                          <div className="flex items-center justify-between gap-3 mb-3">
+                            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wide">Boat details</h3>
+                            {editingKey !== key && (
+                              <button type="button" onClick={() => startEdit(key, v)}
+                                className="text-[11px] font-bold uppercase tracking-wide text-brand-navy hover:text-brand-steel flex items-center gap-1">
+                                <Pencil className="w-3.5 h-3.5" /> Edit names
+                              </button>
+                            )}
+                          </div>
+                          {editOk && editingKey !== key && (
+                            <p className="text-xs text-emerald-700 mb-2">{editOk}</p>
+                          )}
+                          {editingKey === key ? (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              {([
+                                ['company_name', 'Company'],
+                                ['vessel_name', 'Boat'],
+                                ['contact_name', 'Contact'],
+                                ['phone', 'Phone'],
+                                ['terminal_name', 'Terminal / location'],
+                                ['vessel_email', 'Vessel email'],
+                                ['customer_email', 'Billing / confirmation email'],
+                              ] as const).map(([field, label]) => (
+                                <label key={field} className={`text-xs font-semibold text-gray-500 ${field.includes('email') || field === 'terminal_name' ? 'sm:col-span-2' : ''}`}>
+                                  {label}
+                                  <input
+                                    className="input-base mt-1 text-sm font-normal text-brand-navy"
+                                    value={editForm[field]}
+                                    onChange={e => setEditForm(f => ({ ...f, [field]: e.target.value }))}
+                                  />
+                                </label>
+                              ))}
+                              {editError && <p className="sm:col-span-2 text-sm text-red-600">{editError}</p>}
+                              <p className="sm:col-span-2 text-[11px] text-gray-400">
+                                Saves spelling on this boat’s past orders so Build an order picks up the corrected names next time.
+                              </p>
+                              <div className="sm:col-span-2 flex gap-2">
+                                <button type="button" className="btn-primary text-sm px-3 py-1.5 flex items-center gap-1.5" disabled={editSaving} onClick={saveEdit}>
+                                  {editSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save spelling'}
+                                </button>
+                                <button type="button" className="btn-outline text-sm px-3 py-1.5" disabled={editSaving}
+                                  onClick={() => { setEditingKey(null); setEditError(''); }}>
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
+                              <div><dt className="text-xs text-gray-400">Company</dt><dd className="font-medium text-brand-navy">{v.company_name}</dd></div>
+                              <div><dt className="text-xs text-gray-400">Boat</dt><dd className="font-medium text-brand-navy">{v.orders[0]?.vessel_name || '—'}</dd></div>
+                              <div><dt className="text-xs text-gray-400">Contact</dt><dd className="font-medium text-brand-navy">{v.contact_name || '—'}</dd></div>
+                              <div><dt className="text-xs text-gray-400">Phone</dt><dd className="font-medium text-brand-navy">{v.phone || '—'}</dd></div>
+                              <div className="sm:col-span-2">
+                                <dt className="text-xs text-gray-400">Terminal / location</dt>
+                                <dd className="font-medium text-brand-navy">{v.orders[0]?.terminal_name || '—'}</dd>
+                              </div>
+                              <div className="sm:col-span-2">
+                                <dt className="text-xs text-gray-400">Confirmation email</dt>
+                                <dd className="font-medium text-brand-navy">{v.orders[0]?.vessel_email || v.orders[0]?.customer_email || '—'}</dd>
+                              </div>
+                            </dl>
+                          )}
+                        </div>
+
                         <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                          <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wide px-4 py-3 border-b border-gray-100">
-                            Past Orders ({v.orders.length})
-                          </h3>
+                          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-3">
+                            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wide">
+                              Past Orders ({v.orders.length})
+                            </h3>
+                            {canRemoveImport && v.orders.some(o => isImportOrder(o.order_number)) && (
+                              <button
+                                type="button"
+                                onClick={() => removeImportedOnVessel(v)}
+                                disabled={deletingId === 'bulk'}
+                                className="text-[11px] font-bold uppercase tracking-wide text-red-600 hover:text-red-700 disabled:opacity-40 flex items-center gap-1">
+                                {deletingId === 'bulk'
+                                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  : <Trash2 className="w-3.5 h-3.5" />}
+                                Remove imports
+                              </button>
+                            )}
+                          </div>
                           <div className="divide-y divide-gray-100">
                             {v.orders.slice(0, 20).map(o => (
                               <div key={o.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
                                 <div className="min-w-0">
-                                  <p className="font-mono text-xs font-bold text-brand-navy">{o.order_number}</p>
+                                  <p className="font-mono text-xs font-bold text-brand-navy">
+                                    {o.order_number}
+                                    {isImportOrder(o.order_number) && (
+                                      <span className="ml-2 text-[10px] font-bold uppercase tracking-wider text-amber-800 bg-amber-100 rounded px-1.5 py-0.5">
+                                        Import
+                                      </span>
+                                    )}
+                                  </p>
                                   <p className="text-xs text-gray-400">
                                     {formatDate(o.created_at)} · {o.items.filter(i => i.item_type !== 'service').length} items
                                   </p>
                                 </div>
-                                <div className="flex items-center gap-3 shrink-0">
+                                <div className="flex items-center gap-2 shrink-0">
                                   <span className="font-bold text-sm text-brand-navy">{formatCurrency(o.subtotal)}</span>
                                   <button
                                     onClick={() => setRepeatState({ vessel: v, order: o })}
@@ -615,6 +821,19 @@ export default function CustomersPage() {
                                     className="flex items-center gap-1.5 bg-brand-orange text-white text-xs font-bold uppercase tracking-wide px-3 py-1.5 rounded-full hover:bg-brand-ored transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                                     <RotateCcw className="w-3.5 h-3.5" /> Repeat
                                   </button>
+                                  {canRemoveOrder(o.order_number) && (
+                                    <button
+                                      type="button"
+                                      onClick={() => removeOrder(o.id, o.order_number)}
+                                      disabled={deletingId === o.id || deletingId === 'bulk'}
+                                      title={isImportOrder(o.order_number) ? 'Remove this import' : 'Delete this order'}
+                                      className="p-1.5 text-gray-400 hover:text-red-600 disabled:opacity-40"
+                                    >
+                                      {deletingId === o.id
+                                        ? <Loader2 className="w-4 h-4 animate-spin" />
+                                        : <Trash2 className="w-4 h-4" />}
+                                    </button>
+                                  )}
                                 </div>
                               </div>
                             ))}

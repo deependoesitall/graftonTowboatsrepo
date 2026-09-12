@@ -11,8 +11,10 @@ interface OrderRow {
   contact_name: string;
   phone: string;
   customer_email: string | null;
+  vessel_email: string | null;
   vessel_name: string | null;
   vessel_type: string | null;
+  terminal_name: string | null;
   arrival_date: string | null;
   arrival_time: string | null;
   notes: string | null;
@@ -43,7 +45,7 @@ export async function GET(req: NextRequest) {
 
   let query = supabase
     .from('orders')
-    .select('id, order_number, company_name, contact_name, phone, customer_email, vessel_name, vessel_type, arrival_date, arrival_time, notes, eta, subtotal, status, created_at, items:order_items(product_id, description, category, quantity, unit_price, line_total, item_type)')
+    .select('id, order_number, company_name, contact_name, phone, customer_email, vessel_email, vessel_name, vessel_type, terminal_name, arrival_date, arrival_time, notes, eta, subtotal, status, created_at, items:order_items(product_id, description, category, quantity, unit_price, line_total, item_type)')
     .order('created_at', { ascending: true });
 
   if (from) query = query.gte('created_at', from);
@@ -146,6 +148,15 @@ export async function GET(req: NextRequest) {
     orders: v.orders.map(o => ({
       id: o.id, order_number: o.order_number, subtotal: o.subtotal,
       status: o.status, created_at: o.created_at,
+      customer_email: o.customer_email,
+      vessel_email: o.vessel_email,
+      vessel_name: o.vessel_name,
+      vessel_type: o.vessel_type,
+      terminal_name: o.terminal_name,
+      arrival_date: o.arrival_date,
+      arrival_time: o.arrival_time,
+      notes: o.notes,
+      eta: o.eta,
       items: o.items,
     })).sort((a, b) => b.created_at.localeCompare(a.created_at)),
   })).sort((a, b) => b.totalSpent - a.totalSpent);

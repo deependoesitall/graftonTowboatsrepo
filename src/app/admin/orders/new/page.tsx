@@ -43,7 +43,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Search, Loader2, Check, X, Plus, Minus, ClipboardPaste, RotateCcw,
-  Keyboard, ListOrdered, ChevronRight, AlertCircle, Ship, Camera, FileUp,
+  Keyboard, ListOrdered, ChevronRight, AlertCircle, Ship, Camera, FileUp, Mail,
 } from 'lucide-react';
 import { adminFetch, fetchAdminSession } from '@/lib/admin-auth';
 import { formatCurrency } from '@/lib/utils';
@@ -218,6 +218,8 @@ export default function NewOrderPage() {
   }, []);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
+  /** Paper transcription default: do not email the boat unless staff opts in. */
+  const [sendConfirmation, setSendConfirmation] = useState(false);
 
   const [header, setHeader] = useState<HeaderState>({
     vessel_name: '', company_name: '', vessel_type: '',
@@ -430,6 +432,36 @@ export default function NewOrderPage() {
     });
   }, [catalogIds]);
 
+  const handleRepeatApply = useCallback((lines: ApplyLine[], applyMode: 'replace' | 'add', carried: Array<{
+    description: string; qty: number; price: number;
+    paid_by?: 'vessel' | 'deck' | 'cod'; cod_name?: string;
+  }>) => {
+    if (applyMode === 'replace') {
+      setQty({});
+      setLinePay({});
+      setExtraById({});
+      setCustomLines(carried.map(c => ({
+        description: c.description,
+        qty: c.qty,
+        price: c.price,
+        paid_by: c.paid_by === 'cod' ? ('cod' as const) : ('vessel' as const),
+        cod_name: c.cod_name,
+      })));
+    } else if (carried.length) {
+      setCustomLines(prev => [...prev, ...carried.map(c => ({
+        description: c.description,
+        qty: c.qty,
+        price: c.price,
+        paid_by: c.paid_by === 'cod' ? ('cod' as const) : ('vessel' as const),
+        cod_name: c.cod_name,
+      }))]);
+    }
+    applyLines(lines);
+    setRepeatMissing(carried.map(c => `${c.qty} × ${c.description}`));
+    setMode('sheet');
+    setStep('what');
+  }, [applyLines]);
+
   const bump = useCallback((id: string, by: number, step: number) => {
     setQty(prev => {
       const cur = prev[id] || 0;
@@ -480,8 +512,8 @@ export default function NewOrderPage() {
       setStep('who');
       return;
     }
-    if (!header.vessel_email.trim() && !header.billing_email.trim()) {
-      setSubmitError('An email address is needed so the boat gets its confirmation.');
+    if (sendConfirmation && !header.vessel_email.trim() && !header.billing_email.trim()) {
+      setSubmitError('Add a vessel email, or uncheck “Send confirmation email” if the boat should not be notified.');
       setStep('who');
       return;
     }
@@ -571,6 +603,7 @@ export default function NewOrderPage() {
           paid_by: (c.paid_by === 'cod' ? 'cod' : 'vessel') as 'vessel' | 'cod',
           cod_name: c.paid_by === 'cod' ? (c.cod_name || '') : '',
         }))],
+        send_confirmation_email: sendConfirmation,
         // Paper forms rarely name Venmo/Cash App. Cash is the honest default
         // so attribution is not lost; staff can edit the order after place.
         cod_payments: (() => {
@@ -595,7 +628,7 @@ export default function NewOrderPage() {
         })(),
       };
 
-      const res = await fetch('/api/orders', {
+      const res = await adminFetch('/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -661,6 +694,8 @@ export default function NewOrderPage() {
           vessels={vessels} terminals={terminals}
           applyVessel={applyVessel}
           onNext={() => setStep('what')}
+          catalogIds={catalogIds}
+          onRepeatApply={handleRepeatApply}
         />
       )}
 
@@ -732,26 +767,7 @@ export default function NewOrderPage() {
                 vesselName={header.vessel_name}
                 companyName={header.company_name}
                 catalogIds={catalogIds}
-                onApply={(lines, applyMode, carried) => {
-                  // REPLACE clears the catalog lines only. Custom lines and
-                  // anything scanned in stay: they were added by hand for THIS
-                  // order and a repeat has no opinion about them.
-                  if (applyMode === 'replace') { setQty({}); setLinePay({}); setExtraById({}); }
-                  applyLines(lines);
-                  // A line whose product has left the printed form is still a
-                  // thing the boat ordered. It comes across as a write-in with
-                  // its old description and price rather than vanishing.
-                  if (carried.length) {
-                    setCustomLines(prev => [...prev, ...carried.map(c => ({
-                      description: c.description,
-                      qty: c.qty,
-                      price: c.price,
-                      paid_by: c.paid_by === 'cod' ? ('cod' as const) : ('vessel' as const),
-                      cod_name: c.cod_name,
-                    }))]);
-                  }
-                  setRepeatMissing(carried.map(c => `${c.qty} × ${c.description}`));
-                }}
+                onApply={handleRepeatApply}
               />
             </div>
           )}
@@ -769,6 +785,8 @@ export default function NewOrderPage() {
           error={submitError} submitting={submitting}
           onSubmit={submit}
           onBack={() => setStep('what')}
+          sendConfirmation={sendConfirmation}
+          setSendConfirmation={setSendConfirmation}
         />
       )}
 
@@ -856,13 +874,19 @@ function ModeTabs({ mode, setMode, onRegisterTape }: {
 
 /* ── who ── */
 
-function WhoStep({ header, setHeader, vessels, terminals, applyVessel, onNext }: {
+function WhoStep({ header, setHeader, vessels, terminals, applyVessel, onNext, catalogIds, onRepeatApply }: {
   header: HeaderState;
   setHeader: React.Dispatch<React.SetStateAction<HeaderState>>;
   vessels: VesselHeader[];
   terminals: string[];
   applyVessel: (v: VesselHeader) => void;
   onNext: () => void;
+  catalogIds: Set<string>;
+  onRepeatApply: (
+    lines: ApplyLine[],
+    mode: 'replace' | 'add',
+    carried: Array<{ description: string; qty: number; price: number; paid_by?: 'vessel' | 'deck' | 'cod'; cod_name?: string }>,
+  ) => void;
 }) {
   const [q, setQ] = useState('');
   // `vessels` is the opening list the page loaded with; `hits` replaces it once
@@ -952,7 +976,7 @@ function WhoStep({ header, setHeader, vessels, terminals, applyVessel, onNext }:
             <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 animate-spin text-gray-300" />
           )}
         </div>
-        {matches.length > 0 && (
+        {matches.length > 0 && (q.trim().length > 0 || !header.vessel_name.trim()) && (
           <div className="flex flex-col divide-y divide-gray-100 -mx-1">
             {matches.map(v => (
               <button
@@ -1014,8 +1038,8 @@ function WhoStep({ header, setHeader, vessels, terminals, applyVessel, onNext }:
         <Field label="Captain's phone" value={header.captain_phone} onChange={set('captain_phone')} />
         {/* Required by the order endpoint: the confirmation has to go
             somewhere, and on this side of the counter it is the boat's. */}
-        <Field label="Vessel email" required value={header.vessel_email} onChange={set('vessel_email')}
-               hint="Where the confirmation goes" />
+        <Field label="Vessel email" value={header.vessel_email} onChange={set('vessel_email')}
+               hint="Needed if you send a confirmation — optional if the boat should not be emailed" />
         <Field label="Billing email" value={header.billing_email} onChange={set('billing_email')}
                hint="Optional — the office, if different" />
         <Field label="Ordered by" value={header.contact_name} onChange={set('contact_name')}
@@ -1052,6 +1076,23 @@ function WhoStep({ header, setHeader, vessels, terminals, applyVessel, onNext }:
                     placeholder="Anything written on the sheet that doesn't fit a field" />
         </div>
       </section>
+
+      {header.vessel_name.trim().length >= 2 && (
+        <section className="space-y-3">
+          <div>
+            <h2 className="font-bold text-brand-navy text-sm">Past orders for {header.vessel_name}</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Send one again and the cart fills so you can edit it — faster than building from scratch.
+            </p>
+          </div>
+          <RepeatOrderPicker
+            vesselName={header.vessel_name}
+            companyName={header.company_name}
+            catalogIds={catalogIds}
+            onApply={onRepeatApply}
+          />
+        </section>
+      )}
 
       <button onClick={onNext} className="btn-primary w-full sm:w-auto px-5 py-2.5 flex items-center justify-center gap-1.5">
         Add the items <ChevronRight className="w-4 h-4" />
@@ -1429,7 +1470,7 @@ function PasteMode({ items, byUpc, setLine }: {
 /* ── review ── */
 
 function ReviewStep({ header, chosen, qty, setLine, total, error, submitting, onSubmit, onBack,
-                     customLines, removeCustomLine, linePay }: {
+                     customLines, removeCustomLine, linePay, sendConfirmation, setSendConfirmation }: {
   customLines: CustomLine[];
   removeCustomLine: (index: number) => void;
   linePay: Record<string, { paid_by: 'vessel' | 'deck' | 'cod'; cod_name: string }>;
@@ -1442,6 +1483,8 @@ function ReviewStep({ header, chosen, qty, setLine, total, error, submitting, on
   submitting: boolean;
   onSubmit: () => void;
   onBack: () => void;
+  sendConfirmation: boolean;
+  setSendConfirmation: (v: boolean) => void;
 }) {
   return (
     <div className="space-y-5">
@@ -1457,7 +1500,9 @@ function ReviewStep({ header, chosen, qty, setLine, total, error, submitting, on
             .filter(Boolean).join(' · ') || 'No delivery details yet'}
         </p>
         <p className="text-xs text-gray-500 mt-1">
-          Confirmation to {header.vessel_email || header.billing_email || <span className="text-red-600">nobody — add an email</span>}
+          {sendConfirmation
+            ? <>Confirmation to {header.vessel_email || header.billing_email || <span className="text-red-600">nobody — add an email</span>}</>
+            : 'No confirmation email will be sent to the boat'}
         </p>
       </section>
 
@@ -1543,6 +1588,30 @@ function ReviewStep({ header, chosen, qty, setLine, total, error, submitting, on
         actually gets billed.
       </p>
 
+      <label className="card-base p-4 flex items-start gap-3 cursor-pointer">
+        <input
+          type="checkbox"
+          className="mt-1 w-4 h-4 rounded border-gray-300 text-brand-navy"
+          checked={sendConfirmation}
+          onChange={e => setSendConfirmation(e.target.checked)}
+        />
+        <span className="min-w-0">
+          <span className="flex items-center gap-1.5 text-sm font-semibold text-brand-navy">
+            <Mail className="w-4 h-4 shrink-0" />
+            Send confirmation email to the boat
+          </span>
+          <span className="block text-xs text-gray-500 mt-0.5 leading-relaxed">
+            Off by default for paper orders — a surprise “new order” email confuses a cook who already sent the sheet.
+            Staff alerts still fire either way. You can send this later from the order if you change your mind.
+          </span>
+          {sendConfirmation && (
+            <span className="block text-xs text-brand-navy mt-1">
+              Will go to {header.vessel_email || header.billing_email || '— add a vessel email on the Boat step'}
+            </span>
+          )}
+        </span>
+      </label>
+
       {error && (
         <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 flex gap-2">
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /> {error}
@@ -1558,8 +1627,8 @@ function ReviewStep({ header, chosen, qty, setLine, total, error, submitting, on
         </button>
       </div>
       <p className="text-xs text-gray-400">
-        This goes through exactly like an order the boat placed itself — the same confirmation
-        email to the vessel, the same alerts to GTS and Sinclair's.
+        The order still lands in the queue, the pick list, and the deliveries ledger.
+        {sendConfirmation ? ' The boat will also get a confirmation email.' : ' The boat will not get an email unless you send one later.'}
       </p>
     </div>
   );

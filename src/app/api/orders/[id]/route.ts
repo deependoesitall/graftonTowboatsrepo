@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin, isGtsRole } from '@/lib/admin-auth-server';
+import { hydrateOrderItemCatalog } from '@/lib/order-item-catalog';
 
 export async function GET(
   req: NextRequest,
@@ -21,25 +22,9 @@ export async function GET(
   }
 
   // Backfill missing item locations AND images from the CURRENT catalog
-  // (display only — not persisted). Orders placed before the location/image
-  // snapshots still get aisle grouping and product photos in shopping mode.
-  const items = (data.items || []) as Array<{ product_id: string | null; location: string | null; location_seq: number | null; image_url: string | null }>;
-  const missing = items.filter(i => i.product_id && (!i.location || i.location_seq == null || !i.image_url));
-  if (missing.length > 0) {
-    const ids = Array.from(new Set(missing.map(i => i.product_id))) as string[];
-    const { data: prods } = await supabase
-      .from('products')
-      .select('id, location, location_seq, image_url')
-      .in('id', ids);
-    const locMap = new Map((prods || []).map((p: { id: string; location: string | null; location_seq: number | null; image_url: string | null }) => [p.id, p]));
-    for (const item of missing) {
-      const p = item.product_id ? locMap.get(item.product_id) : undefined;
-      if (!p) continue;
-      if (!item.location && p.location) item.location = p.location;
-      if (item.location_seq == null && p.location_seq != null) item.location_seq = p.location_seq;
-      if (!item.image_url && p.image_url) item.image_url = p.image_url;
-    }
-  }
+  // (display only — not persisted). Register-tape imports often snapshot UPC
+  // without a photo; the editor and shopping mode both read this.
+  await hydrateOrderItemCatalog(supabase, data.items || []);
 
   return NextResponse.json(data);
 }
@@ -142,19 +127,37 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = requireAdmin(req, { ownerOnly: true });
+  const session = requireAdmin(req);
   if (session instanceof NextResponse) return session;
   const role = session.role;
 
   const { id } = await params;
   const supabase = createServiceClient();
 
-
   const { data: existing } = await supabase
     .from('orders')
     .select('order_number, status, company_name, contact_name, phone, po_number')
     .eq('id', id)
     .single();
+
+  if (!existing) {
+    return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+  }
+
+  // IMP-* is the register-tape / staff-import prefix — no email, no customer
+  // facing. GTS staff need to wipe test imports after a training pass.
+  // Real GTS-* orders stay owner-only so a shopper cannot erase a live ticket.
+  const isImport = String(existing.order_number || '').startsWith('IMP-');
+  if (isImport) {
+    if (!isGtsRole(role)) {
+      return NextResponse.json(
+        { error: 'Only Grafton Towboat staff can remove imported orders.' },
+        { status: 403 },
+      );
+    }
+  } else if (role !== 'owner') {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
 
   const { error } = await supabase.from('orders').delete().eq('id', id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

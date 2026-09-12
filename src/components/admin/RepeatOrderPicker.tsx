@@ -58,6 +58,8 @@ export interface RepeatApplyLine {
    *  Mary Karen's invoice without telling anyone. */
   paid_by?: 'vessel' | 'deck' | 'cod';
   cod_name?: string;
+  description?: string;
+  price?: number;
 }
 
 /** A line whose product has left the printed form — carried, not discarded. */
@@ -90,7 +92,7 @@ function daysAgo(iso: string): string {
   return m === 1 ? 'a month ago' : `${m} months ago`;
 }
 
-export function RepeatOrderPicker({ vesselName, companyName, catalogIds, onApply }: {
+export function RepeatOrderPicker({ vesselName, companyName, catalogIds: _catalogIds, onApply }: {
   vesselName: string;
   companyName: string;
   /** Product ids currently on the order form, so gone items can be named. */
@@ -165,12 +167,10 @@ export function RepeatOrderPicker({ vesselName, companyName, catalogIds, onApply
             for (const l of o.lines) {
               const pay: 'vessel' | 'deck' | 'cod' =
                 l.paid_by === 'cod' ? 'cod' : l.paid_by === 'deck' ? 'deck' : 'vessel';
-              // A product that has left the printed order form has no id the
-              // builder can hang a quantity on — but the boat still ordered it.
-              // It crosses over as a write-in carrying its old description and
-              // price, rather than disappearing. A cook noticing his coffee
-              // never arrived is a worse way to find out.
-              if (!l.product_id || !catalogIds.has(l.product_id)) {
+              // No catalog id → write-in. A real product_id, even if it is not
+              // on the paper form (register-tape / full-store), goes through
+              // applyLines with description+price so the draft actually shows it.
+              if (!l.product_id) {
                 carried.push({
                   description: l.description,
                   qty: l.quantity,
@@ -185,6 +185,8 @@ export function RepeatOrderPicker({ vesselName, companyName, catalogIds, onApply
                 qty: l.quantity,
                 paid_by: pay,
                 cod_name: pay === 'cod' ? (l.cod_name || undefined) : undefined,
+                description: l.description,
+                price: l.unit_price,
               });
             }
             onApply(lines, mode, carried);

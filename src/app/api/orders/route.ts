@@ -24,7 +24,8 @@ import { fetchActiveDeals, computeDiscounts } from '@/lib/sinclair-offers';
 import { sendOrderReceivedEmail } from '@/lib/email';
 import { sendOrderPush } from '@/lib/push';
 import { Order } from '@/types';
-import { requireAdmin, isSinclairScoped } from '@/lib/admin-auth-server';
+import { requireAdmin, isSinclairScoped, getAdminSession } from '@/lib/admin-auth-server';
+import { hydrateOrderItemCatalog } from '@/lib/order-item-catalog';
 import { z } from 'zod';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -155,6 +156,12 @@ const submitSchema = z.object({
     phone: z.string().max(40).optional().default(''),
     contact_time: z.string().max(80).optional().default(''),
   })).optional().default([]),
+  /**
+   * Staff Build-an-order only. The public storefront never sends this, so
+   * confirmation always goes out for a boat that placed it themselves.
+   * `false` is honored only when the request carries a valid admin session.
+   */
+  send_confirmation_email: z.boolean().optional(),
 }).refine(data => {
   const hasItems = data.items.length > 0;
   const hasSvc = data.services?.parts_pickup?.enabled
@@ -202,10 +209,13 @@ const submitSchema = z.object({
   if (data.cod_payments.length === 0) return true;
   return data.cod_payments.every(p => p.method !== 'credit_card' || !!p.phone.trim());
 }, { message: 'Please add a phone number for each person paying by card.' })
-// We need SOME email to send the order confirmation to — vessel email is the
-// primary (required in the UI); billing email alone still passes for legacy carts.
-.refine(data => !!data.vessel.vessel_email?.trim() || !!data.vessel.email?.trim(),
-  { message: 'Please add the vessel email address so we can send the order confirmation.' });
+// We need SOME email to send the order confirmation to — unless staff
+// explicitly skipped it (paper transcription). Billing email alone still
+// passes for legacy carts.
+.refine(data => {
+  if (data.send_confirmation_email === false) return true;
+  return !!data.vessel.vessel_email?.trim() || !!data.vessel.email?.trim();
+}, { message: 'Please add the vessel email address so we can send the order confirmation.' });
 
 export async function POST(req: NextRequest) {
   try {
@@ -215,8 +225,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid order data', details: parsed.error.issues }, { status: 400 });
     }
 
-    const { vessel, items, services, cod_payments: codPayments } = parsed.data;
+    const { vessel, items, services, cod_payments: codPayments, send_confirmation_email } = parsed.data;
     const supabase = createServiceClient();
+    const adminSession = getAdminSession(req);
+    // Only a signed-in staff member can skip the boat confirmation. A public
+    // client sending send_confirmation_email:false is ignored.
+    const skipBoatEmail = !!adminSession && send_confirmation_email === false;
 
     // NO ORDER CUTOFF. There used to be a manager-configured buffer that
     // rejected orders placed too close to the vessel's ETA. Removed: a towboat's
@@ -563,6 +577,18 @@ export async function POST(req: NextRequest) {
     let debugEnabled = false;
 
     if (fullOrder) {
+      const staffLabel = adminSession
+        ? (adminSession.display_name || adminSession.username)
+        : 'customer storefront';
+
+      if (skipBoatEmail) {
+        const { error: stampErr } = await supabase.from('orders').update({
+          confirmation_email_sent_at: null,
+          confirmation_email_sent_by: `skipped — ${staffLabel}`,
+        }).eq('id', order.id);
+        if (stampErr) console.error('confirmation skip stamp:', stampErr);
+        emailDebug = { ok: true, to: 'skipped' };
+      } else {
       try {
         const { data: s } = await supabase
           .from('admin_settings')
@@ -582,10 +608,16 @@ export async function POST(req: NextRequest) {
           },
         });
         emailDebug = { ok: true, to: s?.business_email, id: (result as { data?: { id?: string } })?.data?.id };
+        const { error: stampErr } = await supabase.from('orders').update({
+          confirmation_email_sent_at: new Date().toISOString(),
+          confirmation_email_sent_by: staffLabel,
+        }).eq('id', order.id);
+        if (stampErr) console.error('confirmation sent stamp:', stampErr);
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         console.error('Email error:', err);
         emailDebug = { ok: false, error: message };
+      }
       }
 
       // WEB PUSH — staff only, and strictly additive to the email above.
@@ -698,6 +730,9 @@ export async function GET(req: NextRequest) {
   ]);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  const allItems = (data || []).flatMap((o: { items?: unknown[] }) => o.items || []);
+  await hydrateOrderItemCatalog(supabase, allItems);
 
   const status_counts: Record<string, number> = { new: 0, in_progress: 0, fulfilled: 0, cancelled: 0 };
   (statusRows || []).forEach((r: { status: string }) => {
