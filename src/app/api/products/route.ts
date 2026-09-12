@@ -32,10 +32,68 @@ export async function GET(req: NextRequest) {
 
   let query = supabase
     .from(source)
-    .select('*', { count: 'exact' })
-    // Paper order-form sequence first (barges shop the form top to bottom);
-    // items not on the form sort after, alphabetically.
-    .order('form_seq', { ascending: true, nullsFirst: false });
+    .select('*', { count: 'exact' });
+
+  // Public catalog only shows active + available products; admin sees all
+  if (!isAdmin) {
+    query = query.eq('is_active', true).eq('is_available', true);
+  }
+
+  // Scope filters FIRST so search cannot wipe them. PostgREST `.or()` for
+  // name/UPC search used to be applied as a sibling of store_only/category
+  // and would return full-store cheese while "Barge Order Form" was selected.
+  const store = searchParams.get('store') || '';
+  const andParts: string[] = [];
+  if (store === 'barge') andParts.push('store_only.eq.false');
+  else if (store === 'store') andParts.push('store_only.eq.true');
+  if (category && category !== 'All') {
+    const cat = category.replace(/"/g, '');
+    andParts.push(/[^A-Za-z0-9 ]/.test(cat) ? `category.eq."${cat}"` : `category.eq.${cat}`);
+  }
+
+  if (isAdmin) {
+    if (status === 'active') andParts.push('is_active.eq.true');
+    else if (status === 'inactive') andParts.push('is_active.eq.false');
+    else if (status === 'available') andParts.push('is_available.eq.true');
+    else if (status === 'unavailable') andParts.push('is_available.eq.false');
+    else if (status === 'no_image') {
+      andParts.push('is_active.eq.true');
+      andParts.push('image_url.is.null');
+    } else if (status === 'name_matched') {
+      andParts.push('image_source.eq.name_match');
+    }
+  }
+
+  const rawSearch = search.trim();
+  if (rawSearch) {
+    const safe = rawSearch.replace(/[%(),]/g, ' ').trim();
+    const digits = rawSearch.replace(/\D/g, '');
+    const name = `search_text.ilike.%${safe}%`;
+    const upcIlike = `upc.ilike.%${safe}%`;
+    const branches = [name, upcIlike];
+    if (digits.length >= 3) branches.push(`upc.eq.${digits}`);
+    if (andParts.length) {
+      query = query.or(branches.map(b => `and(${andParts.join(',')},${b})`).join(','));
+    } else {
+      query = query.or(branches.join(','));
+    }
+  } else {
+    if (store === 'barge') query = query.eq('store_only', false);
+    else if (store === 'store') query = query.eq('store_only', true);
+    if (category && category !== 'All') query = query.eq('category', category);
+    if (isAdmin) {
+      if (status === 'active') query = query.eq('is_active', true);
+      else if (status === 'inactive') query = query.eq('is_active', false);
+      else if (status === 'available') query = query.eq('is_available', true);
+      else if (status === 'unavailable') query = query.eq('is_available', false);
+      else if (status === 'no_image') query = query.eq('is_active', true).is('image_url', null);
+      else if (status === 'name_matched') query = query.eq('image_source', 'name_match');
+    }
+  }
+
+  // Paper order-form sequence first (barges shop the form top to bottom);
+  // items not on the form sort after, alphabetically.
+  query = query.order('form_seq', { ascending: true, nullsFirst: false });
 
   // AFTER form_seq, and that ordering matters more than it looks.
   //
@@ -52,36 +110,6 @@ export async function GET(req: NextRequest) {
     .order('category')
     .order('description')
     .range(offset, offset + perPage - 1);
-
-  // Public catalog only shows active + available products; admin sees all
-  if (!isAdmin) {
-    query = query.eq('is_active', true).eq('is_available', true);
-  }
-
-  if (search) {
-    // Admin search: use search_text (covers description + category + tags) OR UPC exact match
-    query = query.or(`search_text.ilike.%${search}%,upc.ilike.%${search}%`);
-  }
-  if (category && category !== 'All') query = query.eq('category', category);
-
-  // Barge order form vs full-store filter (Jen's notes): 'barge' = curated
-  // catalog only, 'store' = full-store imports only, absent = everything
-  // (admin browsing + substitution search draw from the whole store).
-  const store = searchParams.get('store') || '';
-  if (store === 'barge') query = query.eq('store_only', false);
-  else if (store === 'store') query = query.eq('store_only', true);
-
-  if (isAdmin) {
-    if (status === 'active') query = query.eq('is_active', true);
-    else if (status === 'inactive') query = query.eq('is_active', false);
-    else if (status === 'available') query = query.eq('is_available', true);
-    else if (status === 'unavailable') query = query.eq('is_available', false);
-    // Active listings with no photo — flags what needs a picture taken
-    // (UPC-less meat/deli cuts) vs what Sinclair's site simply has no image for.
-    else if (status === 'no_image') query = query.eq('is_active', true).is('image_url', null);
-    // Name-matched photos awaiting a human's confirmation (Find Photos results).
-    else if (status === 'name_matched') query = query.eq('image_source', 'name_match');
-  }
 
   const { data, count, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

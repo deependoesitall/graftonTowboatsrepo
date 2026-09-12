@@ -876,7 +876,7 @@ function AddProductRow({ onAdded }: {
   if (!open) {
     return (
       <tr>
-        <td colSpan={10} className="px-3 py-2 border-b border-dashed border-gray-200">
+        <td colSpan={11} className="px-3 py-2 border-b border-dashed border-gray-200">
           <button onClick={() => setOpen(true)}
             className="flex items-center gap-2 text-sm text-brand-river hover:text-brand-navy font-medium transition-colors w-full py-1">
             <Plus className="w-4 h-4" /> Add new product
@@ -921,6 +921,7 @@ function AddProductRow({ onAdded }: {
           <TagEditor tags={form.tags} onChange={tags => setForm(f => ({ ...f, tags }))} />
         </div>
       </td>
+      <td className="px-2 py-2 text-xs text-gray-400 font-mono">—</td>
       <td className="px-2 py-2">
         <input className="input-base text-xs py-1.5 w-24" placeholder="e.g. 48 OZ"
           value={form.pkg_size} onChange={e => setForm(f => ({ ...f, pkg_size: e.target.value }))} />
@@ -1000,7 +1001,7 @@ function VariantGroupHeader({ siblings, onSaved }: {
 
   return (
     <tr className="bg-brand-sand/40 border-t-2 border-brand-gold/30">
-      <td colSpan={10} className="px-3 py-1.5">
+      <td colSpan={11} className="px-3 py-1.5">
         <div className="flex items-center gap-2 flex-wrap">
           <Layers className="w-3.5 h-3.5 text-brand-navy/50 shrink-0" />
           <span className="text-xs font-bold text-brand-navy uppercase tracking-wide">{baseName}</span>
@@ -1124,6 +1125,9 @@ function EditableRow({ product, siblings, selected, onSelect, onSaved, onToggleA
             <TagEditor tags={form.tags} onChange={tags => setForm(f => ({ ...f, tags }))} />
           </div>
         </td>
+        <td className="px-3 py-2 font-mono text-xs text-gray-600 whitespace-nowrap">
+          {product.upc || '—'}
+        </td>
         <td className="px-3 py-2">
           <input className="input-base text-xs py-1 w-24" value={form.pkg_size}
             onChange={e => setForm(f => ({ ...f, pkg_size: e.target.value }))} />
@@ -1240,6 +1244,9 @@ function EditableRow({ product, siblings, selected, onSelect, onSaved, onToggleA
           ))}
         </div>
       </td>
+      <td className="px-3 py-2.5 font-mono text-xs text-gray-600 whitespace-nowrap" title={product.upc || 'No UPC'}>
+        {product.upc || '—'}
+      </td>
       <td className="px-3 py-2.5 text-xs text-gray-500">{product.pkg_size || '—'}</td>
       <td className="px-3 py-2.5 text-xs text-gray-500">{product.uom || '—'}</td>
       <td className="px-3 py-2.5 text-sm font-bold text-brand-navy">{formatCurrency(product.price)}</td>
@@ -1295,7 +1302,6 @@ export default function AdminProductsPage() {
   // Barge order form vs full-store filter (Jen's notes) — '' = both
   const [storeFilter, setStoreFilter] = useState('');
   const [page, setPage] = useState(1);
-  const searchRef = useRef<ReturnType<typeof setTimeout>>();
   const perPage = 50;
 
   // Selection state
@@ -1334,12 +1340,14 @@ export default function AdminProductsPage() {
     })();
   }, [router]);
 
-  const fetchProducts = useCallback(async (q = search, p = page, cat = category, st = status) => {
+  const fetchProducts = useCallback(async (
+    q = search, p = page, cat = category, st = status, store = storeFilter,
+  ) => {
     setLoading(true);
     const params = new URLSearchParams({ search: q, page: String(p), per_page: '50' });
     if (cat) params.set('category', cat);
     if (st) params.set('status', st);
-    if (storeFilter) params.set('store', storeFilter);
+    if (store) params.set('store', store);
     const res = await adminFetch(`/api/products?${params}`);
     if (res.ok) {
       const data = await res.json();
@@ -1352,12 +1360,12 @@ export default function AdminProductsPage() {
     setLoading(false);
   }, [search, page, category, status, storeFilter]);
 
-  useEffect(() => { fetchProducts(); }, [page, category, status, storeFilter]);
-
   useEffect(() => {
-    clearTimeout(searchRef.current);
-    searchRef.current = setTimeout(() => { setPage(1); fetchProducts(search, 1, category, status); }, 350);
-  }, [search]);
+    const t = setTimeout(() => {
+      fetchProducts(search, page, category, status, storeFilter);
+    }, search ? 300 : 0);
+    return () => clearTimeout(t);
+  }, [search, page, category, status, storeFilter, fetchProducts]);
 
   // Clear selection whenever the visible product list changes
   useEffect(() => { setSelected(new Set()); }, [products]);
@@ -1625,7 +1633,7 @@ export default function AdminProductsPage() {
             <div className="relative max-w-md flex-1 min-w-[220px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input type="search" placeholder="Search by name or UPC…" value={search}
-                onChange={e => setSearch(e.target.value)}
+                onChange={e => { setSearch(e.target.value); setPage(1); }}
                 className="input-base pl-9 text-sm w-full" />
             </div>
             <div className="flex items-center gap-2">
@@ -1740,7 +1748,7 @@ export default function AdminProductsPage() {
                         onChange={e => toggleSelectAll(e.target.checked)}
                         className="w-4 h-4 rounded border-gray-300" />
                     </th>
-                    {['Image', 'Category', 'Sub-Category', 'Description', 'Pack Size', 'UOM', 'Price', 'Stock', 'Actions'].map(h => (
+                    {['Image', 'Category', 'Sub-Category', 'Description', 'Item #', 'Pack Size', 'UOM', 'Price', 'Stock', 'Actions'].map(h => (
                       <th key={h} className="px-3 py-3 text-xs font-bold text-brand-sky uppercase tracking-wide whitespace-nowrap">
                         {h}
                       </th>
@@ -1799,6 +1807,9 @@ export default function AdminProductsPage() {
             <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
               <p className="text-xs text-gray-400">
                 Showing {((page - 1) * perPage) + 1}–{Math.min(page * perPage, total)} of {total.toLocaleString()}
+                {storeFilter === 'barge' ? ' barge order form' : storeFilter === 'store' ? ' full-store' : ''}
+                {category ? ` · ${category}` : ''}
+                {search.trim() ? ` · “${search.trim()}”` : ''}
               </p>
               <div className="flex items-center gap-2">
                 <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1}
