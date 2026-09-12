@@ -423,6 +423,14 @@ ${groceryItems.length > 0 ? `
           <td style="padding:7px 8px;font-size:11px;font-weight:900;color:#15803d;text-transform:uppercase;">After est. coupon savings (&minus;${formatCurrency(discountTotal)})</td>
           <td style="padding:7px 8px;text-align:right;font-size:14px;font-weight:900;color:#15803d;">${formatCurrency(Math.max(0, Number(order.subtotal) - discountTotal))}</td>
         </tr>` : ''}
+        ${Number(order.delivery_fee) > 0 ? `<tr>
+          <td style="padding:6px 8px;font-size:11px;color:#1E3D1E;font-weight:700;">GTS delivery${order.delivery_service_type ? ` — ${order.delivery_service_type}` : ''}</td>
+          <td style="padding:6px 8px;text-align:right;font-size:12px;font-weight:800;color:#1E3D1E;">${formatCurrency(Number(order.delivery_fee))}</td>
+        </tr>` : ''}
+        ${order.bill_for_groceries === true && order.register_total != null ? `<tr>
+          <td style="padding:6px 8px;font-size:11px;color:#1E3D1E;font-weight:700;">Sinclair&apos;s grocery (register)</td>
+          <td style="padding:6px 8px;text-align:right;font-size:12px;font-weight:800;color:#1E3D1E;">${formatCurrency(Number(order.register_total))}</td>
+        </tr>` : ''}
       </table>
     </td>
   </tr>

@@ -735,48 +735,44 @@ function PhotoReviewPanel({ onClose, onApplied }: { onClose: () => void; onAppli
             const pick = picks[p.id] || { keep: false, name: false };
             const strong = (p.proposed_score ?? 0) >= 0.8;
             return (
-              <div key={p.id} className={`flex items-center gap-4 border rounded-xl p-3 transition-colors ${
+              <div key={p.id} className={`flex flex-col sm:flex-row sm:items-center gap-3 border rounded-xl p-3 transition-colors ${
                 pick.keep ? 'border-brand-gold/40 bg-brand-sand/20' : 'border-gray-200 bg-gray-50 opacity-60'
               }`}>
-                <label className="flex flex-col items-center gap-0.5 shrink-0 cursor-pointer">
-                  <input type="checkbox" checked={pick.keep}
-                    onChange={e => setPicks(v => ({ ...v, [p.id]: { ...pick, keep: e.target.checked } }))}
-                    className="w-4 h-4 accent-brand-navy" />
-                  <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">Use&nbsp;photo</span>
-                </label>
-                <ZoomableThumb src={p.proposed_image_url} alt={p.proposed_name || ''} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-gray-400 truncate">
-                    <span className="font-mono">{p.description}</span>
-                    {p.pkg_size && <span className="ml-1.5">· {p.pkg_size}</span>}
-                    <span className="ml-1.5">· {formatCurrency(p.price)}</span>
-                  </p>
-                  <p className="text-sm font-semibold text-brand-navy truncate mt-0.5">{p.proposed_name}</p>
-                  <div className="flex items-center gap-1.5 mt-1">
-                    <span className="text-[10px] text-gray-400">{p.category}</span>
-                    <span className={`text-[10px] font-bold px-1.5 rounded-full border ${strong ? 'text-green-700 bg-green-50 border-green-200' : 'text-amber-700 bg-amber-50 border-amber-200'}`}>
-                      {Math.round((p.proposed_score ?? 0) * 100)}% match
-                    </span>
-                    {/* Sinclair's has no photo of their OWN listing for this item
-                        (loose produce, hand-cut meat), so this picture is from a
-                        different listing in the same department. Usually right —
-                        a lime looks like a lime — but the reviewer has to know,
-                        because a lime-JUICE photo scores nearly as high. */}
-                    {p.proposed_image_borrowed && (
-                      <span className="text-[10px] font-bold px-1.5 rounded-full border text-orange-700 bg-orange-50 border-orange-200"
-                        title="Sinclair's has no photo of this exact item — this picture is from a similar product in the same department. Check it matches before approving.">
-                        similar item&apos;s photo
+                <div className="flex items-center gap-3 min-w-0">
+                  <label className="flex flex-col items-center gap-0.5 shrink-0 cursor-pointer">
+                    <input type="checkbox" checked={pick.keep}
+                      onChange={e => setPicks(v => ({ ...v, [p.id]: { ...pick, keep: e.target.checked } }))}
+                      className="w-4 h-4 accent-brand-navy" />
+                    <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">Use&nbsp;photo</span>
+                  </label>
+                  <ZoomableThumb src={p.proposed_image_url} alt={p.proposed_name || ''} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-gray-400 truncate">
+                      <span className="font-mono">{p.description}</span>
+                      {p.pkg_size && <span className="ml-1.5">· {p.pkg_size}</span>}
+                    </p>
+                    <p className="text-sm font-semibold text-brand-navy leading-snug mt-0.5 break-words">{p.proposed_name}</p>
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                      <span className="text-[10px] text-gray-400">{p.category}</span>
+                      <span className={`text-[10px] font-bold px-1.5 rounded-full border shrink-0 ${strong ? 'text-green-700 bg-green-50 border-green-200' : 'text-amber-700 bg-amber-50 border-amber-200'}`}>
+                        {Math.round((p.proposed_score ?? 0) * 100)}% match
                       </span>
-                    )}
+                      {p.proposed_image_borrowed && (
+                        <span className="text-[10px] font-bold px-1.5 rounded-full border text-orange-700 bg-orange-50 border-orange-200"
+                          title="Sinclair's has no photo of this exact item — this picture is from a similar product in the same department. Check it matches before approving.">
+                          similar item&apos;s photo
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
-                <label className={`flex items-start gap-2 w-52 shrink-0 text-xs cursor-pointer ${pick.keep ? '' : 'pointer-events-none'}`}>
+                <label className={`flex items-start gap-2 sm:w-52 sm:shrink-0 text-xs cursor-pointer pt-2 sm:pt-0 border-t sm:border-t-0 border-gray-100 ${pick.keep ? '' : 'pointer-events-none'}`}>
                   <input type="checkbox" checked={pick.name}
                     onChange={e => setPicks(v => ({ ...v, [p.id]: { ...pick, name: e.target.checked } }))}
                     className="w-3.5 h-3.5 accent-brand-navy mt-0.5 shrink-0" />
                   <span className="min-w-0">
                     <span className="block text-gray-400">Also show as</span>
-                    <span className="block font-semibold text-brand-navy leading-tight">{p.proposed_details}</span>
+                    <span className="block font-semibold text-brand-navy leading-tight break-words">{p.proposed_details}</span>
                   </span>
                 </label>
               </div>
@@ -784,14 +780,16 @@ function PhotoReviewPanel({ onClose, onApplied }: { onClose: () => void; onAppli
           })}
         </div>
 
-        <div className="px-5 py-4 border-t border-gray-100 flex items-center gap-3 shrink-0">
-          <p className="text-xs text-gray-500 flex-1">{keptCount} to approve · {(proposals?.length || 0) - keptCount} to reject</p>
-          <button onClick={onClose} disabled={applying}
-            className="px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50">Cancel</button>
-          <button onClick={apply} disabled={applying || proposals === null || proposals.length === 0}
-            className="px-5 py-2.5 rounded-xl bg-brand-green text-white text-sm font-bold flex items-center gap-1.5 hover:bg-brand-gmed disabled:opacity-50">
-            {applying ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : <><Check className="w-4 h-4" /> Apply decisions</>}
-          </button>
+        <div className="px-5 py-4 border-t border-gray-100 flex flex-col-reverse sm:flex-row sm:items-center gap-3 shrink-0">
+          <p className="text-xs text-gray-500 sm:flex-1">{keptCount} to approve · {(proposals?.length || 0) - keptCount} to reject</p>
+          <div className="flex gap-2">
+            <button onClick={onClose} disabled={applying}
+              className="flex-1 sm:flex-none px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50">Cancel</button>
+            <button onClick={apply} disabled={applying || proposals === null || proposals.length === 0}
+              className="flex-1 sm:flex-none px-5 py-2.5 rounded-xl bg-brand-green text-white text-sm font-bold flex items-center justify-center gap-1.5 hover:bg-brand-gmed disabled:opacity-50">
+              {applying ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : <><Check className="w-4 h-4" /> Apply decisions</>}
+            </button>
+          </div>
         </div>
       </div>
     </div>,
@@ -1788,12 +1786,12 @@ export default function AdminProductsPage() {
           onClose={() => setShowPhotoReview(false)}
           onApplied={() => { fetchProducts(); loadPhotoReviewCount(); }} />
       )}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-6">
         <div>
           <h1 className="font-display text-2xl font-bold text-brand-navy">Product Catalog</h1>
           <p className="text-gray-400 text-sm">{total.toLocaleString()} products total</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <CatalogSyncStatus isOwner={sessionRole === 'owner'} />
           {photoReviewCount > 0 && (
             <button onClick={() => setShowPhotoReview(true)}

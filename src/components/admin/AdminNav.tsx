@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { LayoutDashboard, ShoppingBag, Settings, LogOut, Package, BarChart3, Users, Truck } from 'lucide-react';
+import { LayoutDashboard, ShoppingBag, Settings, LogOut, Package, BarChart3, Users, Truck, Menu, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAdminRole, getAdminName, logoutAdmin, canAccess, AdminRole } from '@/lib/admin-auth';
 
@@ -28,10 +28,12 @@ export function AdminNav() {
   // differ from the server's HTML (React hydration error #418 on every admin page).
   const [role, setRole] = useState<AdminRole | null>(null);
   const [name, setName] = useState<string>('');
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     setRole(getAdminRole());
     setName(getAdminName());
+    setMenuOpen(false);
   }, [path]);
 
   async function handleLogout() {
@@ -40,6 +42,10 @@ export function AdminNav() {
   }
 
   const visibleNav = NAV.filter(item => item.area === null || canAccess(role, item.area));
+  // GTS owner sees 7 destinations — icons eat the name on a phone. Sinclair's
+  // sees fewer, so the icon row can stay. Collapse only when it would clip
+  // the staff name Deepen asked to keep visible.
+  const collapseNav = visibleNav.length > 5;
 
   return (
     <header className="sticky top-0 z-30 shadow-md">
@@ -47,7 +53,7 @@ export function AdminNav() {
       <div className="h-1 bg-gts-gradient" />
 
       <div className="bg-brand-green text-white">
-        <div className="w-full max-w-none mx-auto px-4 lg:px-6 h-16 flex items-center justify-between gap-3 lg:gap-4">
+        <div className="w-full max-w-none mx-auto px-3 sm:px-4 lg:px-6 h-16 flex items-center justify-between gap-2 lg:gap-4">
           {/* Logo / title */}
           <Link href="/admin" className="flex items-center gap-3 shrink-0">
             {/* ⚠️ THE EMBLEM, NOT THE FULL LOGO. gts-logo.png carries the
@@ -73,9 +79,13 @@ export function AdminNav() {
             </div>
           </Link>
 
-          {/* Nav links */}
-          {/* Scroll only on narrow viewports; hide scrollbar chrome. Desktop: no tab scroller. */}
-          <nav className="flex items-center gap-1 min-w-0 flex-1 justify-center overflow-x-auto lg:overflow-visible [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+          {/* Nav links — icon row on desktop / Sinclair; hamburger on GTS phones */}
+          <nav className={cn(
+            'items-center gap-1 min-w-0 flex-1 justify-center',
+            collapseNav
+              ? 'hidden lg:flex'
+              : 'flex overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden',
+          )}>
             {visibleNav.map(({ href, label, icon: Icon }) => {
               const active = path === href || (href !== '/admin' && path.startsWith(href));
               return (
@@ -93,12 +103,12 @@ export function AdminNav() {
             })}
           </nav>
 
-          {/* Right side */}
-          <div className="flex items-center gap-3 shrink-0">
+          {/* Right side — name + role stay visible on a phone (Deepen, Sept 2026) */}
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             {role && (
-              <span className="hidden md:flex items-center gap-1.5 text-xs">
-                <span className="text-white/50">{name}</span>
-                <span className="bg-white/10 text-brand-yellow px-2 py-0.5 rounded-full font-bold uppercase tracking-wide text-[10px]">
+              <span className="flex items-center gap-1.5 text-xs min-w-0">
+                <span className="text-white/85 truncate max-w-[5.5rem] sm:max-w-[10rem]">{name}</span>
+                <span className="bg-white/10 text-brand-yellow px-1.5 sm:px-2 py-0.5 rounded-full font-bold uppercase tracking-wide text-[9px] sm:text-[10px] shrink-0">
                   {ROLE_LABELS[role]}
                 </span>
               </span>
@@ -107,12 +117,38 @@ export function AdminNav() {
               className="text-white/60 hover:text-white text-xs font-body transition-colors hidden md:block">
               View Store →
             </Link>
+            {collapseNav && (
+              <button type="button" onClick={() => setMenuOpen(o => !o)}
+                className="lg:hidden p-1.5 rounded hover:bg-white/10 text-white"
+                aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+                aria-expanded={menuOpen}>
+                {menuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+              </button>
+            )}
             <button onClick={handleLogout}
               className="flex items-center gap-1 text-white/60 hover:text-white text-xs font-body transition-colors p-1.5 rounded hover:bg-white/10">
               <LogOut className="w-4 h-4" />
             </button>
           </div>
         </div>
+
+        {collapseNav && menuOpen && (
+          <nav className="lg:hidden border-t border-white/10 px-3 py-2 grid grid-cols-2 gap-1">
+            {visibleNav.map(({ href, label, icon: Icon }) => {
+              const active = path === href || (href !== '/admin' && path.startsWith(href));
+              return (
+                <Link key={href} href={href}
+                  className={cn(
+                    'flex items-center gap-2 px-3 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wide',
+                    active ? 'bg-brand-yellow text-brand-green' : 'text-white/85 hover:bg-white/10'
+                  )}>
+                  <Icon className="w-4 h-4 shrink-0" />
+                  {label}
+                </Link>
+              );
+            })}
+          </nav>
+        )}
       </div>
     </header>
   );
