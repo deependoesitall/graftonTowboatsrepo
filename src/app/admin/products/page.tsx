@@ -446,6 +446,213 @@ function PhotoBackfillPanel({ onClose, onApplied }: {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// COPY STORE PHOTOS — barge POS names (LEMONS EACH) vs store listings that
+// already have a real photo. Instant, local, no Sinclair crawl.
+// ─────────────────────────────────────────────────────────────────────────────
+interface StorePhotoHit {
+  barge: { id: string; description: string; category: string; pkg_size: string | null; price: number; upc: string | null };
+  donor: { id: string; description: string; category: string; pkg_size: string | null; image_url: string; store_only: boolean };
+  how: 'upc' | 'name';
+  score: number;
+  autoCheck: boolean;
+}
+
+function CopyStorePhotosPanel({ onClose, onApplied }: { onClose: () => void; onApplied: () => void }) {
+  const [loading, setLoading] = useState(true);
+  const [applying, setApplying] = useState(false);
+  const [note, setNote] = useState('');
+  const [missing, setMissing] = useState(0);
+  const [unmatchedCount, setUnmatchedCount] = useState(0);
+  const [unmatchedSample, setUnmatchedSample] = useState<Array<{ description: string; category: string }>>([]);
+  const [matches, setMatches] = useState<StorePhotoHit[]>([]);
+  const [picks, setPicks] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      try {
+        const res = await adminFetch('/api/admin/copy-store-photos', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: 'preview' }),
+        });
+        if (!res.ok) { setNote('Could not scan the catalog. Try again in a moment.'); return; }
+        const r = await res.json();
+        const list: StorePhotoHit[] = r.matches || [];
+        setMatches(list);
+        setMissing(r.missing || 0);
+        setUnmatchedCount(r.unmatchedCount || 0);
+        setUnmatchedSample(r.unmatchedSample || []);
+        const init: Record<string, boolean> = {};
+        for (const m of list) init[m.barge.id] = !!m.autoCheck;
+        setPicks(init);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const kept = matches.filter(m => picks[m.barge.id]);
+
+  async function apply() {
+    if (!kept.length) return;
+    setApplying(true);
+    try {
+      const res = await adminFetch('/api/admin/copy-store-photos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'apply',
+          picks: kept.map(m => ({ id: m.barge.id, image_url: m.donor.image_url })),
+        }),
+      });
+      if (!res.ok) { setNote('Could not save. Nothing was changed.'); return; }
+      onApplied();
+      onClose();
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  return createPortal(
+    <div className="fixed inset-0 z-[95] bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
+      <div onClick={e => e.stopPropagation()}
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl flex flex-col max-h-[92vh]">
+        <div className="px-5 py-4 border-b border-gray-100 flex items-start justify-between gap-3 shrink-0">
+          <div>
+            <h3 className="font-display text-lg font-bold text-brand-navy flex items-center gap-2">
+              <ImagePlus className="w-5 h-5 text-brand-gold" />
+              Copy photos from the store catalog
+            </h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {loading
+                ? 'Matching barge items to store listings we already have photos for…'
+                : `${matches.length} likely match${matches.length === 1 ? '' : 'es'} of ${missing.toLocaleString()} barge items missing a photo`}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+        </div>
+
+        <div className="p-5 overflow-y-auto flex-1">
+          <div className="bg-brand-sand/40 border border-brand-gold/30 rounded-xl p-3 text-xs text-brand-navy leading-relaxed mb-4">
+            Barge names come off the paper form (<span className="font-mono">LEMONS EACH</span>).
+            Sinclair&apos;s store often already has the same produce with a photo under a slightly
+            different name. This copies that photo onto the barge row — paper-form names stay put.
+            Untick anything that looks like the wrong item.
+          </div>
+
+          {note && (
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">{note}</p>
+          )}
+
+          {loading && (
+            <p className="flex items-center justify-center gap-2 text-sm text-gray-400 py-16">
+              <Loader2 className="w-4 h-4 animate-spin" /> Scanning the catalog…
+            </p>
+          )}
+
+          {!loading && matches.length === 0 && (
+            <p className="text-sm text-gray-400 text-center py-10">
+              No store listings with a real photo lined up. What&apos;s left needs Find Photos or a camera.
+            </p>
+          )}
+
+          <div className="space-y-2">
+            {matches.map(m => {
+              const on = !!picks[m.barge.id];
+              const pct = Math.round(m.score * 100);
+              return (
+                <div key={m.barge.id}
+                  className={`flex items-center gap-4 border rounded-xl p-3 transition-colors ${
+                    on ? 'border-brand-gold/40 bg-brand-sand/20' : 'border-gray-200 bg-gray-50 opacity-60'
+                  }`}>
+                  <label className="flex flex-col items-center gap-0.5 shrink-0 cursor-pointer">
+                    <input type="checkbox" checked={on}
+                      onChange={e => setPicks(prev => ({ ...prev, [m.barge.id]: e.target.checked }))}
+                      className="w-4 h-4 accent-brand-navy"
+                      aria-label={`Use photo for ${m.barge.description}`} />
+                    <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">Use&nbsp;photo</span>
+                  </label>
+                  <ZoomableThumb src={m.donor.image_url} alt={m.donor.description} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-gray-400 truncate">
+                      <span className="font-mono">{m.barge.description}</span>
+                      {m.barge.pkg_size && <span className="ml-1.5">· {m.barge.pkg_size}</span>}
+                      {m.barge.upc && <span className="ml-1.5 font-mono">· {m.barge.upc}</span>}
+                    </p>
+                    <p className="text-sm font-semibold text-brand-navy truncate mt-0.5">
+                      {m.donor.description}
+                    </p>
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                      {m.how === 'upc' ? (
+                        <span className="text-[10px] font-bold text-green-700 bg-green-50 border border-green-200 rounded-full px-1.5">same UPC</span>
+                      ) : (
+                        <span className={`text-[10px] font-bold rounded-full px-1.5 border ${
+                          m.autoCheck
+                            ? 'text-green-700 bg-green-50 border-green-200'
+                            : 'text-amber-700 bg-amber-50 border-amber-200'
+                        }`}>
+                          name {pct}%{m.autoCheck ? '' : ' — check this one'}
+                        </span>
+                      )}
+                      {m.donor.store_only && (
+                        <span className="text-[10px] font-bold text-gray-500 bg-gray-100 rounded-full px-1.5">full store</span>
+                      )}
+                      {m.donor.category !== m.barge.category && (
+                        <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-1.5">
+                          {m.barge.category} ← {m.donor.category}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {!loading && unmatchedCount > 0 && (
+            <div className="mt-6 border-t border-gray-100 pt-4">
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">
+                No store photo found ({unmatchedCount})
+              </p>
+              <p className="text-xs text-gray-400 mb-2">
+                These still need Find Photos (live Sinclair&apos;s search) or a camera. A sample:
+              </p>
+              <ul className="text-xs text-gray-500 columns-1 sm:columns-2 gap-x-6">
+                {unmatchedSample.map(u => (
+                  <li key={u.description + u.category} className="truncate">
+                    <span className="font-mono text-gray-600">{u.description}</span>
+                    <span className="text-gray-300"> · {u.category}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+
+        <div className="px-5 py-4 border-t border-gray-100 flex items-center gap-3 shrink-0">
+          <p className="text-xs text-gray-500 flex-1">
+            {kept.length} photo{kept.length === 1 ? '' : 's'} selected
+            {unmatchedCount > 0 && ` · ${unmatchedCount} still need another source`}
+          </p>
+          <button onClick={onClose} disabled={applying}
+            className="px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50">
+            Cancel
+          </button>
+          <button onClick={apply} disabled={applying || loading || kept.length === 0}
+            className="px-5 py-2.5 rounded-xl bg-brand-green text-white text-sm font-bold flex items-center gap-1.5 hover:bg-brand-gmed disabled:opacity-50">
+            {applying
+              ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
+              : <><Check className="w-4 h-4" /> Save {kept.length > 0 ? kept.length : ''} selected</>}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // PHOTO REVIEW — the nightly sync's weaker name-matches, waiting for a human.
 // Strong matches auto-applied overnight; these are the judgment calls. No live
 // searching here (that already happened, paced, overnight) — just approve/reject.
@@ -1232,7 +1439,7 @@ function EditableRow({ product, siblings, selected, onSelect, onSaved, onToggleA
               </span>
             ) : (
               <span className="inline-block text-[10px] font-bold uppercase tracking-wide text-orange-700 bg-orange-50 rounded px-1.5 py-0.5"
-                title="Not matched to Sinclair's website (no UPC, e.g. custom meat cuts / bakery) — someone needs to take a photo and upload it here.">
+                title="No barcode match to Sinclair's website. Often the same item lives in the full store under a longer name — use Copy store photos.">
                 📷 Needs a photo — not on Sinclair&apos;s site
               </span>
             )
@@ -1318,6 +1525,7 @@ export default function AdminProductsPage() {
   const [denied, setDenied] = useState(false);
   const [sessionRole, setSessionRole] = useState<string | null>(null);
   const [showBackfill, setShowBackfill] = useState(false);
+  const [showCopyStore, setShowCopyStore] = useState(false);
   const [showPhotoReview, setShowPhotoReview] = useState(false);
   const [photoReviewCount, setPhotoReviewCount] = useState(0);
   const { confirm: confirmDialog, dialog: confirmDialogEl } = useConfirm();
@@ -1570,6 +1778,11 @@ export default function AdminProductsPage() {
           onClose={() => setShowBackfill(false)}
           onApplied={() => fetchProducts()} />
       )}
+      {showCopyStore && (
+        <CopyStorePhotosPanel
+          onClose={() => setShowCopyStore(false)}
+          onApplied={() => fetchProducts()} />
+      )}
       {showPhotoReview && (
         <PhotoReviewPanel
           onClose={() => setShowPhotoReview(false)}
@@ -1594,6 +1807,11 @@ export default function AdminProductsPage() {
               and needs someone to judge the results — that's a maintenance job,
               not a task Sinclair's staff should be handed. Seeing it would
               only prompt "what is this and am I supposed to run it?" */}
+          <button onClick={() => setShowCopyStore(true)}
+            title="Copy photos we already have on Sinclair's store listings onto barge-form items (LEMONS EACH ← store lemon)"
+            className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5 border-brand-gold/50 text-brand-navy">
+            <ImagePlus className="w-4 h-4" /> Copy store photos
+          </button>
           {sessionRole === 'owner' && (
             <button onClick={() => setShowBackfill(true)}
               title="Search Sinclair's site for photos and proper names on items the nightly barcode sync can't match"
