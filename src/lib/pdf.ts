@@ -31,6 +31,20 @@ export function generateOrderHTML(order: Order): string {
     if (!i.is_substitution || !i.substitutes_item_id) return true;
     return !parentIds.has(i.substitutes_item_id);
   });
+  const isWriteIn = (i: (typeof groceryItems)[number]) => {
+    if (!i.product_id) return true;
+    const c = (i.category || '').toUpperCase().replace(/[_-]/g, ' ').trim();
+    return c === 'WRITE IN' || c === 'WRITEIN' || c === 'CUSTOM';
+  };
+  // Catalog grocery first (walk the store). Write-ins and COD sit at the
+  // bottom — same rule as the pick sheet. Mixing cigarettes into Dairy
+  // made the boat total look like it included Andy's smokes.
+  const catalogGrocery = primaryGrocery.filter(i => i.paid_by !== 'cod' && !isWriteIn(i));
+  const writeInGrocery = primaryGrocery.filter(i => i.paid_by !== 'cod' && isWriteIn(i));
+  const codGrocery     = primaryGrocery.filter(i => i.paid_by === 'cod');
+  const boatGroceryTotal = groceryItems
+    .filter(i => i.paid_by !== 'cod' && i.shopping_status !== 'out_of_stock')
+    .reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0);
   const serviceItems = order.items.filter(i => i.item_type === 'service');
   const { vessel: vesselPickups, deck: deckPickups, cod: codPickups } = splitOutsidePickups(serviceItems);
   const codItems     = groceryItems.filter(i => i.paid_by === 'cod' && i.shopping_status !== 'out_of_stock');
@@ -120,12 +134,27 @@ export function generateOrderHTML(order: Order): string {
   }
 
   // Group primaries by category; nest linked substitutions under each OOS/original.
-  const grouped = primaryGrocery.reduce((acc, item) => {
+  const grouped = catalogGrocery.reduce((acc, item) => {
     const cat = item.category || 'General';
     if (!acc[cat]) acc[cat] = [];
     acc[cat].push(item);
     return acc;
-  }, {} as Record<string, typeof primaryGrocery>);
+  }, {} as Record<string, typeof catalogGrocery>);
+
+  function sectionRows(heading: string, items: typeof primaryGrocery, headBg: string, headColor: string) {
+    if (!items.length) return '';
+    let idx = 0;
+    const rows = items.map(item => {
+      const bits = [renderGroceryRow(item, idx++)];
+      for (const sub of (subsByParent[item.id] || [])) bits.push(renderGroceryRow(sub, idx++, true));
+      return bits.join('');
+    }).join('');
+    return `
+      <tr>
+        <td colspan="7" style="padding:5px 8px;background:${headBg};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:${headColor};">${heading}</td>
+      </tr>
+      ${rows}`;
+  }
 
   const categoryRows = Object.entries(grouped).map(([cat, items]) => {
     let idx = 0;
@@ -141,7 +170,9 @@ export function generateOrderHTML(order: Order): string {
         <td colspan="7" style="padding:5px 8px;background:#D9E84A;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:#1E3D1E;">${cat}</td>
       </tr>
       ${catRows}`;
-  }).join('');
+  }).join('')
+    + sectionRows('Write-in — boat grocery', writeInGrocery, '#f3f4f6', '#374151')
+    + sectionRows('COD — collect from crew (not invoiced)', codGrocery, '#f3e8ff', '#6b21a8');
 
   // Service items section
   const serviceSection = serviceItems.length > 0 ? `
@@ -396,8 +427,8 @@ ${groceryItems.length > 0 ? `
     <td width="40%">
       <table width="100%" style="border-top:3px solid #1E3D1E;">
         <tr>
-          <td style="padding:6px 8px;font-size:11px;color:#555;">Subtotal (${itemCount} items)</td>
-          <td style="padding:6px 8px;text-align:right;font-weight:700;">${formatCurrency(order.subtotal)}</td>
+          <td style="padding:6px 8px;font-size:11px;color:#555;">Grocery to the boat (${groceryItems.filter(i => i.paid_by !== 'cod' && i.shopping_status !== 'out_of_stock').length} items)</td>
+          <td style="padding:6px 8px;text-align:right;font-weight:700;">${formatCurrency(boatGroceryTotal)}</td>
         </tr>
         ${discounts.map(d => `<tr>
           <td style="padding:4px 8px;font-size:10px;color:#15803d;font-weight:700;">&#127991; ${d.name}${d.description ? `<div style="font-weight:400;font-size:9px;color:#4d7c5f;">${d.description}</div>` : ''}</td>
@@ -415,9 +446,13 @@ ${groceryItems.length > 0 ? `
           <td style="padding:5px 8px;font-size:10px;color:#6b21a8;font-weight:700;">Outside pickup (COD) &mdash; ${pickupLabel(i)}</td>
           <td style="padding:5px 8px;text-align:right;font-size:11px;font-weight:800;color:#6b21a8;">${formatCurrency(lineAmount(i))}</td>
         </tr>`).join('')}
+        ${codSubtotal > 0 ? `<tr>
+          <td style="padding:5px 8px;font-size:10px;color:#6b21a8;font-weight:700;">COD collect from crew &mdash; not on the boat invoice${codFeePct > 0 ? ` (incl. ${codFeeLabel(order, groceryCodTotal + pickupCodTotal)})` : ''}</td>
+          <td style="padding:5px 8px;text-align:right;font-size:11px;font-weight:800;color:#6b21a8;">${formatCurrency(codTotalWithFee(order, groceryCodTotal + pickupCodTotal))}</td>
+        </tr>` : ''}
         <tr>
-          <td style="padding:8px;font-size:14px;font-weight:900;color:#1E3D1E;text-transform:uppercase;">ESTIMATED TOTAL</td>
-          <td style="padding:8px;text-align:right;font-size:16px;font-weight:900;color:#1E3D1E;">${formatCurrency(order.subtotal)}</td>
+          <td style="padding:8px;font-size:14px;font-weight:900;color:#1E3D1E;text-transform:uppercase;">ESTIMATED TOTAL TO THE BOAT</td>
+          <td style="padding:8px;text-align:right;font-size:16px;font-weight:900;color:#1E3D1E;">${formatCurrency(Math.max(0, boatGroceryTotal - discountTotal))}</td>
         </tr>
         ${discountTotal > 0 ? `<tr style="background:#dcfce7;">
           <td style="padding:7px 8px;font-size:11px;font-weight:900;color:#15803d;text-transform:uppercase;">After est. coupon savings (&minus;${formatCurrency(discountTotal)})</td>

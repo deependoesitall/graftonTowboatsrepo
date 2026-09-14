@@ -213,16 +213,34 @@ export async function generateOrderPdfBuffer(order: Order): Promise<Buffer> {
     });
     y += 16;
 
-    // Group visible items by category
-    const grouped = visibleItems.reduce((acc, item) => {
+    const groceryVisible = visibleItems.filter(i => i.item_type !== 'service');
+    const isWriteIn = (i: (typeof groceryVisible)[number]) => {
+      if (!i.product_id) return true;
+      const c = (i.category || '').toUpperCase().replace(/[_-]/g, ' ').trim();
+      return c === 'WRITE IN' || c === 'WRITEIN' || c === 'CUSTOM';
+    };
+    const catalogItems = groceryVisible.filter(i => i.paid_by !== 'cod' && !isWriteIn(i));
+    const writeInItems = groceryVisible.filter(i => i.paid_by !== 'cod' && isWriteIn(i));
+    const codLineItems = groceryVisible.filter(i => i.paid_by === 'cod');
+    const boatGroceryTotal = groceryVisible
+      .filter(i => i.paid_by !== 'cod')
+      .reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0);
+
+    const grouped = catalogItems.reduce((acc, item) => {
       const cat = item.category || 'General';
       if (!acc[cat]) acc[cat] = [];
       acc[cat].push(item);
       return acc;
-    }, {} as Record<string, typeof visibleItems>);
+    }, {} as Record<string, typeof catalogItems>);
+
+    const sections: Array<[string, typeof groceryVisible]> = [
+      ...Object.entries(grouped),
+      ...(writeInItems.length ? [['Write-in — boat grocery', writeInItems] as const] : []),
+      ...(codLineItems.length ? [['COD — collect from crew (not invoiced)', codLineItems] as const] : []),
+    ];
 
     let rowBg = false;
-    Object.entries(grouped).forEach(([cat, items]) => {
+    sections.forEach(([cat, items]) => {
       // Category row
       doc.rect(MARGIN, y, CONTENT_W, 12).fill(LIME);
       doc.fillColor(DARK_GREEN).fontSize(7).font('Helvetica-Bold')
@@ -293,9 +311,19 @@ export async function generateOrderPdfBuffer(order: Order): Promise<Buffer> {
     const totalRowW = CONTENT_W * 0.45;
     doc.rect(totalRowX, y, totalRowW, 26).fill(LIME);
     doc.fillColor(DARK_GREEN).fontSize(12).font('Helvetica-Bold')
-       .text(`ESTIMATED TOTAL  ${formatCurrency(order.subtotal)}`, totalRowX + 8, y + 7,
+       .text(`ESTIMATED TOTAL TO THE BOAT  ${formatCurrency(boatGroceryTotal)}`, totalRowX + 8, y + 7,
          { width: totalRowW - 16, align: 'right' });
-    y += 34;
+    y += 28;
+    const groceryCodAmt = groceryVisible.filter(i => i.paid_by === 'cod')
+      .reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0);
+    if (groceryCodAmt > 0) {
+      if (y > 680) { doc.addPage(); y = MARGIN; }
+      doc.fillColor('#6b21a8').fontSize(8).font('Helvetica-Bold')
+         .text(`COD collect from crew (not invoiced)  ${formatCurrency(groceryCodAmt)}`, totalRowX + 8, y + 2,
+           { width: totalRowW - 16, align: 'right' });
+      y += 16;
+    }
+    y += 10;
 
     // ── CUSTOMER NOTE (fulfilled orders only) ────────────────
     if (isFulfilled) {
