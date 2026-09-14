@@ -30,6 +30,10 @@ interface OrderRow {
     unit_price: number;
     line_total: number;
     item_type: string | null;
+    paid_by?: string | null;
+    cod_name?: string | null;
+    image_url?: string | null;
+    pkg_size?: string | null;
   }>;
 }
 
@@ -50,7 +54,7 @@ export async function GET(req: NextRequest) {
 
   let query = supabase
     .from('orders')
-    .select('id, order_number, company_name, contact_name, phone, customer_email, vessel_email, vessel_name, vessel_type, terminal_name, arrival_date, arrival_time, notes, eta, subtotal, status, created_at, items:order_items(product_id, description, category, quantity, unit_price, line_total, item_type)')
+    .select('id, order_number, company_name, contact_name, phone, customer_email, vessel_email, vessel_name, vessel_type, terminal_name, arrival_date, arrival_time, notes, eta, subtotal, status, created_at, items:order_items(product_id, description, category, quantity, unit_price, line_total, item_type, paid_by, cod_name, image_url, pkg_size)')
     .order('created_at', { ascending: true });
 
   if (from) query = query.gte('created_at', from);

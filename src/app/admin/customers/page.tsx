@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import {
   Lock, RefreshCw, FileText, ChevronDown, ChevronRight, RotateCcw,
   Search, Calendar, X, CheckCircle, AlertCircle, Loader2, Printer,
-  Ship, KeyRound, Users, Trash2, Pencil,
+  Ship, KeyRound, Users, Trash2, Pencil, Plus, Minus,
 } from 'lucide-react';
 import Link from 'next/link';
 import { vesselReportHtml } from '@/lib/vessel-report';
@@ -23,6 +23,10 @@ interface VesselOrderItem {
   unit_price: number;
   line_total: number;
   item_type: string | null;
+  paid_by?: 'vessel' | 'deck' | 'cod' | string | null;
+  cod_name?: string | null;
+  image_url?: string | null;
+  pkg_size?: string | null;
 }
 
 interface VesselOrder {
@@ -59,6 +63,26 @@ interface RepeatState {
   order: VesselOrder;
 }
 
+type RepeatPay = 'vessel' | 'deck' | 'cod';
+interface RepeatLine {
+  key: string;
+  product_id: string | null;
+  description: string;
+  category: string;
+  price: number;
+  quantity: number;
+  paid_by: RepeatPay;
+  cod_name: string;
+  image_url?: string | null;
+  pkg_size?: string | null;
+}
+
+function asRepeatPay(raw: string | null | undefined): RepeatPay {
+  if (raw === 'cod') return 'cod';
+  if (raw === 'deck') return 'deck';
+  return 'vessel';
+}
+
 function RepeatOrderModal({
   state,
   onClose,
@@ -70,29 +94,77 @@ function RepeatOrderModal({
 }) {
   const { vessel, order } = state;
 
-  // Only grocery items can be repeated
-  const groceryItems = order.items.filter(i => i.item_type !== 'service');
-
-  const [quantities, setQuantities] = useState<Record<number, number>>(() =>
-    Object.fromEntries(groceryItems.map((item, idx) => [idx, item.quantity]))
+  const [lines, setLines] = useState<RepeatLine[]>(() =>
+    order.items.filter(i => i.item_type !== 'service').map((item, idx) => ({
+      key: `${item.product_id || 'line'}-${idx}`,
+      product_id: item.product_id,
+      description: item.description,
+      category: item.category || 'Grocery',
+      price: Number(item.unit_price) || 0,
+      quantity: item.quantity,
+      paid_by: asRepeatPay(item.paid_by),
+      cod_name: (item.cod_name || '').trim(),
+      image_url: item.image_url,
+      pkg_size: item.pkg_size,
+    }))
   );
-  const [email, setEmail] = useState(order.customer_email || '');
+  const [email, setEmail] = useState(order.customer_email || order.vessel_email || '');
   const [vesselName, setVesselName] = useState(order.vessel_name || '');
   const [arrivalDate, setArrivalDate] = useState('');
   const [arrivalTime, setArrivalTime] = useState(order.arrival_time || '');
-  const [notes, setNotes] = useState('');
+  const [notes, setNotes] = useState(order.notes || '');
+  const [addQ, setAddQ] = useState('');
+  const [addHits, setAddHits] = useState<Array<{
+    id: string; description: string; category: string; price: number;
+    image_url: string | null; pkg_size: string | null;
+  }>>([]);
+  const [addSearching, setAddSearching] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
-  const activeItems = groceryItems.filter((_, idx) => quantities[idx] > 0);
-  const total = activeItems.reduce((s, item, _) => {
-    const idx = groceryItems.indexOf(item);
-    return s + item.unit_price * (quantities[idx] ?? 0);
-  }, 0);
+  const activeItems = lines.filter(l => l.quantity > 0);
+  const total = activeItems.reduce((s, l) => s + l.price * l.quantity, 0);
+
+  function patchLine(key: string, patch: Partial<RepeatLine>) {
+    setLines(prev => prev.map(l => l.key === key ? { ...l, ...patch } : l));
+  }
+
+  async function searchAdd(q: string) {
+    setAddQ(q);
+    if (q.trim().length < 2) { setAddHits([]); return; }
+    setAddSearching(true);
+    try {
+      const res = await adminFetch(`/api/products?search=${encodeURIComponent(q)}&per_page=8`);
+      if (res.ok) {
+        const d = await res.json();
+        const taken = new Set(lines.map(l => l.product_id).filter(Boolean));
+        setAddHits((d.products || []).filter((p: { id: string }) => !taken.has(p.id)));
+      }
+    } finally { setAddSearching(false); }
+  }
+
+  function addProduct(p: { id: string; description: string; category: string; price: number; image_url: string | null; pkg_size: string | null }) {
+    setLines(prev => [...prev, {
+      key: `add-${p.id}-${Date.now()}`,
+      product_id: p.id,
+      description: p.description,
+      category: p.category || 'Grocery',
+      price: Number(p.price) || 0,
+      quantity: 1,
+      paid_by: 'vessel',
+      cod_name: '',
+      image_url: p.image_url,
+      pkg_size: p.pkg_size,
+    }]);
+    setAddQ('');
+    setAddHits([]);
+  }
 
   async function submit() {
     if (!email.trim()) { setError('Email is required to place the order.'); return; }
     if (activeItems.length === 0) { setError('Add at least one item.'); return; }
+    const missingCod = activeItems.find(l => l.paid_by === 'cod' && !l.cod_name.trim());
+    if (missingCod) { setError(`COD line "${missingCod.description}" needs the crew member's name.`); return; }
     setError('');
     setSubmitting(true);
 
@@ -107,18 +179,18 @@ function RepeatOrderModal({
         arrival_time: arrivalTime || undefined,
         notes: notes || undefined,
       },
-      items: activeItems.map(item => {
-        const idx = groceryItems.indexOf(item);
-        return {
-          product_id: item.product_id ?? `repeat-${order.id}-${idx}`,
-          description: item.description,
-          category: item.category,
-          pkg_size: null,
-          uom: null,
-          price: item.unit_price,
-          quantity: quantities[idx],
-        };
-      }),
+      items: activeItems.map((item, idx) => ({
+        product_id: item.product_id || `repeat-${order.id}-${idx}`,
+        description: item.description,
+        category: item.category,
+        pkg_size: item.pkg_size || null,
+        uom: null,
+        price: item.price,
+        quantity: item.quantity,
+        image_url: item.image_url || null,
+        paid_by: item.paid_by,
+        cod_name: item.paid_by === 'cod' ? item.cod_name.trim() : '',
+      })),
       services: {},
     };
 
@@ -143,13 +215,12 @@ function RepeatOrderModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
-        {/* Header */}
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
           <div>
             <h2 className="font-display font-bold text-brand-navy text-lg">Repeat Order</h2>
             <p className="text-xs text-gray-400 mt-0.5">
-              From {order.order_number} · {vessel.company_name}
+              From {order.order_number} · {vessel.company_name} — grocery, deck, and COD carry over. Add or drop lines before placing.
             </p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
@@ -158,36 +229,100 @@ function RepeatOrderModal({
         </div>
 
         <div className="overflow-y-auto flex-1 px-6 py-4 space-y-5">
-          {/* Items */}
           <div>
             <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Items</p>
-            {groceryItems.length === 0 ? (
-              <p className="text-sm text-gray-400">This order has no grocery items to repeat.</p>
+            {lines.length === 0 ? (
+              <p className="text-sm text-gray-400 mb-2">No grocery lines yet — search below to add some.</p>
             ) : (
               <div className="space-y-2">
-                {groceryItems.map((item, idx) => (
-                  <div key={idx} className="flex items-center justify-between gap-3 bg-gray-50 rounded-lg px-3 py-2">
+                {lines.map(line => (
+                  <div key={line.key} className="flex items-start gap-3 bg-gray-50 rounded-lg px-3 py-2">
+                    <div className="w-10 h-10 shrink-0 rounded-md overflow-hidden border border-gray-100 bg-white">
+                      {line.image_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={line.image_url} alt="" className="w-full h-full object-contain p-0.5" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-gray-300">
+                          <Ship className="w-4 h-4" />
+                        </div>
+                      )}
+                    </div>
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-brand-navy truncate">{item.description}</p>
-                      <p className="text-xs text-gray-400">{formatCurrency(item.unit_price)} each</p>
+                      <p className="text-sm font-medium text-brand-navy truncate">{line.description}</p>
+                      <p className="text-xs text-gray-400">{formatCurrency(line.price)} each{line.pkg_size ? ` · ${line.pkg_size}` : ''}</p>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                        {(['vessel', 'deck', 'cod'] as const).map(pb => (
+                          <button key={pb} type="button"
+                            onClick={() => patchLine(line.key, { paid_by: pb, cod_name: pb === 'cod' ? line.cod_name : '' })}
+                            className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border ${
+                              line.paid_by === pb
+                                ? pb === 'cod' ? 'bg-purple-100 text-purple-800 border-purple-300'
+                                  : pb === 'deck' ? 'bg-teal-100 text-teal-800 border-teal-300'
+                                  : 'bg-brand-navy text-white border-brand-navy'
+                                : 'bg-white border-gray-200 text-gray-500'
+                            }`}>
+                            {pb === 'vessel' ? 'Grocery' : pb === 'deck' ? 'Deck' : 'COD'}
+                          </button>
+                        ))}
+                        {line.paid_by === 'cod' && (
+                          <input
+                            type="text"
+                            value={line.cod_name}
+                            onChange={e => patchLine(line.key, { cod_name: e.target.value })}
+                            placeholder="Crew name"
+                            className="input-base text-[11px] py-0.5 px-1.5 w-28"
+                          />
+                        )}
+                      </div>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
-                      <button
-                        onClick={() => setQuantities(q => ({ ...q, [idx]: Math.max(0, (q[idx] ?? 1) - 1) }))}
-                        className="w-6 h-6 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center text-sm font-bold transition-colors">
-                        −
+                      <button type="button"
+                        onClick={() => patchLine(line.key, { quantity: Math.max(0, line.quantity - 1) })}
+                        className="w-6 h-6 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center">
+                        <Minus className="w-3 h-3" />
                       </button>
-                      <span className="w-7 text-center text-sm font-bold text-brand-navy">{quantities[idx] ?? 0}</span>
-                      <button
-                        onClick={() => setQuantities(q => ({ ...q, [idx]: (q[idx] ?? 0) + 1 }))}
-                        className="w-6 h-6 rounded-full bg-brand-river/20 hover:bg-brand-river/30 flex items-center justify-center text-sm font-bold text-brand-river transition-colors">
-                        +
+                      <span className="w-7 text-center text-sm font-bold text-brand-navy">{line.quantity}</span>
+                      <button type="button"
+                        onClick={() => patchLine(line.key, { quantity: line.quantity + 1 })}
+                        className="w-6 h-6 rounded-full bg-brand-river/20 hover:bg-brand-river/30 flex items-center justify-center text-brand-river">
+                        <Plus className="w-3 h-3" />
                       </button>
                     </div>
                   </div>
                 ))}
               </div>
             )}
+
+            <div className="mt-3 relative">
+              <Search className="absolute left-3 top-2.5 w-3.5 h-3.5 text-gray-400" />
+              <input
+                type="search"
+                value={addQ}
+                onChange={e => void searchAdd(e.target.value)}
+                placeholder="Add an item from the catalog…"
+                className="input-base text-sm w-full pl-8"
+              />
+              {addSearching && <p className="text-[11px] text-gray-400 mt-1">Searching…</p>}
+              {!!addHits.length && (
+                <div className="absolute z-10 left-0 right-0 mt-1 max-h-52 overflow-y-auto border border-gray-200 rounded-lg bg-white shadow-lg divide-y divide-gray-100">
+                  {addHits.map(p => (
+                    <button key={p.id} type="button" onClick={() => addProduct(p)}
+                      className="w-full text-left px-2 py-1.5 hover:bg-brand-sand/40 flex items-center gap-2">
+                      <div className="w-8 h-8 shrink-0 rounded bg-gray-50 border border-gray-100 overflow-hidden">
+                        {p.image_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={p.image_url} alt="" className="w-full h-full object-contain p-0.5" />
+                        ) : null}
+                      </div>
+                      <span className="min-w-0">
+                        <span className="block text-xs font-semibold text-brand-navy truncate">{p.description}</span>
+                        <span className="block text-[11px] text-gray-400">{formatCurrency(p.price)}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Vessel info */}
@@ -265,7 +400,7 @@ function RepeatOrderModal({
             <button onClick={onClose} className="btn-outline text-sm px-4 py-2">Cancel</button>
             <button
               onClick={submit}
-              disabled={submitting || groceryItems.length === 0}
+              disabled={submitting || activeItems.length === 0}
               className="bg-brand-orange text-white text-sm font-bold px-5 py-2 rounded-full hover:bg-brand-ored transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
               {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
               Place Order
