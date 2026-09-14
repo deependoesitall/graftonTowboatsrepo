@@ -95,6 +95,8 @@ export interface CartItem {
   preferred_sub_product_id?: string | null;
   /** Snapshot of preferred product name at cart time. */
   preferred_sub_description?: string | null;
+  /** Snapshot of preferred product photo at cart time. */
+  preferred_sub_image_url?: string | null;
 }
 
 export interface Cart {

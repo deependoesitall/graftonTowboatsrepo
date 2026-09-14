@@ -176,7 +176,7 @@ function CartItemRow({ item, onUpdate, onRemove, onPatch, codNameError, isLogged
   function setPrefMode(mode: PreferredSubMode | null) {
     if (!isLoggedIn) { onNeedSignIn(); return; }
     if (!mode) {
-      onPatch({ preferred_sub_mode: null, preferred_sub_product_id: null, preferred_sub_description: null });
+      onPatch({ preferred_sub_mode: null, preferred_sub_product_id: null, preferred_sub_description: null, preferred_sub_image_url: null });
       setPrefOpen(false);
       return;
     }
@@ -185,7 +185,7 @@ function CartItemRow({ item, onUpdate, onRemove, onPatch, codNameError, isLogged
       onPatch({ preferred_sub_mode: 'product' });
       return;
     }
-    onPatch({ preferred_sub_mode: mode, preferred_sub_product_id: null, preferred_sub_description: null });
+    onPatch({ preferred_sub_mode: mode, preferred_sub_product_id: null, preferred_sub_description: null, preferred_sub_image_url: null });
     setPrefOpen(false);
   }
 
@@ -194,6 +194,7 @@ function CartItemRow({ item, onUpdate, onRemove, onPatch, codNameError, isLogged
       preferred_sub_mode: 'product',
       preferred_sub_product_id: prod.id,
       preferred_sub_description: prod.description,
+      preferred_sub_image_url: prod.image_url || null,
     });
     setPrefOpen(false);
     setPrefSearch('');
@@ -362,10 +363,22 @@ function CartItemRow({ item, onUpdate, onRemove, onPatch, codNameError, isLogged
           )}
         </div>
         {isLoggedIn && item.preferred_sub_mode === 'product' && item.preferred_sub_description && !prefOpen && (
-          <p className="text-[11px] text-amber-800 font-semibold mt-1">
-            Preferred: {item.preferred_sub_description}
-            <button type="button" className="ml-2 text-brand-river underline font-bold" onClick={() => setPrefOpen(true)}>change</button>
-          </p>
+          <div className="mt-1.5 flex items-center gap-2">
+            <div className="w-9 h-9 shrink-0 rounded-md overflow-hidden border border-amber-200 bg-white">
+              {item.preferred_sub_image_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={item.preferred_sub_image_url} alt="" className="w-full h-full object-contain p-0.5" />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center text-amber-300">
+                  <Package className="w-4 h-4" />
+                </div>
+              )}
+            </div>
+            <p className="text-[11px] text-amber-800 font-semibold min-w-0">
+              Preferred: {item.preferred_sub_description}
+              <button type="button" className="ml-2 text-brand-river underline font-bold" onClick={() => setPrefOpen(true)}>change</button>
+            </p>
+          </div>
         )}
         {isLoggedIn && (prefOpen || (item.preferred_sub_mode === 'product' && !item.preferred_sub_product_id)) && (
           <div className="mt-1.5 space-y-1">
@@ -379,12 +392,24 @@ function CartItemRow({ item, onUpdate, onRemove, onPatch, codNameError, isLogged
             />
             {prefSearching && <p className="text-[11px] text-gray-400">Searching…</p>}
             {!!prefResults.length && (
-              <div className="max-h-36 overflow-y-auto border border-amber-200 rounded bg-white divide-y divide-gray-100">
+              <div className="max-h-52 overflow-y-auto border border-amber-200 rounded bg-white divide-y divide-gray-100">
                 {prefResults.map(prod => (
                   <button key={prod.id} type="button" onClick={() => pickPreferred(prod)}
-                    className="w-full text-left px-2.5 py-1.5 hover:bg-amber-50">
-                    <span className="block text-xs font-semibold text-brand-navy truncate">{prod.description}</span>
-                    <span className="block text-[11px] text-gray-400">{prod.pkg_size || ''}{prod.pkg_size ? ' · ' : ''}{formatCurrency(prod.price)}</span>
+                    className="w-full text-left px-2 py-1.5 hover:bg-amber-50 flex items-center gap-2.5">
+                    <div className="w-10 h-10 shrink-0 rounded-md overflow-hidden border border-gray-100 bg-gray-50">
+                      {prod.image_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={prod.image_url} alt="" className="w-full h-full object-contain p-0.5" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-gray-300">
+                          <Package className="w-4 h-4" />
+                        </div>
+                      )}
+                    </div>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-xs font-semibold text-brand-navy truncate">{prod.description}</span>
+                      <span className="block text-[11px] text-gray-400">{prod.pkg_size || ''}{prod.pkg_size ? ' · ' : ''}{formatCurrency(prod.price)}</span>
+                    </span>
                   </button>
                 ))}
               </div>
