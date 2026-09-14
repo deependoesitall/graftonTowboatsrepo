@@ -9,6 +9,7 @@ import {
   splitOutsidePickups, groupCodCollect, pickupPayLabel, pickupIsPriced, lineAmount,
 } from '@/lib/outside-pickup';
 import { ESTIMATED_EXPLANATION } from '@/lib/estimated-copy';
+import { accountUrl } from '@/lib/public-url';
 
 // Lazily construct the Resend client so importing this module (e.g. during
 // `next build` page-data collection) doesn't require RESEND_API_KEY to be set.
@@ -683,7 +684,7 @@ export async function sendOrderReceivedEmail(
   const confirmTo = order.vessel_email || order.customer_email;
   if (confirmTo) {
     const hasAccount = !!order.user_id;
-    const portalUrl = `${appUrl}/account?order=${encodeURIComponent(order.id)}`;
+    const portalUrl = accountUrl(order.id);
     const customerHtml = buildOrderEmailHtml(order, {
       tagline:    'Order Confirmation',
       intro:      hasAccount
@@ -739,11 +740,16 @@ export function buildOrderShoppedEmailHtml(order: Order, docs: ShoppedEmailDocs 
   const intro = hasGroceryItems
     ? `Great news, ${order.contact_name}! Your order has been delivered. Please find your final delivery summary attached — including GTS delivery charges.`
     : `Good news, ${order.contact_name}! Your request has been completed and delivered. Please find your final summary attached.`;
+  const hasAccount = !!order.user_id;
   return buildOrderEmailHtml(order, {
     tagline:    'Delivered',
     intro,
-    buttonText: 'Questions? Contact Us',
-    buttonUrl:  `mailto:GraftonTowboatServices@gmail.com`,
+    buttonText: hasAccount ? 'View in your boat dashboard' : 'Questions? Contact Us',
+    buttonUrl:  hasAccount ? accountUrl(order.id) : `mailto:GraftonTowboatServices@gmail.com`,
+    ...(hasAccount ? {
+      secondButtonText: 'Questions? Contact us',
+      secondButtonUrl: 'mailto:GraftonTowboatServices@gmail.com',
+    } : {}),
     footerText: 'Grafton Towboat Services · Grafton, IL 62037 · (618) 556-0290 · GraftonTowboatServices@gmail.com',
     showDelivery: true,
     linkedDocs: docs.linked,

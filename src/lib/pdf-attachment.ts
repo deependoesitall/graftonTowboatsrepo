@@ -6,6 +6,7 @@ import type { Order } from '@/types';
 import { formatCurrency, formatDate } from './utils';
 import { codFeePercent, codTotalWithFee } from '@/lib/cod-fee';
 import { splitOutsidePickups, groupCodCollect, lineAmount } from '@/lib/outside-pickup';
+import { accountUrl } from '@/lib/public-url';
 
 // ─── Colours / brand ─────────────────────────────────────────
 const DARK_GREEN = '#1E3D1E';
@@ -299,14 +300,17 @@ export async function generateOrderPdfBuffer(order: Order): Promise<Buffer> {
     // ── CUSTOMER NOTE (fulfilled orders only) ────────────────
     if (isFulfilled) {
       if (y > 680) { doc.addPage(); y = MARGIN; }
-      doc.rect(MARGIN, y, CONTENT_W, 28).fill('#fffbf0');
-      doc.rect(MARGIN, y, 3, 28).fill(ORANGE);
+      const portal = accountUrl(order.id);
+      doc.rect(MARGIN, y, CONTENT_W, 36).fill('#fffbf0');
+      doc.rect(MARGIN, y, 3, 36).fill(ORANGE);
       doc.fillColor(ORANGE).fontSize(7).font('Helvetica-Bold')
          .text('NOTE', MARGIN + 8, y + 5, { characterSpacing: 0.5 });
       doc.fillColor('#555555').fontSize(8).font('Helvetica')
-         .text('This is your final receipt. For full order details including any adjustments, visit your account page at grafton-ordering.vercel.app/account or check your confirmation email.',
+         .text('This is your final receipt. For full order details including any adjustments, sign in to your boat dashboard:',
            MARGIN + 8, y + 14, { width: CONTENT_W - 16 });
-      y += 34;
+      doc.fillColor('#E8640A').fontSize(8).font('Helvetica-Bold')
+         .text(portal, MARGIN + 8, y + 24, { width: CONTENT_W - 16, link: portal, underline: true });
+      y += 42;
     }
 
     // ── SINCLAIR FOODS BOX ────────────────────────────────────
