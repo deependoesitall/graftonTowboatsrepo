@@ -386,7 +386,7 @@ function AccountContent() {
         <button onClick={() => setAuthOpen(true)} className="btn-primary">Sign In / Create Account</button>
         <p className="mt-4">
           <Link href="/catalog" className="text-brand-orange text-sm font-bold hover:underline">
-            Continue as guest â'
+            Continue as guest →
           </Link>
         </p>
       </div>
@@ -469,12 +469,12 @@ function AccountContent() {
                       </span>
                     </div>
                     <p className="text-sm text-brand-green/70 truncate">
-                      {order.company_name} Â· {formatDate(order.created_at)}
+                      {order.company_name}{` \u00b7 `}{formatDate(order.created_at)}
                     </p>
                     <p className="text-xs text-brand-green/40 mt-0.5">
-                      {order.items?.length || 0} line items Â· <span className="font-bold text-brand-green">{formatCurrency(order.subtotal)}</span>
+                      {order.items?.length || 0} line items{` \u00b7 `}<span className="font-bold text-brand-green">{formatCurrency(order.subtotal)}</span>
                       {(Number(order.discount_total) || 0) > 0 && (
-                        <span className="ml-1.5 text-green-600 font-semibold">ð· â'{formatCurrency(Number(order.discount_total))} coupons</span>
+                        <span className="ml-1.5 text-green-600 font-semibold">{`\u2212`}{formatCurrency(Number(order.discount_total))} coupons</span>
                       )}
                     </p>
                     {/* Product thumbnails â" the little dopamine strip */}
@@ -600,7 +600,7 @@ function AccountContent() {
               </div>
               <p className="font-bold text-brand-green text-base mb-2">No saved favorites yet</p>
               <p className="text-brand-green/50 text-sm leading-relaxed mb-5 max-w-xs mx-auto">
-                Tap the â... icon on any item in the catalog to save it here. Your favorites are always one tap away from being added to your next order.
+                Tap the star icon on any item in the catalog to save it here. Your favorites are always one tap away from being added to your next order.
               </p>
               <Link href="/catalog" className="btn-primary inline-flex items-center gap-2">
                 <Star className="w-4 h-4" /> Browse Catalog
@@ -624,7 +624,7 @@ function AccountContent() {
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold text-brand-green text-sm truncate">{p.description}</p>
                     <p className="text-xs text-brand-green/40">
-                      {p.category}{p.pkg_size ? ` Â· ${p.pkg_size}` : ''} Â· <span className="font-bold text-brand-green">{formatCurrency(p.price)}</span>
+                      {p.category}{p.pkg_size ? ` \u00b7 ${p.pkg_size}` : ''} \u00b7 <span className="font-bold text-brand-green">{formatCurrency(p.price)}</span>
                     </p>
                   </div>
                   <button onClick={() => favToCart(p)}
