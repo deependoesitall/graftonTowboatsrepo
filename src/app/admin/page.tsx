@@ -29,7 +29,7 @@ export default function AdminDashboard() {
     in_progress: number;
     fulfilled: number;
     total_revenue: number;
-    recent: Array<{ order_number: string; company_name: string; subtotal: number; status: string; created_at: string }>;
+    recent: Array<{ id: string; order_number: string; company_name: string; subtotal: number; status: string; created_at: string }>;
   }>(null);
   const router = useRouter();
 
@@ -302,7 +302,7 @@ export default function AdminDashboard() {
                     <tr
                       key={order.order_number}
                       className="admin-row cursor-pointer"
-                      onClick={() => router.push(`/admin/orders?search=${order.order_number}`)}
+                      onClick={() => router.push(`/admin/orders?order=${order.id}`)}
                     >
                       <td className="px-4 py-3 font-mono text-sm font-bold text-brand-navy">
                         {order.order_number}

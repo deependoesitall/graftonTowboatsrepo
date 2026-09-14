@@ -59,6 +59,10 @@ function OrdersContent() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('');
+  useEffect(() => {
+    const st = new URLSearchParams(window.location.search).get('status');
+    if (st) setStatusFilter(st);
+  }, []);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [deepLinkShop, setDeepLinkShop] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);

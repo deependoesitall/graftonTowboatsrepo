@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
   // Recent orders (last 10)
   const { data: recent } = await supabase
     .from('orders')
-    .select('order_number, company_name, subtotal, status, created_at')
+    .select('id, order_number, company_name, subtotal, status, created_at')
     .order('created_at', { ascending: false })
     .limit(10);
 

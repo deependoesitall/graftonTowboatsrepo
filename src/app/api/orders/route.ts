@@ -841,7 +841,7 @@ export async function GET(req: NextRequest) {
   const allItems = (data || []).flatMap((o: { items?: unknown[] }) => o.items || []);
   await hydrateOrderItemCatalog(supabase, allItems);
 
-  const status_counts: Record<string, number> = { new: 0, in_progress: 0, fulfilled: 0, cancelled: 0 };
+  const status_counts: Record<string, number> = { new: 0, in_progress: 0, shopped: 0, fulfilled: 0, cancelled: 0 };
   (statusRows || []).forEach((r: { status: string }) => {
     if (r.status in status_counts) status_counts[r.status]++;
   });
