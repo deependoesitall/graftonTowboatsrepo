@@ -119,6 +119,12 @@ function RepeatOrderModal({
     image_url: string | null; pkg_size: string | null;
   }>>([]);
   const [addSearching, setAddSearching] = useState(false);
+  const [writeInOpen, setWriteInOpen] = useState(false);
+  const [writeInName, setWriteInName] = useState('');
+  const [writeInPrice, setWriteInPrice] = useState('');
+  const [writeInQty, setWriteInQty] = useState('1');
+  const [writeInPay, setWriteInPay] = useState<RepeatPay>('cod');
+  const [writeInCod, setWriteInCod] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -141,6 +147,35 @@ function RepeatOrderModal({
         setAddHits((d.products || []).filter((p: { id: string }) => !taken.has(p.id)));
       }
     } finally { setAddSearching(false); }
+  }
+
+  function removeLine(key: string) {
+    setLines(prev => prev.filter(l => l.key !== key));
+  }
+
+  function addWriteIn() {
+    const name = writeInName.trim();
+    const price = Number(writeInPrice);
+    const qty = Math.max(1, parseInt(writeInQty, 10) || 1);
+    if (!name) { setError('Write-in needs a name (e.g. Cigarettes).'); return; }
+    if (!Number.isFinite(price) || price < 0) { setError('Write-in needs a price.'); return; }
+    if (writeInPay === 'cod' && !writeInCod.trim()) { setError('COD write-in needs the crew member\'s name.'); return; }
+    setError('');
+    setLines(prev => [...prev, {
+      key: `writein-${Date.now()}`,
+      product_id: null,
+      description: name,
+      category: 'WRITE-IN',
+      price,
+      quantity: qty,
+      paid_by: writeInPay,
+      cod_name: writeInPay === 'cod' ? writeInCod.trim() : '',
+    }]);
+    setWriteInName('');
+    setWriteInPrice('');
+    setWriteInQty('1');
+    setWriteInCod('');
+    setWriteInOpen(false);
   }
 
   function addProduct(p: { id: string; description: string; category: string; price: number; image_url: string | null; pkg_size: string | null }) {
@@ -287,6 +322,11 @@ function RepeatOrderModal({
                         className="w-6 h-6 rounded-full bg-brand-river/20 hover:bg-brand-river/30 flex items-center justify-center text-brand-river">
                         <Plus className="w-3 h-3" />
                       </button>
+                      <button type="button" onClick={() => removeLine(line.key)}
+                        title="Remove from this order"
+                        className="w-6 h-6 rounded-full text-red-400 hover:text-red-600 hover:bg-red-50 flex items-center justify-center">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -323,6 +363,49 @@ function RepeatOrderModal({
                 </div>
               )}
             </div>
+
+            {!writeInOpen ? (
+              <button type="button" onClick={() => { setWriteInOpen(true); setError(''); }}
+                className="mt-2 text-xs font-bold text-purple-700 hover:text-purple-900">
+                + Add write-in (not in catalog)
+              </button>
+            ) : (
+              <div className="mt-3 rounded-lg border border-purple-200 bg-purple-50/50 p-3 space-y-2">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-purple-800">Write-in — cigarettes, smokes, anything Sinclair doesn&apos;t list</p>
+                <input value={writeInName} onChange={e => setWriteInName(e.target.value)}
+                  placeholder="What is it?" className="input-base text-sm w-full" />
+                <div className="grid grid-cols-3 gap-2">
+                  <input value={writeInPrice} onChange={e => setWriteInPrice(e.target.value)}
+                    placeholder="Price $" inputMode="decimal" className="input-base text-sm" />
+                  <input value={writeInQty} onChange={e => setWriteInQty(e.target.value)}
+                    placeholder="Qty" inputMode="numeric" className="input-base text-sm" />
+                  <div className="flex items-center gap-1">
+                    {(['cod', 'vessel', 'deck'] as const).map(pb => (
+                      <button key={pb} type="button" onClick={() => setWriteInPay(pb)}
+                        className={`flex-1 text-[10px] font-bold uppercase py-1.5 rounded border ${
+                          writeInPay === pb
+                            ? pb === 'cod' ? 'bg-purple-200 text-purple-900 border-purple-400'
+                              : pb === 'deck' ? 'bg-teal-100 text-teal-800 border-teal-300'
+                              : 'bg-brand-navy text-white border-brand-navy'
+                            : 'bg-white border-gray-200 text-gray-500'
+                        }`}>
+                        {pb === 'vessel' ? 'Grocery' : pb === 'deck' ? 'Deck' : 'COD'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {writeInPay === 'cod' && (
+                  <input value={writeInCod} onChange={e => setWriteInCod(e.target.value)}
+                    placeholder="Crew member who pays (COD)" className="input-base text-sm w-full" />
+                )}
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setWriteInOpen(false)}
+                    className="btn-outline text-xs px-3 py-1.5">Cancel</button>
+                  <button type="button" onClick={addWriteIn}
+                    className="btn-primary text-xs px-3 py-1.5">Add write-in</button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Vessel info */}
