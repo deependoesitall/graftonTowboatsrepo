@@ -69,6 +69,12 @@ const REQUIRED: Requirement[] = [
     breaks: 'Staff cannot skip (or later prove) the boat confirmation email on paper-entered orders.',
   },
   {
+    table: 'order_items',
+    columns: ['added_after_shopped'],
+    migration: '082_addon_after_shopped.sql',
+    breaks: 'Part B extras after Sinclair shopped cannot be tagged or printed as a separate pick list.',
+  },
+  {
     table: 'vessel_carts',
     migration: '081_boat_history_and_shared_cart.sql',
     breaks: 'Crew on the same boat cannot share one grocery cart, and new logins may miss that boat’s older orders.',

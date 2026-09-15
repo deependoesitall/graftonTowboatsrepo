@@ -55,11 +55,14 @@ export function OrderDetailModal({
     : (!isGtsRole(getAdminRole()) || hasAdminPermission('sinclair'));
   const canEditCrew = canEdit && !isSinclairScoped;
   const canAddGtsServices = canEdit && !isSinclairScoped;
-  /** Mid-fulfill phone-add: hide once delivered or voided. Shopped still OK. */
+  /** Mid-fulfill phone-add: hide once delivered or voided. Shopped uses Part B. */
   const canAddToOrder = canEdit && order.status !== 'fulfilled' && order.status !== 'cancelled';
+  const canAddPartB = canEdit && order.status === 'shopped';
   const [shoppingMode, setShoppingMode] = useState(false);
   const [markingFulfilled, setMarkingFulfilled] = useState(false);
   const [showPickSheet, setShowPickSheet] = useState(false);
+  const [showPickSheetAddon, setShowPickSheetAddon] = useState(false);
+  const [addAsPartB, setAddAsPartB] = useState(false);
   const { confirm: confirmDialog, dialog: confirmDialogEl } = useConfirm();
 
   // ── Billing documents (owner): Sinclair's receipt + signed Ingram slip ──
@@ -663,7 +666,7 @@ export function OrderDetailModal({
     setAddResults([]);
     setAddSelected(null);
     setAddQty('1');
-    setAddPaidBy('vessel');
+    setAddPaidBy(addAsPartB || order.status === 'shopped' ? 'cod' : 'vessel');
     setAddCodName('');
     setWriteDesc('');
     setWritePrice('0');
@@ -676,6 +679,7 @@ export function OrderDetailModal({
   }
 
   function cancelAdd() {
+    setAddAsPartB(false);
     setAddingItem(false);
     resetAddForm();
   }
@@ -1467,6 +1471,9 @@ export function OrderDetailModal({
                         <div className="min-w-0 flex-1">
                           <p className={`font-medium text-brand-navy text-sm leading-snug ${item.shopping_status === 'out_of_stock' ? 'line-through' : ''}`}>
                             {item.description}
+                            {item.added_after_shopped && (
+                              <span className="ml-1.5 inline-block text-[9px] font-bold uppercase tracking-wide text-amber-800 bg-amber-100 px-1 py-0.5 rounded align-middle">Part B</span>
+                            )}
                           </p>
                           <p className="text-[11px] text-gray-400 mt-0.5 break-all">
                             {item.upc || 'no UPC'}{item.pkg_size ? ` · ${item.pkg_size}` : ''}
@@ -1592,6 +1599,12 @@ export function OrderDetailModal({
                               <span className="inline-block text-[9px] font-bold uppercase tracking-wide text-teal-700 bg-teal-100 px-1 py-0.5 rounded mr-1"
                                 title="Deck order — company-billed, listed separately from the grocery allowance">
                                 DECK
+                              </span>
+                            )}
+                            {item.added_after_shopped && (
+                              <span className="inline-block text-[9px] font-bold uppercase tracking-wide text-amber-800 bg-amber-100 px-1 py-0.5 rounded mr-1"
+                                title="Added after Sinclair shopped — extra run / Part B">
+                                Part B
                               </span>
                             )}
                             <p className={`font-medium text-brand-navy text-xs ${item.shopping_status === 'out_of_stock' ? 'line-through' : ''}`}>
@@ -1987,15 +2000,47 @@ export function OrderDetailModal({
                         Customer called after placing? Add items, COD, or a service here.
                       </p>
                     )}
+                    {canAddPartB && !addingItem && (
+                      <div className="rounded-lg border-2 border-dashed border-amber-400 bg-amber-50 px-3 py-2.5">
+                        <p className="text-xs font-bold text-amber-900 uppercase tracking-wide">Part B — extra run</p>
+                        <p className="text-[11px] text-amber-800/90 mt-0.5 leading-snug">
+                          Sinclair already shopped Part A. Boat called with extras GTS (or Sinclair) will grab now — usually COD, like Jen picking up 20 cases of water on the way to deliver.
+                        </p>
+                      </div>
+                    )}
                   <div className="flex flex-wrap items-center gap-3">
                     {!addingItem ? (
                       <>
+                      {canAddPartB ? (
+                        <button
+                          onClick={() => {
+                            setAddAsPartB(true);
+                            setAddPaidBy('cod');
+                            setAddingItem(true);
+                            setAddMode(null);
+                            setItemError('');
+                          }}
+                          className="flex items-center gap-1.5 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-lg px-3 py-2"
+                        >
+                          <Plus className="w-3.5 h-3.5" /> Add Part B extras
+                        </button>
+                      ) : (
                       <button
-                        onClick={() => { setAddingItem(true); setAddMode(null); setItemError(''); }}
+                        onClick={() => { setAddAsPartB(false); setAddingItem(true); setAddMode(null); setItemError(''); }}
                         className="flex items-center gap-1.5 text-xs font-bold text-brand-river hover:text-brand-navy transition-colors py-1"
                       >
                         <Plus className="w-3.5 h-3.5" /> Add to order
                       </button>
+                      )}
+                      {localItems.some(i => i.added_after_shopped) && (
+                        <button
+                          type="button"
+                          onClick={() => setShowPickSheetAddon(true)}
+                          className="flex items-center gap-1.5 text-xs font-bold text-amber-800 border border-amber-400 bg-white rounded-lg px-3 py-2 hover:bg-amber-50"
+                        >
+                          Print Part B pick list
+                        </button>
+                      )}
                       {canEdit && order.status !== 'shopped' && order.status !== 'fulfilled' && order.status !== 'cancelled' && (
                         <button
                           onClick={openFinishShopping}
@@ -2012,7 +2057,9 @@ export function OrderDetailModal({
                     ) : (
                       <div className="mt-3 w-full border border-brand-sky/30 rounded-lg bg-blue-50/40 p-3 space-y-2">
                         <div className="flex items-center justify-between gap-2">
-                          <p className="text-xs font-bold text-brand-navy uppercase tracking-wide">Add to order</p>
+                          <p className="text-xs font-bold text-brand-navy uppercase tracking-wide">
+                            {addAsPartB || order.status === 'shopped' ? 'Part B — extra items' : 'Add to order'}
+                          </p>
                           <button onClick={cancelAdd} className="text-xs text-gray-500 hover:text-gray-700">Cancel</button>
                         </div>
 
@@ -2032,7 +2079,7 @@ export function OrderDetailModal({
                                 if (mode === 'writein') {
                                   setAddPaidBy('cod');
                                 } else if (mode === 'catalog') {
-                                  setAddPaidBy('vessel');
+                                  setAddPaidBy(addAsPartB || order.status === 'shopped' ? 'cod' : 'vessel');
                                 } else if (mode === 'service') {
                                   setSvcKind(canAddGtsServices ? 'parts_pickup' : 'other_pickup');
                                 }
@@ -2521,6 +2568,14 @@ export function OrderDetailModal({
           orderId={order.id}
           orderNumber={order.order_number}
           onClose={() => setShowPickSheet(false)}
+        />
+      )}
+      {showPickSheetAddon && (
+        <PickSheetOverlay
+          orderId={order.id}
+          orderNumber={`${order.order_number} · Part B`}
+          addonOnly
+          onClose={() => setShowPickSheetAddon(false)}
         />
       )}
 

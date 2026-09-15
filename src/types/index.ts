@@ -298,6 +298,8 @@ export interface OrderItem {
   quantity: number;
   line_total: number;
   shopping_status: 'pending' | 'shopped' | 'out_of_stock';
+  /** Extra run after Sinclair already shopped (Part B). */
+  added_after_shopped?: boolean;
   actual_weight: number | null;
   actual_total: number | null;
   is_substitution: boolean;

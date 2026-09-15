@@ -12,10 +12,12 @@ import { buildPickSheetForOrder } from '@/lib/pick-sheet';
 import { adminFetch } from '@/lib/admin-auth';
 import { formatCurrency } from '@/lib/utils';
 
-export function PickSheetOverlay({ orderId, orderNumber, onClose, registerStep = false, estimatedTotal, initialRegisterTotal }: {
+export function PickSheetOverlay({ orderId, orderNumber, onClose, registerStep = false, estimatedTotal, initialRegisterTotal, addonOnly = false }: {
   orderId: string;
   orderNumber?: string;
   onClose: () => void;
+  /** Part B extras after Sinclair already shopped. */
+  addonOnly?: boolean;
   /** True right after shopping completes — the register run. Shows the
    *  register-total entry, which is Sinclair's final confirming step. */
   registerStep?: boolean;
@@ -56,11 +58,11 @@ export function PickSheetOverlay({ orderId, orderNumber, onClose, registerStep =
 
   useEffect(() => {
     let alive = true;
-    buildPickSheetForOrder(orderId)
+    buildPickSheetForOrder(orderId, { addonOnly })
       .then(h => { if (alive) setHtml(h); })
       .catch(e => { if (alive) setError(e instanceof Error ? e.message : 'Could not load the pick sheet'); });
     return () => { alive = false; };
-  }, [orderId]);
+  }, [orderId, addonOnly]);
 
   function print() {
     frameRef.current?.contentWindow?.print();
@@ -73,7 +75,7 @@ export function PickSheetOverlay({ orderId, orderNumber, onClose, registerStep =
       {/* Header bar */}
       <div className="bg-brand-navy px-4 py-3 flex items-center justify-between shrink-0">
         <div>
-          <p className="text-brand-sky text-[10px] uppercase tracking-wide">Barcode Pick Sheet</p>
+          <p className="text-brand-sky text-[10px] uppercase tracking-wide">{addonOnly ? 'Part B pick sheet — extra run' : 'Barcode Pick Sheet'}</p>
           <p className="text-white font-display font-bold">{orderNumber || 'Order'}</p>
         </div>
         <div className="flex items-center gap-2">

@@ -296,11 +296,15 @@ function readableLink(raw: string): { host: string; label: string; path: string 
   }
 }
 
-export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_ORDER): string {
+export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_ORDER, opts?: { addonOnly?: boolean }): string {
   // Shopping day, not order day — the whole point of the expired-sale flag is
   // that these two can differ by several days.
   const today = shoppingDay();
-  const allStock = order.items.filter(i => i.item_type !== 'service');
+  const allStock = order.items.filter(i => {
+    if (i.item_type === 'service') return false;
+    if (opts?.addonOnly) return !!i.added_after_shopped;
+    return true;
+  });
   const byParent = subsByParent(allStock);
   // Substitutions nest under their OOS original (Freshop). Keep them out of the
   // walk-order grid so they don't float to a different aisle as orphan cards.
@@ -512,7 +516,7 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
   <header class="sheet">
     <div class="brand"><b>SINCLAIR'S FOODS</b><span>Boat order via Grafton Towboat Services</span></div>
     <div class="ordmeta">
-      <div class="num">${esc(order.order_number)}</div>
+      <div class="num">${esc(order.order_number)}${opts?.addonOnly ? ' · PART B' : ''}</div>
       <div>Placed ${placed.toLocaleDateString()} ${placed.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div>
       <div>Status: ${esc(order.status.replace('_', ' ').toUpperCase())}</div>
     </div>
@@ -523,6 +527,7 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
     ${order.company_name && order.vessel_name ? `<span><b>Company:</b> ${esc(order.company_name)}</span>` : ''}
     ${order.arrival_date ? `<span><b>Arrival:</b> ${esc(order.arrival_date)}${order.arrival_time ? ` ${esc(formatArrivalTime(order.arrival_time))}` : ''}</span>` : ''}
     ${order.terminal_name ? `<span><b>Deliver to:</b> ${esc(order.terminal_name)}</span>` : ''}
+    ${opts?.addonOnly ? `<span style="color:#c2410c"><b>Part B extra run</b> — after Sinclair shopped. Pull only these lines.</span>` : ''}
     ${codCount ? `<span style="color:#7c3aed"><b>COD lines:</b> ${codCount}</span>` : ''}
     ${services.length ? `<span style="color:#b45309"><b>Outside pickups:</b> ${services.length} (separate trip)</span>` : ''}
   </div>
@@ -649,7 +654,7 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
  * GET) + the manager's zone order, and return the finished sheet HTML.
  * Rendered IN-APP via PickSheetOverlay (iframe) — no pop-up windows.
  */
-export async function buildPickSheetForOrder(orderId: string): Promise<string> {
+export async function buildPickSheetForOrder(orderId: string, opts?: { addonOnly?: boolean }): Promise<string> {
   let zoneOrder = DEFAULT_ZONE_ORDER;
   try {
     const cfg = await fetch('/api/order-config').then(r => (r.ok ? r.json() : null));
@@ -659,5 +664,5 @@ export async function buildPickSheetForOrder(orderId: string): Promise<string> {
   const res = await fetch(`/api/orders/${orderId}`);
   if (!res.ok) throw new Error('Could not load order for pick sheet');
   const order = (await res.json()) as Order;
-  return pickSheetHtml(order, zoneOrder);
+  return pickSheetHtml(order, zoneOrder, opts);
 }

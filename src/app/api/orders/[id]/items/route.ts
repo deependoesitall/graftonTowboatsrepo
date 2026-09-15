@@ -137,13 +137,15 @@ export async function POST(
 
   const { data: order } = await supabase
     .from('orders')
-    .select('id')
+    .select('id, status')
     .eq('id', orderId)
     .single();
 
   if (!order) {
     return NextResponse.json({ error: 'Order not found' }, { status: 404 });
   }
+
+  const partB = (order as { status?: string }).status === 'shopped';
 
   // ── CATALOG GROCERY ───────────────────────────────────────────────────────
   if ('product_id' in data && data.product_id) {
@@ -192,6 +194,7 @@ export async function POST(
         cod_name: billing.cod_name,
         regular_price: eff.regular_price,
         sale_finish_date: eff.sale_finish_date,
+        added_after_shopped: partB,
       })
       .select()
       .single();
@@ -231,6 +234,7 @@ export async function POST(
         cod_name: billing.cod_name,
         regular_price: null,
         sale_finish_date: null,
+        added_after_shopped: partB,
       })
       .select()
       .single();
@@ -320,6 +324,8 @@ export async function POST(
       sale_finish_date: null,
     };
   }
+
+  row.added_after_shopped = partB;
 
   const { data: newItem, error } = await supabase
     .from('order_items')
