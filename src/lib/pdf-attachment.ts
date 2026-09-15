@@ -233,10 +233,12 @@ export async function generateOrderPdfBuffer(order: Order): Promise<Buffer> {
       return acc;
     }, {} as Record<string, typeof catalogItems>);
 
+    const extra: Array<[string, typeof groceryVisible]> = [];
+    if (writeInItems.length) extra.push(['Write-in — boat grocery', writeInItems]);
+    if (codLineItems.length) extra.push(['COD — collect from crew (not invoiced)', codLineItems]);
     const sections: Array<[string, typeof groceryVisible]> = [
       ...Object.entries(grouped),
-      ...(writeInItems.length ? [['Write-in — boat grocery', writeInItems] as const] : []),
-      ...(codLineItems.length ? [['COD — collect from crew (not invoiced)', codLineItems] as const] : []),
+      ...extra,
     ];
 
     let rowBg = false;
