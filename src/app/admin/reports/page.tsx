@@ -1281,7 +1281,7 @@ function AnalyticsTab() {
           </div>
 
           <div className="card-base p-4 flex items-center justify-between flex-wrap gap-3">
-            <p className="text-sm text-gray-500">Export the full order list for this date range.</p>
+            <p className="text-sm text-gray-500">Export the full order list for this date range — company, vessel, PO, register total, delivery, COD split, arrival.</p>
             <button onClick={() => exportCsv('orders')} className="btn-primary text-sm flex items-center gap-2">
               <Download className="w-4 h-4" /> Export Orders CSV
             </button>

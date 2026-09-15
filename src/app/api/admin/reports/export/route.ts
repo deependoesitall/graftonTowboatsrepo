@@ -2,14 +2,47 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/admin-auth-server';
+import { TIME_ZONE } from '@/lib/utils';
 
-
-function csvEscape(val: any): string {
+function csvEscape(val: unknown): string {
   const s = String(val ?? '');
   if (s.includes(',') || s.includes('"') || s.includes('\n')) {
     return `"${s.replace(/"/g, '""')}"`;
   }
   return s;
+}
+
+function money(n: unknown): string {
+  const x = Number(n);
+  return Number.isFinite(x) ? x.toFixed(2) : '';
+}
+
+function chicagoDate(iso: string | null | undefined): string {
+  if (!iso) return '';
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date(iso));
+}
+
+function chicagoTime(iso: string | null | undefined): string {
+  if (!iso) return '';
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: TIME_ZONE, hour: 'numeric', minute: '2-digit',
+  }).format(new Date(iso));
+}
+
+type ExportItem = {
+  description?: string;
+  category?: string;
+  quantity?: number;
+  unit_price?: number;
+  line_total?: number;
+  paid_by?: string | null;
+  item_type?: string | null;
+};
+
+function paidOf(i: ExportItem): string {
+  return i.paid_by || 'vessel';
 }
 
 export async function GET(req: NextRequest) {
@@ -23,29 +56,131 @@ export async function GET(req: NextRequest) {
 
   const supabase = createServiceClient();
 
-  let query = supabase
-    .from('orders')
-    .select('id, order_number, company_name, contact_name, phone, subtotal, status, created_at, items:order_items(description, category, quantity, unit_price, line_total)')
-    .order('created_at', { ascending: true });
+  const SELECT_FULL =
+    'id, order_number, company_name, vessel_name, contact_name, phone, customer_email, vessel_email, po_number, terminal_name, delivery_method, arrival_date, arrival_time, crew_change, notes, eta, subtotal, discount_total, register_total, deck_register_total, delivery_fee, delivery_service_type, bill_for_groceries, invoice_number, status, source, purchased_at, created_at, items:order_items(description, category, quantity, unit_price, line_total, paid_by, item_type)';
+  const SELECT_CORE =
+    'id, order_number, company_name, vessel_name, contact_name, phone, customer_email, vessel_email, po_number, terminal_name, delivery_method, arrival_date, arrival_time, crew_change, notes, eta, subtotal, discount_total, register_total, deck_register_total, delivery_fee, delivery_service_type, bill_for_groceries, invoice_number, status, created_at, items:order_items(description, category, quantity, unit_price, line_total, paid_by, item_type)';
 
+  let query = supabase.from('orders').select(SELECT_FULL).order('created_at', { ascending: true });
   if (from) query = query.gte('created_at', from);
   if (to) query = query.lte('created_at', to);
 
-  const { data, error } = await query;
+  let { data, error } = await query;
+  if (error) {
+    let fallback = supabase.from('orders').select(SELECT_CORE).order('created_at', { ascending: true });
+    if (from) fallback = fallback.gte('created_at', from);
+    if (to) fallback = fallback.lte('created_at', to);
+    const retry = await fallback;
+    data = retry.data;
+    error = retry.error;
+  }
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  const orders = (data || []) as any[];
+  const orders = (data || []) as Array<{
+    order_number: string;
+    company_name: string;
+    vessel_name: string | null;
+    contact_name: string;
+    phone: string;
+    customer_email: string | null;
+    vessel_email: string | null;
+    po_number: string | null;
+    terminal_name: string | null;
+    delivery_method: string | null;
+    arrival_date: string | null;
+    arrival_time: string | null;
+    crew_change: string | null;
+    notes: string | null;
+    eta: string | null;
+    subtotal: number;
+    discount_total: number | null;
+    register_total: number | null;
+    deck_register_total: number | null;
+    delivery_fee: number | null;
+    delivery_service_type: string | null;
+    bill_for_groceries: boolean | null;
+    invoice_number: number | null;
+    status: string;
+    source: string | null;
+    purchased_at: string | null;
+    created_at: string;
+    items: ExportItem[] | null;
+  }>;
 
   let csv = '';
   let filename = 'report.csv';
 
   if (type === 'orders') {
     filename = `orders_${from || 'all'}_${to || 'all'}.csv`;
-    csv = 'Order Number,Vessel,Contact,Phone,Date,Status,Items,Estimated Total\n';
+    csv = [
+      'Order Number',
+      'Date',
+      'Time',
+      'Status',
+      'Company',
+      'Vessel',
+      'Contact',
+      'Phone',
+      'Billing Email',
+      'Boat Email',
+      'PO',
+      'Terminal',
+      'Delivery Method',
+      'Arrival Date',
+      'Arrival Time',
+      'Crew Change',
+      'Item Count',
+      'Grocery Estimate',
+      'COD Estimate',
+      'Deck Estimate',
+      'Discount',
+      'Order Estimate',
+      'Register Total',
+      'Deck Register Total',
+      'Delivery Fee',
+      'Delivery Type',
+      'Bill Groceries',
+      'Invoice #',
+      'Source',
+      'Notes',
+    ].join(',') + '\n';
     for (const o of orders) {
-      const itemCount = o.items.reduce((s: number, i: any) => s + i.quantity, 0);
+      const items = o.items || [];
+      const grocery = items.filter(i => i.item_type !== 'service' && paidOf(i) === 'vessel');
+      const cod = items.filter(i => paidOf(i) === 'cod');
+      const deck = items.filter(i => paidOf(i) === 'deck');
+      const itemCount = items.reduce((s, i) => s + (Number(i.quantity) || 0), 0);
+      const sum = (rows: ExportItem[]) => rows.reduce((s, i) => s + Number(i.line_total || 0), 0);
       csv += [
-        o.order_number, o.company_name, o.contact_name, o.phone,
-        new Date(o.created_at).toLocaleDateString(), o.status, itemCount, o.subtotal,
+        o.order_number,
+        chicagoDate(o.created_at),
+        chicagoTime(o.created_at),
+        o.status,
+        o.company_name,
+        o.vessel_name || '',
+        o.contact_name,
+        o.phone,
+        o.customer_email || '',
+        o.vessel_email || '',
+        o.po_number || '',
+        o.terminal_name || '',
+        o.delivery_method || '',
+        o.arrival_date || '',
+        o.arrival_time || '',
+        o.crew_change || '',
+        itemCount,
+        money(sum(grocery)),
+        money(sum(cod)),
+        money(sum(deck)),
+        money(o.discount_total),
+        money(o.subtotal),
+        o.register_total != null ? money(o.register_total) : '',
+        o.deck_register_total != null ? money(o.deck_register_total) : '',
+        o.delivery_fee != null ? money(o.delivery_fee) : '',
+        o.delivery_service_type || '',
+        o.bill_for_groceries === false ? 'No' : 'Yes',
+        o.invoice_number ?? '',
+        o.source || '',
+        o.notes || '',
       ].map(csvEscape).join(',') + '\n';
     }
   } else if (type === 'products') {
