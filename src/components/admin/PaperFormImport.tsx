@@ -462,7 +462,7 @@ export function PaperFormImport({ catalog, setLine, applyLines, appendNotes, add
   return (
     <div className="card-base p-4 space-y-4">
       <div>
-        <h2 className="text-sm font-bold text-brand-navy">Scan the paper form</h2>
+        <h2 className="text-sm font-bold text-brand-navy">Sinclair&apos;s Order Form importer</h2>
         <p className="text-xs text-gray-500 mt-1 leading-relaxed">
           Drop the marked Sinclair PDF or photos (the Scott Noble order is the reference). Upside-down
           pages flip themselves. Marks are cut out and grouped so identical handwriting is answered

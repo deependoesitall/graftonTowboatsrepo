@@ -26,9 +26,9 @@
 //
 // PASTE is for an order that arrived as a text message or an email body.
 //
-// SCAN is for the marked paper form itself — PDF or photos of the QNTY
-// column. Ink detection + optional OCR prefill a review list; nothing is
-// committed until staff confirm.
+// SCAN (Sinclair's Order Form importer) is the marked paper form itself —
+// PDF or photos of the QNTY column. Ink detection + grouped marks; nothing
+// is committed until staff confirm. Separate from the register-receipt PLU tape.
 //
 // ── WHY IT SUBMITS TO /api/orders AND NOT SOMEWHERE NEW ────────────────────
 //
@@ -208,7 +208,7 @@ export default function NewOrderPage() {
   const [step, setStep] = useState<'who' | 'what' | 'check'>('who');
   /**
    * Register tape is not a 6th tab. Jen asked for a quicker button so she
-   * does not have to open Scan form (paper QNTY photos — a different job)
+   * does not have to open the Order Form importer (marked QNTY photos — a different job)
    * to upload a Sinclair PLU PDF. `showRegister` reveals the match panel
    * in whatever mode she is already in; the hidden file input opens the
    * picker on the same click.
@@ -734,8 +734,9 @@ export default function NewOrderPage() {
               setRegisterFile(f);
             }}
           />
-          {/* Paper-form scan stays under Scan form. Register tape panel
-              mounts here so the shortcut can show it without switching tabs. */}
+          {/* Sinclair's Order Form importer stays under the scan tab.
+              Register-receipt panel mounts here so the shortcut can show it
+              without switching tabs. */}
           {mode === 'scan' && (
             <PaperFormImport
               catalog={items}
@@ -851,7 +852,7 @@ function ModeTabs({ mode, setMode, onRegisterTape }: {
   const tabs: Array<{ id: Mode; label: string; icon: typeof ListOrdered; hint: string }> = [
     { id: 'sheet', label: 'Order form', icon: ListOrdered, hint: 'Same order as the paper' },
     { id: 'repeat', label: 'Send again', icon: RotateCcw, hint: 'Start from one of this boat\u2019s past orders' },
-    { id: 'scan', label: 'Scan form', icon: Camera, hint: 'PDF or photos of the marked form' },
+    { id: 'scan', label: 'Order Form importer', icon: Camera, hint: "Sinclair's marked paper form" },
     { id: 'quick', label: 'Quick add', icon: Keyboard, hint: 'Type a UPC or a name' },
     { id: 'paste', label: 'Paste a list', icon: ClipboardPaste, hint: 'From a text or email' },
   ];
@@ -883,8 +884,8 @@ function ModeTabs({ mode, setMode, onRegisterTape }: {
       >
         <FileUp className="w-4 h-4 shrink-0" />
         <span>
-          <span className="font-semibold block leading-tight">Register tape</span>
-          <span className="text-xs text-gray-400">Upload Sinclair PDF</span>
+          <span className="font-semibold block leading-tight">Register receipt</span>
+          <span className="text-xs text-gray-400">Itemized PLU tape PDF</span>
         </span>
       </button>
     </div>
