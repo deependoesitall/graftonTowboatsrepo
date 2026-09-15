@@ -91,11 +91,13 @@ function applyTemplateVars(text: string, order: Order, appUrl: string): string {
   const itemCount = order.items.filter(i => i.item_type !== 'service').reduce((s, i) => s + i.quantity, 0);
   return text
     .replaceAll('{order_number}', order.order_number)
+    .replaceAll('{order_id}', order.id)
     .replaceAll('{company_name}', order.company_name)
     .replaceAll('{contact_name}', order.contact_name)
     .replaceAll('{phone}', order.phone || '')
     .replaceAll('{po_number}', order.po_number || '')
     .replaceAll('{eta}', order.eta || '')
+    .replaceAll('{vessel_name}', order.vessel_name || '')
     .replaceAll('{order_total}', formatCurrency(order.subtotal))
     .replaceAll('{item_count}', String(itemCount))
     .replaceAll('{order_date}', formatDate(order.created_at))

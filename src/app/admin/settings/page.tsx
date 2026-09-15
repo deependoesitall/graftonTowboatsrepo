@@ -1,6 +1,6 @@
 'use client';
 // src/app/admin/settings/page.tsx
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Save, RefreshCw, Eye, EyeOff, Plus, Trash2, UserPlus, ShieldCheck, User, Lock, ScrollText, Search, ArrowRight, ChevronLeft, ChevronRight, MessageSquarePlus, Check, X, Loader2, Send, Wrench } from 'lucide-react';
 import { fetchAdminSession, getAdminRole, canAccess, adminFetch, AdminRole } from '@/lib/admin-auth';
@@ -301,7 +301,15 @@ export default function AdminSettingsPage() {
     if (tab === 'logs' && !denied) loadLogs();
   }, [tab, logsPage, logsSearch]);
 
-  async function loadEmailPreview() {
+  const emailPreviewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (tab !== 'email' || denied) return;
+    if (emailPreviewTimer.current) clearTimeout(emailPreviewTimer.current);
+    emailPreviewTimer.current = setTimeout(() => { void loadEmailPreview(false); }, 500);
+    return () => { if (emailPreviewTimer.current) clearTimeout(emailPreviewTimer.current); };
+  }, [tab, denied, settings.order_email_subject, settings.email_header_tagline, settings.email_intro_message, settings.email_footer_text, settings.email_button_text, settings.email_button_url]);
+
+  async function loadEmailPreview(openModal = false) {
     setPreviewLoading(true);
     try {
       const res = await adminFetch('/api/admin/email-preview', {
@@ -317,7 +325,7 @@ export default function AdminSettingsPage() {
         }),
       });
       setPreviewHtml(await res.text());
-      setShowPreview(true);
+      if (openModal) setShowPreview(true);
     } catch {}
     setPreviewLoading(false);
   }
@@ -1240,122 +1248,181 @@ export default function AdminSettingsPage() {
       )}
 
       {/* ── EMAIL ── */}
-      {tab === 'email' && (
-        <div className="card-base p-6 space-y-5">
-          <h2 className="font-bold text-brand-navy">Email Notifications</h2>
-          <div>
-            <label className="label-base">Order Notification Email</label>
-            <input type="email" className="input-base" value={settings.business_email}
-              onChange={e => setSettings(s => ({ ...s, business_email: e.target.value }))} />
-            <p className="text-xs text-gray-400 mt-1">All orders will be sent to this address</p>
+      {tab === 'email' && (() => {
+        const SAMPLE = {
+          '{order_number}': 'GTS-260611-1234',
+          '{company_name}': 'Ingram',
+          '{vessel_name}': 'Scott Noble',
+          '{contact_name}': 'Captain Smith',
+          '{phone}': '(618) 555-0142',
+          '{order_total}': '$34.24',
+          '{item_count}': '6',
+          '{order_date}': 'Jun 11, 2026',
+        };
+        const fillSample = (t: string) => Object.entries(SAMPLE).reduce((s, [k, v]) => s.replaceAll(k, v), t);
+        const insert = (field: 'order_email_subject' | 'email_header_tagline' | 'email_intro_message' | 'email_footer_text' | 'email_button_text', token: string) => {
+          setSettings(s => ({ ...s, [field]: `${s[field] || ''}${token}` }));
+        };
+        const TokenRow = ({ field }: { field: 'order_email_subject' | 'email_header_tagline' | 'email_intro_message' | 'email_footer_text' | 'email_button_text' }) => (
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {[
+              ['{order_number}', 'Order #'],
+              ['{company_name}', 'Company'],
+              ['{vessel_name}', 'Boat'],
+              ['{contact_name}', 'Contact'],
+              ['{order_total}', 'Total'],
+              ['{item_count}', '# items'],
+            ].map(([token, label]) => (
+              <button key={token} type="button" onClick={() => insert(field, token)}
+                className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full border border-gray-200 bg-white text-brand-navy hover:border-brand-gold hover:bg-brand-sand/40">
+                + {label}
+              </button>
+            ))}
           </div>
-          <div>
-            <label className="label-base">CC Email (optional)</label>
-            <input type="text" className="input-base" value={settings.order_email_cc}
-              onChange={e => setSettings(s => ({ ...s, order_email_cc: e.target.value }))}
-              placeholder="second@email.com, third@email.com" />
+        );
+        const btnUrl = settings.email_button_url || '/admin/orders';
+        const dest = !btnUrl || btnUrl === '/admin/orders' ? 'list'
+          : btnUrl.includes('{order_id}') ? 'order'
+          : 'custom';
+        return (
+        <div className="space-y-5">
+          <div className="card-base p-6 space-y-4">
+            <div>
+              <h2 className="font-bold text-brand-navy">Who gets pinged when an order lands</h2>
+              <p className="text-xs text-gray-400 mt-1">This is the GTS / Sinclair staff email — not the customer confirmation.</p>
+            </div>
+            <div>
+              <label className="label-base">Send to</label>
+              <input type="email" className="input-base" value={settings.business_email}
+                onChange={e => setSettings(s => ({ ...s, business_email: e.target.value }))} />
+            </div>
+            <div>
+              <label className="label-base">Also send a copy to <span className="font-normal text-gray-400 normal-case">(optional)</span></label>
+              <input type="text" className="input-base" value={settings.order_email_cc}
+                onChange={e => setSettings(s => ({ ...s, order_email_cc: e.target.value }))}
+                placeholder="jen@…, second@…" />
+            </div>
           </div>
 
-          <div className="border-t border-gray-100 pt-5">
-            <h2 className="font-bold text-brand-navy mb-1">Email Template</h2>
-            <p className="text-xs text-gray-400 mb-4">Customize the order notification email sent to staff and owners.</p>
-
-            <div className="space-y-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
+            <div className="card-base p-6 space-y-5">
               <div>
-                <label className="label-base">Subject Line</label>
-                <input type="text" className="input-base" value={settings.order_email_subject}
-                  onChange={e => setSettings(s => ({ ...s, order_email_subject: e.target.value }))} />
-                <p className="text-xs text-gray-400 mt-1">What appears in the inbox before the email is opened.</p>
+                <h2 className="font-bold text-brand-navy">What the email says</h2>
+                <p className="text-xs text-gray-400 mt-1">Tap a green chip to drop in the real order number, boat, or total. Save at the top of the page when you&apos;re happy.</p>
               </div>
 
               <div>
-                <label className="label-base">Banner Text</label>
+                <label className="label-base">Inbox title</label>
+                <input type="text" className="input-base" value={settings.order_email_subject}
+                  onChange={e => setSettings(s => ({ ...s, order_email_subject: e.target.value }))} />
+                <TokenRow field="order_email_subject" />
+                <p className="text-xs text-gray-500 mt-2 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2">
+                  In the inbox it looks like:{' '}
+                  <span className="font-semibold text-brand-navy">{fillSample(settings.order_email_subject || '')}</span>
+                </p>
+              </div>
+
+              <div>
+                <label className="label-base">Green header line</label>
                 <input type="text" className="input-base" value={settings.email_header_tagline}
                   onChange={e => setSettings(s => ({ ...s, email_header_tagline: e.target.value }))}
                   placeholder="New Order Received" />
-                <p className="text-xs text-gray-400 mt-1">Shown inside the email, just below the company name in the green header.</p>
+                <TokenRow field="email_header_tagline" />
               </div>
 
               <div>
-                <label className="label-base">Intro Message <span className="text-gray-400 font-normal normal-case">(optional)</span></label>
+                <label className="label-base">Opening sentence <span className="font-normal text-gray-400 normal-case">(optional)</span></label>
                 <textarea className="input-base" rows={3} value={settings.email_intro_message}
                   onChange={e => setSettings(s => ({ ...s, email_intro_message: e.target.value }))}
-                  placeholder="e.g. Thanks for your order! Our team will start preparing it shortly." />
-                <p className="text-xs text-gray-400 mt-1">A short message shown above the order details. Leave blank to omit.</p>
+                  placeholder="A new grocery order is in — open it in the dashboard." />
+                <TokenRow field="email_intro_message" />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="label-base">Button Text</label>
-                  <input type="text" className="input-base" value={settings.email_button_text}
-                    onChange={e => setSettings(s => ({ ...s, email_button_text: e.target.value }))}
-                    placeholder="Order Dashboard" />
-                </div>
-                <div>
-                  <label className="label-base">Button Link</label>
-                  <input type="text" className="input-base" value={settings.email_button_url}
-                    onChange={e => setSettings(s => ({ ...s, email_button_url: e.target.value }))}
-                    placeholder="/admin/orders" />
-                  <p className="text-xs text-gray-400 mt-1">Use a path like <code className="bg-gray-100 px-1 rounded">/admin/orders</code> or a full URL.</p>
+              <div>
+                <label className="label-base">Green button</label>
+                <input type="text" className="input-base mb-2" value={settings.email_button_text}
+                  onChange={e => setSettings(s => ({ ...s, email_button_text: e.target.value }))}
+                  placeholder="Open this order" />
+                <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wide mb-1.5">When they tap it, go to</p>
+                <div className="space-y-1.5">
+                  {([
+                    ['list', 'The orders list', '/admin/orders'],
+                    ['order', 'That order, already open', '/admin/orders?order={order_id}'],
+                  ] as const).map(([id, label, url]) => (
+                    <label key={id} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm cursor-pointer ${dest === id ? 'border-brand-gold bg-brand-sand/30' : 'border-gray-200 bg-white'}`}>
+                      <input type="radio" name="email-btn-dest" className="accent-brand-navy"
+                        checked={dest === id}
+                        onChange={() => setSettings(s => ({ ...s, email_button_url: url }))} />
+                      <span className="font-medium text-brand-navy">{label}</span>
+                    </label>
+                  ))}
+                  <label className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-sm cursor-pointer ${dest === 'custom' ? 'border-brand-gold bg-brand-sand/30' : 'border-gray-200 bg-white'}`}>
+                    <input type="radio" name="email-btn-dest" className="accent-brand-navy mt-1"
+                      checked={dest === 'custom'}
+                      onChange={() => {
+                        if (dest !== 'custom') setSettings(s => ({ ...s, email_button_url: 'https://' }));
+                      }} />
+                    <span className="flex-1 min-w-0">
+                      <span className="font-medium text-brand-navy">A different page</span>
+                      {dest === 'custom' && (
+                        <input type="text" className="input-base text-xs mt-1.5" value={settings.email_button_url}
+                          onChange={e => setSettings(s => ({ ...s, email_button_url: e.target.value }))}
+                          placeholder="https://…" />
+                      )}
+                    </span>
+                  </label>
                 </div>
               </div>
 
               <div>
-                <label className="label-base">Footer Text</label>
+                <label className="label-base">Fine print at the bottom</label>
                 <input type="text" className="input-base" value={settings.email_footer_text}
                   onChange={e => setSettings(s => ({ ...s, email_footer_text: e.target.value }))} />
               </div>
 
-              <div className="bg-gray-50 rounded-lg p-3">
-                <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Available Variables</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {['{order_number}', '{company_name}', '{contact_name}', '{phone}', '{po_number}', '{eta}', '{order_total}', '{item_count}', '{order_date}'].map(v => (
-                    <code key={v} className="bg-white border border-gray-200 px-1.5 py-0.5 rounded text-[11px] text-brand-navy">{v}</code>
-                  ))}
+              <div className="flex flex-wrap gap-2 pt-1">
+                <button type="button" onClick={() => void loadEmailPreview(true)} disabled={previewLoading}
+                  className="btn-outline text-sm px-4 py-2 flex items-center gap-2">
+                  {previewLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4" />}
+                  Open preview larger
+                </button>
+                <button type="button" onClick={sendTestEmail} disabled={testingEmail}
+                  className="btn-outline text-sm px-4 py-2 flex items-center gap-2">
+                  {testingEmail ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  Send me a test
+                </button>
+              </div>
+              {testEmailResult && (
+                <div className={`rounded-lg p-3 text-xs ${testEmailResult.ok ? 'bg-green-50 text-green-800 border border-green-200' : 'bg-red-50 text-red-800 border border-red-200'}`}>
+                  {testEmailResult.ok ? (
+                    <p>Sent to <strong>{testEmailResult.to}</strong>. Check inbox and spam.</p>
+                  ) : (
+                    <>
+                      <p className="font-semibold mb-1">{testEmailResult.error}</p>
+                      {testEmailResult.hint && <p>{testEmailResult.hint}</p>}
+                    </>
+                  )}
                 </div>
-                <p className="text-xs text-gray-400 mt-2">
-                  Use these in the subject, header tagline, intro message, footer, button text, or button link — they'll be replaced with the order's actual details.
-                </p>
-              </div>
-
-              <button onClick={loadEmailPreview} disabled={previewLoading}
-                className="btn-outline text-sm px-4 py-2 flex items-center gap-2">
-                {previewLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4" />}
-                Preview Email
-              </button>
+              )}
             </div>
-          </div>
 
-          <div className="border border-gray-200 rounded-lg p-4">
-            <div className="flex items-center justify-between flex-wrap gap-3">
-              <div>
-                <p className="font-semibold text-brand-navy text-sm">Test Email Delivery</p>
-                <p className="text-xs text-gray-400">Sends a test email to the address above and shows the exact result.</p>
+            <div className="card-base overflow-hidden lg:sticky lg:top-20">
+              <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between bg-gray-50">
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Live preview</p>
+                {previewLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin text-gray-400" />}
               </div>
-              <button onClick={sendTestEmail} disabled={testingEmail}
-                className="btn-outline text-sm px-4 py-2 flex items-center gap-2">
-                {testingEmail ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                Send Test Email
-              </button>
-            </div>
-            {testEmailResult && (
-              <div className={`mt-3 rounded-lg p-3 text-xs ${testEmailResult.ok ? 'bg-green-50 text-green-800 border border-green-200' : 'bg-red-50 text-red-800 border border-red-200'}`}>
-                {testEmailResult.ok ? (
-                  <p>✅ Sent successfully to <strong>{testEmailResult.to}</strong> from <strong>{testEmailResult.from}</strong>. Check your inbox (and spam folder).</p>
+              <div className="bg-gray-100 min-h-[28rem]">
+                {previewHtml ? (
+                  <iframe srcDoc={previewHtml} className="w-full h-[32rem] border-0 bg-white" title="Email preview" />
                 ) : (
-                  <>
-                    <p className="font-semibold mb-1">❌ {testEmailResult.error}</p>
-                    {testEmailResult.from && testEmailResult.to && (
-                      <p className="text-red-600">From: {testEmailResult.from} → To: {testEmailResult.to}</p>
-                    )}
-                    {testEmailResult.hint && <p className="mt-1 text-red-600">{testEmailResult.hint}</p>}
-                  </>
+                  <p className="text-xs text-gray-400 text-center py-16">Preview loads as you type.</p>
                 )}
               </div>
-            )}
+            </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Email preview modal */}
       {showPreview && (
