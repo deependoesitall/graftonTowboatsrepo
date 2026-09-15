@@ -227,7 +227,7 @@ export function buildOrderEmailHtml(
            bill follows from the office. */''}
       <div style="padding:9px 12px;background:#f7f9f1;border-top:1px solid #e4e8da;font-size:11px;color:#4d7c5f;line-height:1.6;">
         This is your delivery summary, not an invoice &mdash; nothing to pay from this email.
-        Your company is billed monthly in QuickBooks (accounts payable). When GTS bills groceries, that statement uses two lines like this summary: delivery, then one Sinclair&apos;s grocery total. When the boat pays Sinclair&apos;s directly, QuickBooks shows GTS delivery / services only.
+        Your company will receive an invoice from QuickBooks for our services. If your company&apos;s arrangements require billing from GTS, your invoice will include a line item for the delivery charge and a line item for the grocery total. Otherwise, your invoice will include a line item for our services only and a separate invoice will arrive from Sinclair&apos;s for your grocery items.
       </div>
       ${/* Spell out the paperwork. Barge-line accounts payable departments hold
            invoices that arrive without their supporting documents — Ingram's
