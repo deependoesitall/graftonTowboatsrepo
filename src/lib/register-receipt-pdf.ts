@@ -35,5 +35,7 @@ export async function extractPdfText(file: File): Promise<string> {
     }
     parts.push(richer.join('') || line);
   }
-  return parts.join('\n');
+  // pdfjs sometimes emits one blob per page. Force a line break before every
+  // Plu# so the parser can see items even when Y positions collapse.
+  return parts.join('\n').replace(/(?=Plu#\s*\d+)/gi, '\n');
 }

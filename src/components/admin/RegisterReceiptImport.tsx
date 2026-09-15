@@ -71,7 +71,7 @@ export function RegisterReceiptImport({
   const [ok, setOk] = useState('');
   const [matched, setMatched] = useState<MatchRow[] | null>(null);
   const [needsYou, setNeedsYou] = useState<NeedRow[] | null>(null);
-  const [meta, setMeta] = useState<{ vesselHint: string | null; amount: number | null; dateHint: string | null } | null>(null);
+  const [meta, setMeta] = useState<{ vesselHint: string | null; amount: number | null; dateHint: string | null; tapeSum?: number } | null>(null);
   const matchTopRef = useRef<HTMLDivElement>(null);
   const incomingSeen = useRef<File | null>(null);
   const [lastImport, setLastImport] = useState<{ id: string; number: string } | null>(null);
@@ -109,7 +109,14 @@ export function RegisterReceiptImport({
 
       const { matched: hits, needsYou: miss } = matchReceiptToCatalog(lines, matchCatalog);
       setMatched(hits.map(h => ({ ...h, include: true, qtyInput: String(h.qty) })));
-      setNeedsYou(miss.map(n => ({ ...n, include: false, qtyInput: String(n.qty), asCustom: true })));
+      // Unmatched still enter the system as write-ins — staff can uncheck.
+      setNeedsYou(miss.map(n => ({ ...n, include: true, qtyInput: String(n.qty), asCustom: true })));
+      const tapeSum = [...hits, ...miss].reduce((s, r) => {
+        const qty = r.qty || 0;
+        const price = r.unitPrice ?? ('catalogPrice' in r ? (r as MatchedReceiptLine).catalogPrice : 0) ?? 0;
+        return s + qty * (price || 0);
+      }, 0);
+      setMeta(prev => ({ ...(prev || m), tapeSum }));
       requestAnimationFrame(() => {
         matchTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
@@ -128,7 +135,7 @@ export function RegisterReceiptImport({
   }, [incomingFile]);
 
   function applyToDraft() {
-    if (!matched) return;
+    if (!matched && !needsYou) return;
     setError(''); setOk('');
     const lines = matched
       .filter(r => r.include)
@@ -171,8 +178,8 @@ export function RegisterReceiptImport({
       meta?.dateHint ? `date ${formatReceiptDate(meta.dateHint) || meta.dateHint}` : null,
       meta?.amount != null ? `tape total $${meta.amount.toFixed(2)}` : null,
       meta?.vesselHint ? `boat ${meta.vesselHint}` : null,
-      (needsYou || []).filter(n => !n.include).length
-        ? `skipped ${(needsYou || []).filter(n => !n.include).length} unmatched PLUs`
+      (needsYou || []).filter(n => n.include).length
+        ? `${(needsYou || []).filter(n => n.include).length} unmatched PLUs as write-ins`
         : null,
     ].filter(Boolean);
     if (noteBits.length && appendNotes) appendNotes(noteBits.join(' · '));
@@ -183,7 +190,7 @@ export function RegisterReceiptImport({
   }
 
   async function saveAsPastOrder() {
-    if (!matched) return;
+    if (!matched && !needsYou) return;
     const co = companyName?.trim();
     const ves = vesselName?.trim() || meta?.vesselHint || '';
     if (!co || !ves) {
@@ -198,12 +205,16 @@ export function RegisterReceiptImport({
           description: r.catalogDescription || r.description,
           qty: Math.max(0, parseFloat(r.qtyInput) || 0),
           unit_price: r.unitPrice ?? r.catalogPrice,
+          upc: r.upc || r.plu,
+          category: r.category || null,
         })),
         ...(needsYou || []).filter(r => r.include && r.asCustom).map(r => ({
           product_id: null as string | null,
           description: r.description || `PLU ${r.plu}`,
           qty: Math.max(0, parseFloat(r.qtyInput) || 0),
           unit_price: r.unitPrice ?? 0,
+          upc: r.plu || null,
+          category: 'Write-in',
         })),
       ].filter(l => l.qty > 0);
 
@@ -254,8 +265,8 @@ export function RegisterReceiptImport({
       <div>
         <h3 className="font-display font-bold text-brand-navy text-base">Sinclair register receipt</h3>
         <p className="text-xs text-brand-green/50 mt-0.5">
-          Upload the itemized register PDF (PLU tape). Matched lines apply to the draft; unmatched stay in Needs you.
-          A DUPLICATE RECEIPT reprint on the same tape is ignored so quantities are not doubled.
+          Upload the itemized register PDF (PLU tape). Every PLU is imported — catalog matches plus unmatched write-ins.
+          A DUPLICATE RECEIPT / recall reprint on the same tape is ignored so quantities are not doubled.
         </p>
       </div>
 
@@ -290,13 +301,20 @@ export function RegisterReceiptImport({
         </div>
       )}
 
-      {meta && (meta.amount != null || meta.vesselHint || meta.dateHint) && (
+      {meta && (meta.amount != null || meta.vesselHint || meta.dateHint || meta.tapeSum != null) && (
         <div className="text-xs text-brand-green/70 bg-brand-sand/40 border border-brand-gold/20 rounded-lg px-3 py-2">
           {[
             meta.vesselHint && `Boat: ${meta.vesselHint}`,
             meta.dateHint && `Date: ${formatReceiptDate(meta.dateHint) || meta.dateHint}`,
             meta.amount != null && `Tape total: $${meta.amount.toFixed(2)}`,
+            meta.tapeSum != null && `Imported lines: $${meta.tapeSum.toFixed(2)}`,
+            matched != null && `${(matched?.length || 0) + (needsYou?.length || 0)} unique PLUs`,
           ].filter(Boolean).join(' · ')}
+          {meta.amount != null && meta.tapeSum != null && Math.abs(meta.amount - meta.tapeSum) > 2 && (
+            <p className="text-amber-800 mt-1">
+              Line total is ${Math.abs(meta.amount - meta.tapeSum).toFixed(2)} off the tape — skim unmatched write-ins before saving.
+            </p>
+          )}
         </div>
       )}
 
@@ -345,11 +363,11 @@ export function RegisterReceiptImport({
               </li>
             ))}
           </ul>
-          <p className="text-[11px] text-amber-800/70">Checked unmatched lines add as custom (off-catalog) lines.</p>
+          <p className="text-[11px] text-amber-800/70">Unmatched PLUs are included as write-ins so they still land in history. Uncheck to skip.</p>
         </div>
       )}
 
-      {matched && (
+      {(matched || needsYou) && (
         <div className="space-y-2">
           <p className="text-[11px] text-brand-green/60 leading-snug">
             <b>Add to order draft</b> puts these lines on the order you are building now (Review unlocks).

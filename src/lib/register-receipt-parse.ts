@@ -61,104 +61,211 @@ export function upcKey(s: string | null | undefined): string {
   return norm(s);
 }
 
+/** Phrase that may be printed letter-spaced: "D U P L I C A T E   R E C E I P T". */
+function findSpacedPhrase(text: string, phrase: string): number {
+  const pat = phrase
+    .trim()
+    .split(/\s+/)
+    .map(word => word.split('').join('\\s*'))
+    .join('\\s+');
+  return text.search(new RegExp(pat, 'i'));
+}
+
+function countPluMarks(text: string): number {
+  return (text.match(/Plu#\s*\d+/gi) || []).length;
+}
+
 /**
- * Sinclair tapes often append a full reprint marked DUPLICATE RECEIPT
- * (sometimes letter-spaced: "D U P L I C A T E   R E C E I P T").
- * Parsing both copies doubled every qty. Keep the first merchandise block.
- * When the banner is missing, a new Plu# after the totals footer is the reprint.
+ * Sinclair tapes often append a full reprint. Cut on DUPLICATE RECEIPT,
+ * RECALL TRANSACTION, or a second Plu# block after TAX-CODE.
+ * Keep the segment with the MOST Plu# lines — the reprint is sometimes
+ * first in the PDF, so "everything before the banner" would drop the order.
  */
 export function stripDuplicateReceiptCopy(text: string): string {
   if (!text) return text;
-  const banner = /d\s*u\s*p\s*l\s*i\s*c\s*a\s*t\s*e\s+r\s*e\s*c\s*e\s*i\s*p\s*t/i;
-  const b = text.search(banner);
-  if (b >= 0) return text.slice(0, b).trimEnd();
+  const cuts = [
+    findSpacedPhrase(text, 'DUPLICATE RECEIPT'),
+    findSpacedPhrase(text, 'RECALL TRANSACTION'),
+    findSpacedPhrase(text, 'PLEASE KEEP FOR YOUR RECORDS'),
+  ].filter(i => i >= 0);
 
   const totals = text.search(/\b(TAX[-\s]?CODE|BALANCE\s+DUE|IN\s+HOUSE\s+CHARGE)\b/i);
-  if (totals < 0) return text;
-  const after = text.slice(totals);
-  const nextPlu = after.search(/\bPlu#\s*\d+/i);
-  if (nextPlu >= 0) return text.slice(0, totals + nextPlu).trimEnd();
-  return text;
+  if (totals >= 0) {
+    const nextPlu = text.slice(totals).search(/\bPlu#\s*\d+/i);
+    if (nextPlu >= 0) cuts.push(totals + nextPlu);
+  }
+
+  if (!cuts.length) return text;
+
+  const bounds = [0, ...cuts.sort((a, b) => a - b), text.length];
+  let best = text;
+  let bestCount = -1;
+  for (let i = 0; i < bounds.length - 1; i++) {
+    const slice = text.slice(bounds[i], bounds[i + 1]).trim();
+    const n = countPluMarks(slice);
+    if (n > bestCount) {
+      bestCount = n;
+      best = slice;
+    }
+  }
+  return bestCount > 0 ? best : text;
 }
+
+const DEPT_HEADER = /^(BAKERY|CANDY|COLD DELI|DAIRY|DRUGS|FROZEN FOOD|FRZ MT\/F|GEN MDSE|GROCERY|MEATS|PRODUCE|MANUAL WEIGHT|HBA|MEAT|SEAFOOD|FROZEN|HBC)$/i;
+const FOOTER_LINE = /^(TAX|SUBTOTAL|TOTAL|BALANCE|CHANGE|FOOD TAX|NON FOOD|CASHIER|ACCOUNT|SIGNATURE|PHONE NUMBER|POINTS|IN HOUSE)/i;
 
 /**
  * Parse extracted receipt text into aggregated PLU lines.
  * Duplicate PLUs (each ring is qty 1 on Sinclair tapes) are summed.
+ * Pack lines (`12 @ 4.99 EA 59.88`) and catch-weight (`2.60 lb @ 0.74/lb`)
+ * override the qty=1 on the description row.
  */
 export function parseRegisterReceiptText(text: string): ReceiptRawLine[] {
   const lines = stripDuplicateReceiptCopy(text).split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   const raw: ReceiptRawLine[] = [];
 
   for (let i = 0; i < lines.length; i++) {
-    const m = lines[i].match(/^Plu#\s*(\d+)\s*$/i);
-    if (!m) continue;
-    const plu = m[1];
-    // Description is usually the next line; qty/price may be on that line or the one after.
-    const descLine = lines[i + 1] || '';
-    const maybeMore = lines[i + 2] || '';
+    const pluHit = lines[i].match(/^Plu#\s*(\d+)(?:\s+(.*))?$/i);
+    if (!pluHit) continue;
+    const plu = pluHit[1];
+    const sameLineRest = (pluHit[2] || '').trim();
+    const block: string[] = [];
+    if (sameLineRest) block.push(sameLineRest);
 
-    let description = '';
-    let qty = 1;
-    let unitPrice: number | null = null;
-    let lineTotal: number | null = null;
-    let rawBlock = lines[i];
-
-    const packed = parseDescPriceQty(descLine);
-    if (packed && packed.description) {
-      description = packed.description;
-      qty = packed.qty;
-      unitPrice = packed.unitPrice;
-      lineTotal = packed.lineTotal;
-      rawBlock += '\n' + descLine;
-      i += 1;
-    } else {
-      description = descLine.replace(/\s+\d[\d.,]*\s+\d+\s+[A-Z]\s*$/i, '').trim() || descLine;
-      rawBlock += '\n' + descLine;
-      i += 1;
-      const multi = maybeMore.match(/^(\d+)\s*@\s*([\d.]+)\s*EA\s+([\d.]+)/i);
-      if (multi) {
-        qty = parseInt(multi[1], 10) || 1;
-        unitPrice = parseFloat(multi[2]) || null;
-        lineTotal = parseFloat(multi[3]) || null;
-        rawBlock += '\n' + maybeMore;
-        i += 1;
-      } else {
-        const fallback = parseDescPriceQty(maybeMore);
-        if (fallback && !fallback.description) {
-          qty = fallback.qty;
-          unitPrice = fallback.unitPrice;
-          lineTotal = fallback.lineTotal;
-          rawBlock += '\n' + maybeMore;
-          i += 1;
-        }
-      }
+    let j = i + 1;
+    while (j < lines.length) {
+      const nxt = lines[j];
+      if (/^Plu#\s*\d+/i.test(nxt)) break;
+      if (DEPT_HEADER.test(nxt) && !priceTail(nxt)) break;
+      if (FOOTER_LINE.test(nxt) && !priceTail(nxt)) break;
+      block.push(nxt);
+      j++;
+      if (block.length > 6) break;
     }
+    i = j - 1;
 
-    raw.push({
-      plu,
-      description: description || `PLU ${plu}`,
-      qty: qty > 0 ? qty : 1,
-      unitPrice,
-      lineTotal,
-      raw: rawBlock,
-    });
+    raw.push(parseItemBlock(plu, block, [lines[i], ...block].join('\n')));
   }
 
-  // Aggregate duplicate PLUs
+  // Catch-weight meat / random-weight lines with a price but no Plu#
+  // (e.g. "MEATS 107.97 1 F" or "2 @ 6.99  13.98 1 F" under a MEATS header).
+  let deptCtx = '';
+  for (let i = 0; i < lines.length; i++) {
+    if (/^Plu#\s*\d+/i.test(lines[i])) { deptCtx = ''; continue; }
+    if (DEPT_HEADER.test(lines[i]) && !priceTail(lines[i])) {
+      deptCtx = lines[i].toUpperCase();
+      continue;
+    }
+    if (FOOTER_LINE.test(lines[i]) && !priceTail(lines[i])) { deptCtx = ''; continue; }
+    const prev = lines[i - 1] || '';
+    if (/^Plu#\s*\d+/i.test(prev)) continue;
+
+    const pack = lines[i].match(/^(\d+)\s*@\s+([\d.]+)(?:\s*EA)?\s+(\d+\.\d{2})/i);
+    if (pack && /^(MEATS|MEAT|SEAFOOD|PRODUCE)$/i.test(deptCtx)) {
+      raw.push({
+        plu: '',
+        description: deptCtx,
+        qty: parseInt(pack[1], 10) || 1,
+        unitPrice: parseFloat(pack[2]),
+        lineTotal: parseFloat(pack[3]),
+        raw: lines[i],
+      });
+      continue;
+    }
+    const priced = parseDescPriceQty(lines[i]);
+    if (!priced || priced.unitPrice == null) continue;
+    const desc = priced.description.replace(/\s+W\s*$/i, '').trim();
+    if (/^(MEATS|MEAT|SEAFOOD|PRODUCE)$/i.test(desc) || /^(MEATS|MEAT|SEAFOOD|PRODUCE)$/i.test(deptCtx) && priced.unitPrice >= 1) {
+      raw.push({
+        plu: '',
+        description: /^(MEATS|MEAT|SEAFOOD|PRODUCE)$/i.test(desc) ? desc : deptCtx,
+        qty: priced.qty,
+        unitPrice: priced.unitPrice,
+        lineTotal: priced.lineTotal,
+        raw: lines[i],
+      });
+    }
+  }
+
   const byPlu = new Map<string, ReceiptRawLine>();
+  let orphan = 0;
   for (const row of raw) {
-    const key = upcKey(row.plu) || row.plu;
+    const key = row.plu ? (upcKey(row.plu) || row.plu) : `writein-${++orphan}-${row.description}`;
     const prev = byPlu.get(key);
     if (!prev) {
       byPlu.set(key, { ...row });
     } else {
       prev.qty += row.qty;
-      if (prev.lineTotal != null && row.lineTotal != null) prev.lineTotal += row.lineTotal;
-      else if (row.lineTotal != null) prev.lineTotal = row.lineTotal;
-      if (prev.unitPrice == null && row.unitPrice != null) prev.unitPrice = row.unitPrice;
+      const add = row.lineTotal ?? ((row.unitPrice || 0) * row.qty);
+      prev.lineTotal = (prev.lineTotal ?? ((prev.unitPrice || 0) * (prev.qty - row.qty))) + add;
+      if (prev.qty > 0 && prev.lineTotal != null) prev.unitPrice = prev.lineTotal / prev.qty;
     }
   }
   return Array.from(byPlu.values());
+}
+
+function priceTail(line: string): boolean {
+  return /\d+\.\d{2}\s+\d+(?:\.\d+)?\s*[A-Z]?\s*$/.test(line);
+}
+
+function parseItemBlock(plu: string, block: string[], rawBlock: string): ReceiptRawLine {
+  let description = '';
+  let qty = 1;
+  let unitPrice: number | null = null;
+  let lineTotal: number | null = null;
+  let haveExtension = false;
+
+  for (const line of block) {
+    const pack = line.match(/^(\d+)\s*@\s+([\d.]+)(?:\s*EA)?\s+(\d+\.\d{2})/i);
+    if (pack) {
+      qty = parseInt(pack[1], 10) || 1;
+      unitPrice = parseFloat(pack[2]);
+      lineTotal = parseFloat(pack[3]);
+      haveExtension = true;
+      continue;
+    }
+    const twoFor = line.match(/^(\d+)\s*@\s+2\s+FOR\s+([\d.]+)\s+(\d+\.\d{2})/i);
+    if (twoFor) {
+      qty = parseInt(twoFor[1], 10) || 1;
+      lineTotal = parseFloat(twoFor[3]);
+      unitPrice = qty ? lineTotal / qty : parseFloat(twoFor[2]);
+      haveExtension = true;
+      continue;
+    }
+    const wt = line.match(/^([\d.]+)\s*lb\s*@\s*([\d.]+)\s*\/?\s*lb\s+(\d+\.\d{2})/i);
+    if (wt) {
+      qty = parseFloat(wt[1]) || 1;
+      unitPrice = parseFloat(wt[2]);
+      lineTotal = parseFloat(wt[3]);
+      haveExtension = true;
+      continue;
+    }
+    const priced = parseDescPriceQty(line);
+    if (priced && priced.unitPrice != null) {
+      const name = priced.description.replace(/\s+W\s*$/i, '').trim();
+      if (name && !DEPT_HEADER.test(name)) description = description || name;
+      else if (name) description = description || name;
+      if (!haveExtension) {
+        qty = priced.qty;
+        unitPrice = priced.unitPrice;
+        lineTotal = priced.lineTotal;
+      }
+      continue;
+    }
+    const cleaned = line.replace(/\s+W\s*$/i, '').trim();
+    if (cleaned && !DEPT_HEADER.test(cleaned) && !FOOTER_LINE.test(cleaned)) {
+      description = description || cleaned;
+    }
+  }
+
+  return {
+    plu,
+    description: description || (plu ? `PLU ${plu}` : 'Write-in'),
+    qty: qty > 0 ? qty : 1,
+    unitPrice,
+    lineTotal,
+    raw: rawBlock,
+  };
 }
 
 function parseDescPriceQty(line: string): {
@@ -168,13 +275,13 @@ function parseDescPriceQty(line: string): {
   lineTotal: number | null;
 } | null {
   if (!line) return null;
-  // DESC ........ 2.25 2 F   (unit price, qty, food stamp flag)
-  const m = line.match(/^(.*?)\s+([\d.]+)\s+(\d+)\s+[A-Z]\s*$/i);
+  // DESC ........ 2.25 2 F   — F (food stamp) is optional (drugs / HBA omit it)
+  const m = line.match(/^(.*?)\s+(\d+\.\d{2})\s+(\d+)(?:\s+[A-Z])?\s*$/i);
   if (m) {
     const unitPrice = parseFloat(m[2]);
     const qty = parseInt(m[3], 10) || 1;
     return {
-      description: m[1].trim(),
+      description: m[1].replace(/\s+W\s*$/i, '').trim(),
       qty,
       unitPrice: Number.isFinite(unitPrice) ? unitPrice : null,
       lineTotal: Number.isFinite(unitPrice) ? unitPrice * qty : null,
@@ -205,7 +312,10 @@ export function matchReceiptToCatalog(lines: ReceiptRawLine[], catalog: CatalogR
   const needsYou: UnmatchedReceiptLine[] = [];
 
   for (const line of lines) {
-    const keys = ourKeys(line.plu);
+    const keys = [
+      ...ourKeys(line.plu),
+      ...(line.plu && line.plu.length < 12 ? ourKeys(line.plu.padStart(12, '0')) : []),
+    ];
     let hit: CatalogRow | undefined;
     for (const k of keys) {
       hit = byUpc.get(k);
@@ -298,7 +408,8 @@ export function parseReceiptMeta(text: string): {
   amount: number | null;
   dateHint: string | null;
 } {
-  text = stripDuplicateReceiptCopy(text);
+  // Header/footer (amount, date, boat) can sit on the charge slip, which is
+  // a different segment than the item list after reprint-stripping.
   const amountM = text.match(/A\s*m\s*o\s*u\s*n\s*t\s*:\s*([\d\s,.]+)/i)
     || text.match(/\$\s*([\d,]+\.\d{2})/);
   let amount: number | null = null;

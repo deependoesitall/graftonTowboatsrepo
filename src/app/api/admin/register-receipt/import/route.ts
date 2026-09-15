@@ -35,6 +35,8 @@ export async function POST(req: NextRequest) {
     description?: string;
     qty?: number;
     unit_price?: number;
+    upc?: string | null;
+    category?: string | null;
   }) => {
     const description = String(l.description || '').trim();
     const quantity = Number(l.qty) || 0;
@@ -48,6 +50,8 @@ export async function POST(req: NextRequest) {
       line_total: Math.round(unit_price * quantity * 100) / 100,
       paid_by: 'vessel',
       item_type: 'grocery',
+      upc: l.upc ? String(l.upc) : null,
+      category: l.category || 'General',
     };
   }).filter(Boolean) as Array<{
     product_id: string | null;
@@ -57,6 +61,8 @@ export async function POST(req: NextRequest) {
     line_total: number;
     paid_by: string;
     item_type: string;
+    upc: string | null;
+    category: string;
   }>;
 
   if (!items.length) {
@@ -115,11 +121,18 @@ export async function POST(req: NextRequest) {
       || new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago' }).format(new Date()),
   };
 
-  const { data: order, error: oErr } = await supabase
+  let { data: order, error: oErr } = await supabase
     .from('orders')
     .insert(insertOrder)
     .select('id, order_number')
     .single();
+
+  if (oErr) {
+    const { source: _s, purchased_at: _p, ...core } = insertOrder;
+    const retry = await supabase.from('orders').insert(core).select('id, order_number').single();
+    order = retry.data;
+    oErr = retry.error;
+  }
 
   if (oErr || !order) {
     return NextResponse.json({ error: oErr?.message || 'Failed to create order' }, { status: 500 });
@@ -129,6 +142,7 @@ export async function POST(req: NextRequest) {
     items.map(it => ({ ...it, order_id: order.id })),
   );
   if (iErr) {
+    await supabase.from('orders').delete().eq('id', order.id);
     return NextResponse.json({ error: iErr.message }, { status: 500 });
   }
 
