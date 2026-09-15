@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { getAdminSession, requireAdmin } from '@/lib/admin-auth-server';
+import { excludeHotPrepared, HOT_PREPARED_OR } from '@/lib/catalog-exclusions';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -36,7 +37,7 @@ export async function GET(req: NextRequest) {
 
   // Public catalog only shows active + available products; admin sees all
   if (!isAdmin) {
-    query = query.eq('is_active', true).eq('is_available', true);
+    query = excludeHotPrepared(query.eq('is_active', true).eq('is_available', true));
   }
 
   // Scope filters FIRST so search cannot wipe them. PostgREST `.or()` for
@@ -44,6 +45,7 @@ export async function GET(req: NextRequest) {
   // and would return full-store cheese while "Barge Order Form" was selected.
   const store = searchParams.get('store') || '';
   const andParts: string[] = [];
+  if (!isAdmin) andParts.push(`or(${HOT_PREPARED_OR})`);
   if (store === 'barge') andParts.push('store_only.eq.false');
   else if (store === 'store') andParts.push('store_only.eq.true');
   if (category && category !== 'All') {

@@ -13,6 +13,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { applyEffectiveCatalogPricing } from '@/lib/catalog-price';
+import { excludeHotPrepared } from '@/lib/catalog-exclusions';
 
 // Re-fetched at most every 10 minutes; the browser also caches it per session.
 export const revalidate = 600;
@@ -32,12 +33,14 @@ export async function GET() {
 
   const products: unknown[] = [];
   for (let from = 0; ; from += 1000) {
-    const { data, error } = await supabase
+    const { data, error } = await excludeHotPrepared(
+      supabase
       .from('products')
       .select(FIELDS)
       .eq('is_active', true)
       .eq('is_available', true)
-      .eq('store_only', false)          // barge order form only
+      .eq('store_only', false),          // barge order form only
+    )
       .order('form_seq', { ascending: true, nullsFirst: false })
       .range(from, from + 999);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });

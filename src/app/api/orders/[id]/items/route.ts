@@ -9,6 +9,7 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin, isSinclairScoped } from '@/lib/admin-auth-server';
 import { z } from 'zod';
 import { recalcSubtotal } from '@/lib/recalc-subtotal';
+import { refreshBoatsOrderingRail } from '@/lib/boats-ordering';
 
 const paidBySchema = z.enum(['vessel', 'deck', 'cod']);
 
@@ -202,6 +203,9 @@ export async function POST(
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
     await recalcSubtotal(supabase, orderId);
+    if (billing.paid_by === 'vessel') {
+      try { await refreshBoatsOrderingRail(supabase); } catch { /* never fail the add */ }
+    }
     return NextResponse.json({ item: newItem }, { status: 201 });
   }
 

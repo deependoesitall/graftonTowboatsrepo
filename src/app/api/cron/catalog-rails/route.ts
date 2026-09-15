@@ -13,6 +13,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { buildBestSellers, buildOnSale, type RailItem } from '@/lib/catalog-rails';
+import { excludeHotPrepared } from '@/lib/catalog-exclusions';
+import { refreshBoatsOrderingRail } from '@/lib/boats-ordering';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -33,11 +35,13 @@ export async function GET(req: NextRequest) {
   const supabase = createServiceClient();
 
   // Freshop id → our uuid. Built once and shared by both rails.
-  const { data: products, error: pErr } = await supabase
+  const { data: products, error: pErr } = await excludeHotPrepared(
+    supabase
     .from('products')
     .select('id, freshop_id')
     .not('freshop_id', 'is', null)
-    .eq('is_active', true);
+    .eq('is_active', true),
+  );
 
   if (pErr) return NextResponse.json({ error: pErr.message }, { status: 500 });
 
@@ -48,7 +52,7 @@ export async function GET(req: NextRequest) {
     if (p.freshop_id && !byFreshop.has(p.freshop_id)) byFreshop.set(p.freshop_id, p.id);
   }
 
-  const result: Record<string, { found: number; skipped: number }> = {};
+  const result: Record<string, { found: number; skipped: number; error?: string }> = {};
 
   async function writeRail(rail: 'best_sellers' | 'on_sale', items: RailItem[]) {
     const rows = items
@@ -97,6 +101,8 @@ export async function GET(req: NextRequest) {
     // trip their throttle and get half a rail.
     await writeRail('on_sale', await buildOnSale());
     await writeRail('best_sellers', await buildBestSellers());
+    const boats = await refreshBoatsOrderingRail(supabase);
+    result.boats_ordering = { found: boats.wrote, skipped: 0, error: boats.error };
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : 'Rail build failed' },

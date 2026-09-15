@@ -22,7 +22,7 @@ import { applyFormLayout } from '@/lib/form-layout-apply';
 import { findMatchFor } from '@/lib/image-backfill';
 import {
   fetchFreshopPages, fetchFreshopTotal, freshopKeys, ourKeys, computeFields,
-  buildStoreProduct, isSellableStatus, norm,
+  buildStoreProduct, isSellableStatus, isExcludedFromVesselCatalog, norm,
   FRESHOP_PAGE_SIZE, FRESHOP_STOREFRONT_ROOT,
   type FreshopProduct, type SyncableProduct, type SyncStats,
 } from '@/lib/freshop-sync';
@@ -130,11 +130,40 @@ function storePriceFields(
   return computeFields(stub, hit, stats);
 }
 
+function touchExistingStoreRow(
+  existing: {
+    id: string; is_active: boolean; is_available: boolean; manual_fields: string[];
+    price: number; regular_price: number | null;
+    sale_start_date: string | null; sale_finish_date: string | null;
+    popularity: number | null;
+  },
+  item: FreshopProduct,
+  stats: SyncStats,
+  batchUpdates: Array<{ id: string; fields: Record<string, unknown> }>,
+) {
+  // Alcohol / floral / hot-prepared: turn the existing row OFF even when
+  // Freshop still lists it. Price updates on a hidden SKU don't matter.
+  if (isExcludedFromVesselCatalog(item)) {
+    if (existing.is_active) {
+      batchUpdates.push({ id: existing.id, fields: { is_active: false } });
+      existing.is_active = false;
+    }
+    return;
+  }
+  if (!isSellableStatus(item)) return;
+  const fields = storePriceFields(existing, item, stats);
+  if (fields) {
+    batchUpdates.push({ id: existing.id, fields });
+    applyStoreMeta(existing, fields);
+  }
+}
+
 function applyStoreMeta(
   existing: { is_active: boolean; is_available: boolean; price: number; regular_price: number | null },
   fields: Record<string, unknown>,
 ) {
   if (fields.is_active === true) existing.is_active = true;
+  if (fields.is_active === false) existing.is_active = false;
   if (fields.is_available === true) existing.is_available = true;
   if (typeof fields.price === 'number') existing.price = fields.price;
   if ('regular_price' in fields) existing.regular_price = (fields.regular_price as number | null) ?? null;
@@ -210,6 +239,17 @@ async function handle(req: NextRequest) {
   // Cheap expire sweep every poke — does not need Freshop. No-op when nothing
   // is past sale_finish_date (America/Chicago). Migration 080 installs the RPC.
   try { await supabase.rpc('expire_stale_product_sales'); } catch { /* migration pending */ }
+
+  // Hide already-imported hot/prepared deli. isHotFood skips NEW inserts, but
+  // rows imported before that filter — and any computeFields used to revive —
+  // stay live until we turn them off. Idempotent: 0 rows after the first poke.
+  // Browse also filters by sub_category so customers don't wait on this.
+  try {
+    await supabase.from('products')
+      .update({ is_active: false })
+      .ilike('sub_category', 'Hot Food%')
+      .eq('is_active', true);
+  } catch { /* ignore */ }
 
   const today = chicagoDay();
 
@@ -471,13 +511,7 @@ async function handle(req: NextRequest) {
         const fid = item.id != null ? String(item.id) : '';
         if (fid && knownFreshopIds.has(fid)) {
           const existing = storeByFreshopId.get(fid);
-          if (existing && isSellableStatus(item)) {
-            const fields = storePriceFields(existing, item, stats);
-            if (fields) {
-              batchUpdates.push({ id: existing.id, fields });
-              applyStoreMeta(existing, fields);
-            }
-          }
+          if (existing) touchExistingStoreRow(existing, item, stats, batchUpdates);
           continue;
         }
 
@@ -490,13 +524,7 @@ async function handle(req: NextRequest) {
               if (existing) break;
             }
           }
-          if (existing && isSellableStatus(item)) {
-            const fields = storePriceFields(existing, item, stats);
-            if (fields) {
-              batchUpdates.push({ id: existing.id, fields });
-              applyStoreMeta(existing, fields);
-            }
-          }
+          if (existing) touchExistingStoreRow(existing, item, stats, batchUpdates);
           continue;
         }
 

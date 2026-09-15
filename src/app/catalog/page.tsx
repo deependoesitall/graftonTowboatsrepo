@@ -17,6 +17,7 @@ import { OtherPickupCard } from '@/components/catalog/OtherPickupCard';
 import { fetchSinclairCoupons } from '@/lib/sinclair-coupons';
 import { MAIN_CATEGORIES, formatCalendarDate } from '@/lib/utils';
 import { isUpcLikeQuery } from '@/lib/product-search';
+import { excludeHotPrepared } from '@/lib/catalog-exclusions';
 
 
 export const metadata: Metadata = {
@@ -167,11 +168,13 @@ export default async function CatalogPage({ searchParams }: PageProps) {
   // products_catalog is `products` plus browse_rank / has_real_image
   // (migration 071). It's a security_invoker view, so the RLS on products
   // still applies exactly as before — same rows, three extra columns.
-  let query = supabase
+  let query = excludeHotPrepared(
+    supabase
     .from('products_catalog')
     .select('*', { count: 'exact' })
     .eq('is_active', true)
-    .eq('is_available', true)
+    .eq('is_available', true),
+  )
     .order('form_seq', { ascending: true, nullsFirst: false })
     // AFTER form_seq, so the paper order form's sequence is untouched — every
     // barge-list row is browse_rank 0 by definition and this is a no-op across
@@ -217,22 +220,26 @@ export default async function CatalogPage({ searchParams }: PageProps) {
   // Never search-scoped — a UPC miss must not read as "0 everyday items"
   // (empty-store feel). Match counts for search live separately near results.
   const scopeTotalCount = (storeOnly: boolean) =>
-    supabase
+    excludeHotPrepared(
+      supabase
       .from('products')
       .select('id', { count: 'exact', head: true })
       .eq('is_active', true)
       .eq('is_available', true)
-      .eq('store_only', storeOnly);
+      .eq('store_only', storeOnly),
+    );
 
   // Expander CTA ("N more matches in the full store") stays search/category
   // scoped so cooks aren't dumped into all 20k items (Dave).
   const scopedMatchCount = (storeOnly: boolean) => {
-    let q = supabase
+    let q = excludeHotPrepared(
+      supabase
       .from('products')
       .select('id', { count: 'exact', head: true })
       .eq('is_active', true)
       .eq('is_available', true)
-      .eq('store_only', storeOnly);
+      .eq('store_only', storeOnly),
+    );
     if (search) q = q.ilike('search_text', `%${search}%`);
     if (category && category !== 'All') q = q.eq('category', category);
     return q;
@@ -242,10 +249,12 @@ export default async function CatalogPage({ searchParams }: PageProps) {
   // to the barge form, so the store view counts its own categories.
   const storeCategoryCounts = storeAll
     ? Promise.all(MAIN_CATEGORIES.map(async c => {
-        let q = supabase.from('products')
+        let q = excludeHotPrepared(
+          supabase.from('products')
           .select('id', { count: 'exact', head: true })
           .eq('is_active', true).eq('is_available', true).eq('store_only', true)
-          .eq('category', c);
+          .eq('category', c),
+        );
         if (search) q = q.ilike('search_text', `%${search}%`);
         const { count } = await q;
         return { category: c, count: count || 0 };

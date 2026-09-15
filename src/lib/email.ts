@@ -64,10 +64,26 @@ const publicContactEmail = () =>
  * until a boat arrived at an empty dock. Override via env if the addresses
  * change.
  */
-const sinclairsOrderEmails = (): string[] =>
-  (process.env.SINCLAIRS_ORDER_EMAILS
-    || 'sinclairfoods@jerseyville-il.net,dwittman@jerseyville-il.net')
-    .split(',').map(s => s.trim()).filter(Boolean);
+export const DEFAULT_SINCLAIR_ORDER_EMAILS =
+  'sinclairfoods@jerseyville-il.net, dwittman@jerseyville-il.net';
+
+/** Who actually gets the Sinclair Shop-now copy. Test mode never falls
+ *  back to the store — an empty test list means nobody, not Dave. */
+export function resolveSinclairOrderEmails(s: {
+  sinclair_order_emails?: string | null;
+  sinclair_email_test_mode?: boolean | null;
+  sinclair_test_emails?: string | null;
+}): { raw: string; testMode: boolean } {
+  if (s.sinclair_email_test_mode) {
+    return { raw: (s.sinclair_test_emails || '').trim(), testMode: true };
+  }
+  return {
+    raw: (s.sinclair_order_emails || '').trim()
+      || process.env.SINCLAIRS_ORDER_EMAILS
+      || DEFAULT_SINCLAIR_ORDER_EMAILS,
+    testMode: false,
+  };
+}
 
 export interface EmailTemplateConfig {
   subject_template?: string;
@@ -598,6 +614,8 @@ export async function sendOrderReceivedEmail(
     ccEmailRaw?: string;
     /** Sinclair shopping-desk inboxes (Settings). Not GTS. */
     sinclairEmailRaw?: string;
+    /** Settings test mode — Shop-now copy goes to you, not the store. */
+    sinclairTestMode?: boolean;
     template?: EmailTemplateConfig;
   } = {}
 ) {
@@ -664,14 +682,16 @@ export async function sendOrderReceivedEmail(
   if (hasShoppableItems) {
     const sinclairTo = parseCcList(
       opts.sinclairEmailRaw
-      || process.env.SINCLAIRS_ORDER_EMAILS
-      || 'sinclairfoods@jerseyville-il.net,dwittman@jerseyville-il.net',
+      || (opts.sinclairTestMode ? '' : (process.env.SINCLAIRS_ORDER_EMAILS || DEFAULT_SINCLAIR_ORDER_EMAILS)),
     );
     if (sinclairTo.length) {
       const shopUrl = `${shopAppUrl()}/admin/orders?order=${encodeURIComponent(order.id)}&shop=1`;
       const sinclairHtml = buildOrderEmailHtml(order, {
-        tagline:    'New order to shop',
-        intro:      `Grocery order <strong>${order.order_number}</strong> for <strong>${order.company_name}</strong> / <strong>${order.vessel_name || 'vessel'}</strong> is ready to pick. Open it in Shopping Mode — barcode scan, aisle order, weights, and substitutions.`,
+        tagline:    opts.sinclairTestMode ? 'TEST — Sinclair shopping-desk copy' : 'New order to shop',
+        intro:      (opts.sinclairTestMode
+          ? `<strong>TEST MODE</strong> — this is the email Sinclair&apos;s shopping desk would get. The store inboxes are not on this send.<br><br>`
+          : '')
+          + `Grocery order <strong>${order.order_number}</strong> for <strong>${order.company_name}</strong> / <strong>${order.vessel_name || 'vessel'}</strong> is ready to pick. Open it in Shopping Mode — barcode scan, aisle order, weights, and substitutions.`,
         buttonText: 'Open in Shopping Mode',
         buttonUrl:  shopUrl,
         footerText: 'Grafton Towboat Services — order alerts for Sinclair\'s Foods staff',
@@ -681,7 +701,7 @@ export async function sendOrderReceivedEmail(
         from:    fromEmail,
         to:      sinclairTo,
         replyTo: toEmail,
-        subject: `Shop now — Order #${order.order_number} — ${order.vessel_name || order.company_name}`,
+        subject: `${opts.sinclairTestMode ? '[TEST] ' : ''}Shop now — Order #${order.order_number} — ${order.vessel_name || order.company_name}`,
         html:    sinclairHtml,
         attachments: pdfAttachment,
       });

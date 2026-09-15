@@ -655,23 +655,32 @@ function AlsoBought({ productId, onSelect }: {
   productId: string; onSelect: (p: Product) => void;
 }) {
   const [items, setItems] = useState<Product[] | null>(null);
+  const [source, setSource] = useState<'boats' | 'sinclair' | 'mixed'>('sinclair');
 
   useEffect(() => {
     let cancelled = false;
     setItems(null);
     fetch(`/api/products/${productId}/also-bought`)
       .then(r => (r.ok ? r.json() : { products: [] }))
-      .then(d => { if (!cancelled) setItems(d.products || []); })
+      .then(d => {
+        if (cancelled) return;
+        setItems(d.products || []);
+        setSource(d.source === 'boats' || d.source === 'mixed' ? d.source : 'sinclair');
+      })
       .catch(() => { if (!cancelled) setItems([]); });
     return () => { cancelled = true; };
   }, [productId]);
 
   if (items !== null && items.length === 0) return null;
 
+  const heading = source === 'sinclair'
+    ? 'People who bought this also bought'
+    : 'Boats buying this also buy';
+
   return (
     <div className="border-t border-gray-100 bg-gray-50/60 px-5 py-4">
       <h3 className="font-display text-sm font-bold text-brand-navy mb-3">
-        People who bought this also bought
+        {heading}
       </h3>
 
       {items === null ? (

@@ -1,24 +1,18 @@
 // src/app/api/products/[id]/also-bought/route.ts
 //
-// "People who bought this also bought" — the same row Sinclair's shows on
-// their own product pages.
+// Product-modal row: "Boats buying this also buy" when we have
+// basket co-occurrence; otherwise Sinclair's popularity rank (same as their
+// own product pages) so the row is never empty on day one.
 //
-// HOW SINCLAIR'S DOES IT (probed live against the Freshop API, July 2026):
-// Freshop stamps every product with a store-wide `popularity` RANK (1 = most
-// popular) and their storefront's default sort IS that rank. The row on a
-// Sinclair's product page is the store's popular staples — milk, eggs, sugar,
-// tomatoes — not a per-product co-occurrence model. We reproduce it from the
-// popularity we already sync nightly, so it's real Sinclair's data with no
-// cold-start problem and no admin curation.
-//
-// Ordering: same-category popular items first (a produce item surfaces produce
-// neighbours, like Sinclair's banana page did), then store-wide staples to
-// fill out the row.
+// Boat pairs = DISTINCT grocery orders in 90 days that contained both SKUs.
+// Sinclair fill is the old behaviour and stays until co-occurrence is rich.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { Product } from '@/types';
 import { applyEffectiveCatalogPricing } from '@/lib/catalog-price';
+import { excludeHotPrepared } from '@/lib/catalog-exclusions';
+import { fetchBoatsAlsoBought } from '@/lib/boats-ordering';
 
 const LIMIT = 8;
 
@@ -41,35 +35,61 @@ export async function GET(
     .eq('id', id)
     .single();
 
-  if (!seed) return NextResponse.json({ products: [] });
+  if (!seed) return NextResponse.json({ products: [], source: 'sinclair' });
 
-  // The typed Supabase client can't infer a row shape from a concatenated
-  // select string, so results are cast to Product explicitly.
   const picked = new Map<string, Product>();
+  let boatCount = 0;
 
-  // Pass 1 — popular items in the SAME category as the product being viewed.
-  const { data: sameCat } = await supabase
-    .from('products')
-    .select(SELECT)
-    .eq('category', seed.category)
-    .eq('is_active', true)
-    .eq('is_available', true)
-    .not('popularity', 'is', null)
-    .neq('id', id)
-    .order('popularity', { ascending: true })
-    .limit(LIMIT);
+  const neighbours = await fetchBoatsAlsoBought(supabase, id, LIMIT);
+  if (neighbours.length) {
+    const { data: boatRows } = await excludeHotPrepared(
+      supabase
+        .from('products')
+        .select(SELECT)
+        .in('id', neighbours.map(n => n.product_id))
+        .eq('is_active', true)
+        .eq('is_available', true),
+    );
+    const byId = new Map(((boatRows || []) as unknown as Product[]).map(p => [p.id, p]));
+    for (const n of neighbours) {
+      const p = byId.get(n.product_id);
+      if (!p || p.id === id) continue;
+      picked.set(p.id, p);
+      boatCount++;
+      if (picked.size >= LIMIT) break;
+    }
+  }
 
-  for (const p of (sameCat || []) as unknown as Product[]) picked.set(p.id, p);
-
-  // Pass 2 — store-wide staples fill any remaining slots.
   if (picked.size < LIMIT) {
-    const { data: storeWide } = await supabase
-      .from('products')
-      .select(SELECT)
-      .eq('is_active', true)
-      .eq('is_available', true)
-      .not('popularity', 'is', null)
-      .neq('id', id)
+    const { data: sameCat } = await excludeHotPrepared(
+      supabase
+        .from('products')
+        .select(SELECT)
+        .eq('category', seed.category)
+        .eq('is_active', true)
+        .eq('is_available', true)
+        .not('popularity', 'is', null)
+        .neq('id', id),
+    )
+      .order('popularity', { ascending: true })
+      .limit(LIMIT);
+
+    for (const p of (sameCat || []) as unknown as Product[]) {
+      if (picked.size >= LIMIT) break;
+      if (!picked.has(p.id)) picked.set(p.id, p);
+    }
+  }
+
+  if (picked.size < LIMIT) {
+    const { data: storeWide } = await excludeHotPrepared(
+      supabase
+        .from('products')
+        .select(SELECT)
+        .eq('is_active', true)
+        .eq('is_available', true)
+        .not('popularity', 'is', null)
+        .neq('id', id),
+    )
       .order('popularity', { ascending: true })
       .limit(LIMIT * 3);
 
@@ -79,5 +99,12 @@ export async function GET(
     }
   }
 
-  return NextResponse.json({ products: Array.from(picked.values()).slice(0, LIMIT).map(p => applyEffectiveCatalogPricing(p)) });
+  const products = Array.from(picked.values()).slice(0, LIMIT).map(p =>
+    applyEffectiveCatalogPricing(p),
+  );
+  const source = boatCount === 0
+    ? 'sinclair'
+    : boatCount >= products.length ? 'boats' : 'mixed';
+
+  return NextResponse.json({ products, source });
 }

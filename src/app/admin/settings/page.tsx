@@ -2,7 +2,7 @@
 // src/app/admin/settings/page.tsx
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Save, RefreshCw, Eye, EyeOff, Plus, Trash2, UserPlus, ShieldCheck, User, Lock, ScrollText, Search, ArrowRight, ChevronLeft, ChevronRight, MessageSquarePlus, Check, X, Loader2, Send, Wrench } from 'lucide-react';
+import { Save, RefreshCw, Eye, EyeOff, Plus, Trash2, UserPlus, ShieldCheck, User, Lock, ScrollText, Search, ArrowRight, ChevronLeft, ChevronRight, MessageSquarePlus, Check, X, Loader2, Send, Wrench, FlaskConical, RotateCcw } from 'lucide-react';
 import { fetchAdminSession, getAdminRole, canAccess, adminFetch, AdminRole } from '@/lib/admin-auth';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import PushDevices from '@/components/admin/PushDevices';
@@ -23,6 +23,8 @@ interface Settings {
   business_email: string;
   order_email_cc: string;
   sinclair_order_emails: string;
+  sinclair_email_test_mode: boolean;
+  sinclair_test_emails: string;
   order_email_subject: string;
   tax_rate: number;
   tax_enabled: boolean;
@@ -39,6 +41,7 @@ interface Settings {
   /** Migration 075 — the two Sinclair's rails on /catalog. */
   show_sale_rail: boolean;
   show_best_sellers_rail: boolean;
+  show_boats_ordering_rail: boolean;
   cod_fee_enabled: boolean;
   cod_fee_percent: number;
   fleet_cta_enabled: boolean;
@@ -170,6 +173,8 @@ export default function AdminSettingsPage() {
     business_email: 'GraftonTowboatServices@gmail.com',
     order_email_cc: '',
     sinclair_order_emails: 'sinclairfoods@jerseyville-il.net, dwittman@jerseyville-il.net',
+    sinclair_email_test_mode: false,
+    sinclair_test_emails: '',
     order_email_subject: 'New Order #{order_number} — {company_name}',
     tax_rate: 0, tax_enabled: false,
     draft_orders_enabled: false, repeat_orders_enabled: true,
@@ -183,6 +188,7 @@ export default function AdminSettingsPage() {
     show_digital_coupons: true,
     show_sale_rail: false,
     show_best_sellers_rail: true,
+    show_boats_ordering_rail: false,
     cod_fee_enabled: true,
     cod_fee_percent: 5,
     fleet_cta_enabled: false,
@@ -191,6 +197,7 @@ export default function AdminSettingsPage() {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
   const [loading, setLoading] = useState(true);
+  const [sinclairTestBusy, setSinclairTestBusy] = useState(false);
 
   // Password change
   const [currentPw, setCurrentPw] = useState('');
@@ -373,6 +380,7 @@ export default function AdminSettingsPage() {
           // GTS owns what its customers see. Either alone is enough.
           show_sale_rail: settings.show_sale_rail,
           show_best_sellers_rail: settings.show_best_sellers_rail,
+          show_boats_ordering_rail: settings.show_boats_ordering_rail,
           store_zone_order: settings.store_zone_order,
           cod_fee_enabled: settings.cod_fee_enabled,
           cod_fee_percent: settings.cod_fee_percent,
@@ -394,6 +402,48 @@ export default function AdminSettingsPage() {
       setSaveMsg(msg);
       console.error('Settings save failed:', res.status, msg);
     }
+  }
+
+  async function patchSinclairTest(partial: {
+    sinclair_email_test_mode: boolean;
+    sinclair_test_emails?: string;
+  }) {
+    setSinclairTestBusy(true);
+    setSaveMsg('');
+    setSettings(s => ({ ...s, ...partial }));
+    const res = await adminFetch('/api/admin/settings', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(partial),
+    });
+    setSinclairTestBusy(false);
+    if (!res.ok) {
+      let msg = 'Could not switch Sinclair test mode — run migration 085?';
+      try {
+        const err = await res.json();
+        if (err?.error) msg = `Error: ${err.error}`;
+      } catch {}
+      setSaveMsg(msg);
+      loadSettings();
+      return;
+    }
+    setSaveMsg(partial.sinclair_email_test_mode
+      ? 'Test mode on — Sinclair copies come to you.'
+      : "Sinclair's emails restored.");
+    setTimeout(() => setSaveMsg(''), 4000);
+  }
+
+  function startSinclairTest() {
+    const prefill = (settings.sinclair_test_emails || '').trim()
+      || (settings.business_email || '').trim();
+    return patchSinclairTest({
+      sinclair_email_test_mode: true,
+      sinclair_test_emails: prefill,
+    });
+  }
+
+  function restoreSinclairEmails() {
+    return patchSinclairTest({ sinclair_email_test_mode: false });
   }
 
   async function changePassword() {
@@ -794,6 +844,7 @@ export default function AdminSettingsPage() {
             {([
               ['show_sale_rail', "What's on sale", 'Shelf specials only — hidden automatically when Sinclair’s week is too thin to look like a real sale row.'],
               ['show_best_sellers_rail', 'Best sellers', 'Sinclair’s featured items, ordered by how much the store sells.'],
+              ['show_boats_ordering_rail', 'See What Boats Are Buying', 'Our own frequency from grocery orders and matched register receipts. Off until it has enough boats — Best sellers stays. Catalog still hides the row under 8 items.'],
             ] as const).map(([key, label, hint]) => (
               <div key={key} className="flex items-start justify-between gap-4 border-t border-gray-100 pt-4 first:border-0 first:pt-0">
                 <div>
@@ -807,6 +858,7 @@ export default function AdminSettingsPage() {
                 </button>
               </div>
             ))}
+            <BoatsOrderingPreview />
           </div>
 
           {/* ── COD handling fee — toggleable + configurable percent.
@@ -1310,16 +1362,52 @@ export default function AdminSettingsPage() {
                   placeholder="jen@…, second@…" />
               </div>
             </div>
-            <div className="rounded-xl border-2 border-red-200 bg-red-50/40 p-4 space-y-3">
-              <p className="text-xs font-bold uppercase tracking-wide text-red-800">Sinclair&apos;s Foods — shopping desk</p>
+            <div className={`rounded-xl border-2 p-4 space-y-3 ${settings.sinclair_email_test_mode ? 'border-amber-400 bg-amber-50' : 'border-red-200 bg-red-50/40'}`}>
+              <p className={`text-xs font-bold uppercase tracking-wide ${settings.sinclair_email_test_mode ? 'text-amber-900' : 'text-red-800'}`}>
+                Sinclair&apos;s Foods — shopping desk
+                {settings.sinclair_email_test_mode ? ' · test mode' : ''}
+              </p>
               <p className="text-[11px] text-gray-600">
                 Only when there is grocery to shop. They get &ldquo;Shop now&rdquo; with a link into Shopping Mode — not GTS delivery charges, not crew-change-only jobs.
               </p>
-              <div>
-                <label className="label-base">Sinclair&apos;s emails</label>
-                <textarea className="input-base" rows={2} value={settings.sinclair_order_emails}
-                  onChange={e => setSettings(s => ({ ...s, sinclair_order_emails: e.target.value }))}
-                  placeholder="sinclairfoods@jerseyville-il.net, dwittman@jerseyville-il.net" />
+              {settings.sinclair_email_test_mode && (
+                <div className="rounded-lg bg-amber-100 border border-amber-300 px-3 py-2 text-xs text-amber-950 font-medium">
+                  Test mode is on. The store inboxes below are held — Shop-now copies go to you until you restore.
+                </div>
+              )}
+              {settings.sinclair_email_test_mode ? (
+                <div>
+                  <label className="label-base">Send Sinclair copies to <span className="font-normal text-gray-500 normal-case">(your inbox)</span></label>
+                  <textarea className="input-base" rows={2} value={settings.sinclair_test_emails}
+                    onChange={e => setSettings(s => ({ ...s, sinclair_test_emails: e.target.value }))}
+                    placeholder={settings.business_email || 'you@…'} />
+                  <p className="text-[11px] text-gray-500 mt-1.5">
+                    Held for restore: {settings.sinclair_order_emails || 'sinclairfoods@jerseyville-il.net, dwittman@jerseyville-il.net'}
+                    {' · '}Save Changes if you edit this address.
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <label className="label-base">Sinclair&apos;s emails</label>
+                  <textarea className="input-base" rows={2} value={settings.sinclair_order_emails}
+                    onChange={e => setSettings(s => ({ ...s, sinclair_order_emails: e.target.value }))}
+                    placeholder="sinclairfoods@jerseyville-il.net, dwittman@jerseyville-il.net" />
+                </div>
+              )}
+              <div className="flex flex-wrap gap-2 pt-1">
+                {settings.sinclair_email_test_mode ? (
+                  <button type="button" onClick={restoreSinclairEmails} disabled={sinclairTestBusy}
+                    className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg border border-red-200 bg-white text-red-800 hover:bg-red-50 disabled:opacity-50">
+                    {sinclairTestBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                    Restore Sinclair&apos;s emails
+                  </button>
+                ) : (
+                  <button type="button" onClick={startSinclairTest} disabled={sinclairTestBusy}
+                    className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg border border-amber-300 bg-amber-50 text-amber-950 hover:bg-amber-100 disabled:opacity-50">
+                    {sinclairTestBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FlaskConical className="w-3.5 h-3.5" />}
+                    Test with my inbox
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -1490,6 +1578,79 @@ export default function AdminSettingsPage() {
             </div>
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+function BoatsOrderingPreview() {
+  const [data, setData] = useState<{
+    stats: { grocery_orders: number; distinct_boats: number; matched_lines: number; distinct_skus: number; ready: boolean; window_days: number };
+    thresholds: { grocery_orders: number; distinct_boats: number; cards: number };
+    items: Array<{ product_id: string; description: string; order_count: number; last_purchased: string | null }>;
+    error?: string;
+  } | null>(null);
+  const [rebuilding, setRebuilding] = useState(false);
+
+  async function loadPreview() {
+    const res = await adminFetch('/api/admin/boats-ordering');
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) setData({ error: json.error || 'Could not load ranking', stats: { grocery_orders: 0, distinct_boats: 0, matched_lines: 0, distinct_skus: 0, ready: false, window_days: 90 }, thresholds: { grocery_orders: 25, distinct_boats: 3, cards: 8 }, items: [] });
+    else setData(json);
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const res = await adminFetch('/api/admin/boats-ordering');
+      const json = await res.json().catch(() => ({}));
+      if (cancelled) return;
+      if (!res.ok) setData({ error: json.error || 'Could not load ranking', stats: { grocery_orders: 0, distinct_boats: 0, matched_lines: 0, distinct_skus: 0, ready: false, window_days: 90 }, thresholds: { grocery_orders: 25, distinct_boats: 3, cards: 8 }, items: [] });
+      else setData(json);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  async function rebuild() {
+    setRebuilding(true);
+    await adminFetch('/api/admin/boats-ordering', { method: 'POST' });
+    await loadPreview();
+    setRebuilding(false);
+  }
+
+  if (!data) {
+    return <p className="text-xs text-gray-400 border-t border-gray-100 pt-4">Loading boat-order ranking…</p>;
+  }
+  const s = data.stats;
+  return (
+    <div className="border-t border-gray-100 pt-4 space-y-2">
+      <p className="text-xs font-bold uppercase tracking-wide text-brand-navy">Silent collection — last {s.window_days} days</p>
+      {data.error ? (
+        <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{data.error}</p>
+      ) : (
+        <>
+          <p className="text-xs text-gray-500 leading-relaxed">
+            {s.grocery_orders} grocery order{s.grocery_orders === 1 ? '' : 's'} · {s.distinct_boats} boat{s.distinct_boats === 1 ? '' : 's'} · {s.matched_lines} catalog-matched line{s.matched_lines === 1 ? '' : 's'} · {s.distinct_skus} SKUs.
+            Suggested live bar: {data.thresholds.grocery_orders} orders, {data.thresholds.distinct_boats} boats, {data.thresholds.cards} cards.
+            {s.ready ? ' Ready to turn on.' : ' Still collecting — leave the toggle off.'}
+            {' '}Product-page “boats buying this also buy” uses these same baskets, then fills with Sinclair popularity if a pair is thin.
+          </p>
+          {data.items.length > 0 && (
+            <ol className="text-xs text-brand-navy space-y-0.5">
+              {data.items.slice(0, 8).map((it, i) => (
+                <li key={it.product_id}>
+                  <span className="text-gray-400 w-4 inline-block">{i + 1}.</span>
+                  {it.description}
+                  <span className="text-gray-400"> · {it.order_count} order{it.order_count === 1 ? '' : 's'}</span>
+                </li>
+              ))}
+            </ol>
+          )}
+          <button type="button" onClick={rebuild} disabled={rebuilding}
+            className="text-[11px] font-bold text-brand-river hover:underline disabled:opacity-50">
+            {rebuilding ? 'Rebuilding…' : 'Rebuild ranking now'}
+          </button>
+        </>
       )}
     </div>
   );

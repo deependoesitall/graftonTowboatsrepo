@@ -318,7 +318,13 @@ export function computeFields(
   // Live Freshop hit ⇒ flip back-in-stock flags on contact, not only at
   // end-of-sweep reconcile (which is skipped on incomplete/safety runs).
   // Same manual_fields lock as reconcile_store_availability for is_available.
-  if (isSellableStatus(hit)) {
+  //
+  // NEVER revive alcohol / floral / hot-prepared deli. buildStoreProduct skips
+  // those on INSERT, but rows imported before the skip (and any that this
+  // block used to reactivate) would otherwise keep coming back every night.
+  if (isExcludedFromVesselCatalog(hit)) {
+    if (product.is_active !== false) fields.is_active = false;
+  } else if (isSellableStatus(hit)) {
     if (product.is_active === false) {
       fields.is_active = true;
     }
@@ -511,24 +517,52 @@ export function isFloral(p: FreshopProduct): boolean {
  * THE SIGNAL IS THE TAXONOMY, NOT THE LOCATION OR THE NAME.
  *
  * Freshop files these under a sub-department that reads, unambiguously,
- * "hot_food_and_prepared". Two things that look like better signals are not:
+ * "hot_food_and_prepared" (Sinclair URL `/shop/deli/hot_food_and_prepared/…`).
+ * Two things that look like better signals are not:
  *
  *   · `location` says "COLD DELI" for every one of them — the hot case sits in
  *     the same walkpath zone as the cold case, so the location field actively
- *     misleads.
+ *     misleads. SKU 13156 "Breast" is the poster child.
  *   · Name keywords are far worse. Searching descriptions for "fried" returns
  *     refried beans, French fried onions, "Baked Not Fried" crisps, frozen
  *     dinners and fried-pickle-flavoured chips — dozens of shelf-stable items
  *     a boat can perfectly well order. Matching on names would have quietly
  *     removed them.
  *
- * So this checks the department path only, and deliberately adds no keyword
- * fallback. A false negative here is one item Jen can disable by hand; a false
- * positive is stock silently missing from the catalogue with nobody the wiser.
+ * Cold deli (freshly sliced meat/cheese, lunch meat, olives, packaged cheese)
+ * is a SIBLING of this node, not a child — those stay orderable.
+ *
+ * So this checks the department path (any segment) and the known Freshop
+ * department ids, and deliberately adds no keyword fallback.
  */
+const HOT_FOOD_SLUG = /^hot[_-]?food/;
+/** Freshop ids for "Hot Food and Prepared" and its children. Probed live
+ *  Sept 2026; the URL slug is the durable signal if Sinclair adds a node. */
+const HOT_FOOD_DEPT_IDS = new Set([
+  '1595102', // Hot Food and Prepared
+  '1595328', '1595329', '1595330', '1595331', '1595332',
+  '1595333', '1595334', '1595335', '1595336', '1595337',
+  '1595338', '1595339', '1595340', '1595341', '1595342',
+]);
+
 export function isHotFood(p: FreshopProduct): boolean {
-  const [, second] = deptPath(p);
-  return /^hot[_-]?food/.test(second || '');
+  // Scan EVERY taxonomy segment, not just the second. deptPath treats a
+  // 2-part path (`/shop/deli/hot_food_and_prepared/p/{id}`) as
+  // [dept, product-slug] and would miss the sub-department.
+  const url = (p.canonical_url || '').toLowerCase();
+  const after = url.split('/shop/')[1] || '';
+  const segs = after.split('/p/')[0].split('/').filter(Boolean);
+  if (segs.some(s => HOT_FOOD_SLUG.test(s))) return true;
+  const ids = [
+    ...(p.department_ids || []),
+    ...(((p as { department_id?: Array<string | number> }).department_id) || []),
+  ];
+  return ids.some(id => HOT_FOOD_DEPT_IDS.has(String(id)));
+}
+
+/** Alcohol, floral, and hot/prepared deli — never sold to a vessel. */
+export function isExcludedFromVesselCatalog(p: FreshopProduct): boolean {
+  return isAlcohol(p) || isFloral(p) || isHotFood(p);
 }
 
 /**
@@ -631,11 +665,8 @@ export function buildStoreProduct(p: FreshopProduct, deptCategory: string): Reco
   // consuming the whole nightly budget. Skipping them here is the difference
   // between a sweep that finishes and one that never has.
   if (!isSellableStatus(p)) return null;
-  if (isAlcohol(p)) return null;
-  if (isFloral(p)) return null;
-  // Hot, ready-to-eat deli food — see isHotFood. A boat's ETA moves by hours;
-  // hot food handed over on arrival is a complaint waiting to happen.
-  if (isHotFood(p)) return null;
+  // Alcohol, floral, and hot/prepared deli — see isExcludedFromVesselCatalog.
+  if (isExcludedFromVesselCatalog(p)) return null;
   const upcRaw = (p.upc || '').trim() || norm(p.barcode_upc_a) || null;
   const weighable = !!p.is_weight_required || isWeighableUpcDigits(upcRaw);
   const step = typeof p.quantity_step === 'number' && isFinite(p.quantity_step) && p.quantity_step > 0 ? p.quantity_step : null;

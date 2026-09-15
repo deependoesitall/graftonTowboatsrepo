@@ -17,8 +17,8 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Tag, TrendingUp, Plus, ChevronRight } from 'lucide-react';
-import { formatCurrency } from '@/lib/utils';
+import { Tag, TrendingUp, Plus, ChevronRight, Ship } from 'lucide-react';
+import { formatCurrency, productDisplayName } from '@/lib/utils';
 import { addToCart } from '@/lib/cart';
 import type { Product } from '@/types';
 
@@ -28,15 +28,21 @@ type RailProduct = Product & {
 };
 
 export default function CatalogRails() {
-  const [rails, setRails] = useState<{ on_sale: RailProduct[]; best_sellers: RailProduct[] } | null>(null);
+  const [rails, setRails] = useState<{
+    on_sale: RailProduct[]; best_sellers: RailProduct[]; boats_ordering: RailProduct[];
+  } | null>(null);
 
   useEffect(() => {
     fetch('/api/catalog-rails')
       .then(r => (r.ok ? r.json() : null))
-      .then(d => setRails(d && !d.error ? d : { on_sale: [], best_sellers: [] }))
+      .then(d => setRails(d && !d.error ? {
+        on_sale: d.on_sale || [],
+        best_sellers: d.best_sellers || [],
+        boats_ordering: d.boats_ordering || [],
+      } : { on_sale: [], best_sellers: [], boats_ordering: [] }))
       // A failed rail is not worth an error message on a page someone is
       // trying to order from. It just isn't there.
-      .catch(() => setRails({ on_sale: [], best_sellers: [] }));
+      .catch(() => setRails({ on_sale: [], best_sellers: [], boats_ordering: [] }));
   }, []);
 
   // NO SKELETON. Rails are supplementary — the catalog below is the page.
@@ -50,12 +56,27 @@ export default function CatalogRails() {
   // cards after clip-coupons and expired dates are stripped. Three lonely
   // cards look broken; hide the rail until there is a real week of specials.
   const MIN_SALE_CARDS = 8;
+  const MIN_BOATS_CARDS = 8;
   const hasSale = rails.on_sale.length >= MIN_SALE_CARDS;
   const hasBest = rails.best_sellers.length > 0;
-  if (!hasSale && !hasBest) return null;
+  const hasBoats = rails.boats_ordering.length >= MIN_BOATS_CARDS;
+  if (!hasSale && !hasBest && !hasBoats) return null;
 
   return (
     <div className="space-y-4 mb-5">
+      {hasBoats && (
+        <Rail
+          title="See What Boats Are Buying"
+          subtitle="from recent boat orders"
+          icon={Ship}
+          accent="text-brand-green"
+          items={rails.boats_ordering}
+          viewAll={{
+            href: `/catalog?ids=${rails.boats_ordering.map(p => p.id).join(',')}`,
+            label: 'View all',
+          }}
+        />
+      )}
       {hasSale && (
         <Rail
           title="What's on sale"
@@ -80,8 +101,9 @@ export default function CatalogRails() {
   );
 }
 
-function Rail({ title, icon: Icon, accent, items, viewAll }: {
+function Rail({ title, subtitle = "from Sinclair's this week", icon: Icon, accent, items, viewAll }: {
   title: string;
+  subtitle?: string;
   icon: typeof Tag;
   accent: string;
   items: RailProduct[];
@@ -93,7 +115,7 @@ function Rail({ title, icon: Icon, accent, items, viewAll }: {
         <p className="flex items-center gap-1.5 text-xs font-bold text-brand-navy uppercase tracking-wide">
           <Icon className={`w-3.5 h-3.5 ${accent}`} /> {title}
           <span className="font-normal normal-case text-gray-400">
-            — from Sinclair&apos;s this week
+            — {subtitle}
           </span>
         </p>
         {viewAll && (
@@ -133,7 +155,7 @@ function RailCard({ product }: { product: RailProduct }) {
     // confirmation quietly disagree with the receipt.
     addToCart({
       product_id: product.id,
-      description: product.description,
+      description: productDisplayName(product),
       category: product.category,
       pkg_size: product.pkg_size,
       uom: product.uom,
@@ -159,7 +181,7 @@ function RailCard({ product }: { product: RailProduct }) {
       )}
 
       <p className="text-[11px] font-semibold text-brand-navy leading-snug line-clamp-2 min-h-[28px]">
-        {product.description}
+        {productDisplayName(product)}
       </p>
 
       {(product.pkg_size || product.uom) && (

@@ -62,11 +62,31 @@ export function upcKey(s: string | null | undefined): string {
 }
 
 /**
+ * Sinclair tapes often append a full reprint marked DUPLICATE RECEIPT
+ * (sometimes letter-spaced: "D U P L I C A T E   R E C E I P T").
+ * Parsing both copies doubled every qty. Keep the first merchandise block.
+ * When the banner is missing, a new Plu# after the totals footer is the reprint.
+ */
+export function stripDuplicateReceiptCopy(text: string): string {
+  if (!text) return text;
+  const banner = /d\s*u\s*p\s*l\s*i\s*c\s*a\s*t\s*e\s+r\s*e\s*c\s*e\s*i\s*p\s*t/i;
+  const b = text.search(banner);
+  if (b >= 0) return text.slice(0, b).trimEnd();
+
+  const totals = text.search(/\b(TAX[-\s]?CODE|BALANCE\s+DUE|IN\s+HOUSE\s+CHARGE)\b/i);
+  if (totals < 0) return text;
+  const after = text.slice(totals);
+  const nextPlu = after.search(/\bPlu#\s*\d+/i);
+  if (nextPlu >= 0) return text.slice(0, totals + nextPlu).trimEnd();
+  return text;
+}
+
+/**
  * Parse extracted receipt text into aggregated PLU lines.
  * Duplicate PLUs (each ring is qty 1 on Sinclair tapes) are summed.
  */
 export function parseRegisterReceiptText(text: string): ReceiptRawLine[] {
-  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const lines = stripDuplicateReceiptCopy(text).split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   const raw: ReceiptRawLine[] = [];
 
   for (let i = 0; i < lines.length; i++) {
@@ -226,6 +246,32 @@ const MONTHS: Record<string, string> = {
   JUL: 'Jul', AUG: 'Aug', SEP: 'Sep', OCT: 'Oct', NOV: 'Nov', DEC: 'Dec',
 };
 
+const MONTH_NUM: Record<string, string> = {
+  JAN: '01', FEB: '02', MAR: '03', APR: '04', MAY: '05', JUN: '06',
+  JUL: '07', AUG: '08', SEP: '09', OCT: '10', NOV: '11', DEC: '12',
+};
+
+/** ISO date (YYYY-MM-DD) for orders.purchased_at. */
+export function receiptDateToIso(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  const m = s.match(/^(\d{1,2})([A-Za-z]{3})(\d{4})$/);
+  if (m) {
+    const mm = MONTH_NUM[m[2].toUpperCase()];
+    if (!mm) return null;
+    return `${m[3]}-${mm}-${String(parseInt(m[1], 10)).padStart(2, '0')}`;
+  }
+  const dmy = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/);
+  if (dmy) {
+    const year = dmy[3].length === 2 ? `20${dmy[3]}` : dmy[3];
+    const month = parseInt(dmy[1], 10);
+    const day = parseInt(dmy[2], 10);
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
+  return null;
+}
+
 /** Turn tape dates like 11SEP2026 into Sep 11, 2026. */
 export function formatReceiptDate(raw: string | null | undefined): string | null {
   if (!raw) return null;
@@ -252,6 +298,7 @@ export function parseReceiptMeta(text: string): {
   amount: number | null;
   dateHint: string | null;
 } {
+  text = stripDuplicateReceiptCopy(text);
   const amountM = text.match(/A\s*m\s*o\s*u\s*n\s*t\s*:\s*([\d\s,.]+)/i)
     || text.match(/\$\s*([\d,]+\.\d{2})/);
   let amount: number | null = null;

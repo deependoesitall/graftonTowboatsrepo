@@ -15,23 +15,41 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   const supabase = createServiceClient();
 
-  const { data: settings } = await supabase
-    .from('admin_settings')
-    .select('show_sale_rail, show_best_sellers_rail')
-    .single();
+  let settings: {
+    show_sale_rail?: boolean | null;
+    show_best_sellers_rail?: boolean | null;
+    show_boats_ordering_rail?: boolean | null;
+  } | null = null;
+  {
+    const withBoats = await supabase
+      .from('admin_settings')
+      .select('show_sale_rail, show_best_sellers_rail, show_boats_ordering_rail')
+      .single();
+    if (withBoats.error) {
+      const without = await supabase
+        .from('admin_settings')
+        .select('show_sale_rail, show_best_sellers_rail')
+        .single();
+      settings = without.data;
+    } else {
+      settings = withBoats.data;
+    }
+  }
 
   // Default TRUE when the row or column is missing — matches the migration's
   // default, so the rails work before anyone visits Settings.
   const showSale = settings?.show_sale_rail ?? false;
   const showBest = settings?.show_best_sellers_rail ?? true;
+  const showBoats = settings?.show_boats_ordering_rail ?? false;
 
-  if (!showSale && !showBest) {
-    return NextResponse.json({ on_sale: [], best_sellers: [] });
+  if (!showSale && !showBest && !showBoats) {
+    return NextResponse.json({ on_sale: [], best_sellers: [], boats_ordering: [] });
   }
 
   const wanted = [
     ...(showSale ? ['on_sale'] : []),
     ...(showBest ? ['best_sellers'] : []),
+    ...(showBoats ? ['boats_ordering'] : []),
   ];
 
   const { data, error } = await supabase
@@ -39,7 +57,7 @@ export async function GET() {
     .select(`
       rail, position, sale_price, regular_price,
       product:products!inner (
-        id, description, pkg_size, uom, price, regular_price,
+        id, description, details, category, pkg_size, uom, price, regular_price,
         sale_start_date, sale_finish_date, image_url,
         billed_by_weight, quantity_step, quantity_label,
         is_active, is_available
@@ -56,7 +74,7 @@ export async function GET() {
     product: Record<string, unknown> | null;
   };
 
-  const rails: Record<string, unknown[]> = { on_sale: [], best_sellers: [] };
+  const rails: Record<string, unknown[]> = { on_sale: [], best_sellers: [], boats_ordering: [] };
 
   for (const r of (data || []) as unknown as Row[]) {
     // A product deactivated since the nightly run — pulled from sale, out of

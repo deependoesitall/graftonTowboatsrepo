@@ -216,6 +216,7 @@ export function RegisterReceiptImport({
           vessel_name: ves,
           register_total: meta?.amount ?? null,
           notes: meta?.dateHint ? `Receipt date ${formatReceiptDate(meta.dateHint) || meta.dateHint}` : '',
+          purchased_at: meta?.dateHint || null,
           lines,
         }),
       });
@@ -254,6 +255,7 @@ export function RegisterReceiptImport({
         <h3 className="font-display font-bold text-brand-navy text-base">Sinclair register receipt</h3>
         <p className="text-xs text-brand-green/50 mt-0.5">
           Upload the itemized register PDF (PLU tape). Matched lines apply to the draft; unmatched stay in Needs you.
+          A DUPLICATE RECEIPT reprint on the same tape is ignored so quantities are not doubled.
         </p>
       </div>
 

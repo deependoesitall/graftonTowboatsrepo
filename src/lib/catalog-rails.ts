@@ -22,7 +22,7 @@
 
 import {
   FRESHOP_APP_KEY, FRESHOP_STORE_ID,
-  isAlcohol, isFloral, isHotFood, isSellableStatus, saleIsActive,
+  isExcludedFromVesselCatalog, isSellableStatus, saleIsActive,
   type FreshopProduct,
 } from '@/lib/freshop-sync';
 
@@ -90,7 +90,7 @@ export function isRealSale(p: FreshopSaleFields): boolean {
 /** Same exclusions the catalogue sync applies. A rail must never surface
  *  something the store itself refuses to sell to a vessel. */
 function isCarryable(p: FreshopProduct): boolean {
-  return isSellableStatus(p) && !isAlcohol(p) && !isFloral(p) && !isHotFood(p);
+  return isSellableStatus(p) && !isExcludedFromVesselCatalog(p);
 }
 
 async function fetchRailPages(query: string): Promise<FreshopSaleFields[]> {

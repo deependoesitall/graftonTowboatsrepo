@@ -22,7 +22,7 @@ const MANAGER_FIELDS = [
   // Dave's side should be able to switch that off without asking anyone.
   // This list is also what a manager can READ, so omitting them would render
   // both toggles permanently "off" for the people meant to use them.
-  'show_sale_rail', 'show_best_sellers_rail',
+  'show_sale_rail', 'show_best_sellers_rail', 'show_boats_ordering_rail',
 ] as const;
 
 export async function GET(req: NextRequest) {
@@ -63,13 +63,14 @@ export async function PATCH(req: NextRequest) {
   if (body.show_digital_coupons !== undefined) updates.show_digital_coupons = !!body.show_digital_coupons;
   if (body.show_sale_rail !== undefined) updates.show_sale_rail = !!body.show_sale_rail;
   if (body.show_best_sellers_rail !== undefined) updates.show_best_sellers_rail = !!body.show_best_sellers_rail;
+  if (body.show_boats_ordering_rail !== undefined) updates.show_boats_ordering_rail = !!body.show_boats_ordering_rail;
   if (body.store_zone_order !== undefined) updates.store_zone_order = sanitizeZoneOrder(body.store_zone_order);
   if (body.cod_fee_enabled !== undefined) updates.cod_fee_enabled = !!body.cod_fee_enabled;
   if (body.cod_fee_percent !== undefined) updates.cod_fee_percent = Math.min(100, Math.max(0, Number(body.cod_fee_percent) || 0));
 
   // Owner-only fields
   const ownerOnlyRequested = [
-    'business_email', 'order_email_cc', 'sinclair_order_emails', 'tax_rate', 'tax_enabled', 'weekly_ad_url',
+    'business_email', 'order_email_cc', 'sinclair_order_emails', 'sinclair_email_test_mode', 'sinclair_test_emails', 'tax_rate', 'tax_enabled', 'weekly_ad_url',
     'draft_orders_enabled', 'repeat_orders_enabled', 'email_debug_enabled',
     'fleet_cta_enabled',
     'order_email_subject', 'email_header_tagline', 'email_intro_message',
@@ -85,6 +86,8 @@ export async function PATCH(req: NextRequest) {
     if (body.business_email !== undefined) updates.business_email = body.business_email;
     if (body.order_email_cc !== undefined) updates.order_email_cc = body.order_email_cc;
     if (body.sinclair_order_emails !== undefined) updates.sinclair_order_emails = body.sinclair_order_emails;
+    if (body.sinclair_email_test_mode !== undefined) updates.sinclair_email_test_mode = !!body.sinclair_email_test_mode;
+    if (body.sinclair_test_emails !== undefined) updates.sinclair_test_emails = String(body.sinclair_test_emails ?? '');
     if (body.tax_rate !== undefined) updates.tax_rate = body.tax_rate;
     if (body.tax_enabled !== undefined) updates.tax_enabled = body.tax_enabled;
     if (body.draft_orders_enabled !== undefined) updates.draft_orders_enabled = body.draft_orders_enabled;

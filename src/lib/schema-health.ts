@@ -85,7 +85,26 @@ const REQUIRED: Requirement[] = [
     migration: '083_sinclair_order_emails.sql',
     breaks: 'Sinclair shopping-desk addresses cannot be edited in Settings.',
   },
+  {
+    table: 'admin_settings',
+    columns: ['sinclair_email_test_mode', 'sinclair_test_emails'],
+    migration: '085_sinclair_email_test_mode.sql',
+    breaks: 'Sinclair inbox test mode in Settings cannot persist; Shop-now emails keep going to the live store desk.',
+  },
+  {
+    table: 'orders',
+    columns: ['purchased_at', 'source'],
+    migration: '086_boats_ordering.sql',
+    breaks: 'Boat-order frequency rail cannot tell receipt date from import day, so historical tapes would look "current".',
+  },
+  {
+    table: 'admin_settings',
+    columns: ['show_boats_ordering_rail'],
+    migration: '086_boats_ordering.sql',
+    breaks: 'Boats-are-ordering catalog rail has no kill switch.',
+  },
 ];
+
 
 export interface SchemaIssue {
   table: string;

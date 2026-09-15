@@ -23,7 +23,8 @@ import { generateOrderNumber } from '@/lib/utils';
 import { vesselKey } from '@/lib/vessel';
 import { vesselNameKey } from '@/lib/vessel-membership';
 import { fetchActiveDeals, computeDiscounts } from '@/lib/sinclair-offers';
-import { sendOrderReceivedEmail } from '@/lib/email';
+import { sendOrderReceivedEmail, resolveSinclairOrderEmails } from '@/lib/email';
+import { refreshBoatsOrderingRail } from '@/lib/boats-ordering';
 import { sendOrderPush } from '@/lib/push';
 import { Order } from '@/types';
 import { requireAdmin, isSinclairScoped, getAdminSession } from '@/lib/admin-auth-server';
@@ -395,6 +396,8 @@ export async function POST(req: NextRequest) {
         status: 'new',
         user_id: userId,
         vessel_id: resolvedVesselId,
+        source: adminSession ? 'staff' : 'catalog',
+        purchased_at: new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago' }).format(new Date()),
       })
       .select()
       .single();
@@ -698,13 +701,15 @@ export async function POST(req: NextRequest) {
       try {
         const { data: s } = await supabase
           .from('admin_settings')
-          .select('business_email, order_email_cc, sinclair_order_emails, email_debug_enabled, order_email_subject, email_header_tagline, email_intro_message, email_footer_text, email_button_text, email_button_url')
+          .select('business_email, order_email_cc, sinclair_order_emails, sinclair_email_test_mode, sinclair_test_emails, email_debug_enabled, order_email_subject, email_header_tagline, email_intro_message, email_footer_text, email_button_text, email_button_url')
           .single();
         debugEnabled = !!s?.email_debug_enabled;
+        const sinclair = resolveSinclairOrderEmails(s || {});
         const result = await sendOrderReceivedEmail(fullOrder as Order, {
           businessEmail: s?.business_email || process.env.BUSINESS_EMAIL,
           ccEmailRaw: s?.order_email_cc,
-          sinclairEmailRaw: (s as { sinclair_order_emails?: string | null })?.sinclair_order_emails,
+          sinclairEmailRaw: sinclair.raw,
+          sinclairTestMode: sinclair.testMode,
           template: {
             subject_template: s?.order_email_subject,
             header_tagline: s?.email_header_tagline,
@@ -760,6 +765,10 @@ export async function POST(req: NextRequest) {
       } catch (err) {
         console.error('Order push error (order still saved and emailed):', err);
       }
+    }
+
+    try { await refreshBoatsOrderingRail(supabase); } catch (e) {
+      console.error('boats ordering rail:', e instanceof Error ? e.message : e);
     }
 
     return NextResponse.json({

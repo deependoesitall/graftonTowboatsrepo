@@ -6,6 +6,8 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/admin-auth-server';
 import { vesselNameKey } from '@/lib/vessel-membership';
 import { logActivity } from '@/lib/activity-log';
+import { receiptDateToIso } from '@/lib/register-receipt-parse';
+import { refreshBoatsOrderingRail } from '@/lib/boats-ordering';
 
 export async function POST(req: NextRequest) {
   const session = requireAdmin(req, { gtsOnly: true });
@@ -18,6 +20,7 @@ export async function POST(req: NextRequest) {
   const customerEmail = body.customer_email ? String(body.customer_email).trim() : null;
   const registerTotal = body.register_total != null ? Number(body.register_total) : null;
   const notesExtra = String(body.notes || '').trim();
+  const purchasedAt = receiptDateToIso(body.purchased_at || body.receipt_date) || null;
   const lines = Array.isArray(body.lines) ? body.lines : [];
 
   if (!companyName || !vesselName) {
@@ -107,6 +110,9 @@ export async function POST(req: NextRequest) {
     discount_total: 0,
     notes,
     bill_for_groceries: true,
+    source: 'register_import',
+    purchased_at: purchasedAt
+      || new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago' }).format(new Date()),
   };
 
   const { data: order, error: oErr } = await supabase
@@ -141,6 +147,10 @@ export async function POST(req: NextRequest) {
     po_number: null,
     note: `Saved as past boat order · ${vesselName}`,
   });
+
+  try { await refreshBoatsOrderingRail(supabase); } catch (e) {
+    console.error('boats ordering rail:', e instanceof Error ? e.message : e);
+  }
 
   return NextResponse.json({
     order_id: order.id,
