@@ -7,11 +7,33 @@
 --
 -- Calendar day is America/Chicago (Sinclair's ad turnover), not UTC.
 
--- One-shot repair for every row whose sale window has ended.
+-- One-shot repair. uniq_store_match_key forbids two store_only rows with the
+-- same flattened name+size AND the same price. Snapping an expired sale back
+-- to regular_price can collide (5 lb brussels at $2.49 already exists). Those
+-- rows still get their sale WINDOW cleared so live pricing uses regular_price;
+-- we just don't rewrite `price` when that would violate the unique index.
+
+UPDATE products p
+SET
+  price            = COALESCE(p.regular_price, p.price),
+  regular_price    = NULL,
+  sale_start_date  = NULL,
+  sale_finish_date = NULL
+WHERE p.sale_finish_date IS NOT NULL
+  AND p.sale_finish_date < (CURRENT_TIMESTAMP AT TIME ZONE 'America/Chicago')::date
+  AND NOT EXISTS (
+    SELECT 1 FROM products o
+    WHERE o.id <> p.id
+      AND o.store_only IS TRUE
+      AND p.store_only IS TRUE
+      AND public.product_match_key(o.description, o.pkg_size)
+        = public.product_match_key(p.description, p.pkg_size)
+      AND o.price = COALESCE(p.regular_price, p.price)
+  );
+
+-- Collisions: drop the expired window, keep both listings.
 UPDATE products
 SET
-  price            = COALESCE(regular_price, price),
-  regular_price    = NULL,
   sale_start_date  = NULL,
   sale_finish_date = NULL
 WHERE sale_finish_date IS NOT NULL
@@ -28,10 +50,25 @@ AS $$
 DECLARE
   n integer;
 BEGIN
+  UPDATE products p
+  SET
+    price            = COALESCE(p.regular_price, p.price),
+    regular_price    = NULL,
+    sale_start_date  = NULL,
+    sale_finish_date = NULL
+  WHERE p.sale_finish_date IS NOT NULL
+    AND p.sale_finish_date < (CURRENT_TIMESTAMP AT TIME ZONE 'America/Chicago')::date
+    AND NOT EXISTS (
+      SELECT 1 FROM products o
+      WHERE o.id <> p.id
+        AND o.store_only IS TRUE
+        AND p.store_only IS TRUE
+        AND public.product_match_key(o.description, o.pkg_size)
+          = public.product_match_key(p.description, p.pkg_size)
+        AND o.price = COALESCE(p.regular_price, p.price)
+    );
   UPDATE products
   SET
-    price            = COALESCE(regular_price, price),
-    regular_price    = NULL,
     sale_start_date  = NULL,
     sale_finish_date = NULL
   WHERE sale_finish_date IS NOT NULL
