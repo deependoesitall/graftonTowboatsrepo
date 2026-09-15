@@ -42,10 +42,8 @@ export function AdminNav() {
   }
 
   const visibleNav = NAV.filter(item => item.area === null || canAccess(role, item.area));
-  // GTS owner sees 7 destinations — icons eat the name on a phone. Sinclair's
-  // sees fewer, so the icon row can stay. Collapse only when it would clip
-  // the staff name Deepen asked to keep visible.
-  const collapseNav = visibleNav.length > 5;
+  // Same phone chrome for GTS and Sinclair's: hamburger + labeled panels,
+  // name/role stay in the bar. Desktop keeps the full pill row.
 
   return (
     <header className="sticky top-0 z-30 shadow-md">
@@ -79,13 +77,8 @@ export function AdminNav() {
             </div>
           </Link>
 
-          {/* Nav links — icon row on desktop / Sinclair; hamburger on GTS phones */}
-          <nav className={cn(
-            'items-center gap-1 min-w-0 flex-1 justify-center',
-            collapseNav
-              ? 'hidden lg:flex'
-              : 'flex overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden',
-          )}>
+          {/* Desktop pill row — phones use the hamburger below */}
+          <nav className="hidden lg:flex items-center gap-1 min-w-0 flex-1 justify-center">
             {visibleNav.map(({ href, label, icon: Icon }) => {
               const active = path === href || (href !== '/admin' && path.startsWith(href));
               return (
@@ -117,14 +110,12 @@ export function AdminNav() {
               className="text-white/60 hover:text-white text-xs font-body transition-colors hidden md:block">
               View Store →
             </Link>
-            {collapseNav && (
-              <button type="button" onClick={() => setMenuOpen(o => !o)}
-                className="lg:hidden p-1.5 rounded hover:bg-white/10 text-white"
-                aria-label={menuOpen ? 'Close menu' : 'Open menu'}
-                aria-expanded={menuOpen}>
-                {menuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-              </button>
-            )}
+            <button type="button" onClick={() => setMenuOpen(o => !o)}
+              className="lg:hidden p-1.5 rounded hover:bg-white/10 text-white"
+              aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+              aria-expanded={menuOpen}>
+              {menuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            </button>
             <button onClick={handleLogout}
               className="flex items-center gap-1 text-white/60 hover:text-white text-xs font-body transition-colors p-1.5 rounded hover:bg-white/10">
               <LogOut className="w-4 h-4" />
@@ -132,7 +123,7 @@ export function AdminNav() {
           </div>
         </div>
 
-        {collapseNav && menuOpen && (
+        {menuOpen && (
           <nav className="lg:hidden border-t border-white/10 px-3 py-2 grid grid-cols-2 gap-1">
             {visibleNav.map(({ href, label, icon: Icon }) => {
               const active = path === href || (href !== '/admin' && path.startsWith(href));
