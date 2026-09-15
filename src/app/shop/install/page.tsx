@@ -35,7 +35,7 @@ export const metadata = {
     icon: '/branding/favicon-sinclairs.png',
     shortcut: '/branding/favicon-sinclairs.png',
     // iOS ignores the manifest's icons for the Home Screen and uses ONLY this.
-    apple: '/branding/shop-icon.png',
+    apple: '/branding/shop-icon-180.png',
   },
   appleWebApp: {
     capable: true,
