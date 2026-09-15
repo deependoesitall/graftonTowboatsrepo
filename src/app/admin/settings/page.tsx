@@ -22,6 +22,7 @@ interface AdminUser {
 interface Settings {
   business_email: string;
   order_email_cc: string;
+  sinclair_order_emails: string;
   order_email_subject: string;
   tax_rate: number;
   tax_enabled: boolean;
@@ -168,6 +169,7 @@ export default function AdminSettingsPage() {
   const [settings, setSettings] = useState<Settings>({
     business_email: 'GraftonTowboatServices@gmail.com',
     order_email_cc: '',
+    sinclair_order_emails: 'sinclairfoods@jerseyville-il.net, dwittman@jerseyville-il.net',
     order_email_subject: 'New Order #{order_number} — {company_name}',
     tax_rate: 0, tax_enabled: false,
     draft_orders_enabled: false, repeat_orders_enabled: true,
@@ -1286,21 +1288,39 @@ export default function AdminSettingsPage() {
           : 'custom';
         return (
         <div className="space-y-5">
-          <div className="card-base p-6 space-y-4">
+          <div className="card-base p-6 space-y-5">
             <div>
-              <h2 className="font-bold text-brand-navy">Who gets pinged when an order lands</h2>
-              <p className="text-xs text-gray-400 mt-1">This is the GTS / Sinclair staff email — not the customer confirmation.</p>
+              <h2 className="font-bold text-brand-navy">Who gets which email</h2>
+              <p className="text-xs text-gray-400 mt-1">
+                Separate inboxes — same split as the admin dashboard. Customer confirmation still goes to the boat. Separate with commas.
+              </p>
             </div>
-            <div>
-              <label className="label-base">Send to</label>
-              <input type="email" className="input-base" value={settings.business_email}
-                onChange={e => setSettings(s => ({ ...s, business_email: e.target.value }))} />
+            <div className="rounded-xl border-2 border-brand-navy/15 bg-brand-navy/[0.03] p-4 space-y-3">
+              <p className="text-xs font-bold uppercase tracking-wide text-brand-navy">GTS — Grafton Towboat Services</p>
+              <p className="text-[11px] text-gray-500">New orders (full GTS view) and the final delivery email with GTS charges.</p>
+              <div>
+                <label className="label-base">GTS inbox</label>
+                <input type="email" className="input-base" value={settings.business_email}
+                  onChange={e => setSettings(s => ({ ...s, business_email: e.target.value }))} />
+              </div>
+              <div>
+                <label className="label-base">Also GTS <span className="font-normal text-gray-400 normal-case">(optional copies)</span></label>
+                <input type="text" className="input-base" value={settings.order_email_cc}
+                  onChange={e => setSettings(s => ({ ...s, order_email_cc: e.target.value }))}
+                  placeholder="jen@…, second@…" />
+              </div>
             </div>
-            <div>
-              <label className="label-base">Also send a copy to <span className="font-normal text-gray-400 normal-case">(optional)</span></label>
-              <input type="text" className="input-base" value={settings.order_email_cc}
-                onChange={e => setSettings(s => ({ ...s, order_email_cc: e.target.value }))}
-                placeholder="jen@…, second@…" />
+            <div className="rounded-xl border-2 border-red-200 bg-red-50/40 p-4 space-y-3">
+              <p className="text-xs font-bold uppercase tracking-wide text-red-800">Sinclair&apos;s Foods — shopping desk</p>
+              <p className="text-[11px] text-gray-600">
+                Only when there is grocery to shop. They get &ldquo;Shop now&rdquo; with a link into Shopping Mode — not GTS delivery charges, not crew-change-only jobs.
+              </p>
+              <div>
+                <label className="label-base">Sinclair&apos;s emails</label>
+                <textarea className="input-base" rows={2} value={settings.sinclair_order_emails}
+                  onChange={e => setSettings(s => ({ ...s, sinclair_order_emails: e.target.value }))}
+                  placeholder="sinclairfoods@jerseyville-il.net, dwittman@jerseyville-il.net" />
+              </div>
             </div>
           </div>
 

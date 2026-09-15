@@ -698,12 +698,13 @@ export async function POST(req: NextRequest) {
       try {
         const { data: s } = await supabase
           .from('admin_settings')
-          .select('business_email, order_email_cc, email_debug_enabled, order_email_subject, email_header_tagline, email_intro_message, email_footer_text, email_button_text, email_button_url')
+          .select('business_email, order_email_cc, sinclair_order_emails, email_debug_enabled, order_email_subject, email_header_tagline, email_intro_message, email_footer_text, email_button_text, email_button_url')
           .single();
         debugEnabled = !!s?.email_debug_enabled;
         const result = await sendOrderReceivedEmail(fullOrder as Order, {
           businessEmail: s?.business_email || process.env.BUSINESS_EMAIL,
           ccEmailRaw: s?.order_email_cc,
+          sinclairEmailRaw: (s as { sinclair_order_emails?: string | null })?.sinclair_order_emails,
           template: {
             subject_template: s?.order_email_subject,
             header_tagline: s?.email_header_tagline,

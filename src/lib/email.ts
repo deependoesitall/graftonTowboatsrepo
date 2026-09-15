@@ -589,6 +589,8 @@ export async function sendOrderReceivedEmail(
   opts: {
     businessEmail?: string;
     ccEmailRaw?: string;
+    /** Sinclair shopping-desk inboxes (Settings). Not GTS. */
+    sinclairEmailRaw?: string;
     template?: EmailTemplateConfig;
   } = {}
 ) {
@@ -653,7 +655,11 @@ export async function sendOrderReceivedEmail(
   // 2) Sinclair's ? only when there is grocery to shop. Dedicated message with
   // a one-tap link into Shopping Mode on the shop host (their installed app).
   if (hasShoppableItems) {
-    const sinclairTo = sinclairsOrderEmails();
+    const sinclairTo = parseCcList(
+      opts.sinclairEmailRaw
+      || process.env.SINCLAIRS_ORDER_EMAILS
+      || 'sinclairfoods@jerseyville-il.net,dwittman@jerseyville-il.net',
+    );
     if (sinclairTo.length) {
       const shopUrl = `${shopAppUrl()}/admin/orders?order=${encodeURIComponent(order.id)}&shop=1`;
       const sinclairHtml = buildOrderEmailHtml(order, {

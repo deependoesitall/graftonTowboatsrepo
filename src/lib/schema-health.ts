@@ -79,6 +79,12 @@ const REQUIRED: Requirement[] = [
     migration: '081_boat_history_and_shared_cart.sql',
     breaks: 'Crew on the same boat cannot share one grocery cart, and new logins may miss that boat’s older orders.',
   },
+  {
+    table: 'admin_settings',
+    columns: ['sinclair_order_emails'],
+    migration: '083_sinclair_order_emails.sql',
+    breaks: 'Sinclair shopping-desk addresses cannot be edited in Settings.',
+  },
 ];
 
 export interface SchemaIssue {

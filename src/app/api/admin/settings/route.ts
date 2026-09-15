@@ -69,7 +69,7 @@ export async function PATCH(req: NextRequest) {
 
   // Owner-only fields
   const ownerOnlyRequested = [
-    'business_email', 'order_email_cc', 'tax_rate', 'tax_enabled', 'weekly_ad_url',
+    'business_email', 'order_email_cc', 'sinclair_order_emails', 'tax_rate', 'tax_enabled', 'weekly_ad_url',
     'draft_orders_enabled', 'repeat_orders_enabled', 'email_debug_enabled',
     'fleet_cta_enabled',
     'order_email_subject', 'email_header_tagline', 'email_intro_message',
@@ -84,6 +84,7 @@ export async function PATCH(req: NextRequest) {
     if (body.weekly_ad_url !== undefined) updates.weekly_ad_url = body.weekly_ad_url;
     if (body.business_email !== undefined) updates.business_email = body.business_email;
     if (body.order_email_cc !== undefined) updates.order_email_cc = body.order_email_cc;
+    if (body.sinclair_order_emails !== undefined) updates.sinclair_order_emails = body.sinclair_order_emails;
     if (body.tax_rate !== undefined) updates.tax_rate = body.tax_rate;
     if (body.tax_enabled !== undefined) updates.tax_enabled = body.tax_enabled;
     if (body.draft_orders_enabled !== undefined) updates.draft_orders_enabled = body.draft_orders_enabled;
