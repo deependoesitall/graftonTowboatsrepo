@@ -514,9 +514,11 @@ function FinalEmailQueue() {
 function SendFinalEmailDialog({ order, onClose, onSent }: {
   order: QueueOrder; onClose: () => void; onSent: () => void;
 }) {
+  const { confirm, dialog } = useConfirm();
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   const [preview, setPreview] = useState<null | 'email' | 'receipt'>(null);
+  const [staffNote, setStaffNote] = useState('');
   const sendTo = order.vessel_email || order.customer_email;
 
   // ── GTS delivery billing — rides on this final email as a line item ──
@@ -651,6 +653,7 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
   if (serviceType) previewQuery.set('delivery_service_type', serviceType);
   previewQuery.set('bill_for_groceries', String(billGroceries));
   if (billGroceries && groceryTotal !== '') previewQuery.set('register_total', groceryTotal);
+  if (staffNote.trim()) previewQuery.set('staff_note', staffNote.trim());
   const emailPreviewSrc = `/api/orders/${order.id}/email-preview?${previewQuery.toString()}`;
 
   // Grocery-billed orders can't go out on an estimate — they need Sinclair's
@@ -661,6 +664,22 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
   const needsGroceryDocs = missingGroceryDocs && !overrideReceipt;
 
   async function send() {
+    const feeNum = fee === '' ? 0 : Number(fee);
+    if (!Number.isFinite(feeNum) || feeNum === 0) {
+      const ok = await confirm({
+        title: 'Send with no delivery charge?',
+        message: (
+          <span>
+            Delivery is <strong>$0.00</strong> on this email. That is rare — usually there is a GTS fee.
+            If this is a courtesy or a verbal agreement, add a note above (for example, &ldquo;This one&apos;s on us&rdquo;) so the boat sees why.
+            Send anyway?
+          </span>
+        ),
+        cancelLabel: 'Go back',
+        actions: [{ id: 'ok', label: 'Yes, send with $0 delivery' }],
+      });
+      if (!ok) return;
+    }
     setSending(true); setError('');
     try {
       const res = await adminFetch(`/api/orders/${order.id}/send-shopped-email`, {
@@ -672,6 +691,7 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
           delivery_company_id: companyId || null,
           bill_for_groceries: billGroceries,
           register_total: billGroceries && groceryTotal !== '' ? Number(groceryTotal) : undefined,
+          staff_note: staffNote.trim() || undefined,
         }),
       });
       const r = await res.json();
@@ -687,7 +707,10 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
   // PORTAL to <body>: the queue card animates with a transform, which traps
   // position:fixed descendants inside it (the dialog rendered wedged into the
   // card and couldn't be dismissed). Portaling escapes any ancestor styling.
-  return createPortal(
+  return (
+    <>
+      {dialog}
+      {createPortal(
     <div className="fixed inset-0 z-[95] bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
       <div onClick={e => e.stopPropagation()}
         className={`bg-white rounded-2xl shadow-2xl w-full flex flex-col max-h-[92vh] transition-all ${preview ? 'max-w-4xl' : 'max-w-md'}`}>
@@ -926,6 +949,14 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
               )}
             </div>
 
+          <div className="mb-4">
+            <label className="label-base" htmlFor="staff-note">Note to the boat <span className="font-normal text-gray-400 normal-case">(optional)</span></label>
+            <textarea id="staff-note" className="input-base text-sm" rows={3} value={staffNote}
+              onChange={e => setStaffNote(e.target.value)}
+              placeholder={'e.g. This one\'s on us. We owe you a free delivery as reimbursement for the spilled groceries from the last delivery.'} />
+            <p className="text-[11px] text-gray-400 mt-1">Shows on the final email as &ldquo;A note from Grafton Towboat Services.&rdquo; Leave blank if you don&apos;t need one.</p>
+          </div>
+
           {preview && (
             <div className="border border-gray-200 rounded-xl overflow-hidden bg-gray-50" style={{ height: '52vh' }}>
               <iframe
@@ -962,6 +993,7 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
         </div>
       </div>
     </div>,
-    document.body
+    document.body)}
+    </>
   );
 }

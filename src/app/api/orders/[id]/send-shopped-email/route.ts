@@ -72,6 +72,7 @@ export async function POST(
     await sendOrderShoppedEmail(order as Order, {
       businessEmail: s?.business_email || process.env.BUSINESS_EMAIL,
       ccEmailRaw: s?.order_email_cc,
+      staffNote: typeof body.staff_note === 'string' ? body.staff_note : '',
     });
   } catch (err) {
     console.error('Manual shopped email error:', err);
@@ -99,6 +100,9 @@ export async function POST(
     contact_name: order.contact_name,
     phone: order.phone,
     po_number: order.po_number,
+    note: (typeof body.staff_note === 'string' && body.staff_note.trim())
+      ? body.staff_note.trim().slice(0, 500)
+      : (Number(order.delivery_fee) === 0 ? 'Sent with $0 delivery fee' : null),
   });
 
   return NextResponse.json({ ok: true, sent_at: sentAt, sent_to: order.vessel_email || order.customer_email });

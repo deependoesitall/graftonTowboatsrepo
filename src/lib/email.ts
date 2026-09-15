@@ -135,6 +135,8 @@ export function buildOrderEmailHtml(
     showSinclairNote?: boolean;
     /** Final email only — renders the GTS delivery charge + grand total. */
     showDelivery?: boolean;
+    /** Optional note from GTS on this send (courtesy delivery, verbal agreement). */
+    staffNote?: string;
     /** Documents too large to attach, offered as links instead. Passed down
      *  from sendOrderShoppedEmail when the size budget is hit. */
     linkedDocs?: Array<{ label: string; url: string }>;
@@ -387,6 +389,11 @@ export function buildOrderEmailHtml(
   <div style="padding:24px 28px;">
 
     ${opts.intro ? `<div style="font-size:13px;color:#333;line-height:1.6;margin-bottom:18px;">${opts.intro}</div>` : ''}
+    ${opts.staffNote ? `
+    <div style="background:#fff8e8;border:1px solid #e8c96a;border-left:4px solid #E8640A;padding:12px 14px;border-radius:4px;margin-bottom:18px;">
+      <div style="font-size:9px;font-weight:800;color:#E8640A;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">A note from Grafton Towboat Services</div>
+      <div style="font-size:13px;color:#1E3D1E;line-height:1.55;white-space:pre-wrap;">${String(opts.staffNote).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+    </div>` : ''}
 
     <!-- Vessel & billing info -->
     <table width="100%" style="background:#f8fde8;border-left:3px solid #1E3D1E;padding:14px;border-radius:0 4px 4px 0;margin-bottom:16px;border-spacing:0;">
@@ -741,7 +748,7 @@ export interface ShoppedEmailDocs {
   linked?: Array<{ label: string; url: string }>;
 }
 
-export function buildOrderShoppedEmailHtml(order: Order, docs: ShoppedEmailDocs = {}): string {
+export function buildOrderShoppedEmailHtml(order: Order, docs: ShoppedEmailDocs = {}, staffNote?: string): string {
   // Orders with no grocery items (crew change / services only) were never
   // "shopped" — use neutral fulfillment language for those.
   const hasGroceryItems = order.items.some(i => i.item_type !== 'service');
@@ -761,6 +768,7 @@ export function buildOrderShoppedEmailHtml(order: Order, docs: ShoppedEmailDocs 
     footerText: 'Grafton Towboat Services · Grafton, IL 62037 · (618) 556-0290 · GraftonTowboatServices@gmail.com',
     showDelivery: true,
     linkedDocs: docs.linked,
+    staffNote: (staffNote || '').trim() || undefined,
   });
 }
 
@@ -769,6 +777,7 @@ export async function sendOrderShoppedEmail(
   opts: {
     businessEmail?: string;
     ccEmailRaw?: string;
+    staffNote?: string;
   } = {}
 ) {
   const fromEmail  = process.env.EMAIL_FROM || 'onboarding@resend.dev';
@@ -862,7 +871,7 @@ export async function sendOrderShoppedEmail(
   }
 
   const hasGroceryItems = order.items.some(i => i.item_type !== 'service');
-  const shoppedHtml = buildOrderShoppedEmailHtml(order, { linked: linkedDocs });
+  const shoppedHtml = buildOrderShoppedEmailHtml(order, { linked: linkedDocs }, opts.staffNote);
 
   // Vessel email first — the boat tracks the order, not the home office.
   const shoppedTo = order.vessel_email || order.customer_email;

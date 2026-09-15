@@ -37,7 +37,8 @@ export async function GET(
   if (searchParams.has('bill_for_groceries')) merged.bill_for_groceries = searchParams.get('bill_for_groceries') === 'true';
   if (searchParams.has('register_total')) merged.register_total = Number(searchParams.get('register_total')) || null;
 
-  const html = buildOrderShoppedEmailHtml(merged);
+  const staffNote = searchParams.get('staff_note') || '';
+  const html = buildOrderShoppedEmailHtml(merged, {}, staffNote);
   return new NextResponse(html, {
     headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
   });
