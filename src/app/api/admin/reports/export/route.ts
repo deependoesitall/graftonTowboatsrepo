@@ -61,21 +61,7 @@ export async function GET(req: NextRequest) {
   const SELECT_CORE =
     'id, order_number, company_name, vessel_name, contact_name, phone, customer_email, vessel_email, po_number, terminal_name, delivery_method, arrival_date, arrival_time, crew_change, notes, eta, subtotal, discount_total, register_total, deck_register_total, delivery_fee, delivery_service_type, bill_for_groceries, invoice_number, status, created_at, items:order_items(description, category, quantity, unit_price, line_total, paid_by, item_type)';
 
-  let query = supabase.from('orders').select(SELECT_FULL).order('created_at', { ascending: true });
-  if (from) query = query.gte('created_at', from);
-  if (to) query = query.lte('created_at', to);
-
-  let { data, error } = await query;
-  if (error) {
-    let fallback = supabase.from('orders').select(SELECT_CORE).order('created_at', { ascending: true });
-    if (from) fallback = fallback.gte('created_at', from);
-    if (to) fallback = fallback.lte('created_at', to);
-    const retry = await fallback;
-    data = retry.data;
-    error = retry.error;
-  }
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  const orders = (data || []) as Array<{
+  type OrderExportRow = {
     order_number: string;
     company_name: string;
     vessel_name: string | null;
@@ -100,11 +86,29 @@ export async function GET(req: NextRequest) {
     bill_for_groceries: boolean | null;
     invoice_number: number | null;
     status: string;
-    source: string | null;
-    purchased_at: string | null;
+    source?: string | null;
+    purchased_at?: string | null;
     created_at: string;
     items: ExportItem[] | null;
-  }>;
+  };
+
+  let query = supabase.from('orders').select(SELECT_FULL).order('created_at', { ascending: true });
+  if (from) query = query.gte('created_at', from);
+  if (to) query = query.lte('created_at', to);
+
+  const first = await query;
+  let data: OrderExportRow[] | null = (first.data || null) as OrderExportRow[] | null;
+  let error = first.error;
+  if (error) {
+    let fallback = supabase.from('orders').select(SELECT_CORE).order('created_at', { ascending: true });
+    if (from) fallback = fallback.gte('created_at', from);
+    if (to) fallback = fallback.lte('created_at', to);
+    const retry = await fallback;
+    data = (retry.data || null) as OrderExportRow[] | null;
+    error = retry.error;
+  }
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  const orders = data || [];
 
   let csv = '';
   let filename = 'report.csv';
