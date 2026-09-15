@@ -464,9 +464,10 @@ export function PaperFormImport({ catalog, setLine, applyLines, appendNotes, add
       <div>
         <h2 className="text-sm font-bold text-brand-navy">Scan the paper form</h2>
         <p className="text-xs text-gray-500 mt-1 leading-relaxed">
-          Drop the marked Sinclair PDF or photos. Pages straighten themselves, the marks are cut out
-          and sorted so identical handwriting is answered once, and you tap the number. Nothing is
-          added until you say so. Write-ins and COD notes on the last page show up here too.
+          Drop the marked Sinclair PDF or photos (the Scott Noble order is the reference). Upside-down
+          pages flip themselves. Marks are cut out and grouped so identical handwriting is answered
+          once — you tap the number, nothing is added until you say so. Words like “Case” and
+          write-ins on the last page come through as their own rows.
         </p>
       </div>
 

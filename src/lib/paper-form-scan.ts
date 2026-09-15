@@ -403,8 +403,39 @@ export function autoOrientCanvas(canvas: HTMLCanvasElement): { canvas: HTMLCanva
     releaseCanvas(turned);
   }
 
-  const best: 0 | 90 | 180 | 270 = contrast < -ORIENT_MARGIN ? axis[1] : axis[0];
-  return { canvas: rotateCanvas(canvas, best), rotation: best };
+  let best: 0 | 90 | 180 | 270 = contrast < -ORIENT_MARGIN ? axis[1] : axis[0];
+  let out = rotateCanvas(canvas, best);
+  // Second check: on an upright form the QNTY stripe is almost empty (pencil
+  // only). If that stripe is full of printed description text, the page is
+  // still upside down — the Scott Noble scan has 16/20 pages that way, and
+  // edge contrast alone has missed them when the left gutter is dark.
+  if (qntyStripeLooksLikeText(out)) {
+    const flipped = rotateCanvas(out, 180);
+    if (out !== canvas) releaseCanvas(out);
+    out = flipped;
+    best = ((best + 180) % 360) as 0 | 90 | 180 | 270;
+  }
+  return { canvas: out, rotation: best };
+}
+
+/** True when the supposed QNTY column is actually full of printed type. */
+function qntyStripeLooksLikeText(canvas: HTMLCanvasElement): boolean {
+  const stripe = (x0f: number, x1f: number) => {
+    const w = canvas.width, h = canvas.height;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+    const x0 = Math.floor(w * x0f), x1 = Math.max(x0 + 1, Math.floor(w * x1f));
+    const y0 = Math.floor(h * 0.18), y1 = Math.floor(h * 0.90);
+    const { data } = ctx.getImageData(x0, y0, x1 - x0, Math.max(1, y1 - y0));
+    let dark = 0, n = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      n++;
+      if ((data[i] + data[i + 1] + data[i + 2]) / 3 < 150) dark++;
+    }
+    return dark / Math.max(1, n);
+  };
+  const qnty = stripe(0.63, 0.70);
+  const cat = stripe(0.08, 0.16);
+  return qnty > 0.055 && qnty > cat * 1.15;
 }
 
 export async function renderPdfToCanvases(
@@ -739,6 +770,58 @@ export function calibrateQntyColumn(canvases: HTMLCanvasElement[], anyPhotos = t
   // A leaning table means a fixed vertical stripe cannot follow the column, no
   // matter how well this run located it at one height.
   return { lo, hi, skew, confident: skew <= 0.015 };
+}
+
+/**
+ * A real product line has printed type in the description AND a price on the
+ * right. Header fields, "PRICING LISTED BELOW…", and section titles (PORK,
+ * POULTRY) do not. Counting those as layout rows is how the Scott Noble scan
+ * assigned hamburger-patties-qty-3 to the wrong meat.
+ */
+function isProductRow(canvas: HTMLCanvasElement, band: RowBand): boolean {
+  const w = canvas.width;
+  const inset = Math.max(1, Math.round((band.y1 - band.y0) * 0.12));
+  const y0 = band.y0 + inset, y1 = band.y1 - inset;
+  if (y1 - y0 < 4) return false;
+  const desc = measureInk(canvas, {
+    x0: Math.floor(w * 0.24), y0, x1: Math.floor(w * 0.52), y1,
+  });
+  const price = measureInk(canvas, {
+    x0: Math.floor(w * 0.75), y0, x1: Math.floor(w * 0.86), y1,
+  });
+  return desc > 0.035 && price > 0.025 && price < 0.42;
+}
+
+function descRect(canvas: HTMLCanvasElement, band: RowBand) {
+  const w = canvas.width;
+  return {
+    x0: Math.floor(w * 0.23), y0: band.y0,
+    x1: Math.floor(w * 0.54), y1: band.y1,
+  };
+}
+
+function findLayoutIndex(
+  query: string,
+  items: FormLayoutItem[],
+  hint: number,
+): number {
+  const q = normDesc(query);
+  if (q.length < 5) return hint;
+  const qTok = new Set(q.split(' ').filter(t => t.length > 1));
+  let best = hint, bestScore = 0;
+  const lo = Math.max(0, hint - 20);
+  const hi = Math.min(items.length, hint + 90);
+  for (let i = lo; i < hi; i++) {
+    const d = normDesc(items[i].description);
+    if (d === q) return i;
+    const dt = d.split(' ').filter(t => t.length > 1);
+    if (!dt.length) continue;
+    let hit = 0;
+    for (const t of dt) if (qTok.has(t)) hit++;
+    const score = hit / Math.max(dt.length, qTok.size);
+    if (score > bestScore) { bestScore = score; best = i; }
+  }
+  return bestScore >= 0.45 ? best : hint;
 }
 
 function qntyRect(canvas: HTMLCanvasElement, band: RowBand, col: QntyColumn) {
@@ -1434,7 +1517,28 @@ export async function scanPaperPages(opts: {
     }
     const markedByRow = new Map(marked.map(m => [m.rowIndex, m]));
 
+    // Only PRODUCT rows consume the layout. Page-1 letterhead, "PRICING LISTED
+    // BELOW", and PORK/POULTRY section titles used to eat seq numbers so a
+    // marked "3" on hamburger patties landed on the wrong meat.
+    const productIdx: number[] = [];
     for (let r = 0; r < bands.length; r++) {
+      if (isProductRow(oriented[p], bands[r])) productIdx.push(r);
+    }
+
+    if (productIdx.length && layoutCursor < layoutItems.length) {
+      try {
+        const sample = descRect(oriented[p], bands[productIdx[0]]);
+        const read = await ocrImage(cropDataUrl(oriented[p], sample));
+        if (read) {
+          const snapped = findLayoutIndex(read, layoutItems, layoutCursor);
+          if (snapped !== layoutCursor) {
+            layoutCursor = snapped;
+          }
+        }
+      } catch { /* sequential fallback */ }
+    }
+
+    for (const r of productIdx) {
       if (layoutCursor >= layoutItems.length) break;
       const layout = layoutItems[layoutCursor];
       layoutCursor++;
@@ -1465,6 +1569,9 @@ export async function scanPaperPages(opts: {
       const qty: number | null = null;
       const note: string | null = null;
       const rowFlags = [...flags];
+      if (hit.shape && (hit.shape.components >= 3 || hit.shape.aspect > 2.4)) {
+        rowFlags.push('Looks like a word (Case, box…) — type the number, put the word in the note.');
+      }
       /**
        * ⚠️ AN UNTRUSTED COLUMN IS A PAGE FACT, NOT A ROW FACT.
        *
