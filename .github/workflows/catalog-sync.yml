@@ -1,10 +1,9 @@
 # Nightly catalog sync — chunk driver.
 #
 # NCR/Freshop rate-limits datacenter IPs, so the sync endpoint processes only a
-# few catalog pages per call and checkpoints in the database. Vercel's cron
-# kicks the first chunk at 12:05am Central; this workflow keeps poking the
-# endpoint every 15 minutes through the night until the run reports "done"
-# (already-done invocations are instant no-ops).
+# few catalog pages per call and checkpoints in the database. First kick is
+# 12:30 AM Central (after Sinclair's midnight catalog rebuild). This workflow
+# then pokes production every 15 minutes until the run reports "done".
 #
 # Setup (one time): add repo secret CRON_SECRET with the same value as the
 # CRON_SECRET environment variable in Vercel.
@@ -13,18 +12,12 @@ name: Nightly catalog sync
 
 on:
   schedule:
-    # Every 15 min, 07:00–11:45 UTC (≈ 2am–6:45am Central).
-    #
-    # DO NOT MOVE EARLIER. Sinclair's rebuilds their catalog between midnight
-    # and ~12:15 AM Central. This used to start at 05:00 UTC (midnight Central),
-    # straight into the rebuild — the sweep sized departments off half-built
-    # data, locked those short totals into the session, and imported a slice of
-    # the store while reporting success. Observed: store sized at 775 when
-    # Bakery alone reports 1,820.
-    #
-    # The very first sweep (full-store import) may take two nights; the
-    # checkpoint carries over automatically.
-    - cron: '*/15 7-11 * * *'
+    # 12:30 AM America/Chicago = 05:30 UTC (CDT) / 06:30 UTC (CST).
+    # Sinclair's rebuilds ~midnight–12:15 AM Central — 12:30 is after that.
+    - cron: '30 5 * * *'
+    - cron: '30 6 * * *'
+    # Then every 15 min until ~5:45 AM Central so 123 pages can finish.
+    - cron: '*/15 6-10 * * *'
   workflow_dispatch: {}   # manual "Run workflow" button for testing
 
 jobs:

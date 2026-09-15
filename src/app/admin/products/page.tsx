@@ -50,7 +50,7 @@ function ZoomableThumb({ src, alt }: { src: string; alt: string }) {
   );
 }
 
-// -- Quiet nightly-sync status. The catalog syncs ITSELF (12:05 AM kickoff,
+// -- Quiet nightly-sync status. The catalog syncs ITSELF (12:30 AM kickoff,
 // chunks overnight: prices, locations, images, new store items, order-form
 // layout). Admins never run anything — this line just proves it's happening.
 // Owners get a small "Sync now" escape hatch for rare mid-day price changes.
@@ -138,7 +138,7 @@ function CatalogSyncStatus({ isOwner }: { isOwner: boolean }) {
     ? `Syncing — ${status.pages_done}/${status.pages_total} pages · sized at ${status.sized_items.toLocaleString()} store items · ${status.store_items_imported.toLocaleString()} imported so far`
     : status.completed_at
     ? `Synced ${formatDateShort(status.completed_at)}, ${formatTimeOnly(status.completed_at)} · ${status.products_updated.toLocaleString()} updated · ${status.store_items_imported.toLocaleString()} store items imported (store sized at ${status.sized_items.toLocaleString()})`
-    : 'Nightly sync runs at 12:05 AM';
+    : 'Nightly sync runs at 12:30 AM';
 
   const deptDetail = status?.departments?.length
     ? `Department progress:\n${status.departments.join('\n')}`

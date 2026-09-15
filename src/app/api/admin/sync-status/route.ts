@@ -1,7 +1,7 @@
 // src/app/api/admin/sync-status/route.ts
 // Read-only view of the nightly catalog sync checkpoint — powers the quiet
 // "Catalog last synced ..." line on the admin Products page. The sync itself
-// is fully automatic (12:05 AM kickoff + overnight chunks); admins never need
+// is fully automatic (12:30 AM Central kickoff + overnight chunks); admins never need
 // to run anything by hand.
 
 import { NextRequest, NextResponse } from 'next/server';

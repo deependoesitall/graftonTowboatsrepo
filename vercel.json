@@ -21,47 +21,47 @@
   "crons": [
     {
       "path": "/api/cron/catalog-sync",
-      "schedule": "0 7 * * *"
+      "schedule": "30 5 * * *"
     },
     {
       "path": "/api/cron/catalog-sync",
-      "schedule": "20 7 * * *"
+      "schedule": "50 5 * * *"
     },
     {
       "path": "/api/cron/catalog-sync",
-      "schedule": "40 7 * * *"
+      "schedule": "10 6 * * *"
     },
     {
       "path": "/api/cron/catalog-sync",
-      "schedule": "0 8 * * *"
+      "schedule": "30 6 * * *"
     },
     {
       "path": "/api/cron/catalog-sync",
-      "schedule": "20 8 * * *"
+      "schedule": "50 6 * * *"
     },
     {
       "path": "/api/cron/catalog-sync",
-      "schedule": "40 8 * * *"
+      "schedule": "10 7 * * *"
     },
     {
       "path": "/api/cron/catalog-sync",
-      "schedule": "0 9 * * *"
+      "schedule": "30 7 * * *"
     },
     {
       "path": "/api/cron/catalog-sync",
-      "schedule": "20 9 * * *"
+      "schedule": "50 7 * * *"
     },
     {
       "path": "/api/cron/catalog-sync",
-      "schedule": "40 9 * * *"
+      "schedule": "10 8 * * *"
     },
     {
       "path": "/api/cron/catalog-sync",
-      "schedule": "0 10 * * *"
+      "schedule": "30 8 * * *"
     },
     {
       "path": "/api/cron/catalog-rails",
-      "schedule": "40 10 * * *"
+      "schedule": "0 10 * * *"
     }
   ]
 }
