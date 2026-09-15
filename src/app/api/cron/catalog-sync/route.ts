@@ -95,6 +95,51 @@ interface SyncState {
 const emptyStats = (): SyncStats =>
   ({ matched: 0, images: 0, details: 0, weightFlags: 0, locations: 0, prices: 0 });
 
+/** Shelf + weekly-ad sale price for a store_only row (never clip-to-save). */
+function storePriceFields(
+  existing: {
+    id: string; price: number; regular_price: number | null;
+    sale_start_date: string | null; sale_finish_date: string | null;
+    popularity: number | null; is_active: boolean; is_available: boolean;
+    manual_fields: string[];
+  },
+  hit: FreshopProduct,
+  stats: SyncStats,
+): Record<string, unknown> | null {
+  const stub: SyncableProduct = {
+    id: existing.id,
+    upc: null,
+    details: null,
+    image_url: null,
+    billed_by_weight: false,
+    location: null,
+    location_seq: null,
+    price: existing.price,
+    regular_price: existing.regular_price,
+    sale_start_date: existing.sale_start_date,
+    sale_finish_date: existing.sale_finish_date,
+    quantity_step: null,
+    quantity_label: null,
+    quantity_size_ratio: null,
+    freshop_id: hit.id != null ? String(hit.id) : null,
+    popularity: existing.popularity,
+    is_active: existing.is_active,
+    is_available: existing.is_available,
+    manual_fields: existing.manual_fields,
+  };
+  return computeFields(stub, hit, stats);
+}
+
+function applyStoreMeta(
+  existing: { is_active: boolean; is_available: boolean; price: number; regular_price: number | null },
+  fields: Record<string, unknown>,
+) {
+  if (fields.is_active === true) existing.is_active = true;
+  if (fields.is_available === true) existing.is_available = true;
+  if (typeof fields.price === 'number') existing.price = fields.price;
+  if ('regular_price' in fields) existing.regular_price = (fields.regular_price as number | null) ?? null;
+}
+
 function chicagoDay(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago' }).format(new Date());
 }
@@ -191,14 +236,13 @@ async function handle(req: NextRequest) {
       // Catalog sweep is done for today — but keep clearing the photo-match
       // backlog and self-chain until it's empty, so Photo Review fills up in
       // ONE night instead of only during the sweep's handful of runs.
-      const selfUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : process.env.NEXT_PUBLIC_APP_URL;
       let backfill: { processed: number; hasMore: boolean; error?: string } = { processed: 0, hasMore: false };
       try { backfill = await runPhotoBackfill(supabase, started + TIME_BUDGET_MS - 5000); } catch { /* never break */ }
       if (backfill.error) {
         state.lastError = `Photo backfill write failed: ${backfill.error}`;
         await saveState(supabase, state);
       }
-      if (backfill.hasMore) chainSelf(secret, selfUrl);
+      if (backfill.hasMore) chainSelf(secret);
       return NextResponse.json({
         status: 'done', day: today, completedAt: state.completedAt,
         stats: state.stats, inserted: state.inserted || 0,
@@ -273,27 +317,40 @@ async function handle(req: NextRequest) {
   // the name+size fallback covers the rare item with neither.
   // store_only identity + reactivation targets (delisted rows Freshop still sells)
   const knownFreshopIds = new Set<string>();
-  const storeByFreshopId = new Map<string, { id: string; is_active: boolean; is_available: boolean; manual_fields: string[] }>();
-  const storeByUpcKey = new Map<string, { id: string; is_active: boolean; is_available: boolean; manual_fields: string[] }>();
+  type StoreMeta = {
+    id: string; is_active: boolean; is_available: boolean; manual_fields: string[];
+    price: number; regular_price: number | null;
+    sale_start_date: string | null; sale_finish_date: string | null;
+    popularity: number | null;
+  };
+  const storeByFreshopId = new Map<string, StoreMeta>();
+  const storeByUpcKey = new Map<string, StoreMeta>();
   for (let from = 0; ; from += 5000) {
     const { data, error } = await supabase
       .from('products')
-      .select('id, upc, freshop_id, description, pkg_size, price, is_active, is_available, manual_fields')
+      .select('id, upc, freshop_id, description, pkg_size, price, regular_price, sale_start_date, sale_finish_date, popularity, is_active, is_available, manual_fields')
       .eq('store_only', true)
       .range(from, from + 4999);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     const rowsIn = (data || []) as Array<{
       id: string; upc: string | null; freshop_id: string | null;
       description: string | null; pkg_size: string | null; price: number | null;
+      regular_price: number | null; sale_start_date: string | null; sale_finish_date: string | null;
+      popularity: number | null;
       is_active: boolean | null; is_available: boolean | null;
       manual_fields: string[] | null;
     }>;
     for (const r of rowsIn) {
-      const meta = {
+      const meta: StoreMeta = {
         id: r.id,
         is_active: r.is_active !== false,
         is_available: r.is_available !== false,
         manual_fields: r.manual_fields || [],
+        price: Number(r.price) || 0,
+        regular_price: r.regular_price,
+        sale_start_date: r.sale_start_date,
+        sale_finish_date: r.sale_finish_date,
+        popularity: r.popularity,
       };
       for (const k of ourKeys(r.upc || '')) {
         knownUpcKeys.add(k);
@@ -413,18 +470,12 @@ async function handle(req: NextRequest) {
         // id, so that's the reliable identity.
         const fid = item.id != null ? String(item.id) : '';
         if (fid && knownFreshopIds.has(fid)) {
-          // Already carried — if we delisted it and Freshop still sells it, revive.
           const existing = storeByFreshopId.get(fid);
           if (existing && isSellableStatus(item)) {
-            const fields: Record<string, unknown> = {};
-            if (!existing.is_active) fields.is_active = true;
-            if (!existing.is_available && !(existing.manual_fields || []).includes('is_available')) {
-              fields.is_available = true;
-            }
-            if (Object.keys(fields).length) {
+            const fields = storePriceFields(existing, item, stats);
+            if (fields) {
               batchUpdates.push({ id: existing.id, fields });
-              if (fields.is_active) existing.is_active = true;
-              if (fields.is_available) existing.is_available = true;
+              applyStoreMeta(existing, fields);
             }
           }
           continue;
@@ -440,15 +491,10 @@ async function handle(req: NextRequest) {
             }
           }
           if (existing && isSellableStatus(item)) {
-            const fields: Record<string, unknown> = {};
-            if (!existing.is_active) fields.is_active = true;
-            if (!existing.is_available && !(existing.manual_fields || []).includes('is_available')) {
-              fields.is_available = true;
-            }
-            if (Object.keys(fields).length) {
+            const fields = storePriceFields(existing, item, stats);
+            if (fields) {
               batchUpdates.push({ id: existing.id, fields });
-              if (fields.is_active) existing.is_active = true;
-              if (fields.is_available) existing.is_available = true;
+              applyStoreMeta(existing, fields);
             }
           }
           continue;
@@ -623,9 +669,8 @@ async function handle(req: NextRequest) {
   // cascades through the whole sweep instead of idling between pokes.
   // Rate-limited or errored runs DON'T chain; the scheduled pokes resume them.
   // Keep chaining while EITHER the sweep or the photo backfill has work left.
-  const selfUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : process.env.NEXT_PUBLIC_APP_URL;
   const moreWork = (!finished || backfillHasMore) && !rateLimited;
-  if (moreWork) chainSelf(secret, selfUrl);
+  if (moreWork) chainSelf(secret);
 
   return NextResponse.json({
     status: finished ? 'done' : rateLimited ? 'rate-limited' : 'in-progress',
@@ -721,17 +766,31 @@ async function runPhotoBackfill(
   return { processed, hasMore: rows.length > processed, error: photoError ?? undefined };
 }
 
-/** Fire another invocation of this route (self-driving chain). */
-function chainSelf(secret: string | undefined, selfUrl: string | undefined) {
-  if (!secret || !selfUrl) return;
+/** Production origin for self-chain. Never a *.vercel.app preview (auth wall)
+ *  and never localhost. The GitHub Action used to poke grafton-towboatsrepo.vercel.app
+ *  which is why the sweep died at ~32/123 pages. */
+function chainSelfUrl(): string {
+  const pub = (process.env.NEXT_PUBLIC_APP_URL || '').replace(/\/$/, '');
+  if (pub && !/localhost|127\.0\.0\.1|vercel\.app/i.test(pub)) return pub;
+  const prod = process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  if (prod) return `https://${prod.replace(/^https?:\/\//, '')}`;
+  return 'https://graftontowboatservices.com';
+}
+
+/** Fire another invocation of this route (self-driving chain).
+ *  Do NOT abort the fetch — a 3s timeout cancelled the child before Vercel
+ *  finished booting it, so one kick never cascaded. */
+function chainSelf(secret: string | undefined) {
+  if (!secret) return;
+  const url = `${chainSelfUrl()}/api/cron/catalog-sync`;
   after(async () => {
     try {
-      await fetch(`${selfUrl}/api/cron/catalog-sync`, {
+      await fetch(url, {
         method: 'POST',
         headers: { Authorization: `Bearer ${secret}` },
-        signal: AbortSignal.timeout(3000),
+        keepalive: true,
       });
-    } catch { /* the scheduled pokes are the backstop */ }
+    } catch { /* scheduled pokes are the backstop */ }
   });
 }
 

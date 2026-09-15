@@ -33,7 +33,7 @@ jobs:
     steps:
       - name: Trigger sync chunk
         run: |
-          curl -sS -X POST "https://grafton-towboatsrepo.vercel.app/api/cron/catalog-sync" \
+          curl -sS -X POST "https://graftontowboatservices.com/api/cron/catalog-sync" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             --max-time 90 \
             -w "\nHTTP %{http_code}\n"
