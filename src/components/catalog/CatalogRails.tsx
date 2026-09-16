@@ -51,11 +51,24 @@ export default function CatalogRails() {
   // something real to render.
   if (!rails) return null;
 
-  // Sinclair's homepage no longer has a "What's on sale" tab (Sept 2026) —
-  // they show "You Might Also Like" instead. Our rail is leftover shelf-sale
-  // cards after clip-coupons and expired dates are stripped. Three lonely
-  // cards look broken; hide the rail until there is a real week of specials.
-  const MIN_SALE_CARDS = 8;
+  // ⚠️ "IS SINCLAIR'S RUNNING A SALE?" IS NO LONGER ASKED HERE.
+  //
+  // This used to hide the sale rail below eight cards, as a stand-in for
+  // checking whether Sinclair's still had a sale row on their own storefront.
+  // It was a guess made in the browser about something only the nightly job
+  // can know, and it was wrong in both directions — it buried a real seven-item
+  // week, and it cheerfully showed last week's prices on a week Sinclair's had
+  // no sale at all, because the stale snapshot still had rows in it.
+  //
+  // The cron now asks Freshop directly and records the answer
+  // (admin_settings.sale_rail_available, migration 089); /api/catalog-rails
+  // ANDs it with the admin switch and returns an empty rail when either says
+  // no. So by the time cards reach this component, they are cards that should
+  // be on the page.
+  //
+  // What is left here is presentation only: a rail of one or two cards reads as
+  // a rendering fault rather than a short week.
+  const MIN_SALE_CARDS = 4;
   const MIN_BOATS_CARDS = 8;
   const hasSale = rails.on_sale.length >= MIN_SALE_CARDS;
   const hasBest = rails.best_sellers.length > 0;

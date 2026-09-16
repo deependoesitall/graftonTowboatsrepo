@@ -15,32 +15,35 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   const supabase = createServiceClient();
 
-  let settings: {
-    show_sale_rail?: boolean | null;
-    show_best_sellers_rail?: boolean | null;
-    show_boats_ordering_rail?: boolean | null;
-  } | null = null;
-  {
-    const withBoats = await supabase
-      .from('admin_settings')
-      .select('show_sale_rail, show_best_sellers_rail, show_boats_ordering_rail')
-      .single();
-    if (withBoats.error) {
-      const without = await supabase
-        .from('admin_settings')
-        .select('show_sale_rail, show_best_sellers_rail')
-        .single();
-      settings = without.data;
-    } else {
-      settings = withBoats.data;
-    }
-  }
+  // ⚠️ SELECT * ON PURPOSE.
+  //
+  // This used to name its columns and fall back to a shorter list when the
+  // query errored, which meant every new settings column needed a third
+  // hand-maintained variant of the same query. Selecting the row and reading
+  // what is there degrades by itself: a database missing 089's columns simply
+  // has undefined for them, and the defaults below carry it.
+  const { data: settings } = await supabase
+    .from('admin_settings')
+    .select('*')
+    .single<Record<string, boolean | number | string | null>>();
 
-  // Default TRUE when the row or column is missing — matches the migration's
-  // default, so the rails work before anyone visits Settings.
-  const showSale = settings?.show_sale_rail ?? false;
-  const showBest = settings?.show_best_sellers_rail ?? true;
-  const showBoats = settings?.show_boats_ordering_rail ?? false;
+  const flag = (key: string, fallback: boolean): boolean => {
+    const v = settings?.[key];
+    return typeof v === 'boolean' ? v : fallback;
+  };
+
+  // ── TWO ANSWERS, BOTH REQUIRED ────────────────────────────────
+  //
+  // show_*        — a person at GTS or Sinclair's decided. Always wins.
+  // *_available   — the nightly cron's report on whether Sinclair's is running
+  //                 this rail at all (089). Defaults to true so a database
+  //                 without 089, or one whose cron has not run yet, behaves
+  //                 exactly as it did before.
+  //
+  // A rail needs both. Neither is allowed to quietly turn the other back on.
+  const showSale = flag('show_sale_rail', false) && flag('sale_rail_available', true);
+  const showBest = flag('show_best_sellers_rail', true) && flag('best_sellers_rail_available', true);
+  const showBoats = flag('show_boats_ordering_rail', false);
 
   if (!showSale && !showBest && !showBoats) {
     return NextResponse.json({ on_sale: [], best_sellers: [], boats_ordering: [] });

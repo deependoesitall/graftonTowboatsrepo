@@ -41,6 +41,11 @@ interface Settings {
   /** Migration 075 — the two Sinclair's rails on /catalog. */
   show_sale_rail: boolean;
   show_best_sellers_rail: boolean;
+  /* ── Written by the nightly rail cron, never by this page (089). ── */
+  sale_rail_available?: boolean | null;
+  best_sellers_rail_available?: boolean | null;
+  sale_rail_upstream_count?: number | null;
+  rails_checked_at?: string | null;
   show_boats_ordering_rail: boolean;
   cod_fee_enabled: boolean;
   cod_fee_percent: number;
@@ -834,22 +839,25 @@ export default function AdminSettingsPage() {
                 Two optional rows on the ordering catalog, refreshed nightly.
                 <strong className="text-brand-navy"> These are shelf sales, not digital
                 coupons</strong> — clip-to-save and loyalty offers are filtered out, because crews
-                have no Sinclair&apos;s account to clip with. Sinclair&apos;s own shop no longer
-                has a &ldquo;What&apos;s on sale&rdquo; tab (they show &ldquo;You Might Also Like&rdquo;),
-                so that rail stays off unless a week has enough real shelf specials to fill it.
-                Either team can switch a rail off.
+                have no Sinclair&apos;s account to clip with. Each night the sync checks
+                whether Sinclair&apos;s is actually running a sale week and takes our row down
+                with theirs if not &mdash; nobody has to notice and flip anything.
+                These switches are the override: off here means off regardless.
               </p>
             </div>
 
             {([
-              ['show_sale_rail', "What's on sale", 'Shelf specials only — hidden automatically when Sinclair’s week is too thin to look like a real sale row.'],
-              ['show_best_sellers_rail', 'Best sellers', 'Sinclair’s featured items, ordered by how much the store sells.'],
+              ['show_sale_rail', "What's on sale", 'Genuine shelf discounts from Sinclair’s own sale set. Comes down on its own when they are not running one.'],
+              ['show_best_sellers_rail', 'Best sellers', 'The same items in the same order as Sinclair’s own storefront — their popularity ranking, refreshed nightly.'],
               ['show_boats_ordering_rail', 'See What Boats Are Buying', 'Our own frequency from grocery orders and matched register receipts. Off until it has enough boats — Best sellers stays. Catalog still hides the row under 8 items.'],
             ] as const).map(([key, label, hint]) => (
               <div key={key} className="flex items-start justify-between gap-4 border-t border-gray-100 pt-4 first:border-0 first:pt-0">
                 <div>
                   <p className="text-sm font-semibold text-brand-navy">{label}</p>
                   <p className="text-xs text-gray-400 mt-0.5 leading-relaxed">{hint}</p>
+                  {/* ⚠️ A DARK RAIL MUST STATE ITS REASON. Switched on but not on the
+                      page is the confusing case — say which half said no. */}
+                  <RailAutoStatus settingsKey={key} settings={settings} />
                 </div>
                 <button
                   onClick={() => setSettings(s => ({ ...s, [key]: !s[key] }))}
@@ -1876,5 +1884,71 @@ function CouponsManager() {
         shopped. All coupon changes are recorded in the activity log.
       </div>
     </div>
+  );
+}
+
+// ── Why a rail is or isn't on the catalog ────────────────────────────────────
+//
+// ⚠️ THE SWITCH ABOVE IS ONLY HALF THE ANSWER.
+//
+// A rail appears when BOTH the switch is on AND the nightly sync found that
+// Sinclair's is running it (migration 089). "On but not on the page" is the
+// state that generates support messages, so it says which half said no, and
+// when the sync last managed to ask.
+function RailAutoStatus({
+  settingsKey, settings,
+}: {
+  settingsKey: string;
+  settings: Settings;
+}) {
+  const isSale = settingsKey === 'show_sale_rail';
+  const isBest = settingsKey === 'show_best_sellers_rail';
+  if (!isSale && !isBest) return null;
+
+  const on = (settings as unknown as Record<string, unknown>)[settingsKey] === true;
+  // Undefined means a database without 089, or a cron that has not run yet.
+  // Both behave as "available", so say nothing rather than inventing a state.
+  const available = isSale ? settings.sale_rail_available : settings.best_sellers_rail_available;
+  if (available === undefined || available === null) return null;
+
+  const checked = settings.rails_checked_at
+    ? new Date(settings.rails_checked_at).toLocaleDateString(undefined, {
+        month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+      })
+    : null;
+
+  if (!available) {
+    return (
+      <p className="text-xs mt-1.5 leading-relaxed text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5">
+        <strong>Not on the catalog right now.</strong>{' '}
+        {isSale
+          ? <>Sinclair&rsquo;s is not running a sale week
+              {typeof settings.sale_rail_upstream_count === 'number'
+                ? <> ({settings.sale_rail_upstream_count} items in their sale set)</>
+                : null}
+              , so ours is down too. It comes back on its own the night theirs does.</>
+          : <>The last sync could not build this rail. It returns on its own once it can.</>}
+        {checked ? <> Last checked {checked}.</> : null}
+      </p>
+    );
+  }
+
+  if (!on) {
+    return (
+      <p className="text-xs mt-1.5 text-gray-400">
+        Sinclair&rsquo;s is running this &mdash; it is off because this switch is off.
+        {checked ? <> Last checked {checked}.</> : null}
+      </p>
+    );
+  }
+
+  return (
+    <p className="text-xs mt-1.5 text-brand-green/70">
+      Live on the catalog.
+      {isSale && typeof settings.sale_rail_upstream_count === 'number'
+        ? <> {settings.sale_rail_upstream_count.toLocaleString()} items in Sinclair&rsquo;s sale set.</>
+        : null}
+      {checked ? <> Last checked {checked}.</> : null}
+    </p>
   );
 }

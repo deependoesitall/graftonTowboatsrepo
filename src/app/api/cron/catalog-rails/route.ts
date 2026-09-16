@@ -12,7 +12,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
-import { buildBestSellers, buildOnSale, type RailItem } from '@/lib/catalog-rails';
+import { buildBestSellers, buildOnSale, MIN_SALE_UPSTREAM, type RailBuild } from '@/lib/catalog-rails';
 import { excludeHotPrepared } from '@/lib/catalog-exclusions';
 import { refreshBoatsOrderingRail } from '@/lib/boats-ordering';
 
@@ -54,7 +54,42 @@ export async function GET(req: NextRequest) {
 
   const result: Record<string, { found: number; skipped: number; error?: string }> = {};
 
-  async function writeRail(rail: 'best_sellers' | 'on_sale', items: RailItem[]) {
+  // What Sinclair's is publishing right now, recorded so the read path and the
+  // admin panel can both see it. See migration 089.
+  const availability: Record<string, unknown> = { rails_checked_at: new Date().toISOString() };
+
+  async function writeRail(rail: 'best_sellers' | 'on_sale', build: RailBuild) {
+    const { items, upstream, incomplete } = build;
+
+    // ── IS SINCLAIR'S RUNNING THIS RAIL AT ALL? ──────────────────────
+    //
+    // Asked of THEIR set size, before our filters, and never asked at all when
+    // the fetch was incomplete — a Freshop timeout must not read as "they
+    // cancelled the sale". On an incomplete run the previous answer stands.
+    if (rail === 'on_sale' && !incomplete) {
+      const live = upstream >= MIN_SALE_UPSTREAM;
+      availability.sale_rail_available = live;
+      availability.sale_rail_upstream_count = upstream;
+
+      // ⚠️ THE ONE CASE WHERE WIPING THE RAIL IS CORRECT.
+      //
+      // Everywhere else this file refuses to clear a rail it cannot rebuild,
+      // because a day stale beats a day empty. Not here: if Sinclair's has
+      // taken their sale row down, ours is last week's prices under a heading
+      // that says "on sale", and a crew ordering against those gets a register
+      // total that does not match. Stale is worse than empty exactly once, and
+      // this is it.
+      if (!live) {
+        await supabase.from('catalog_rails').delete().eq('rail', rail);
+        result[rail] = { found: 0, skipped: items.length, error: 'Sinclair\u2019s has no sale week running' };
+        return;
+      }
+    }
+
+    if (rail === 'best_sellers' && !incomplete) {
+      availability.best_sellers_rail_available = items.length > 0;
+    }
+
     const rows = items
       .map(it => {
         const productId = byFreshop.get(it.freshopId);
@@ -103,6 +138,19 @@ export async function GET(req: NextRequest) {
     await writeRail('best_sellers', await buildBestSellers());
     const boats = await refreshBoatsOrderingRail(supabase);
     result.boats_ordering = { found: boats.wrote, skipped: 0, error: boats.error };
+
+    // Availability last, so a build that threw leaves yesterday's answer in
+    // place rather than half of today's.
+    const { data: settingsRow } = await supabase
+      .from('admin_settings')
+      .select('id')
+      .single();
+    const { error: availErr } = settingsRow
+      ? await supabase.from('admin_settings').update(availability).eq('id', settingsRow.id)
+      : { error: { message: 'no admin_settings row' } };
+    // Pre-089 databases have none of these columns. That is not a failure —
+    // the read path defaults them to true, which is the old behaviour.
+    if (availErr) console.warn('[catalog-rails] availability not recorded:', availErr.message);
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : 'Rail build failed' },
