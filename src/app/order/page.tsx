@@ -435,7 +435,6 @@ export default function OrderPage() {
   });
   const [vessel, setVessel] = useState<VesselInfo>(getVesselInfo());
   const [showOrderContact, setShowOrderContact] = useState(false);
-  const [showSecondary, setShowSecondary] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [tooltipOpen, setTooltipOpen] = useState(false);
@@ -483,7 +482,9 @@ export default function OrderPage() {
     const v = getVesselInfo();
     setVessel(v);
     if (v.order_contact_name || v.order_contact_phone) setShowOrderContact(true);
-    if (v.secondary_terminal_name) setShowSecondary(true);
+    if (v.secondary_terminal_name || v.secondary_arrival_date || v.secondary_arrival_time) {
+      clearSecondary();
+    }
 
     const sync = () => setItems(getCart());
     window.addEventListener('cart-updated', sync);
@@ -542,10 +543,18 @@ export default function OrderPage() {
     setShowOrderContact(false);
   }
 
+  /**
+   * ⚠️ A STALE SECOND STOP IN A SAVED CART WOULD BE INVISIBLE AND BINDING.
+   *
+   * The entry point is gone from this form (see the note in the delivery
+   * section), but getVesselInfo() reads a cart that may have been saved while
+   * it was still there. Those values would ride along on the next order with
+   * nothing on screen to show them — and a terminal nobody can see is a van at
+   * the wrong dock. Cleared on load, once.
+   */
   function clearSecondary() {
     (['secondary_terminal_name', 'secondary_arrival_date', 'secondary_arrival_time', 'secondary_delivery_method'] as const)
       .forEach(f => setV(f, ''));
-    setShowSecondary(false);
   }
 
   // ── Validation ──
@@ -1376,65 +1385,33 @@ export default function OrderPage() {
             </>)}
           </div>
 
-          {/* Secondary delivery */}
-          {!showSecondary ? (
-            <button type="button" onClick={() => setShowSecondary(true)}
-              className="mt-4 text-xs text-brand-river hover:text-brand-steel flex items-center gap-1">
-              <Plus className="w-3.5 h-3.5" /> Add a second stop
-            </button>
-          ) : (
-            <div className="mt-4 pt-4 border-t border-gray-100">
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Second Stop <span className="font-normal text-gray-400">(optional)</span></p>
-                <button type="button" onClick={clearSecondary} className="text-xs text-gray-400 hover:text-gray-600">Remove</button>
-              </div>
-              {/* ⚠️ CAUGHT HERE, WHERE IT IS STILL FREE TO FIX.
-                  Everything downstream — the confirmation, the order email, the
-                  PDF, the pick sheet — calls these stop 1 and stop 2 in the
-                  order they were typed, because that is the only ordering
-                  information the form collects. A second stop dated before the
-                  first makes every one of those screens confidently wrong, and
-                  a driver plans a run off them. Nothing is blocked; the boat
-                  may well mean it. It is just said out loud once. */}
-              {vessel.arrival_date && vessel.secondary_arrival_date
-                && vessel.secondary_arrival_date < vessel.arrival_date && (
-                <div className="mb-3 flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2">
-                  <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
-                  <p className="text-[13px] leading-snug text-amber-900">
-                    This second stop is dated <b>before</b> your first one. If the boat is making
-                    this stop first, swap the two so we run them in the right order.
-                  </p>
-                </div>
-              )}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <Field label="Location / Terminal Name" col2>
-                  <input type="text" className="input-base w-full" placeholder="e.g. Grafton Ferry Landing"
-                    value={vessel.secondary_terminal_name} onChange={e => setV('secondary_terminal_name', e.target.value)} />
-                </Field>
-                <Field label="Est. Arrival Date">
-                  <input type="date" className="input-base w-full"
-                    min={new Date().toISOString().slice(0, 10)}
-                    value={vessel.secondary_arrival_date} onChange={e => setV('secondary_arrival_date', e.target.value)} />
-                </Field>
-                <Field label="Est. Arrival Time">
-                  <input type="time" className="input-base w-full"
-                    value={vessel.secondary_arrival_time} onChange={e => setV('secondary_arrival_time', e.target.value)} />
-                </Field>
-                <Field label="Delivery Method" col2>
-                  <div className="flex gap-3 mt-1">
-                    {(['boat', 'van'] as const).map(m => (
-                      <button key={m} type="button" onClick={() => setV('secondary_delivery_method', m)}
-                        className={`flex-1 py-2 rounded-xl border-2 text-sm font-bold transition-all ${
-                          vessel.secondary_delivery_method === m
-                            ? 'border-brand-navy bg-brand-navy text-white'
-                            : 'border-gray-200 text-gray-500 hover:border-gray-300'
-                        }`}>{m === 'boat' ? '⛵ Boat' : '🚐 Van'}</button>
-                    ))}
-                  </div>
-                </Field>
-              </div>
-            </div>
-          )}
+          {/* ── THE SECOND STOP IS NOT ON THIS FORM ANY MORE ─────────────────
+              ⚠️ DO NOT PUT IT BACK WITHOUT READING THIS.
+
+              Checkout used to offer "Add a second stop": a second terminal,
+              date and time for the same order. It was removed in Sept 2026
+              after checking it against GTS's own delivery ledger — 205 rows
+              across a full year, 47 of them days with more than one delivery.
+              Not one row in that year sent a single boat's order to two
+              terminals. Every multi-delivery day is several BOATS, each its
+              own row at its own full rate.
+
+              So the field invited captains to describe something GTS has never
+              done, and nothing downstream could carry it: a delivery is billed
+              per boat per trip, one ledger row per order, so a second run
+              entered here would have produced no charge at all.
+
+              What the ledger DOES show is the same boat taking two SERVICES on
+              one trip — 5/8/2026, Coop Vanguard: a grocery delivery at $350
+              and a crew change at half price beside it. That is a second
+              charge, not a second place, and it lives on the order's service
+              charges where GTS sets them.
+
+              The secondary_* fields remain on the order and every screen still
+              renders them, because orders placed before this was removed still
+              carry them and staff can still enter one in the admin builder
+              when a boat asks for it on the phone. Only the customer-facing
+              entry point is gone. */}
         </section>
 
         {/* ── Crew Change ── */}
