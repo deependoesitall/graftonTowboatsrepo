@@ -2,7 +2,7 @@
 // src/app/admin/orders/page.tsx
 import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, Download, Eye, Loader2, RefreshCw, Package, ArrowRight, Trash2, Users, Wrench, Printer, Plus, Mail, MailX, MailCheck, CheckCircle2 } from 'lucide-react';
+import { Search, Download, Eye, Loader2, RefreshCw, Package, ArrowRight, Trash2, Users, Wrench, Printer, Plus, Mail, MailX, MailCheck, CheckCircle2, MapPin } from 'lucide-react';
 import { PickSheetOverlay } from '@/components/admin/PickSheetOverlay';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { formatCurrency, formatDate, orderItemCount, ORDER_STATUSES } from '@/lib/utils';
@@ -404,6 +404,11 @@ function OrdersContent() {
                 const nextSt = nextStatus(order.status, roleFlags.isGts);
                 const isUpdating = updatingId === order.id;
                 const hasCod = items.some(i => i.paid_by === 'cod') || !!order.extended_info?.personal_cod_notes;
+                const twoStops = !!(
+                  order.extended_info?.secondary_terminal_name
+                  || order.extended_info?.secondary_arrival_date
+                  || order.extended_info?.secondary_arrival_time
+                );
                 return (
                   <div key={order.id}
                     onClick={() => setSelectedOrder(order)}
@@ -429,6 +434,11 @@ function OrdersContent() {
                       )}
                       {order.crew_change === 'maybe' && (
                         <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-300">Crew Change?</span>
+                      )}
+                      {twoStops && (
+                        <span className="inline-flex items-center gap-0.5 text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-brand-yellow text-brand-navy border border-brand-gold/50">
+                          <MapPin className="w-2.5 h-2.5" /> 2 Stops
+                        </span>
                       )}
                       {hasCod && (
                         <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 border border-purple-200">$ COD</span>
@@ -469,6 +479,15 @@ function OrdersContent() {
                     const hasCrewChange = order.crew_change === 'yes';
                     const maybeCrewChange = order.crew_change === 'maybe';
                     const hasCod = items.some(i => i.paid_by === 'cod') || !!order.extended_info?.personal_cod_notes;
+                    // ⚠️ TWO STOPS CHANGES THE RUN, SO IT BELONGS IN THE QUEUE.
+                    // It was only visible by opening the order, which meant
+                    // scheduling a day's deliveries required opening every one
+                    // of them to find out which needed two.
+                    const twoStops = !!(
+                      order.extended_info?.secondary_terminal_name
+                      || order.extended_info?.secondary_arrival_date
+                      || order.extended_info?.secondary_arrival_time
+                    );
                     const hasPartsPickup = items.some(i => i.item_type === 'service' && i.service_type === 'parts_pickup');
                     const hasPkgDelivery = items.some(i => i.item_type === 'service' && i.service_type === 'package_delivery');
                     const hasOtherPickup = items.some(i => i.item_type === 'service' && i.service_type === 'other_pickup');
@@ -510,6 +529,14 @@ function OrdersContent() {
                             {maybeCrewChange && (
                               <span className="inline-flex items-center gap-0.5 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-300">
                                 <Users className="w-2.5 h-2.5" /> Crew Change?
+                              </span>
+                            )}
+                            {twoStops && (
+                              <span className="inline-flex items-center gap-0.5 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-brand-yellow text-brand-navy border border-brand-gold/50"
+                                title={order.extended_info?.secondary_terminal_name
+                                  ? `Second stop: ${order.extended_info.secondary_terminal_name}`
+                                  : 'This order has a second stop'}>
+                                <MapPin className="w-2.5 h-2.5" /> 2 Stops
                               </span>
                             )}
                             {hasCod && (

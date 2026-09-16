@@ -1,7 +1,7 @@
 // src/lib/pdf.ts
 // Generates a clean, branded, print-ready HTML order sheet for Sinclair Foods
 import { Order } from '@/types';
-import { formatCurrency, formatDate, formatArrivalTime, orderItemCount } from './utils';
+import { formatCurrency, formatDate, formatArrivalTime, formatCalendarDate, orderItemCount } from './utils';
 import { codFeePercent, codFeeLabel, codTotalWithFee, allocateCodTotals } from '@/lib/cod-fee';
 import { readCodPayments, codMethodSentence } from '@/lib/cod-payments';
 import {
@@ -207,6 +207,10 @@ export function generateOrderHTML(order: Order): string {
   const deliveryMethod  = order.delivery_method === 'boat' ? 'Boat Delivery' : order.delivery_method === 'van' ? 'Van Delivery' : null;
   const approachSide    = order.approach_side  ? order.approach_side.charAt(0).toUpperCase() + order.approach_side.slice(1) : null;
   const ext             = order.extended_info  || {};
+  /** Two stops is a different run, and several places below read differently for it. */
+  const hasSecondStop   = !!(
+    ext.secondary_terminal_name || ext.secondary_arrival_date || ext.secondary_arrival_time
+  );
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -298,8 +302,8 @@ ${(order.terminal_name || order.arrival_date) ? `
   <div style="font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:#E8640A;margin-bottom:8px;">Delivery Information</div>
   <table width="100%">
     <tr>
-      ${order.terminal_name ? `<td width="40%" style="padding-bottom:6px;"><div style="font-size:9px;color:#666;">DELIVER TO</div><div style="font-size:13px;font-weight:900;color:#E8640A;">${order.terminal_name}</div></td>` : '<td></td>'}
-      ${order.arrival_date ? `<td width="30%" style="padding-bottom:6px;"><div style="font-size:9px;color:#666;">ARRIVAL DATE</div><div style="font-size:13px;font-weight:700;color:#E8640A;">${order.arrival_date}</div></td>` : '<td></td>'}
+      ${order.terminal_name ? `<td width="40%" style="padding-bottom:6px;"><div style="font-size:9px;color:#666;">${hasSecondStop ? 'STOP 1 &mdash; DELIVER TO' : 'DELIVER TO'}</div><div style="font-size:13px;font-weight:900;color:#E8640A;">${order.terminal_name}</div></td>` : '<td></td>'}
+      ${order.arrival_date ? `<td width="30%" style="padding-bottom:6px;"><div style="font-size:9px;color:#666;">ARRIVAL DATE</div><div style="font-size:13px;font-weight:700;color:#E8640A;">${formatCalendarDate(order.arrival_date)}</div></td>` : '<td></td>'}
       ${order.arrival_time ? `<td width="30%" style="padding-bottom:6px;"><div style="font-size:9px;color:#666;">ARRIVAL TIME</div><div style="font-size:13px;font-weight:700;color:#E8640A;">${formatArrivalTime(order.arrival_time)}</div></td>` : '<td></td>'}
     </tr>
     ${deliveryMethod || order.vhf_channel || order.crew_change !== 'no' ? `<tr>
@@ -311,10 +315,27 @@ ${(order.terminal_name || order.arrival_date) ? `
         ? `<td><div style="font-size:9px;color:#666;">CREW CHANGE</div><div style="font-size:11px;font-weight:700;color:#B45309;">MAYBE &mdash; to be confirmed</div></td>`
         : '<td></td>'}
     </tr>` : ''}
-    ${ext.secondary_terminal_name ? `<tr>
-      <td colspan="3" style="padding-top:6px;border-top:1px solid #eee;">
-        <div style="font-size:9px;color:#666;">SECONDARY DELIVERY</div>
-        <div style="font-size:11px;font-weight:600;">${ext.secondary_terminal_name}${ext.secondary_arrival_date ? ` &middot; ${ext.secondary_arrival_date}` : ''}${ext.secondary_arrival_time ? ` ${formatArrivalTime(ext.secondary_arrival_time)}` : ''}</div>
+    ${/* ⚠️ A SECOND STOP IS A SECOND RUN. It printed as a grey footnote headed
+          "SECONDARY DELIVERY" under the real one, with the date as a raw
+          '2026-09-22' while everything above it read "Sep 22, 2026". On the one
+          copy of this order that gets carried out to a van, that is the line
+          that decides whether a boat gets fed. It is now marked like the
+          delivery it is, and the stop above it is numbered so the pair reads
+          as a run. */''}
+    ${(ext.secondary_terminal_name || ext.secondary_arrival_date || ext.secondary_arrival_time) ? `<tr>
+      <td colspan="3" style="padding-top:8px;">
+        <div style="background:#fff8f0;border-left:4px solid #E8640A;padding:6px 10px;">
+          <div style="font-size:9px;color:#666;font-weight:700;letter-spacing:1px;">STOP 2 &mdash; SECOND DELIVERY</div>
+          <div style="font-size:13px;font-weight:900;color:#E8640A;">${ext.secondary_terminal_name || 'Terminal not given'}</div>
+          <div style="font-size:11px;font-weight:700;color:#333;">${
+            [
+              ext.secondary_arrival_date ? formatCalendarDate(ext.secondary_arrival_date) : '',
+              ext.secondary_arrival_time ? formatArrivalTime(ext.secondary_arrival_time) : '',
+              ext.secondary_delivery_method === 'boat' ? 'by boat'
+                : ext.secondary_delivery_method === 'van' ? 'by van' : '',
+            ].filter(Boolean).join(' &middot; ') || 'Date and time not given'
+          }</div>
+        </div>
       </td>
     </tr>` : ''}
     ${order.eta ? `<tr><td colspan="3" style="padding-top:4px;"><div style="font-size:9px;color:#666;">ETA NOTE</div><div style="font-size:11px;">${order.eta}</div></td></tr>` : ''}
@@ -348,7 +369,7 @@ ${order.crew_change === 'yes' ? `
   ${order.crew_change_notes ? `<div style="margin-top:8px;font-size:11px;color:#555;"><strong>Notes:</strong> ${order.crew_change_notes}</div>` : ''}
   ${order.terminal_name || order.arrival_date ? `<div style="margin-top:10px;padding-top:10px;border-top:1px solid #f0d0b0;font-size:11px;color:#555;">
     ${order.terminal_name ? `<strong>Location:</strong> ${order.terminal_name}&nbsp;&nbsp;` : ''}
-    ${order.arrival_date ? `<strong>Date:</strong> ${order.arrival_date}${order.arrival_time ? ` at ${formatArrivalTime(order.arrival_time)}` : ''}` : ''}
+    ${order.arrival_date ? `<strong>Date:</strong> ${formatCalendarDate(order.arrival_date)}${order.arrival_time ? ` at ${formatArrivalTime(order.arrival_time)}` : ''}` : ''}
   </div>` : ''}
 </div>` : ''}
 ${order.crew_change === 'maybe' ? `
@@ -485,7 +506,7 @@ ${groceryItems.length > 0 ? `
     FOR SINCLAIR FOODS &mdash; Jerseyville, IL &middot; (618) 498-6856 &middot; sinclairfoods@jerseyville-il.net
   </div>
   <div style="font-size:11px;color:#444;line-height:1.6;">
-    Please prepare the items above for delivery to <strong>${vesselName}</strong>${order.terminal_name ? ` at ${order.terminal_name}` : ''}${order.arrival_date ? `, arriving ${order.arrival_date}${order.arrival_time ? ` ${formatArrivalTime(order.arrival_time)}` : ''}` : ''}.<br>
+    Please prepare the items above for delivery to <strong>${vesselName}</strong>${order.terminal_name ? ` at ${order.terminal_name}` : ''}${order.arrival_date ? `, arriving ${formatCalendarDate(order.arrival_date)}${order.arrival_time ? ` ${formatArrivalTime(order.arrival_time)}` : ''}` : ''}.<br>
     This order was placed through Grafton Towboat Services online ordering system.<br>
     Questions: (618) 556-0290 &middot; GraftonTowboatServices@gmail.com
   </div>

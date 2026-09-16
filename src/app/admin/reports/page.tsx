@@ -19,7 +19,7 @@ import {
 } from 'recharts';
 import { fetchAdminSession, canAccess, adminFetch } from '@/lib/admin-auth';
 import { billingKey, canonicalVesselName } from '@/lib/vessel';
-import { formatCurrency, orderItemCount } from '@/lib/utils';
+import { formatCurrency, orderItemCount, formatCalendarDate, formatArrivalTime } from '@/lib/utils';
 
 // ─── Analytics types ──────────────────────────────────────────
 interface Stats {
@@ -96,7 +96,15 @@ interface BillingOrder {
   bill_for_groceries?: boolean | null;
   status: string;
   created_at: string;
-  extended_info: { personal_cod_notes?: string } | null;
+  extended_info: {
+    personal_cod_notes?: string;
+    // A second stop is part of "which delivery was that?" — the question this
+    // cross-reference sheet exists to answer months after the fact.
+    secondary_terminal_name?: string;
+    secondary_arrival_date?: string;
+    secondary_arrival_time?: string;
+    secondary_delivery_method?: string;
+  } | null;
   items: BillingItem[];
   discounts?: Array<{ id: string; name: string; description: string | null; amount: number }>;
 }
@@ -336,12 +344,25 @@ function orderDetailSheet(o: BillingOrder, groupLabel: string, monthLabel: strin
   <!-- Delivery reference strip — answers "which delivery was that?" months later -->
   <table width="100%" style="border-collapse:collapse;background:#f8fde8;border-bottom:1px solid #e5e7d5;">
     <tr>
-      ${[
-        ['Delivered To', o.terminal_name || '—'],
-        ['Method', o.delivery_method === 'boat' ? '⛵ Boat' : o.delivery_method === 'van' ? '🚐 Van' : '—'],
-        ['Arrival', [o.arrival_date, o.arrival_time].filter(Boolean).join(' · ') || '—'],
+      ${(() => {
+        const x = o.extended_info || {};
+        const two = !!(x.secondary_terminal_name || x.secondary_arrival_date || x.secondary_arrival_time);
+        // ⚠️ formatCalendarDate, not a timezone-aware formatter — arrival_date
+        // is a bare YYYY-MM-DD and the ordinary one renders the day before.
+        const when = (d?: string | null, tm?: string | null) =>
+          [d ? formatCalendarDate(d) : '', tm ? formatArrivalTime(tm) : ''].filter(Boolean).join(' · ') || '—';
+        const method = (m?: string | null) =>
+          m === 'boat' ? '⛵ Boat' : m === 'van' ? '🚐 Van' : '—';
+        return [
+        [two ? 'Stop 1 — Delivered To' : 'Delivered To', o.terminal_name || '—'],
+        ['Method', method(o.delivery_method)],
+        ['Arrival', when(o.arrival_date, o.arrival_time)],
+        ...(two ? [
+          ['Stop 2 — Delivered To', x.secondary_terminal_name || '—'],
+          ['Stop 2 Arrival', when(x.secondary_arrival_date, x.secondary_arrival_time)],
+        ] as string[][] : []),
         ['Contact', `${o.contact_name}${o.phone ? ` · ${o.phone}` : ''}`],
-      ].map(([l, v]) => `
+      ]; })().map(([l, v]) => `
       <td style="padding:7px 14px;">
         <div style="font-size:7px;font-weight:800;color:#888;text-transform:uppercase;letter-spacing:1px;">${l}</div>
         <div style="font-size:10px;font-weight:700;color:${GREEN};">${esc(v)}</div>

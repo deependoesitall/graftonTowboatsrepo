@@ -15,7 +15,7 @@ import {
   updateCartItemFields, getVesselSubtotal, getCodSubtotal, getDeckSubtotal,
   getCodPayments, saveCodPayments,
 } from '@/lib/cart';
-import { formatCurrency, formatLb, formatQty, isPoundQty, lbStepsFor, usesLbSteps, formatArrivalTime } from '@/lib/utils';
+import { formatCurrency, formatLb, formatQty, isPoundQty, lbStepsFor, usesLbSteps, formatArrivalTime, formatCalendarDate } from '@/lib/utils';
 import { CartItem, VesselInfo, AdditionalServices, VESSEL_TYPES, PreferredSubMode, Product } from '@/types';
 import { SiteHeader } from '@/components/layout/SiteHeader';
 import { ContactPhones } from '@/components/layout/ContactPhones';
@@ -1380,14 +1380,32 @@ export default function OrderPage() {
           {!showSecondary ? (
             <button type="button" onClick={() => setShowSecondary(true)}
               className="mt-4 text-xs text-brand-river hover:text-brand-steel flex items-center gap-1">
-              <Plus className="w-3.5 h-3.5" /> Add secondary delivery location
+              <Plus className="w-3.5 h-3.5" /> Add a second stop
             </button>
           ) : (
             <div className="mt-4 pt-4 border-t border-gray-100">
               <div className="flex items-center justify-between mb-3">
-                <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Secondary Delivery <span className="font-normal text-gray-400">(optional)</span></p>
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Second Stop <span className="font-normal text-gray-400">(optional)</span></p>
                 <button type="button" onClick={clearSecondary} className="text-xs text-gray-400 hover:text-gray-600">Remove</button>
               </div>
+              {/* ⚠️ CAUGHT HERE, WHERE IT IS STILL FREE TO FIX.
+                  Everything downstream — the confirmation, the order email, the
+                  PDF, the pick sheet — calls these stop 1 and stop 2 in the
+                  order they were typed, because that is the only ordering
+                  information the form collects. A second stop dated before the
+                  first makes every one of those screens confidently wrong, and
+                  a driver plans a run off them. Nothing is blocked; the boat
+                  may well mean it. It is just said out loud once. */}
+              {vessel.arrival_date && vessel.secondary_arrival_date
+                && vessel.secondary_arrival_date < vessel.arrival_date && (
+                <div className="mb-3 flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2">
+                  <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+                  <p className="text-[13px] leading-snug text-amber-900">
+                    This second stop is dated <b>before</b> your first one. If the boat is making
+                    this stop first, swap the two so we run them in the right order.
+                  </p>
+                </div>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Field label="Location / Terminal Name" col2>
                   <input type="text" className="input-base w-full" placeholder="e.g. Grafton Ferry Landing"
@@ -1713,10 +1731,12 @@ export default function OrderPage() {
               </div>
             )}
             <div>
-              <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1.5">Primary Delivery</p>
+              <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1.5">
+                {vessel.secondary_terminal_name ? 'Stop 1' : 'Delivery'}
+              </p>
               <div className="grid grid-cols-2 gap-1">
                 <ReviewRow label="Terminal" value={vessel.terminal_name} />
-                <ReviewRow label="Arrival" value={[vessel.arrival_date, formatArrivalTime(vessel.arrival_time)].filter(Boolean).join(', ')} />
+                <ReviewRow label="Arrival" value={[vessel.arrival_date ? formatCalendarDate(vessel.arrival_date) : '', formatArrivalTime(vessel.arrival_time)].filter(Boolean).join(', ')} />
                 <ReviewRow label="Method" value={vessel.delivery_method === 'boat' ? 'Boat Delivery' : vessel.delivery_method === 'van' ? 'Van Delivery' : ''} />
                 {vessel.delivery_method === 'boat' && vessel.approach_side && (
                   <ReviewRow label="Approach" value={vessel.approach_side.charAt(0).toUpperCase() + vessel.approach_side.slice(1)} />
@@ -1726,10 +1746,10 @@ export default function OrderPage() {
             </div>
             {vessel.secondary_terminal_name && (
               <div>
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1.5">Secondary Delivery</p>
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1.5">Stop 2</p>
                 <div className="grid grid-cols-2 gap-1">
                   <ReviewRow label="Terminal" value={vessel.secondary_terminal_name} />
-                  <ReviewRow label="Arrival" value={[vessel.secondary_arrival_date, formatArrivalTime(vessel.secondary_arrival_time)].filter(Boolean).join(', ')} />
+                  <ReviewRow label="Arrival" value={[vessel.secondary_arrival_date ? formatCalendarDate(vessel.secondary_arrival_date) : '', formatArrivalTime(vessel.secondary_arrival_time)].filter(Boolean).join(', ')} />
                   {vessel.secondary_delivery_method && (
                     <ReviewRow label="Method" value={vessel.secondary_delivery_method === 'boat' ? 'Boat' : 'Van'} />
                   )}

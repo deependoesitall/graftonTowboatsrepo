@@ -5,7 +5,7 @@ import { useState, useCallback, useEffect, Fragment } from 'react';
 import { createPortal } from 'react-dom';
 import {
   X, Download, FileText, Printer, Trash2, Loader2, ShoppingCart,
-  Ship, MapPin, Users, Package, Wrench, CheckCircle2, Eye,
+  Ship, Users, Package, Wrench, CheckCircle2, Eye,
   Pencil, Plus, Search, Check, Receipt, FileSignature,
   Scale, Replace, CornerDownRight, PackageX, AlertTriangle, Mail,
 } from 'lucide-react';
@@ -596,12 +596,6 @@ export function OrderDetailModal({
 
   const ext = order.extended_info;
 
-  const deliveryMethodLabel = order.delivery_method === 'boat' ? 'Boat Delivery'
-    : order.delivery_method === 'van' ? 'Van Delivery' : null;
-  const approachLabel = order.approach_side
-    ? order.approach_side.charAt(0).toUpperCase() + order.approach_side.slice(1)
-    : null;
-
   // ── Product search for Add Item ───────────────────────────────────────────
   const searchProducts = useCallback(async (q: string) => {
     if (q.trim().length < 2) { setAddResults([]); return; }
@@ -1020,37 +1014,21 @@ export function OrderDetailModal({
               </Section>
             )}
 
-            {/* Shared delivery card */}
-          <div className="mb-4">
-            <DeliverySummary order={order} variant="admin" />
-          </div>
-
-          {/* Delivery */}
-            {(order.terminal_name || order.arrival_date || order.delivery_method) && (
-              <Section icon={<MapPin className="w-3.5 h-3.5" />} title="Delivery Information">
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  {order.terminal_name && <IB label="Terminal / Location" value={order.terminal_name} highlight />}
-                  {order.arrival_date  && <IB label="Arrival Date"        value={order.arrival_date}  highlight />}
-                  {order.arrival_time  && <IB label="Arrival Time"        value={formatArrivalTime(order.arrival_time)}  highlight />}
-                  {deliveryMethodLabel && <IB label="Method"              value={deliveryMethodLabel} />}
-                  {approachLabel       && <IB label="Approach Side"       value={approachLabel} />}
-                  {order.vhf_channel   && <IB label="VHF Channel"         value={order.vhf_channel} />}
-                </div>
-                {ext?.secondary_terminal_name && (
-                  <div className="mt-3 pt-3 border-t border-gray-100">
-                    <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">Secondary Delivery</p>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                      <IB label="Terminal" value={ext.secondary_terminal_name} />
-                      {ext.secondary_arrival_date && <IB label="Arrival Date" value={ext.secondary_arrival_date} />}
-                      {ext.secondary_arrival_time && <IB label="Arrival Time" value={formatArrivalTime(ext.secondary_arrival_time)} />}
-                      {ext.secondary_delivery_method && (
-                        <IB label="Method" value={ext.secondary_delivery_method === 'boat' ? 'Boat Delivery' : 'Van Delivery'} />
-                      )}
-                    </div>
-                  </div>
-                )}
-              </Section>
-            )}
+            {/* ── DELIVERY ────────────────────────────────────────────
+                ⚠️ ONE COPY. This modal used to render the shared delivery card
+                AND its own hand-written "Delivery Information" section directly
+                below it, with its own second-stop block. They printed the same
+                facts twice and they did not agree: the card formatted the
+                arrival date (a day early, as it turned out) and the section
+                below printed the raw column, so a two-stop order showed a
+                dispatcher two different dates for the same delivery and no way
+                to tell which was right.
+                The shared card is the answer. Anything the admin side needs
+                that the customer side does not goes into DeliverySummary
+                behind variant="admin" — never into a second copy here. */}
+            <div className="mb-4">
+              <DeliverySummary order={order} variant="admin" />
+            </div>
 
             {/* Crew Change — GTS editable; Sinclair display-only when already set */}
             {canEditCrew ? (

@@ -17,7 +17,7 @@
 //  - COD lines flagged loudly (collected from the crew member, never invoiced).
 
 import { Order, OrderItem } from '@/types';
-import { formatCurrency, formatQty, isPoundQty, formatArrivalTime } from '@/lib/utils';
+import { formatCurrency, formatQty, isPoundQty, formatArrivalTime, formatCalendarDate } from '@/lib/utils';
 import { groupByWalkingOrder, LocationGroup, DEFAULT_ZONE_ORDER } from '@/lib/store-layout';
 import { upcASvg, isWeighableUpc, normalizeUpcA } from '@/lib/barcode';
 
@@ -374,6 +374,27 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
   const totalLines = uniqueItemCount;
   const totalUnits = totalItemCount;
   const codCount = codAll.length;
+
+  /**
+   * The second stop, already formatted, or null.
+   *
+   * ⚠️ formatCalendarDate, NOT the ordinary date formatter.
+   * secondary_arrival_date is a bare 'YYYY-MM-DD'; running it through a
+   * timezone-aware formatter renders the day BEFORE, and a printed sheet is
+   * the one place nobody can check that against the screen.
+   */
+  const secondStop = (() => {
+    const ext = (order.extended_info || {}) as Record<string, string | undefined>;
+    const terminal = (ext.secondary_terminal_name || '').trim();
+    const date = (ext.secondary_arrival_date || '').trim();
+    const time = (ext.secondary_arrival_time || '').trim();
+    const rawMethod = (ext.secondary_delivery_method || '').trim();
+    if (!terminal && !date && !time) return null;
+    const when = [date ? formatCalendarDate(date) : '', time ? formatArrivalTime(time) : '']
+      .filter(Boolean).join(' ');
+    const method = rawMethod === 'boat' ? 'by boat' : rawMethod === 'van' ? 'by van' : '';
+    return { terminal, when, method };
+  })();
   const weighCount = allStock.filter(isWeighable).length;
   const noBarcodeCount = allStock.filter(i => !isWeighable(i) && !normalizeUpcA(i.upc)).length;
 
@@ -525,8 +546,16 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
   <div class="facts">
     <span><b>Vessel:</b> ${esc(order.vessel_name || order.company_name)}</span>
     ${order.company_name && order.vessel_name ? `<span><b>Company:</b> ${esc(order.company_name)}</span>` : ''}
-    ${order.arrival_date ? `<span><b>Arrival:</b> ${esc(order.arrival_date)}${order.arrival_time ? ` ${esc(formatArrivalTime(order.arrival_time))}` : ''}</span>` : ''}
-    ${order.terminal_name ? `<span><b>Deliver to:</b> ${esc(order.terminal_name)}</span>` : ''}
+    ${order.arrival_date ? `<span><b>Arrival:</b> ${esc(formatCalendarDate(order.arrival_date))}${order.arrival_time ? ` ${esc(formatArrivalTime(order.arrival_time))}` : ''}</span>` : ''}
+    ${order.terminal_name ? `<span><b>${secondStop ? 'Stop 1' : 'Deliver to'}:</b> ${esc(order.terminal_name)}</span>` : ''}
+    ${/* ⚠️ A SECOND STOP IS A SECOND RUN, AND THIS SHEET IS WHAT GETS CARRIED.
+          The pick sheet told whoever loaded the van about one destination. An
+          order going to two terminals looked identical on paper to one going
+          to a single terminal, and the only place the second was written down
+          was a screen back at the counter. */''}
+    ${secondStop ? `<span style="color:#b45309"><b>Stop 2:</b> ${esc(secondStop.terminal || 'terminal not given')}${
+      secondStop.when ? ` &mdash; ${esc(secondStop.when)}` : ''
+    }${secondStop.method ? ` (${esc(secondStop.method)})` : ''}</span>` : ''}
     ${opts?.addonOnly ? `<span style="color:#c2410c"><b>Part B extra run</b> — after Sinclair shopped. Pull only these lines.</span>` : ''}
     ${codCount ? `<span style="color:#7c3aed"><b>COD lines:</b> ${codCount}</span>` : ''}
     ${services.length ? `<span style="color:#b45309"><b>Outside pickups:</b> ${services.length} (separate trip)</span>` : ''}

@@ -44,6 +44,17 @@ function orderPushSignals(order: Order): string[] {
     signals.push(`Crew Change (${order.crew_change})`);
   }
 
+  // ⚠️ TWO STOPS IS THE SIGNAL THAT CHANGES THE DAY'S PLAN.
+  //
+  // This is the one line a GTS staffer reads on a lock screen, and it listed
+  // every service on the order except the one that decides how many runs it
+  // takes. Someone glancing at a notification could schedule a single delivery
+  // for an order that needed two, and only find out on opening it.
+  const ext = order.extended_info || {};
+  if (ext.secondary_terminal_name || ext.secondary_arrival_date || ext.secondary_arrival_time) {
+    signals.push('2 Stops');
+  }
+
   const hasCod =
     !!order.cod_payment_method ||
     items.some(i => i.paid_by === 'cod');

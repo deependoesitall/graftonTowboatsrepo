@@ -1,7 +1,7 @@
 // src/lib/email.ts
 import { Resend } from 'resend';
 import { Order } from '@/types';
-import { formatCurrency, formatDate, formatArrivalTime, orderItemCount } from './utils';
+import { formatCurrency, formatDate, formatArrivalTime, formatCalendarDate, orderItemCount } from './utils';
 import { generateOrderPdfBuffer } from './pdf-attachment';
 import { codFeePercent, codFeeLabel, codTotalWithFee, allocateCodTotals } from '@/lib/cod-fee';
 import { readCodPayments, codMethodSentence } from '@/lib/cod-payments';
@@ -181,6 +181,10 @@ export function buildOrderEmailHtml(
     return !parentIds.has(i.substitutes_item_id);
   });
   const ext           = order.extended_info || {};
+  /** A second stop is a second run; several places below read differently for it. */
+  const hasSecondStop = !!(
+    ext.secondary_terminal_name || ext.secondary_arrival_date || ext.secondary_arrival_time
+  );
 
   const codItems = groceryItems.filter(i => i.paid_by === 'cod');
   const { deck: deckPickups, cod: codPickups } = splitOutsidePickups(serviceItems);
@@ -446,13 +450,13 @@ export function buildOrderEmailHtml(
     </table>` : ''}
 
     <!-- Delivery info (if provided) -->
-    ${(order.terminal_name || order.arrival_date || order.arrival_time || deliveryMethodLabel || order.vhf_channel || order.approach_side || (order.crew_change && order.crew_change !== 'no') || ext.secondary_terminal_name || ext.secondary_arrival_date) ? `
+    ${(order.terminal_name || order.arrival_date || order.arrival_time || deliveryMethodLabel || order.vhf_channel || order.approach_side || (order.crew_change && order.crew_change !== 'no') || hasSecondStop) ? `
     <div style="background:#fff8f0;border-left:3px solid #E8640A;padding:14px;border-radius:0 4px 4px 0;margin-bottom:16px;">
       <div style="font-size:9px;font-weight:800;color:#E8640A;text-transform:uppercase;letter-spacing:1px;padding:0 12px 6px;">Delivery</div>
       <table width="100%" style="border-spacing:0;">
         <tr>
-          ${order.terminal_name ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Deliver To</div><div style="font-size:15px;font-weight:900;color:#E8640A;">${order.terminal_name}</div></td>` : '<td></td>'}
-          ${order.arrival_date  ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Arrival Date</div><div style="font-size:15px;font-weight:900;color:#E8640A;">${order.arrival_date}</div></td>` : '<td></td>'}
+          ${order.terminal_name ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">${hasSecondStop ? 'Stop 1 — Deliver To' : 'Deliver To'}</div><div style="font-size:15px;font-weight:900;color:#E8640A;">${order.terminal_name}</div></td>` : '<td></td>'}
+          ${order.arrival_date  ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Arrival Date</div><div style="font-size:15px;font-weight:900;color:#E8640A;">${formatCalendarDate(order.arrival_date)}</div></td>` : '<td></td>'}
           ${order.arrival_time  ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Arrival Time</div><div style="font-size:15px;font-weight:900;color:#E8640A;">${formatArrivalTime(order.arrival_time)}</div></td>` : '<td></td>'}
         </tr>
         ${(deliveryMethodLabel || order.vhf_channel || order.approach_side || (order.crew_change && order.crew_change !== 'no')) ? `<tr>
@@ -464,10 +468,23 @@ export function buildOrderEmailHtml(
             ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Crew Change</div><div style="font-size:13px;font-weight:700;color:#B45309;">MAYBE${order.crew_change_notes ? ` — ${order.crew_change_notes}` : ''}</div></td>`
             : '<td></td>'}
         </tr>` : ''}
-        ${(ext.secondary_terminal_name || ext.secondary_arrival_date) ? `<tr>
-          ${ext.secondary_terminal_name ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Second Stop</div><div style="font-size:13px;font-weight:700;color:#E8640A;">${ext.secondary_terminal_name}</div></td>` : '<td></td>'}
-          ${ext.secondary_arrival_date ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Second Date</div><div style="font-size:13px;font-weight:700;">${ext.secondary_arrival_date}${ext.secondary_arrival_time ? ` · ${formatArrivalTime(ext.secondary_arrival_time)}` : ''}</div></td>` : '<td></td>'}
-          ${ext.secondary_delivery_method ? `<td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Second Method</div><div style="font-size:13px;font-weight:600;">${ext.secondary_delivery_method === 'boat' ? 'Boat' : ext.secondary_delivery_method === 'van' ? 'Van' : ext.secondary_delivery_method}</div></td>` : '<td></td>'}
+        ${/* ⚠️ STOP 2 GETS THE SAME WEIGHT AS STOP 1. It used to sit in a
+              lighter, smaller row headed "Second Stop", with the date printed
+              raw as '2026-09-22' while the row above it read "Sep 22, 2026" —
+              two different date formats for one delivery, in the email GTS and
+              Sinclair's schedule from. It is also no longer conditional on a
+              terminal or date being present: a second stop with only a time on
+              it is still a second stop, and hiding it is worse than showing it
+              half-filled. */''}
+        ${hasSecondStop ? `<tr>
+          <td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Stop 2 — Deliver To</div><div style="font-size:15px;font-weight:900;color:#E8640A;">${ext.secondary_terminal_name || 'Terminal not given'}</div></td>
+          <td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Stop 2 Arrival</div><div style="font-size:15px;font-weight:900;color:#E8640A;">${
+            [
+              ext.secondary_arrival_date ? formatCalendarDate(ext.secondary_arrival_date) : '',
+              ext.secondary_arrival_time ? formatArrivalTime(ext.secondary_arrival_time) : '',
+            ].filter(Boolean).join(' · ') || 'Not given'
+          }</div></td>
+          <td style="padding:4px 12px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px;">Stop 2 Method</div><div style="font-size:13px;font-weight:600;">${ext.secondary_delivery_method === 'boat' ? 'Boat' : ext.secondary_delivery_method === 'van' ? 'Van' : (ext.secondary_delivery_method || 'Not given')}</div></td>
         </tr>` : ''}
       </table>
     </div>` : ''}

@@ -46,7 +46,7 @@ import {
   Keyboard, ListOrdered, ChevronRight, ChevronDown, AlertCircle, Ship, Camera, FileUp, Mail, MapPin,
 } from 'lucide-react';
 import { adminFetch, fetchAdminSession } from '@/lib/admin-auth';
-import { formatCurrency, formatArrivalTime } from '@/lib/utils';
+import { formatCurrency, formatArrivalTime, formatCalendarDate } from '@/lib/utils';
 import { PaperFormImport, type ApplyLine, type CustomLine } from '@/components/admin/PaperFormImport';
 import { RegisterReceiptImport } from '@/components/admin/RegisterReceiptImport';
 import { RepeatOrderPicker, MissingLinesNotice } from '@/components/admin/RepeatOrderPicker';
@@ -1518,6 +1518,22 @@ function ExtendedDeliveryFields({ header, setHeader, terminals }: {
 
           <div>
             <p className="text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-2">Second stop</p>
+            {/* ⚠️ THE NUMBERING IS NOT A GUESS ANYWHERE ELSE, SO IT CANNOT BE
+                WRONG HERE. Every screen downstream — the Check step, the order
+                email, the PDF, the pick sheet — calls these stop 1 and stop 2
+                in the order they were typed, because that is the only ordering
+                information collected. A second stop dated earlier makes all of
+                them confidently wrong, and a driver plans off them. */}
+            {header.arrival_date && header.secondary_arrival_date
+              && header.secondary_arrival_date < header.arrival_date && (
+              <div className="mb-3 flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2">
+                <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+                <p className="text-[13px] leading-snug text-amber-900">
+                  This stop is dated <b>before</b> the first one. If the boat is making it first,
+                  swap the two so the run reads in the right order everywhere else.
+                </p>
+              </div>
+            )}
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="sm:col-span-2">
                 <label className="label-base" htmlFor="terminal-2">Terminal</label>
@@ -2021,6 +2037,12 @@ function ReviewStep({ header, chosen, qty, setLine, total, error, submitting, on
   sendConfirmation: boolean;
   setSendConfirmation: (v: boolean) => void;
 }) {
+  /** Two stops is two runs — it changes how this whole screen reads. */
+  const hasSecondStop = !!(
+    header.secondary_terminal_name.trim()
+    || header.secondary_arrival_date
+    || header.secondary_arrival_time
+  );
   return (
     <div className="space-y-5">
       <section className="card-base p-4">
@@ -2030,7 +2052,9 @@ function ReviewStep({ header, chosen, qty, setLine, total, error, submitting, on
           {header.company_name ? ` · ${header.company_name}` : ''}
         </p>
         <p className="text-xs text-gray-500 mt-0.5">
-          {[header.terminal_name, header.arrival_date, formatArrivalTime(header.arrival_time),
+          {[hasSecondStop && header.terminal_name ? `Stop 1: ${header.terminal_name}` : header.terminal_name,
+            header.arrival_date ? formatCalendarDate(header.arrival_date) : '',
+            formatArrivalTime(header.arrival_time),
             header.delivery_method === 'boat' ? 'by boat' : header.delivery_method === 'van' ? 'by van' : '',
             header.approach_side || '',
             header.vhf_channel ? `VHF ${header.vhf_channel}` : '']
@@ -2051,16 +2075,24 @@ function ReviewStep({ header, chosen, qty, setLine, total, error, submitting, on
             collapses, so this is the one screen where it is guaranteed to be
             read before the order goes. A second terminal nobody noticed is a
             van at one dock and a boat at another. */}
-        {header.secondary_terminal_name.trim() && (
-          <p className="text-xs font-semibold text-brand-navy mt-1.5 bg-brand-navy/5 border border-brand-navy/10 rounded-md px-2 py-1 inline-block">
-            Second stop: {[
-              header.secondary_terminal_name,
-              header.secondary_arrival_date,
-              formatArrivalTime(header.secondary_arrival_time),
-              header.secondary_delivery_method === 'boat' ? 'by boat'
-                : header.secondary_delivery_method === 'van' ? 'by van' : '',
-            ].filter(Boolean).join(' · ')}
-          </p>
+        {hasSecondStop && (
+          <>
+            <p className="text-xs font-bold text-brand-navy mt-2 bg-brand-yellow/50 border border-brand-gold/40 rounded-md px-2 py-1.5 inline-block">
+              Stop 2: {[
+                header.secondary_terminal_name || 'terminal not given',
+                header.secondary_arrival_date ? formatCalendarDate(header.secondary_arrival_date) : '',
+                formatArrivalTime(header.secondary_arrival_time),
+                header.secondary_delivery_method === 'boat' ? 'by boat'
+                  : header.secondary_delivery_method === 'van' ? 'by van' : '',
+              ].filter(Boolean).join(' · ')}
+            </p>
+            {header.arrival_date && header.secondary_arrival_date
+              && header.secondary_arrival_date < header.arrival_date && (
+              <p className="text-xs font-semibold text-amber-800 mt-1">
+                Stop 2 is dated before stop 1 — check the run order before this goes out.
+              </p>
+            )}
+          </>
         )}
         {header.order_contact_name.trim() && (
           <p className="text-xs text-gray-500 mt-1">
