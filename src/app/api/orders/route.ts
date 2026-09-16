@@ -34,6 +34,38 @@ import { z } from 'zod';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * ⚠️ A PRODUCT ID IS A UUID OR IT IS NOTHING.
+ *
+ * order_items.product_id is a uuid column with a foreign key to products, and
+ * this value reaches it three ways: straight into the insert, into
+ * `.in('id', ...)` for the price lookup, and as a map key for UPC and image
+ * hydration. Postgres rejects anything that is not a uuid with
+ *
+ *   invalid input syntax for type uuid: "repeat-9d75447f-...-195"
+ *
+ * and the whole order dies after the header row has already been written. That
+ * is the message a GTS staffer hit trying to repeat a 205-line order: 'Could
+ * not save the order's items — nothing was charged, please try again', which
+ * would have failed identically on every retry, forever.
+ *
+ * The id in that message was minted by the caller so its list had React keys.
+ * That caller is fixed, but a client should not be able to take an order down
+ * by sending a string — so the boundary decides. Anything that is not a uuid
+ * is not a catalog product, which is exactly what a write-in is: the line keeps
+ * its description, price and quantity and is stored with a null product_id,
+ * the same footing as a scanned paper-form write-in or a service line.
+ *
+ * Silently dropping a bad id beats guessing at one. An id we cannot resolve
+ * must never be allowed to point at SOME row — that bills the wrong product.
+ */
+const productId = z.string().optional().default('').transform(v => {
+  const s = (v || '').trim();
+  return UUID_RE.test(s) ? s : '';
+});
+
 const submitSchema = z.object({
   vessel: z.object({
     company_name: z.string().min(1),
@@ -89,7 +121,7 @@ const submitSchema = z.object({
     eta: z.string().optional().default(''),
   }),
   items: z.array(z.object({
-    product_id: z.string(),
+    product_id: productId,
     description: z.string(),
     category: z.string(),
     pkg_size: z.string().nullable().optional(),

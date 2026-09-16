@@ -214,8 +214,15 @@ function RepeatOrderModal({
         arrival_time: arrivalTime || undefined,
         notes: notes || undefined,
       },
-      items: activeItems.map((item, idx) => ({
-        product_id: item.product_id || `repeat-${order.id}-${idx}`,
+      items: activeItems.map(item => ({
+        // ⚠️ NO INVENTED IDS. This used to send `repeat-<order>-<idx>` for a
+        // line with no catalog product, because the local list needed a key.
+        // order_items.product_id is a uuid column, so that string reached
+        // Postgres and took the entire order down with 'invalid input syntax
+        // for type uuid' — after the order header had already been inserted.
+        // An off-catalog line sends nothing and is stored as a write-in, which
+        // is what it is. Keys come from `line.key`, not from this field.
+        product_id: item.product_id || '',
         description: item.description,
         category: item.category,
         pkg_size: item.pkg_size || null,
