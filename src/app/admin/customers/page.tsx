@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import {
   Lock, RefreshCw, FileText, ChevronDown, ChevronRight, RotateCcw,
   Search, Calendar, X, CheckCircle, AlertCircle, Loader2, Printer,
-  Ship, KeyRound, Users, Trash2, Pencil, Plus, Minus,
+  Ship, KeyRound, Users, Trash2, Pencil, Plus, Minus, Wrench,
 } from 'lucide-react';
 import Link from 'next/link';
 import { vesselReportHtml } from '@/lib/vessel-report';
@@ -126,6 +126,7 @@ function RepeatOrderModal({
   const [writeInPay, setWriteInPay] = useState<RepeatPay>('cod');
   const [writeInCod, setWriteInCod] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [handingOff, setHandingOff] = useState(false);
   const [error, setError] = useState('');
 
   const activeItems = lines.filter(l => l.quantity > 0);
@@ -193,6 +194,99 @@ function RepeatOrderModal({
     }]);
     setAddQ('');
     setAddHits([]);
+  }
+
+  /**
+   * HAND THIS OFF TO THE REAL BUILDER.
+   *
+   * ⚠️ THIS MODAL IS NOT A SECOND ORDER FORM AND MUST NOT GROW INTO ONE.
+   *
+   * It does one thing well — same list, same boat, out the door — and it
+   * deliberately does not ask about parts pickups, crew changes, a second stop
+   * or who placed the order. Answering those here would mean two order forms
+   * drifting apart, which is the exact failure the shared services component
+   * was written to end.
+   *
+   * So when an order needs more than this modal offers, it goes to
+   * /admin/orders/new instead, carrying everything already entered. The
+   * transport is a draft (migration 090): the state is parked server-side and
+   * the builder opens on it. Nothing is placed, and closing the tab on the way
+   * over loses nothing.
+   */
+  async function openInBuilder() {
+    setError('');
+    setHandingOff(true);
+    try {
+      const state = {
+        v: 1 as const,
+        header: {
+          vessel_name: vesselName || order.vessel_name || '',
+          company_name: vessel.company_name || '',
+          vessel_type: '', captain_name: '', captain_phone: '',
+          vessel_email: email.trim(), billing_email: '',
+          contact_name: vessel.contact_name || '', phone: vessel.phone || '',
+          terminal_name: '', arrival_date: arrivalDate || '', arrival_time: arrivalTime || '',
+          delivery_method: '', approach_side: '', vhf_channel: '', po_number: '',
+          notes: notes || '',
+          crew_change: 'no', crew_arriving: '', crew_departing: '', crew_change_notes: '',
+          eta: '',
+          secondary_terminal_name: '', secondary_arrival_date: '',
+          secondary_arrival_time: '', secondary_delivery_method: '',
+          order_contact_name: '', order_contact_title: '',
+          order_contact_phone: '', order_contact_email: '',
+          personal_cod_notes: '',
+        },
+        qty: Object.fromEntries(
+          activeItems.filter(l => l.product_id).map(l => [l.product_id as string, l.quantity]),
+        ),
+        linePay: Object.fromEntries(
+          activeItems.filter(l => l.product_id).map(l => [
+            l.product_id as string,
+            { paid_by: l.paid_by === 'cod' ? 'cod' : l.paid_by === 'deck' ? 'deck' : 'vessel', cod_name: l.cod_name || '' },
+          ]),
+        ),
+        // Lines with no catalog row travel as write-ins, exactly as they do on
+        // the wire — never with an invented product id.
+        customLines: activeItems.filter(l => !l.product_id).map(l => ({
+          description: l.description,
+          qty: l.quantity,
+          price: l.price,
+          paid_by: l.paid_by === 'cod' ? 'cod' : 'vessel',
+          cod_name: l.cod_name || '',
+        })),
+        extraById: {},
+        services: {
+          parts_pickup: { enabled: false, pickup_location: '', order_number: '', contact_name: '', contact_phone: '' },
+          package_delivery: { enabled: false, description: '', origin: '', contact_name: '', contact_phone: '' },
+          other_pickup: { enabled: false, items: [{ url: '', notes: '' }] },
+        },
+        sendConfirmation: false,
+        mode: 'sheet',
+        step: 'who',
+      };
+
+      const res = await adminFetch('/api/admin/order-drafts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          company_name: vessel.company_name || '',
+          vessel_name: vesselName || order.vessel_name || '',
+          line_count: activeItems.length,
+          subtotal: Math.round(total * 100) / 100,
+          state,
+        }),
+      });
+      if (!res.ok) {
+        setError('Could not open this in the full builder. Nothing has been lost — the order is still here.');
+        return;
+      }
+      const j = await res.json();
+      window.location.href = `/admin/orders/new?draft=${encodeURIComponent(j.draft.id)}`;
+    } catch {
+      setError('Could not reach the server. Nothing has been lost — the order is still here.');
+    } finally {
+      setHandingOff(false);
+    }
   }
 
   async function submit() {
@@ -471,6 +565,31 @@ function RepeatOrderModal({
               </div>
             </div>
           </div>
+
+          {/* ⚠️ THE WAY OUT OF THIS MODAL'S LIMITS.
+              This screen asks about items, email, boat and delivery time — and
+              deliberately nothing else. A parts pickup, a crew change, a second
+              stop or a PO number are real parts of an order and they belong in
+              the one builder that knows about all of them, not in a second
+              order form growing quietly alongside it. */}
+          <button
+            type="button"
+            onClick={openInBuilder}
+            disabled={handingOff || activeItems.length === 0}
+            className="w-full rounded-xl border border-dashed border-brand-navy/30 bg-brand-navy/[0.03] px-4 py-3 text-left hover:border-brand-navy/60 hover:bg-brand-navy/[0.06] transition-colors disabled:opacity-50 flex items-center gap-3">
+            {handingOff
+              ? <Loader2 className="w-4 h-4 animate-spin text-brand-navy shrink-0" />
+              : <Wrench className="w-4 h-4 text-brand-navy shrink-0" />}
+            <span className="min-w-0">
+              <span className="block text-sm font-bold text-brand-navy">
+                Need a crew change, parts pickup or a second stop?
+              </span>
+              <span className="block text-xs text-gray-500 mt-0.5">
+                Opens these {activeItems.length} line{activeItems.length === 1 ? '' : 's'} in the full
+                order builder. Nothing is placed, and nothing typed here is lost.
+              </span>
+            </span>
+          </button>
 
           {error && (
             <div className="flex items-start gap-2 text-red-600 bg-red-50 rounded-lg px-3 py-2.5 text-sm">

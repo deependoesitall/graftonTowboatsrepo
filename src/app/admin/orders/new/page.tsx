@@ -347,6 +347,19 @@ export default function NewOrderPage() {
   // drop the line.
   const catalogIds = useMemo(() => new Set(items.map(i => i.id)), [items]);
 
+  // Today's shelf price for a product the repeat picker is offering to bring
+  // back. null means we no longer stock it, which is a different fact from
+  // "costs nothing" and is what turns the line into a write-in.
+  const priceById = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const i of items) m.set(i.id, i.price);
+    return m;
+  }, [items]);
+  const catalogPrice = useCallback(
+    (id: string) => (priceById.has(id) ? priceById.get(id)! : null),
+    [priceById],
+  );
+
   const chosen = useMemo(() => {
     const fromExtra = Object.values(extraById)
       .filter(e => (qty[e.product_id] || e.quantity || 0) > 0)
@@ -952,6 +965,7 @@ export default function NewOrderPage() {
           applyVessel={applyVessel}
           onNext={() => setStep('what')}
           catalogIds={catalogIds}
+          catalogPrice={catalogPrice}
           onRepeatApply={handleRepeatApply}
           services={services}
           setServices={setServices}
@@ -1027,6 +1041,7 @@ export default function NewOrderPage() {
                 vesselName={header.vessel_name}
                 companyName={header.company_name}
                 catalogIds={catalogIds}
+                catalogPrice={catalogPrice}
                 onApply={handleRepeatApply}
               />
             </div>
@@ -1037,6 +1052,8 @@ export default function NewOrderPage() {
 
       {step === 'check' && (
         <ReviewStep
+          services={services}
+          onEditDetails={() => setStep('who')}
           linePay={linePay}
           customLines={customLines}
           removeCustomLine={(i) => setCustomLines(prev => prev.filter((_, k) => k !== i))}
@@ -1135,8 +1152,8 @@ function ModeTabs({ mode, setMode, onRegisterTape }: {
 /* ── who ── */
 
 function WhoStep({
-  header, setHeader, vessels, terminals, applyVessel, onNext, catalogIds, onRepeatApply,
-  services, setServices,
+  header, setHeader, vessels, terminals, applyVessel, onNext, catalogIds, catalogPrice,
+  onRepeatApply, services, setServices,
 }: {
   header: HeaderState;
   setHeader: React.Dispatch<React.SetStateAction<HeaderState>>;
@@ -1145,6 +1162,7 @@ function WhoStep({
   applyVessel: (v: VesselHeader) => void;
   onNext: () => void;
   catalogIds: Set<string>;
+  catalogPrice: (id: string) => number | null;
   services: AdditionalServices;
   setServices: React.Dispatch<React.SetStateAction<AdditionalServices>>;
   onRepeatApply: (
@@ -1405,6 +1423,7 @@ function WhoStep({
             vesselName={header.vessel_name}
             companyName={header.company_name}
             catalogIds={catalogIds}
+            catalogPrice={catalogPrice}
             onApply={onRepeatApply}
           />
         </section>
@@ -1901,8 +1920,92 @@ function PasteMode({ items, byUpc, setLine }: {
 
 /* ── review ── */
 
+/**
+ * The services block on the Check step.
+ *
+ * Renders nothing when nothing was added — an empty "Services: none" panel on
+ * every order is noise, and noise is what makes a real one get skipped over.
+ */
+function ServicesReview({ services, personalCodNotes }: {
+  services: AdditionalServices;
+  personalCodNotes: string;
+}) {
+  const parts = services.parts_pickup?.enabled ? services.parts_pickup : null;
+  const pkg = services.package_delivery?.enabled ? services.package_delivery : null;
+  const other = services.other_pickup?.enabled
+    ? (services.other_pickup.items || []).filter(i => i.url.trim() || i.notes.trim())
+    : [];
+  const notes = personalCodNotes.trim();
+
+  if (!parts && !pkg && other.length === 0 && !notes) return null;
+
+  return (
+    <section className="card-base p-4 space-y-3">
+      <h2 className="font-bold text-brand-navy text-sm">Also going out with this order</h2>
+
+      {parts && (
+        <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3">
+          <p className="text-xs font-bold uppercase tracking-wide text-gray-500 mb-1">Parts pickup</p>
+          <p className="text-sm text-gray-900">{parts.pickup_location}</p>
+          <p className="text-xs text-gray-500 mt-0.5">
+            {[parts.order_number && `#${parts.order_number}`, parts.contact_name, parts.contact_phone]
+              .filter(Boolean).join(' · ')}
+          </p>
+        </div>
+      )}
+
+      {pkg && (
+        <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3">
+          <p className="text-xs font-bold uppercase tracking-wide text-gray-500 mb-1">Package / other delivery</p>
+          <p className="text-sm text-gray-900">{pkg.description}</p>
+          <p className="text-xs text-gray-500 mt-0.5">
+            {[pkg.origin, pkg.contact_name, pkg.contact_phone].filter(Boolean).join(' · ')}
+          </p>
+        </div>
+      )}
+
+      {other.length > 0 && (
+        <div className="rounded-lg border border-purple-200 bg-purple-50/60 p-3">
+          <p className="text-xs font-bold uppercase tracking-wide text-purple-700 mb-1">
+            From another store · {other.length} item{other.length === 1 ? '' : 's'}
+          </p>
+          <ul className="space-y-1.5">
+            {other.map((i, n) => (
+              <li key={n} className="text-sm text-purple-900">
+                {i.notes || i.url || `Item ${n + 1}`}
+                <span className="block text-xs text-purple-900/60">
+                  {(i.paid_by ?? 'grocery') === 'cod'
+                    ? `COD · ${i.cod_name?.trim() || 'crew member not named'}`
+                    : 'Billed to the boat'}
+                  {i.url ? ' · link on file' : ''}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {/* Always COD, never invoiced — stated here because the estimated
+              total below does not include any of it and that surprises people. */}
+          <p className="text-[11px] text-purple-900/60 mt-2">
+            Not in the estimate — price is known only once it is bought, and it is collected at delivery.
+          </p>
+        </div>
+      )}
+
+      {notes && (
+        <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3">
+          <p className="text-xs font-bold uppercase tracking-wide text-gray-500 mb-1">Personal / COD notes</p>
+          <p className="text-sm text-gray-900 whitespace-pre-line">{notes}</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function ReviewStep({ header, chosen, qty, setLine, total, error, submitting, onSubmit, onBack,
-                     customLines, removeCustomLine, linePay, sendConfirmation, setSendConfirmation }: {
+                     customLines, removeCustomLine, linePay, sendConfirmation, setSendConfirmation,
+                     services, onEditDetails }: {
+  services: AdditionalServices;
+  /** Back to the boat step, where services and delivery are edited. */
+  onEditDetails: () => void;
   customLines: CustomLine[];
   removeCustomLine: (index: number) => void;
   linePay: Record<string, { paid_by: 'vessel' | 'deck' | 'cod'; cod_name: string }>;
@@ -1941,12 +2044,47 @@ function ReviewStep({ header, chosen, qty, setLine, total, error, submitting, on
               : ''}
           </p>
         )}
+        {header.eta.trim() && (
+          <p className="text-xs text-gray-500 mt-1">ETA {header.eta}</p>
+        )}
+        {/* ⚠️ A SECOND STOP MUST NOT BE QUIET. It is entered in a section that
+            collapses, so this is the one screen where it is guaranteed to be
+            read before the order goes. A second terminal nobody noticed is a
+            van at one dock and a boat at another. */}
+        {header.secondary_terminal_name.trim() && (
+          <p className="text-xs font-semibold text-brand-navy mt-1.5 bg-brand-navy/5 border border-brand-navy/10 rounded-md px-2 py-1 inline-block">
+            Second stop: {[
+              header.secondary_terminal_name,
+              header.secondary_arrival_date,
+              formatArrivalTime(header.secondary_arrival_time),
+              header.secondary_delivery_method === 'boat' ? 'by boat'
+                : header.secondary_delivery_method === 'van' ? 'by van' : '',
+            ].filter(Boolean).join(' · ')}
+          </p>
+        )}
+        {header.order_contact_name.trim() && (
+          <p className="text-xs text-gray-500 mt-1">
+            Placed by {header.order_contact_name}
+            {header.order_contact_title ? `, ${header.order_contact_title}` : ''}
+            {header.order_contact_phone ? ` · ${header.order_contact_phone}` : ''}
+          </p>
+        )}
         <p className="text-xs text-gray-500 mt-1">
           {sendConfirmation
             ? <>Confirmation to {header.vessel_email || header.billing_email || <span className="text-red-600">nobody — add an email</span>}</>
             : 'No confirmation email will be sent to the boat'}
         </p>
+        <button type="button" onClick={onEditDetails}
+          className="mt-2 text-xs font-bold text-brand-river hover:text-brand-navy transition-colors">
+          Change delivery, services or crew change
+        </button>
       </section>
+
+      {/* ⚠️ SERVICES GO OUT WITH THE ORDER, SO THEY GET CHECKED WITH IT.
+          These were not on this screen because staff could not enter them at
+          all. Now that they can, a parts pickup added twenty minutes ago and
+          forgotten is exactly the kind of thing a last look is for. */}
+      <ServicesReview services={services} personalCodNotes={header.personal_cod_notes} />
 
       <section className="card-base overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">

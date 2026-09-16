@@ -21,10 +21,27 @@
 // ADD for "same as last time plus a few things". Neither ever submits. The
 // items land in the same draft the order form and the scanner feed, and the
 // person still reviews and places the order.
+//
+// ── THE STEP IN BETWEEN ───────────────────────────────────────
+//
+// Tapping "send this again" used to drop forty lines into the build with no
+// chance to look at them first, and the things most worth looking at are
+// exactly the things that do not survive three months in a database:
+//
+//   · the price moved — an order from July carries July's prices, and the
+//     only place that shows up otherwise is the register
+//   · the product left the catalog — it comes over as a write-in with an old
+//     description and no shelf tag to scan
+//   · the boat does not want it this time
+//
+// RepeatReviewModal puts those three in front of somebody before anything
+// lands, with every line tickable and its quantity editable. Nothing about it
+// places an order; it is a better handoff into the same builder.
 
 import { useEffect, useMemo, useState } from 'react';
 import {
   Loader2, RotateCcw, Plus, ChevronDown, ChevronUp, Package, AlertTriangle, Check,
+  X, TrendingUp, TrendingDown, PencilLine,
 } from 'lucide-react';
 import { adminFetch } from '@/lib/admin-auth';
 import { formatCurrency } from '@/lib/utils';
@@ -92,17 +109,23 @@ function daysAgo(iso: string): string {
   return m === 1 ? 'a month ago' : `${m} months ago`;
 }
 
-export function RepeatOrderPicker({ vesselName, companyName, catalogIds: _catalogIds, onApply }: {
+export function RepeatOrderPicker({
+  vesselName, companyName, catalogIds: _catalogIds, catalogPrice, onApply,
+}: {
   vesselName: string;
   companyName: string;
   /** Product ids currently on the order form, so gone items can be named. */
   catalogIds: Set<string>;
+  /** Today's shelf price for a product id, or null when we no longer stock it. */
+  catalogPrice: (id: string) => number | null;
   onApply: (lines: RepeatApplyLine[], mode: 'replace' | 'add', carried: CarriedLine[]) => void;
 }) {
   const [orders, setOrders] = useState<PastOrder[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const [applied, setApplied] = useState<string | null>(null);
+  /** The order waiting to be reviewed, and how it was asked for. */
+  const [reviewing, setReviewing] = useState<{ order: PastOrder; mode: 'replace' | 'add' } | null>(null);
 
   useEffect(() => {
     const v = vesselName.trim();
@@ -161,40 +184,27 @@ export function RepeatOrderPicker({ vesselName, companyName, catalogIds: _catalo
           expanded={open === o.id}
           justApplied={applied === o.id}
           onToggle={() => setOpen(open === o.id ? null : o.id)}
-          onApply={(mode) => {
-            const lines: RepeatApplyLine[] = [];
-            const carried: CarriedLine[] = [];
-            for (const l of o.lines) {
-              const pay: 'vessel' | 'deck' | 'cod' =
-                l.paid_by === 'cod' ? 'cod' : l.paid_by === 'deck' ? 'deck' : 'vessel';
-              // No catalog id → write-in. A real product_id, even if it is not
-              // on the paper form (register-tape / full-store), goes through
-              // applyLines with description+price so the draft actually shows it.
-              if (!l.product_id) {
-                carried.push({
-                  description: l.description,
-                  qty: l.quantity,
-                  price: l.unit_price,
-                  paid_by: pay,
-                  cod_name: l.cod_name || undefined,
-                });
-                continue;
-              }
-              lines.push({
-                productId: l.product_id,
-                qty: l.quantity,
-                paid_by: pay,
-                cod_name: pay === 'cod' ? (l.cod_name || undefined) : undefined,
-                description: l.description,
-                price: l.unit_price,
-              });
-            }
+          onApply={mode => setReviewing({ order: o, mode })}
+        />
+      ))}
+
+      {/* Nothing reaches the build until this is confirmed — see the note at
+          the top of this file for why the step is here at all. */}
+      {reviewing && (
+        <RepeatReviewModal
+          order={reviewing.order}
+          mode={reviewing.mode}
+          catalogPrice={catalogPrice}
+          onCancel={() => setReviewing(null)}
+          onConfirm={(lines, carried) => {
+            const { order: o, mode } = reviewing;
+            setReviewing(null);
             onApply(lines, mode, carried);
             setApplied(o.id);
             setTimeout(() => setApplied(null), 2200);
           }}
         />
-      ))}
+      )}
     </div>
   );
 }
@@ -280,6 +290,214 @@ function OrderCard({ order, expanded, justApplied, onToggle, onApply }: {
         </ul>
       )}
     </article>
+  );
+}
+
+/* ── the review step ──────────────────────────────────────────────────────── */
+
+interface ReviewLine {
+  key: string;
+  productId: string | null;
+  description: string;
+  qty: number;
+  /** What this cost on the past order. */
+  wasPrice: number;
+  /** Today's shelf price, or null when we no longer stock it. */
+  nowPrice: number | null;
+  paid_by: 'vessel' | 'deck' | 'cod';
+  cod_name?: string;
+  include: boolean;
+}
+
+/** More than a cent, so rounding noise is not reported as a price change. */
+const PRICE_EPSILON = 0.005;
+
+function RepeatReviewModal({ order, mode, catalogPrice, onCancel, onConfirm }: {
+  order: PastOrder;
+  mode: 'replace' | 'add';
+  /** Today's price for a product id, or null if it is no longer in the catalog. */
+  catalogPrice: (id: string) => number | null;
+  onCancel: () => void;
+  onConfirm: (lines: RepeatApplyLine[], carried: CarriedLine[]) => void;
+}) {
+  const [lines, setLines] = useState<ReviewLine[]>(() =>
+    order.lines.map((l, i) => {
+      const pay: 'vessel' | 'deck' | 'cod' =
+        l.paid_by === 'cod' ? 'cod' : l.paid_by === 'deck' ? 'deck' : 'vessel';
+      return {
+        key: `${l.product_id || 'w'}-${i}`,
+        productId: l.product_id,
+        description: l.description,
+        qty: l.quantity,
+        wasPrice: l.unit_price,
+        nowPrice: l.product_id ? catalogPrice(l.product_id) : null,
+        paid_by: pay,
+        cod_name: l.cod_name || undefined,
+        include: true,
+      };
+    }),
+  );
+
+  const patch = (key: string, p: Partial<ReviewLine>) =>
+    setLines(ls => ls.map(l => (l.key === key ? { ...l, ...p } : l)));
+
+  const kept = lines.filter(l => l.include && l.qty > 0);
+  const total = kept.reduce((s, l) => s + (l.nowPrice ?? l.wasPrice) * l.qty, 0);
+  const changed = kept.filter(
+    l => l.nowPrice != null && Math.abs(l.nowPrice - l.wasPrice) > PRICE_EPSILON,
+  );
+  const writeIns = kept.filter(l => l.nowPrice == null);
+
+  function confirm() {
+    const apply: RepeatApplyLine[] = [];
+    const carried: CarriedLine[] = [];
+    for (const l of kept) {
+      if (!l.productId || l.nowPrice == null) {
+        // No catalog row behind it any more — it travels as a write-in with
+        // last time's description and price. See the note on product_id in
+        // /api/orders for why an absent id is the right wire format.
+        carried.push({
+          description: l.description,
+          qty: l.qty,
+          price: l.wasPrice,
+          paid_by: l.paid_by,
+          cod_name: l.cod_name,
+        });
+        continue;
+      }
+      apply.push({
+        productId: l.productId,
+        qty: l.qty,
+        paid_by: l.paid_by,
+        cod_name: l.paid_by === 'cod' ? l.cod_name : undefined,
+        description: l.description,
+        price: l.nowPrice,
+      });
+    }
+    onConfirm(apply, carried);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/40 backdrop-blur-sm">
+      <div className="bg-white w-full sm:max-w-2xl sm:rounded-2xl rounded-t-2xl shadow-2xl max-h-[92vh] flex flex-col">
+        <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-gray-100">
+          <div className="min-w-0">
+            <h2 className="font-display font-bold text-brand-navy text-lg">
+              {mode === 'replace' ? 'Send this again' : 'Add these to the order'}
+            </h2>
+            <p className="text-xs text-gray-400 mt-0.5">
+              From {order.order_number} · {orderDay(order.created_at)} · {daysAgo(order.created_at)}.
+              Untick anything the boat doesn&rsquo;t want this time.
+            </p>
+          </div>
+          <button onClick={onCancel} className="text-gray-400 hover:text-gray-600 shrink-0" aria-label="Cancel">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* ⚠️ THE TWO THINGS THAT DO NOT SURVIVE THREE MONTHS IN A DATABASE.
+            Stated at the top rather than left to be noticed line by line —
+            a price that moved is otherwise only discovered at the register. */}
+        {(changed.length > 0 || writeIns.length > 0) && (
+          <div className="px-5 py-3 bg-amber-50 border-b border-amber-200 space-y-1">
+            {changed.length > 0 && (
+              <p className="text-xs text-amber-900">
+                <b>{changed.length} price{changed.length === 1 ? ' has' : 's have'} changed</b> since
+                that order. The figures below are today&rsquo;s.
+              </p>
+            )}
+            {writeIns.length > 0 && (
+              <p className="text-xs text-amber-900">
+                <b>{writeIns.length} item{writeIns.length === 1 ? '' : 's'} no longer in the catalog</b> —
+                {writeIns.length === 1 ? ' it comes' : ' they come'} over as write-ins at last
+                time&rsquo;s price, with no shelf tag to scan.
+              </p>
+            )}
+          </div>
+        )}
+
+        <ul className="overflow-y-auto flex-1 divide-y divide-gray-50">
+          {lines.map(l => {
+            const now = l.nowPrice ?? l.wasPrice;
+            const delta = l.nowPrice != null ? l.nowPrice - l.wasPrice : 0;
+            const moved = Math.abs(delta) > PRICE_EPSILON;
+            return (
+              <li key={l.key}
+                className={`px-5 py-2.5 flex items-center gap-3 ${l.include ? '' : 'opacity-40'}`}>
+                <input
+                  type="checkbox" checked={l.include}
+                  onChange={e => patch(l.key, { include: e.target.checked })}
+                  className="w-4 h-4 shrink-0 accent-brand-navy"
+                  aria-label={`Include ${l.description}`}
+                />
+                <input
+                  type="number" min={0} max={999} step="any" value={l.qty}
+                  onChange={e => patch(l.key, { qty: Math.max(0, Number(e.target.value) || 0) })}
+                  className="input-base w-16 shrink-0 text-sm py-1 text-center tabular-nums"
+                  aria-label={`Quantity of ${l.description}`}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm text-gray-900 truncate">
+                    {l.description}
+                    {l.paid_by === 'cod' && (
+                      <span className="ml-2 text-[10px] font-bold uppercase tracking-wider text-purple-700 bg-purple-100 rounded px-1.5 py-0.5">
+                        COD{l.cod_name ? ` · ${l.cod_name}` : ''}
+                      </span>
+                    )}
+                    {l.paid_by === 'deck' && (
+                      <span className="ml-2 text-[10px] font-bold uppercase tracking-wider text-blue-700 bg-blue-100 rounded px-1.5 py-0.5">
+                        Deck
+                      </span>
+                    )}
+                    {l.nowPrice == null && (
+                      <span className="ml-2 text-[10px] font-bold uppercase tracking-wider text-amber-700 bg-amber-100 rounded px-1.5 py-0.5 inline-flex items-center gap-1">
+                        <PencilLine className="w-2.5 h-2.5" /> Write-in
+                      </span>
+                    )}
+                  </span>
+                  <span className="block text-xs text-gray-400">
+                    {formatCurrency(now)} each
+                    {moved && (
+                      <span className={`ml-1.5 font-semibold inline-flex items-center gap-0.5 ${
+                        delta > 0 ? 'text-red-600' : 'text-green-700'
+                      }`}>
+                        {delta > 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                        was {formatCurrency(l.wasPrice)}
+                      </span>
+                    )}
+                  </span>
+                </span>
+                <span className="text-sm tabular-nums text-gray-700 shrink-0">
+                  {formatCurrency(now * l.qty)}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+
+        <div className="px-5 py-4 border-t border-gray-100 flex items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-bold text-brand-navy">
+              {kept.length} line{kept.length === 1 ? '' : 's'} · {formatCurrency(total)}
+            </p>
+            <p className="text-xs text-gray-400">
+              {mode === 'replace'
+                ? 'Replaces whatever is in the build now'
+                : 'Added to what is already there'}
+              {' · '}nothing is placed yet
+            </p>
+          </div>
+          <button type="button" onClick={onCancel} className="btn-outline text-sm px-4 py-2 shrink-0">
+            Cancel
+          </button>
+          <button type="button" onClick={confirm} disabled={kept.length === 0}
+            className="btn-primary text-sm px-4 py-2 shrink-0 disabled:opacity-40 inline-flex items-center gap-1.5">
+            {mode === 'replace' ? <RotateCcw className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+            {mode === 'replace' ? 'Use these' : 'Add these'}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
