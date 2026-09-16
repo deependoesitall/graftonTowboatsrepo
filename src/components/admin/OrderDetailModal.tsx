@@ -10,7 +10,7 @@ import {
   Scale, Replace, CornerDownRight, PackageX, AlertTriangle, Mail,
 } from 'lucide-react';
 import { Order, OrderItem, OrderStatus, Product } from '@/types';
-import { formatCurrency, formatDate, formatArrivalTime, ORDER_STATUSES } from '@/lib/utils';
+import { formatCurrency, formatDate, formatArrivalTime, formatQty, isWeighedLine, orderItemCount, ORDER_STATUSES } from '@/lib/utils';
 import { DeliverySummary } from '@/components/order/DeliverySummary';
 import { ShoppingModeModal } from '@/components/admin/ShoppingModeModal';
 import { adminFetch, isGtsRole, getAdminRole, hasAdminPermission } from '@/lib/admin-auth';
@@ -1161,7 +1161,7 @@ export function OrderDetailModal({
                         </p>
                         {list.map(i => (
                           <p key={i.id} className="text-xs text-purple-900 pl-2">
-                            {i.quantity}× {i.description} · {i.unpriced
+                            {formatQty(i.quantity, isWeighedLine(i))} {i.description} · {i.unpriced
                               ? <span className="text-amber-700 font-semibold">priced when bought</span>
                               : formatCurrency(i.amount)}
                           </p>
@@ -1788,7 +1788,7 @@ export function OrderDetailModal({
                       )}
                       <tr className="bg-brand-sand/30 border-t-2 border-brand-gold/30">
                         <td colSpan={6} className="px-3 py-2 font-bold text-brand-navy text-sm">
-                          SYSTEM TOTAL ({groceryItems.reduce((s, i) => s + i.quantity, 0)} items)
+                          SYSTEM TOTAL ({orderItemCount(groceryItems)} items)
                         </td>
                         <td className="px-3 py-2 text-right font-display text-base font-bold text-brand-navy">
                           {formatCurrency(subtotal)}
@@ -2490,7 +2490,7 @@ export function OrderDetailModal({
                     <p><strong>Arrival:</strong> {[order.arrival_date, formatArrivalTime(order.arrival_time)].filter(Boolean).join(', ')}</p>
                   )}
                   {order.eta && <p><strong>ETA:</strong> {order.eta}</p>}
-                  <p><strong>Total Items:</strong> {groceryItems.reduce((s, i) => s + i.quantity, 0)}</p>
+                  <p><strong>Total Items:</strong> {orderItemCount(groceryItems)}</p>
                   <p><strong>Order Total:</strong> {formatCurrency(grocerySubtotal)}</p>
                 </div>
               </div>

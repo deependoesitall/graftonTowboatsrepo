@@ -10,7 +10,7 @@
 
 import webpush from 'web-push';
 import { createServiceClient } from '@/lib/supabase/server';
-import { formatCurrency } from '@/lib/utils';
+import { formatCurrency, orderItemCount } from '@/lib/utils';
 import { isGtsRole, type AdminRole } from '@/lib/admin-auth-server';
 import type { Order } from '@/types';
 
@@ -235,9 +235,9 @@ export async function sendOrderPush(
 
   // Item count excludes service lines so it reads as "things to shop", which
   // is what the number is for.
-  const itemCount = (order.items || [])
-    .filter(i => i.item_type !== 'service')
-    .reduce((s, i) => s + i.quantity, 0);
+  const itemCount = orderItemCount(
+    (order.items || []).filter(i => i.item_type !== 'service'),
+  );
 
   const vessel = order.vessel_name || order.company_name || 'vessel';
   const line = orderPushBody(order, itemCount);

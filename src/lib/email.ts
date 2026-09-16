@@ -1,7 +1,7 @@
 // src/lib/email.ts
 import { Resend } from 'resend';
 import { Order } from '@/types';
-import { formatCurrency, formatDate, formatArrivalTime } from './utils';
+import { formatCurrency, formatDate, formatArrivalTime, orderItemCount } from './utils';
 import { generateOrderPdfBuffer } from './pdf-attachment';
 import { codFeePercent, codFeeLabel, codTotalWithFee, allocateCodTotals } from '@/lib/cod-fee';
 import { readCodPayments, codMethodSentence } from '@/lib/cod-payments';
@@ -104,7 +104,7 @@ const DEFAULT_TEMPLATE: Required<EmailTemplateConfig> = {
 };
 
 function applyTemplateVars(text: string, order: Order, appUrl: string): string {
-  const itemCount = order.items.filter(i => i.item_type !== 'service').reduce((s, i) => s + i.quantity, 0);
+  const itemCount = orderItemCount(order.items.filter(i => i.item_type !== 'service'));
   return text
     .replaceAll('{order_number}', order.order_number)
     .replaceAll('{order_id}', order.id)
@@ -164,9 +164,9 @@ export function buildOrderEmailHtml(
   const groceryItems  = order.items.filter(i => i.item_type !== 'service');
   const serviceItems  = order.items.filter(i => i.item_type === 'service');
   // Delivered/units count excludes OOS; the item list still shows the full audit.
-  const itemCount     = groceryItems
-    .filter(i => i.shopping_status !== 'out_of_stock')
-    .reduce((s, i) => s + i.quantity, 0);
+  const itemCount     = orderItemCount(
+    groceryItems.filter(i => i.shopping_status !== 'out_of_stock'),
+  );
   const itemById = new Map(groceryItems.map(i => [i.id, i]));
   const subsByParent = groceryItems
     .filter(i => i.is_substitution && i.substitutes_item_id)

@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin, canAccess } from '@/lib/admin-auth-server';
+import { countableUnits } from '@/lib/utils';
 
 
 interface OrderRow {
@@ -139,7 +140,7 @@ export async function GET(req: NextRequest) {
     cur.totalSpent += Number(o.subtotal);
     cur.orders.push(o);
     for (const item of o.items) {
-      cur.itemCounts.set(item.description, (cur.itemCounts.get(item.description) || 0) + item.quantity);
+      cur.itemCounts.set(item.description, (cur.itemCounts.get(item.description) || 0) + countableUnits(item));
     }
     vesselMap.set(key, cur);
   }

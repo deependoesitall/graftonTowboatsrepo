@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Search, Download, Eye, Loader2, RefreshCw, Package, ArrowRight, Trash2, Users, Wrench, Printer, Plus, Mail, MailX, MailCheck, CheckCircle2 } from 'lucide-react';
 import { PickSheetOverlay } from '@/components/admin/PickSheetOverlay';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
-import { formatCurrency, formatDate, ORDER_STATUSES } from '@/lib/utils';
+import { formatCurrency, formatDate, orderItemCount, ORDER_STATUSES } from '@/lib/utils';
 import { Order, OrderStatus } from '@/types';
 import { OrderDetailModal } from '@/components/admin/OrderDetailModal';
 import { ShoppingModeModal } from '@/components/admin/ShoppingModeModal';
@@ -398,8 +398,8 @@ function OrdersContent() {
               {orders.map(order => {
                 const items = Array.isArray(order.items) ? order.items : [];
                 const groceryItems = items.filter(i => i.item_type !== 'service');
-                const groceryCount = groceryItems.reduce((s, i) => s + i.quantity, 0);
-                const itemCount = items.reduce((s, i) => s + i.quantity, 0);
+                const groceryCount = orderItemCount(groceryItems);
+                const itemCount = orderItemCount(items);
                 const cfg = STATUS_CONFIG[order.status as keyof typeof STATUS_CONFIG] ?? STATUS_CONFIG.new;
                 const nextSt = nextStatus(order.status, roleFlags.isGts);
                 const isUpdating = updatingId === order.id;
@@ -464,8 +464,8 @@ function OrdersContent() {
                   {orders.map(order => {
                     const items = Array.isArray(order.items) ? order.items : [];
                     const groceryItems = items.filter(i => i.item_type !== 'service');
-                    const groceryCount = groceryItems.reduce((s, i) => s + i.quantity, 0);
-                    const itemCount = items.reduce((s, i) => s + i.quantity, 0);
+                    const groceryCount = orderItemCount(groceryItems);
+                    const itemCount = orderItemCount(items);
                     const hasCrewChange = order.crew_change === 'yes';
                     const maybeCrewChange = order.crew_change === 'maybe';
                     const hasCod = items.some(i => i.paid_by === 'cod') || !!order.extended_info?.personal_cod_notes;

@@ -84,6 +84,8 @@ interface SyncState {
   inserted?: number;
   completedAt?: string;
   lastError?: string;
+  /** Non-fatal thing the operator should see — e.g. rows skipped as duplicates. */
+  lastNotice?: string;
   /** Result of the end-of-sweep store reconcile (see reconcile_store_availability). */
   reconcile?: {
     skipped: boolean; reason?: string;
@@ -554,11 +556,44 @@ async function handle(req: NextRequest) {
     if (batchUpdates.length) {
       const { error: rpcErr } = await supabase.rpc('apply_enrich_updates', { items: batchUpdates });
       if (rpcErr) {
-        state.lastError = `apply_enrich_updates: ${rpcErr.message}`;
-        await saveState(supabase, state);
-        return NextResponse.json({ error: state.lastError }, { status: 500 });
+        // ⚠️ A NEAR-DUPLICATE MUST NOT STOP THE SWEEP.
+        //
+        // uniq_store_match_key (054) allows one store_only row per
+        // (normalized name+size, price). Two legitimately separate Freshop rows
+        // can collide the night one of them goes on sale onto the other's
+        // price — and because this RPC was a single bulk UPDATE, that one row
+        // took the whole batch, and the route took the whole night, with it.
+        //
+        // Migration 088 gives the RPC a per-row fallback, so a modern database
+        // resolves this itself. This branch is the belt to that's braces: if
+        // 088 has not been applied yet, retry the batch in singles here so the
+        // rest of the catalog still syncs, exactly as the insert path below
+        // already does for 23505.
+        const isDuplicate = rpcErr.code === '23505'
+          || /duplicate key value/i.test(rpcErr.message || '');
+        if (!isDuplicate) {
+          state.lastError = `apply_enrich_updates: ${rpcErr.message}`;
+          await saveState(supabase, state);
+          return NextResponse.json({ error: state.lastError }, { status: 500 });
+        }
+
+        let landed = 0;
+        const collided: string[] = [];
+        for (const one of batchUpdates) {
+          const { error: oneErr } = await supabase.rpc('apply_enrich_updates', { items: [one] });
+          if (oneErr) collided.push(String((one as { id?: string }).id || '?'));
+          else landed++;
+        }
+        state.applied = (state.applied || 0) + landed;
+        // Recorded, not swallowed: a row that collides every night is a real
+        // duplicate someone has to merge, and it should be visible in the
+        // sync status rather than only in the server log.
+        state.lastNotice = `${collided.length} near-duplicate row(s) skipped by uniq_store_match_key`
+          + (collided.length ? ` — ${collided.slice(0, 5).join(', ')}` : '');
+        console.warn('[catalog-sync]', state.lastNotice);
+      } else {
+        state.applied = (state.applied || 0) + batchUpdates.length;
       }
-      state.applied = (state.applied || 0) + batchUpdates.length;
     }
     if (batchInserts.length) {
       const { error: insErr } = await supabase.from('products').insert(batchInserts);

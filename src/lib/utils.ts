@@ -261,6 +261,44 @@ export function formatQty(quantity: number, asPounds: boolean | undefined | null
   return asPounds ? formatLb(quantity) : `×${quantity}`;
 }
 
+// ── How many *things* are in an order ─────────────────────────────────
+//
+// ⚠️ DO NOT SUM `quantity` TO COUNT ITEMS.
+//
+// For a by-the-pound line, `quantity` IS the weight — 1.5 means a pound and a
+// half of sliced ham, not "one and a half hams". Summing it raw produced order
+// cards reading "23.75 items", which is how GTS-260915-3684 ended up showing a
+// decimal beside an order number.
+//
+// A weighed line is still ONE thing to pick, bag and load, so it counts as one.
+// Everything else counts its units. The result is always a whole number, which
+// is the only kind of answer the question "how many items?" has.
+
+/** True when this line's `quantity` is a weight rather than a unit count. */
+export interface CountableLine {
+  uom?: string | null;
+  quantity?: number | null;
+  billed_by_weight?: boolean | null;
+}
+
+export function isWeighedLine(item: CountableLine): boolean {
+  if (item.billed_by_weight) return true;
+  return isPoundQty(item.uom, Number(item.quantity) || 0);
+}
+
+/** Units this one line contributes to an item count. Weighed lines count as 1. */
+export function countableUnits(item: CountableLine): number {
+  const q = Number(item.quantity) || 0;
+  if (q <= 0) return 0;
+  if (isWeighedLine(item)) return 1;
+  return Math.round(q);
+}
+
+/** Whole-number item count for a set of order lines. Never returns a decimal. */
+export function orderItemCount(items: CountableLine[] | null | undefined): number {
+  return (items || []).reduce((s, i) => s + countableUnits(i), 0);
+}
+
 /**
  * Customer-facing product name. The catalog spreadsheet's `description` is
  * abbreviated POS-style ("YOP STRWBRY YOG"); the full name from Sinclair's

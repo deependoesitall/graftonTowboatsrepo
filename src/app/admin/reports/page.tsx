@@ -19,7 +19,7 @@ import {
 } from 'recharts';
 import { fetchAdminSession, canAccess, adminFetch } from '@/lib/admin-auth';
 import { billingKey, canonicalVesselName } from '@/lib/vessel';
-import { formatCurrency } from '@/lib/utils';
+import { formatCurrency, orderItemCount } from '@/lib/utils';
 
 // ─── Analytics types ──────────────────────────────────────────
 interface Stats {
@@ -367,7 +367,7 @@ function orderDetailSheet(o: BillingOrder, groupLabel: string, monthLabel: strin
     <tbody>${itemRows}</tbody>
     <tfoot>
       <tr style="border-top:2px solid ${GREEN};">
-        <td colspan="6" style="padding:7px 6px;font-size:10px;font-weight:800;color:#555;text-transform:uppercase;">Order totals (${grocery.filter(i => i.shopping_status !== 'out_of_stock').reduce((s, i) => s + i.quantity, 0)} items billed to vessel)</td>
+        <td colspan="6" style="padding:7px 6px;font-size:10px;font-weight:800;color:#555;text-transform:uppercase;">Order totals (${orderItemCount(grocery.filter(i => i.shopping_status !== 'out_of_stock'))} items billed to vessel)</td>
         <td style="padding:7px 6px;text-align:right;font-size:11px;font-weight:800;color:#555;">${money(est)}</td>
         <td></td>
         <td style="padding:7px 6px;text-align:right;font-size:12px;font-weight:900;color:${GREEN};">${money(actual)}</td>
@@ -451,8 +451,8 @@ function vesselStatementPage(group: string, orders: BillingOrder[], monthLabel: 
   const orderRows = orders.map(o => {
     const grocery = billableItems(o);
     const delivered = grocery.filter(i => i.shopping_status !== 'out_of_stock');
-    const orderedQty = grocery.filter(i => !i.is_substitution).reduce((s, i) => s + i.quantity, 0);
-    const deliveredQty = delivered.reduce((s, i) => s + i.quantity, 0);
+    const orderedQty = orderItemCount(grocery.filter(i => !i.is_substitution));
+    const deliveredQty = orderItemCount(delivered);
     const subCount = delivered.filter(i => i.is_substitution).length;
     const svcCount = o.items.filter(i => i.item_type === 'service').length;
     const codCount = codLines(o).length;
@@ -1009,9 +1009,9 @@ function BillingOrderTable({ orders, selected, onToggle, showCompany = false, sh
           {orders.map(o => {
             const grocery = billableItems(o);
             const codCount = codLines(o).length;
-            const orderedQty = grocery.filter(i => !i.is_substitution).reduce((s, i) => s + i.quantity, 0);
+            const orderedQty = orderItemCount(grocery.filter(i => !i.is_substitution));
             const delivered = grocery.filter(i => i.shopping_status !== 'out_of_stock');
-            const deliveredQty = delivered.reduce((s, i) => s + i.quantity, 0);
+            const deliveredQty = orderItemCount(delivered);
             const subCount = delivered.filter(i => i.is_substitution).length;
             const svcCount = o.items.filter(i => i.item_type === 'service').length;
             return (

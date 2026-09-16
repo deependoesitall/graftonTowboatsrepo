@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   Star, History, User, LogOut, Loader2, ShoppingCart,
-  RotateCcw, ChevronRight, Save, Package
+  RotateCcw, ChevronRight, Save, Package, AlertTriangle, RefreshCw
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { AuthModal } from '@/components/auth/AuthModal';
@@ -15,7 +15,7 @@ import { CartBar } from '@/components/cart/CartBar';
 import { createClient } from '@/lib/supabase/client';
 import { getFavoriteProducts, removeFavorite } from '@/lib/favorites';
 import { addToCart, saveCart, getCart, saveVesselInfo, getVesselInfo, saveCodPayments, clearCodPayments, type StoredCodPay } from '@/lib/cart';
-import { formatCurrency, formatDate, productDisplayName } from '@/lib/utils';
+import { formatCurrency, formatDate, formatQty, isWeighedLine, productDisplayName } from '@/lib/utils';
 import { Product, Order, VESSEL_TYPES } from '@/types';
 import { readCodPayments } from '@/lib/cod-payments';
 import { useToast } from '@/hooks/use-toast';
@@ -40,6 +40,7 @@ function AccountContent() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
   const [ordersLoading, setOrdersLoading] = useState(false);
+  const [ordersError, setOrdersError] = useState<string | null>(null);
 
   // Favorites
   const [favorites, setFavorites] = useState<Product[]>([]);
@@ -70,18 +71,39 @@ function AccountContent() {
     setExpandedOrderId(id);
   }, [user]);
 
+  // ⚠️ ORDER HISTORY COMES FROM THE SERVER, NOT FROM RLS.
+  //
+  // This used to select from `orders` directly and trust row-level security to
+  // hide other people's rows. The catch is that RLS hiding a row that IS yours
+  // — a missing user_id, a boat not linked yet, a policy migration not run —
+  // looks exactly like having no orders, so the page confidently told people
+  // who had just checked out that they had never ordered.
+  //
+  // /api/customer/orders decides what "yours" means in one place (own orders,
+  // your boat's orders, orders placed with your email), repairs unstamped rows
+  // while it is there, and returns a real error when something actually breaks.
   async function loadOrders() {
     setOrdersLoading(true);
+    setOrdersError(null);
     try {
       const supabase = createClient();
-      const { data } = await supabase
-        .from('orders')
-        .select('*, items:order_items(*)')
-        .order('created_at', { ascending: false })
-        .limit(50);
-      setOrders((data as Order[]) || []);
-    } catch {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error('Your session expired. Please sign in again.');
+
+      const res = await fetch('/api/customer/orders', {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        cache: 'no-store',
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || 'We could not load your orders just now.');
+      }
+      const body = await res.json();
+      setOrders((body.orders as Order[]) || []);
+    } catch (err) {
+      // Deliberately NOT falling back to an empty list — see above.
       setOrders([]);
+      setOrdersError(err instanceof Error ? err.message : 'We could not load your orders just now.');
     } finally {
       setOrdersLoading(false);
     }
@@ -127,7 +149,7 @@ function AccountContent() {
         phone: data.phone || '',
       });
     } catch {
-      // no profile yet â" leave defaults
+      // no profile yet — leave defaults
     }
   }
 
@@ -151,22 +173,22 @@ function AccountContent() {
   }
 
   /**
-   * REPEAT ORDER â" brings back the LINES AND THE HEADER.
+   * REPEAT ORDER — brings back the LINES AND THE HEADER.
    *
    * It used to copy line items and nothing else, so the one button whose whole
    * promise is "same as last time" still made a returning captain retype the
    * company, vessel, captain, captain's mobile, vessel email, terminal and
    * delivery method. Every one of those is already snapshotted on the order
-   * being repeated â" the data was sitting right there, unused.
+   * being repeated — the data was sitting right there, unused.
    *
    * Three other things it got wrong:
    *
-   *   Â· paid_by was HARDCODED to 'vessel', so repeating an order silently
+   *   · paid_by was HARDCODED to 'vessel', so repeating an order silently
    *     moved every COD line onto the company invoice. A crew member's
    *     personal Tylenol became the boat's, and nothing said so.
-   *   Â· cod_name went with it, losing even the record of whose item it was.
-   *   Â· The toast counted order.items â" including the service lines it had
-   *     just filtered out â" so it reported adding more than it added.
+   *   · cod_name went with it, losing even the record of whose item it was.
+   *   · The toast counted order.items — including the service lines it had
+   *     just filtered out — so it reported adding more than it added.
    */
   async function repeatOrder(order: Order) {
     // Services are deliberately not repeated: a parts pickup or a package
@@ -191,7 +213,7 @@ function AccountContent() {
       const ok = await confirmDialog({
         title: 'Replace your current cart?',
         message: `Repeating ${order.order_number} brings back ${lines.length} item${lines.length !== 1 ? 's' : ''}. `
-          + `Your cart has ${existing.length} right now â" ${existing.length === 1 ? 'it' : 'they'} will be removed.`,
+          + `Your cart has ${existing.length} right now — ${existing.length === 1 ? 'it' : 'they'} will be removed.`,
         danger: true,
       });
       if (!ok) return;
@@ -278,7 +300,7 @@ function AccountContent() {
       };
     }));
 
-    // â"â" The header â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"
+    // —— The header ————————————————————————————————————————————————————————
     //
     // Restored from the order's own snapshot. The API stores vessel_type
     // resolved to a plain string, so a custom type has to be unpacked back into
@@ -308,7 +330,7 @@ function AccountContent() {
       approach_side:   order.approach_side   || '',
       vhf_channel:     order.vhf_channel     || '',
 
-      // â ï¸ EVERYTHING BELOW IS PER-TRIP AND MUST COME BACK BLANK.
+      // ⚠️ EVERYTHING BELOW IS PER-TRIP AND MUST COME BACK BLANK.
       //
       // A stale arrival date is worse than an empty one: an empty field is
       // caught by validation, while a plausible-looking old date gets submitted
@@ -321,10 +343,10 @@ function AccountContent() {
       notes: '', eta: '',
     });
 
-    // â"â" Who pays, per person â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"â"
+    // —— Who pays, per person ——————————————————————————————————————————————
     //
     // Restored from the same snapshot. A boat's crew settle the same way most
-    // weeks â" Amber by Venmo, Andy by card â" so asking again, including for the
+    // weeks — Amber by Venmo, Andy by card — so asking again, including for the
     // Venmo handle, is exactly the retyping this button is supposed to remove.
     // The form still shows each choice and still validates it; nothing is
     // submitted on their behalf.
@@ -349,8 +371,8 @@ function AccountContent() {
     toast({
       title: `${lines.length} item${lines.length !== 1 ? 's' : ''} added to cart`,
       description: (droppedServices > 0
-        ? `From ${order.order_number}. ${droppedServices} service line${droppedServices !== 1 ? 's' : ''} not repeated â" add those again if you need them.`
-        : `From ${order.order_number}. Vessel and delivery details are filled in â" just set the date and time.`) + staleNote,
+        ? `From ${order.order_number}. ${droppedServices} service line${droppedServices !== 1 ? 's' : ''} not repeated — add those again if you need them.`
+        : `From ${order.order_number}. Vessel and delivery details are filled in — just set the date and time.`) + staleNote,
       variant: 'success',
     });
     router.push('/order');
@@ -440,10 +462,26 @@ function AccountContent() {
           ))}
         </div>
 
-        {/* â"â" PAST ORDERS â"â" */}
+        {/* —— PAST ORDERS —— */}
         {tab === 'orders' && (
           ordersLoading ? (
             <div className="flex justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-brand-green" /></div>
+          ) : ordersError ? (
+            /* ⚠️ A LOAD FAILURE IS NEVER SHOWN AS "no orders". Telling a captain
+               they have no history when the real problem is our end is how a
+               boat gets reordered from scratch. */
+            <div className="card-base p-10 text-center border-brand-orange/30">
+              <div className="w-16 h-16 bg-brand-orange/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                <AlertTriangle className="w-8 h-8 text-brand-orange" />
+              </div>
+              <p className="font-bold text-brand-green text-base mb-2">We couldn&rsquo;t load your orders</p>
+              <p className="text-brand-green/50 text-sm leading-relaxed mb-5 max-w-xs mx-auto">
+                {ordersError} Your orders are safe &mdash; this is a problem showing them, not a problem with them.
+              </p>
+              <button onClick={loadOrders} className="btn-primary inline-flex items-center gap-2">
+                <RefreshCw className="w-4 h-4" /> Try again
+              </button>
+            </div>
           ) : orders.length === 0 ? (
             <div className="card-base p-10 text-center">
               <div className="w-16 h-16 bg-brand-green/5 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -469,15 +507,15 @@ function AccountContent() {
                       </span>
                     </div>
                     <p className="text-sm text-brand-green/70 truncate">
-                      {order.company_name}{` \u00b7 `}{formatDate(order.created_at)}
+                      {order.company_name}{' · '}{formatDate(order.created_at)}
                     </p>
                     <p className="text-xs text-brand-green/40 mt-0.5">
-                      {order.items?.length || 0} line items{` \u00b7 `}<span className="font-bold text-brand-green">{formatCurrency(order.subtotal)}</span>
+                      {order.items?.length || 0} line items{' · '}<span className="font-bold text-brand-green">{formatCurrency(order.subtotal)}</span>
                       {(Number(order.discount_total) || 0) > 0 && (
                         <span className="ml-1.5 text-green-600 font-semibold">{`\u2212`}{formatCurrency(Number(order.discount_total))} coupons</span>
                       )}
                     </p>
-                    {/* Product thumbnails â" the little dopamine strip */}
+                    {/* Product thumbnails — the little dopamine strip */}
                     {(order.items || []).some(i => i.image_url) && (
                       <div className="flex items-center gap-1.5 mt-2">
                         {(order.items || []).filter(i => i.image_url).slice(0, 8).map(i => (
@@ -538,7 +576,7 @@ function AccountContent() {
                           return (
                             <div key={item.id} className="text-sm">
                               <div className={`flex gap-2 items-start ${oos ? 'opacity-70' : ''}`}>
-                                <span className="text-xs font-bold text-brand-green/60 w-8 shrink-0">{item.quantity}×</span>
+                                <span className="text-xs font-bold text-brand-green/60 w-12 shrink-0">{formatQty(item.quantity, isWeighedLine(item))}</span>
                                 <div className="min-w-0 flex-1">
                                   <p className={`font-semibold text-brand-navy text-xs leading-snug ${oos ? 'line-through' : ''}`}>
                                     {item.description}
@@ -566,7 +604,7 @@ function AccountContent() {
                                   && sub.product_id === item.preferred_sub_product_id;
                                 return (
                                   <div key={sub.id} className="flex gap-2 items-start ml-6 mt-1 border-l-2 border-amber-400 pl-2">
-                                    <span className="text-xs font-bold text-amber-700 w-8 shrink-0">{sub.quantity}×</span>
+                                    <span className="text-xs font-bold text-amber-700 w-12 shrink-0">{formatQty(sub.quantity, isWeighedLine(sub))}</span>
                                     <div className="min-w-0 flex-1">
                                       <p className="font-semibold text-amber-800 text-xs leading-snug">{sub.description}</p>
                                       <p className="text-[10px] font-bold text-amber-700 uppercase">
@@ -589,7 +627,7 @@ function AccountContent() {
           )
         )}
 
-        {/* â"â" FAVORITES â"â" */}
+        {/* —— FAVORITES —— */}
         {tab === 'favorites' && (
           favsLoading ? (
             <div className="flex justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-brand-green" /></div>
@@ -624,7 +662,7 @@ function AccountContent() {
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold text-brand-green text-sm truncate">{p.description}</p>
                     <p className="text-xs text-brand-green/40">
-                      {p.category}{p.pkg_size ? ` \u00b7 ${p.pkg_size}` : ''} \u00b7 <span className="font-bold text-brand-green">{formatCurrency(p.price)}</span>
+                      {p.category}{p.pkg_size ? ` · ${p.pkg_size}` : ''}{' · '}<span className="font-bold text-brand-green">{formatCurrency(p.price)}</span>
                     </p>
                   </div>
                   <button onClick={() => favToCart(p)}
@@ -637,7 +675,7 @@ function AccountContent() {
           )
         )}
 
-        {/* â"â" PROFILE â"â" */}
+        {/* —— PROFILE —— */}
         {tab === 'profile' && (
           <div className="space-y-4">
             <div className="card-base p-6 space-y-4">

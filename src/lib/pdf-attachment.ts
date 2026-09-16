@@ -3,7 +3,7 @@
 // Does NOT use @react-pdf/renderer or any browser-only API — safe for Node.js serverless.
 
 import type { Order } from '@/types';
-import { formatCurrency, formatDate } from './utils';
+import { formatCurrency, formatDate, orderItemCount } from './utils';
 import { codFeePercent, codTotalWithFee } from '@/lib/cod-fee';
 import { splitOutsidePickups, groupCodCollect, lineAmount } from '@/lib/outside-pickup';
 import { accountUrl } from '@/lib/public-url';
@@ -50,7 +50,7 @@ export async function generateOrderPdfBuffer(order: Order): Promise<Buffer> {
     const visibleItems = order.items.filter(i => i.shopping_status !== 'out_of_stock');
     const isFulfilled  = order.status === 'fulfilled';
 
-    const itemCount = visibleItems.reduce((s, i) => s + i.quantity, 0);
+    const itemCount = orderItemCount(visibleItems);
 
     // ── HEADER ────────────────────────────────────────────────
     doc.rect(MARGIN, MARGIN, CONTENT_W, 56).fill(DARK_GREEN);

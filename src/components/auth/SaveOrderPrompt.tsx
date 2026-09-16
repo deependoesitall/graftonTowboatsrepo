@@ -33,6 +33,7 @@
 import { useEffect, useState } from 'react';
 import { X, History, Zap, Ship, ShieldCheck } from 'lucide-react';
 import type { Order } from '@/types';
+import { countableUnits } from '@/lib/utils';
 
 /** Remembered per order, so re-opening the emailed link doesn't re-ask. */
 const dismissKey = (orderId: string) => `gts-save-order-dismissed:${orderId}`;
@@ -100,7 +101,7 @@ export function SaveOrderPrompt({ order, orderNumber, onCreateAccount }: {
   // "reorder your items" is a slogan.
   const itemCount = (order?.items || [])
     .filter(i => i.item_type !== 'service')
-    .reduce((s, i) => s + (i.quantity || 0), 0);
+    .reduce((s, i) => s + countableUnits(i), 0);
   const vessel = (order?.vessel_name || '').trim();
 
   return (

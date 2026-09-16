@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { clearCart } from '@/lib/cart';
-import { formatCurrency, formatDate } from '@/lib/utils';
+import { formatCurrency, formatDate, formatQty, isWeighedLine } from '@/lib/utils';
 import { Order } from '@/types';
 import { SiteHeader } from '@/components/layout/SiteHeader';
 import { CheckCircle2, Download, ShoppingCart, Anchor, Star, History } from 'lucide-react';
@@ -20,7 +20,7 @@ function ConfirmContent() {
   const { user, loading: authLoading } = useAuth();
   const [authOpen, setAuthOpen] = useState(false);
   // Carried from the prompt so the signup form opens with the address the
-  // confirmation was just sent to already in it â" one less field, and it
+  // confirmation was just sent to already in it — one less field, and it
   // guarantees claim-orders finds this order under the new account.
   const [authEmail, setAuthEmail] = useState('');
   const prevUserRef = useRef<string | null>(null);
@@ -50,7 +50,7 @@ function ConfirmContent() {
     prevUserRef.current = user?.id ?? null;
 
     if (wasLoggedOut && isNowLoggedIn) {
-      // Fire-and-forget â" link all orders placed with this email to the new account
+      // Fire-and-forget — link all orders placed with this email to the new account
       createClient().auth.getSession().then(({ data }) => {
         const token = data.session?.access_token;
         if (!token) return;
@@ -92,7 +92,7 @@ function ConfirmContent() {
             {order && (
               <p className="text-gray-400 text-xs">
                 Estimated Total: <span className="font-bold text-brand-navy">{formatCurrency(order.subtotal)}</span>
-                {' Â· '}Placed {formatDate(order.created_at)}
+                {' · '}Placed {formatDate(order.created_at)}
               </p>
             )}
           </div>
@@ -141,7 +141,7 @@ function ConfirmContent() {
                         {item.description}
                       </p>
                       <p className="text-xs text-gray-400">
-                        {item.quantity}&times; {formatCurrency(item.unit_price)}
+                        {formatQty(item.quantity, isWeighedLine(item))} {formatCurrency(item.unit_price)}{isWeighedLine(item) ? '/lb' : ''}
                       </p>
                     </div>
                     <p className="text-sm font-bold text-brand-navy shrink-0">
@@ -235,7 +235,7 @@ function ConfirmContent() {
         </div>
       </main>
       {/* THE ASK, AT THE ONE MOMENT IT IS EARNED.
-          Guests only, once per order, and after the confirmation has landed â"
+          Guests only, once per order, and after the confirmation has landed —
           see the header of SaveOrderPrompt for why each of those is a rule and
           not a preference. */}
       {!authLoading && !user && (

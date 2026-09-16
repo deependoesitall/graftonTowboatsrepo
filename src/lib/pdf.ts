@@ -1,7 +1,7 @@
 // src/lib/pdf.ts
 // Generates a clean, branded, print-ready HTML order sheet for Sinclair Foods
 import { Order } from '@/types';
-import { formatCurrency, formatDate, formatArrivalTime } from './utils';
+import { formatCurrency, formatDate, formatArrivalTime, orderItemCount } from './utils';
 import { codFeePercent, codFeeLabel, codTotalWithFee, allocateCodTotals } from '@/lib/cod-fee';
 import { readCodPayments, codMethodSentence } from '@/lib/cod-payments';
 import {
@@ -80,9 +80,9 @@ export function generateOrderHTML(order: Order): string {
     : order.cod_payment_method === 'cash' ? 'Cash (legacy)' : null;
   const codFeePct = codFeePercent(order);
   const isFulfilled       = order.status === 'fulfilled';
-  const itemCount         = groceryItems
-    .filter(i => i.shopping_status !== 'out_of_stock')
-    .reduce((s, i) => s + i.quantity, 0);
+  const itemCount         = orderItemCount(
+    groceryItems.filter(i => i.shopping_status !== 'out_of_stock'),
+  );
   const isCrewChangeOnly  = order.crew_change !== 'no' && groceryItems.length === 0;
 
   function renderGroceryRow(item: typeof groceryItems[number], idx: number, nested = false): string {

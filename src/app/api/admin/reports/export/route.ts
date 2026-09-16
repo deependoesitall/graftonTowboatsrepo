@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/admin-auth-server';
-import { TIME_ZONE } from '@/lib/utils';
+import { TIME_ZONE, orderItemCount } from '@/lib/utils';
 
 function csvEscape(val: unknown): string {
   const s = String(val ?? '');
@@ -152,7 +152,7 @@ export async function GET(req: NextRequest) {
       const grocery = items.filter(i => i.item_type !== 'service' && paidOf(i) === 'vessel');
       const cod = items.filter(i => paidOf(i) === 'cod');
       const deck = items.filter(i => paidOf(i) === 'deck');
-      const itemCount = items.reduce((s, i) => s + (Number(i.quantity) || 0), 0);
+      const itemCount = orderItemCount(items);
       const sum = (rows: ExportItem[]) => rows.reduce((s, i) => s + Number(i.line_total || 0), 0);
       csv += [
         o.order_number,
