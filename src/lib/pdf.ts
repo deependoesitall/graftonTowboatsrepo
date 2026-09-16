@@ -2,6 +2,11 @@
 // Generates a clean, branded, print-ready HTML order sheet for Sinclair Foods
 import { Order } from '@/types';
 import { formatCurrency, formatDate, formatArrivalTime, formatCalendarDate, orderItemCount } from './utils';
+import { billableCharges, chargeLabel } from '@/lib/service-charges';
+
+/** Service labels are staff free text and this is markup. */
+const escHtml = (s: string) => String(s ?? '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 import { codFeePercent, codFeeLabel, codTotalWithFee, allocateCodTotals } from '@/lib/cod-fee';
 import { readCodPayments, codMethodSentence } from '@/lib/cod-payments';
 import {
@@ -208,6 +213,8 @@ export function generateOrderHTML(order: Order): string {
   const approachSide    = order.approach_side  ? order.approach_side.charAt(0).toUpperCase() + order.approach_side.slice(1) : null;
   const ext             = order.extended_info  || {};
   /** Two stops is a different run, and several places below read differently for it. */
+  /** GTS's own charges on this order, one line each. See lib/service-charges. */
+  const gtsCharges      = billableCharges(order);
   const hasSecondStop   = !!(
     ext.secondary_terminal_name || ext.secondary_arrival_date || ext.secondary_arrival_time
   );
@@ -479,10 +486,14 @@ ${groceryItems.length > 0 ? `
           <td style="padding:7px 8px;font-size:11px;font-weight:900;color:#15803d;text-transform:uppercase;">After est. coupon savings (&minus;${formatCurrency(discountTotal)})</td>
           <td style="padding:7px 8px;text-align:right;font-size:14px;font-weight:900;color:#15803d;">${formatCurrency(Math.max(0, Number(order.subtotal) - discountTotal))}</td>
         </tr>` : ''}
-        ${Number(order.delivery_fee) > 0 ? `<tr>
-          <td style="padding:6px 8px;font-size:11px;color:#1E3D1E;font-weight:700;">GTS delivery${order.delivery_service_type ? ` — ${order.delivery_service_type}` : ''}</td>
-          <td style="padding:6px 8px;text-align:right;font-size:12px;font-weight:800;color:#1E3D1E;">${formatCurrency(Number(order.delivery_fee))}</td>
-        </tr>` : ''}
+        ${/* ⚠️ ONE LINE PER SERVICE. A boat billed for a grocery delivery and a
+              crew change on the same trip is billed for two things, and this
+              is the copy it keeps. billableCharges yields the same shape for a
+              single-charge order from before 091, so there is one path here. */''}
+        ${gtsCharges.map(c => `<tr>
+          <td style="padding:6px 8px;font-size:11px;color:#1E3D1E;font-weight:700;">GTS ${escHtml(chargeLabel(c))}</td>
+          <td style="padding:6px 8px;text-align:right;font-size:12px;font-weight:800;color:#1E3D1E;">${formatCurrency(c.amount)}</td>
+        </tr>`).join('')}
         ${order.bill_for_groceries === true && order.register_total != null ? `<tr>
           <td style="padding:6px 8px;font-size:11px;color:#1E3D1E;font-weight:700;">Sinclair&apos;s grocery (register)</td>
           <td style="padding:6px 8px;text-align:right;font-size:12px;font-weight:800;color:#1E3D1E;">${formatCurrency(Number(order.register_total))}</td>

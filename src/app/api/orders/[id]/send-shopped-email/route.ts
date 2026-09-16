@@ -30,8 +30,46 @@ export async function POST(
   if ('bill_for_groceries' in body) deliveryUpdate.bill_for_groceries = !!body.bill_for_groceries;
   // Grocery total from Sinclair's receipt (only sent for grocery-billed orders).
   if (body.register_total != null && body.register_total !== '') deliveryUpdate.register_total = Number(body.register_total);
+
+  // ── GTS'S SERVICES ON THIS ORDER ────────────────────────────────
+  //
+  // One boat's trip can take more than one — a grocery delivery and a crew
+  // change are two charges at two prices, which is how GTS's ledger has always
+  // recorded them. Migration 091 derives delivery_fee (the sum) and
+  // delivery_service_type from this, so the ledger, the QuickBooks pack and
+  // every report keep reading the columns they always read.
+  //
+  // Normalised HERE and not trusted from the client: this is money, and the
+  // dialog is not the only thing that could ever POST to this route.
+  let charges: Array<{ service_type: string; amount: number; note?: string }> | null = null;
+  if (Array.isArray(body.service_charges)) {
+    charges = (body.service_charges as Array<Record<string, unknown>>)
+      .map(c => ({
+        service_type: String(c?.service_type ?? '').trim().slice(0, 120) || 'Delivery',
+        amount: Math.round((Number(c?.amount) || 0) * 100) / 100,
+        note: String(c?.note ?? '').trim().slice(0, 120) || undefined,
+      }))
+      // A row with no label and no money is a half-filled line somebody
+      // abandoned in the dialog, not a service to invoice.
+      .filter(c => c.service_type !== 'Delivery' || c.amount > 0);
+    deliveryUpdate.service_charges = charges;
+  }
+
   if (Object.keys(deliveryUpdate).length) {
-    await supabase.from('orders').update(deliveryUpdate).eq('id', id);
+    const { error: updErr } = await supabase.from('orders').update(deliveryUpdate).eq('id', id);
+    if (updErr) {
+      // ⚠️ A DATABASE WITHOUT 091 HAS NO service_charges COLUMN, and the whole
+      // update fails with it — taking the fee and the bill-for-groceries choice
+      // down too, which is the part that actually has to be saved. Retry
+      // without it so the single-charge path still works on an un-migrated
+      // database, exactly as it did before this feature existed.
+      const { service_charges: _dropped, ...withoutCharges } = deliveryUpdate;
+      void _dropped;
+      if (Object.keys(withoutCharges).length) {
+        await supabase.from('orders').update(withoutCharges).eq('id', id);
+      }
+      console.warn('[send-shopped-email] service_charges not saved:', updErr.message);
+    }
   }
 
   const { data: order, error } = await supabase

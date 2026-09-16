@@ -36,6 +36,18 @@ export async function GET(
   if (searchParams.has('delivery_service_type')) merged.delivery_service_type = searchParams.get('delivery_service_type');
   if (searchParams.has('bill_for_groceries')) merged.bill_for_groceries = searchParams.get('bill_for_groceries') === 'true';
   if (searchParams.has('register_total')) merged.register_total = Number(searchParams.get('register_total')) || null;
+  // ⚠️ A TWO-SERVICE BILL CANNOT BE DESCRIBED BY A FEE AND A LABEL, so the
+  // preview takes the whole breakdown. Parsed defensively: this is a query
+  // string, and a preview that throws is worse than one that falls back to the
+  // fee it already has.
+  if (searchParams.has('service_charges')) {
+    try {
+      const parsed = JSON.parse(searchParams.get('service_charges') || '[]');
+      if (Array.isArray(parsed)) {
+        (merged as unknown as { service_charges: unknown }).service_charges = parsed;
+      }
+    } catch { /* keep whatever the stored order has */ }
+  }
 
   const staffNote = searchParams.get('staff_note') || '';
   const html = buildOrderShoppedEmailHtml(merged, {}, staffNote);

@@ -31,6 +31,7 @@
 // screen and testable without a browser.
 
 import { formatCurrency } from '@/lib/utils';
+import { billableCharges, chargeLabel } from '@/lib/service-charges';
 
 export type GroceryMode = 'none' | 'sinclair_courtesy' | 'gts_purchased';
 
@@ -47,6 +48,9 @@ export interface PackDelivery {
   location_delivered: string | null;
   po_number: string | null;
   delivery_fee: number | null;
+  /** The breakdown behind delivery_fee, when the order carried more than one
+   *  service. Empty on hand-typed rows and single-service deliveries (091). */
+  service_charges?: unknown;
   grocery_mode: GroceryMode;
   sinclairs_grocery_total: number | null;
   side_purchases: SidePurchase[] | null;
@@ -125,14 +129,34 @@ export function buildPack(d: PackDelivery): QbPack {
   const lines: PackLine[] = [];
   const warnings: PackWarning[] = [];
 
-  // ── 1. The delivery itself ──────────────────────────────────────────────
-  const fee = Number(d.delivery_fee) || 0;
+  // ── 1. GTS's own services ───────────────────────────────────────────────
+  //
+  // ⚠️ ONE QBO LINE PER SERVICE, NOT ONE PER DELIVERY.
+  //
+  // A boat that took a grocery delivery and a crew change on the same trip
+  // owes for both, and GTS's ledger has always written them as two lines at
+  // two prices (5/8/2026, Coop Vanguard: $350 and $150 with the second at half
+  // rate). Invoicing that as a single "$500 Delivery" gives accounts payable a
+  // number they cannot reconcile against anything, which is how an invoice sits
+  // unpaid for a month.
+  //
+  // billableCharges falls back to the single delivery_fee for every row
+  // recorded before 091, so nothing about an ordinary one-service delivery
+  // changes: same one line, same description, same amount.
+  const charges = billableCharges({
+    service_charges: d.service_charges,
+    delivery_fee: d.delivery_fee,
+    delivery_service_type: d.service_type,
+  });
+  const fee = charges.reduce((s, c) => s + c.amount, 0);
   if (fee > 0) {
-    lines.push({
-      description: d.service_type || 'Delivery',
-      amount: money(fee),
-      taxable: FEE_TAXABLE,
-    });
+    for (const c of charges) {
+      lines.push({
+        description: chargeLabel(c),
+        amount: money(c.amount),
+        taxable: FEE_TAXABLE,
+      });
+    }
   } else {
     warnings.push({
       level: 'warn',

@@ -39,6 +39,11 @@ interface Delivery {
   // Migration 074 — the QuickBooks handoff.
   grocery_mode: 'none' | 'sinclair_courtesy' | 'gts_purchased';
   side_purchases: Array<{ description: string; amount: number }> | null;
+  /** Migration 091 — the breakdown behind delivery_fee when the order carried
+   *  more than one service (a grocery delivery AND a crew change on one trip).
+   *  Read-only here: it belongs to the order, and editing it there is what
+   *  keeps the fee, the customer's final email and the invoice agreeing. */
+  service_charges?: Array<{ service_type: string; amount: number; note?: string }> | null;
   customer_invoiced_in_qb: boolean | null;
   driver_paid_in_qb: boolean | null;
   not_billable: boolean | null;

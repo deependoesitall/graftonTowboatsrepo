@@ -1,12 +1,12 @@
 'use client';
 // src/app/admin/page.tsx
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import {
   Package, Clock, CheckCircle2, TrendingUp,
   ShoppingBag, Lock, Eye, EyeOff, Loader2, ShoppingCart,
-  Mail, Send, X, FileText, AlertTriangle, Truck,
+  Mail, Send, X, FileText, AlertTriangle, Truck, Plus,
 } from 'lucide-react';
 import { formatCurrency, formatDateOnly } from '@/lib/utils';
 import { AdminRole, AdminPermission, setAdminSession, setAdminUiState, fetchAdminSession, adminFetch, isGtsRole, getAdminRole } from '@/lib/admin-auth';
@@ -525,8 +525,44 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
   const [companies, setCompanies] = useState<Array<{ id: string; name: string }>>([]);
   const [serviceTypes, setServiceTypes] = useState<Array<{ id: string; name: string; default_rate: number }>>([]);
   const [companyId, setCompanyId] = useState('');
-  const [serviceType, setServiceType] = useState('');
-  const [fee, setFee] = useState('');
+  /* ── GTS'S CHARGES ON THIS ORDER ──────────────────────────────────
+     ⚠️ ONE BOAT'S TRIP CAN TAKE MORE THAN ONE SERVICE.
+
+     This was a single service type and a single fee, which meant a boat that
+     had a grocery delivery AND a crew change on the same run could only be
+     charged for one of them. GTS's own ledger has always written those as two
+     lines at two prices — 5/8/2026, Coop Vanguard: $350 for the grocery
+     delivery and $150 for the crew change beside it, the second discounted by
+     hand.
+
+     A different BOAT is a different order with its own full charge; that
+     already worked and is untouched. Amounts are held as strings because they
+     are whatever is in the input box — '' means "not filled in yet", which is
+     a different thing from 0 and has to survive as one. */
+  const [charges, setCharges] = useState<Array<{ service_type: string; amount: string; note: string }>>(
+    [{ service_type: '', amount: '', note: '' }],
+  );
+  const [rateHints, setRateHints] = useState<Record<number, string>>({});
+
+  const patchCharge = (i: number, p: Partial<{ service_type: string; amount: string; note: string }>) =>
+    setCharges(cs => cs.map((c, n) => (n === i ? { ...c, ...p } : c)));
+
+  // What goes on the wire and into the preview. Half-filled rows are dropped
+  // rather than sent as $0 lines nobody meant to add.
+  const filledCharges = charges
+    .filter(c => c.service_type.trim() || c.amount !== '')
+    .map(c => ({
+      service_type: c.service_type.trim() || 'Delivery',
+      amount: c.amount === '' ? 0 : Number(c.amount) || 0,
+      note: c.note.trim(),
+    }));
+
+  // ⚠️ THE SUM, NOT THE FIRST. Migration 091's trigger derives
+  // orders.delivery_fee from the charges exactly this way; mirroring it here
+  // means the dialog shows what will actually be billed.
+  const feeTotal = Math.round(filledCharges.reduce((s, c) => s + c.amount, 0) * 100) / 100;
+  const fee = filledCharges.length ? String(feeTotal) : '';
+  const serviceType = charges[0]?.service_type || '';
   const [billGroceries, setBillGroceries] = useState(order.bill_for_groceries === true); // default OFF unless ledger/order says courtesy
   const [courtesyHint, setCourtesyHint] = useState('');
   const [rateHint, setRateHint] = useState('');
@@ -632,25 +668,52 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Auto-fill the fee from the chosen company's rate card when both are set.
-  const svcId = serviceTypes.find(s => s.name === serviceType)?.id;
+  /**
+   * Fill each charge's amount from the barge line's rate card.
+   *
+   * ⚠️ ONLY INTO AN EMPTY BOX. Half-price crew changes and courtesy runs are
+   * routine here — the ledger is full of them — so a rate arriving late from
+   * the network must never overwrite a number somebody has already typed. The
+   * hint stays visible beside the row so an override reads as deliberate.
+   */
+  const rateFor = useCallback((name: string) => {
+    const id = serviceTypes.find(s => s.name === name)?.id;
+    if (!companyId || !id) return null;
+    return adminFetch(`/api/admin/service-rates?company_id=${companyId}&service_type_id=${id}`)
+      .then(r => (r.ok ? r.json() : null))
+      .catch(() => null);
+  }, [companyId, serviceTypes]);
+
+  const chooseServiceType = useCallback((i: number, name: string) => {
+    patchCharge(i, { service_type: name });
+    setRateHints(h => ({ ...h, [i]: '' }));
+    if (!name) return;
+    rateFor(name)?.then((d: { rate?: number; is_override?: boolean } | null) => {
+      if (!d || d.rate == null) return;
+      setRateHints(h => ({
+        ...h,
+        [i]: `${d.is_override ? "this company's rate" : 'default rate'}: $${Number(d.rate).toFixed(2)}`,
+      }));
+      setCharges(cs => cs.map((c, n) => (n === i && c.amount === '' ? { ...c, amount: String(d.rate) } : c)));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rateFor]);
+
+  // Changing the barge line re-prices every row that is still untouched.
   useEffect(() => {
-    if (!companyId || !svcId) { setRateHint(''); return; }
-    let cancelled = false;
-    adminFetch(`/api/admin/service-rates?company_id=${companyId}&service_type_id=${svcId}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(d => {
-        if (cancelled || !d || d.rate == null) return;
-        setRateHint(`${d.is_override ? "this company's rate" : 'default rate'}: $${Number(d.rate).toFixed(2)}`);
-        setFee(prev => prev === '' ? String(d.rate) : prev);
-      });
-    return () => { cancelled = true; };
-  }, [companyId, svcId]);
+    if (!companyId) { setRateHints({}); return; }
+    charges.forEach((c, i) => { if (c.service_type) chooseServiceType(i, c.service_type); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId]);
 
   // Query params so the email preview reflects the live delivery choice.
   const previewQuery = new URLSearchParams();
   if (fee !== '') previewQuery.set('delivery_fee', fee);
   if (serviceType) previewQuery.set('delivery_service_type', serviceType);
+  // The preview has to show the same lines the email will, or it stops being a
+  // preview. Sent whole rather than as a fee + a label, because a two-service
+  // bill cannot be described by those two fields.
+  if (filledCharges.length) previewQuery.set('service_charges', JSON.stringify(filledCharges));
   previewQuery.set('bill_for_groceries', String(billGroceries));
   if (billGroceries && groceryTotal !== '') previewQuery.set('register_total', groceryTotal);
   if (staffNote.trim()) previewQuery.set('staff_note', staffNote.trim());
@@ -664,7 +727,7 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
   const needsGroceryDocs = missingGroceryDocs && !overrideReceipt;
 
   async function send() {
-    const feeNum = fee === '' ? 0 : Number(fee);
+    const feeNum = feeTotal;
     if (!Number.isFinite(feeNum) || feeNum === 0) {
       const ok = await confirm({
         title: 'Send with no delivery charge?',
@@ -686,6 +749,11 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          service_charges: filledCharges,
+          // ⚠️ STILL SENT. Migration 091's trigger derives both from the
+          // charges, so these are ignored on a database that has it — but on
+          // one that does not, they are the whole bill, and the single-service
+          // case has to keep working either way.
           delivery_fee: fee === '' ? null : Number(fee),
           delivery_service_type: serviceType || null,
           delivery_company_id: companyId || null,
@@ -754,35 +822,82 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
               <p className="text-xs font-bold text-brand-navy uppercase tracking-wide mb-2 flex items-center gap-1.5">
                 <Truck className="w-3.5 h-3.5" /> Delivery charge on this bill
               </p>
-              <div className="grid grid-cols-2 gap-2">
-                <label className="block">
-                  <span className="text-[11px] font-semibold text-gray-500">Barge line</span>
-                  <select value={companyId} onChange={e => setCompanyId(e.target.value)}
-                    className="mt-0.5 w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm">
-                    <option value="">—</option>
-                    {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                </label>
-                <label className="block">
-                  <span className="text-[11px] font-semibold text-gray-500">Service type</span>
-                  <select value={serviceType} onChange={e => setServiceType(e.target.value)}
-                    className="mt-0.5 w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm">
-                    <option value="">—</option>
-                    {serviceTypes.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
-                  </select>
-                </label>
-              </div>
-              <label className="block mt-2">
-                <span className="text-[11px] font-semibold text-gray-500">
-                  Delivery fee {rateHint && <span className="text-brand-green font-normal">· {rateHint}</span>}
-                </span>
-                <div className="flex items-center gap-1 mt-0.5">
-                  <span className="text-gray-400 text-sm">$</span>
-                  <input type="number" step="0.01" min="0" placeholder="0.00" value={fee}
-                    onChange={e => setFee(e.target.value)}
-                    className="w-32 border border-gray-200 rounded-lg px-2 py-1.5 text-sm" />
-                </div>
+              {/* Full width now the services sit below it — the barge line is
+                  what prices every one of them, so it is asked first and once. */}
+              <label className="block">
+                <span className="text-[11px] font-semibold text-gray-500">Barge line</span>
+                <select value={companyId} onChange={e => setCompanyId(e.target.value)}
+                  className="mt-0.5 w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm">
+                  <option value="">—</option>
+                  {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
               </label>
+
+              {/* ── ONE ROW PER SERVICE ─────────────────────────────────
+                  A boat that took a grocery delivery and a crew change on one
+                  trip owes for both, and each gets its own line on the email
+                  and its own line on the QuickBooks invoice. The note field is
+                  for why a price is not the card rate — "1/2 off", "courtesy"
+                  — because that is the first thing anyone asks when they see
+                  $150 against a $350 service. */}
+              <div className="mt-2 space-y-2">
+                {charges.map((c, i) => (
+                  <div key={i} className="rounded-lg border border-gray-200 p-2">
+                    <div className="flex items-start gap-2">
+                      <label className="block flex-1 min-w-0">
+                        <span className="text-[11px] font-semibold text-gray-500">
+                          {i === 0 ? 'Service type' : `Service ${i + 1}`}
+                        </span>
+                        <select value={c.service_type} onChange={e => chooseServiceType(i, e.target.value)}
+                          className="mt-0.5 w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm">
+                          <option value="">—</option>
+                          {serviceTypes.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                        </select>
+                      </label>
+                      <label className="block w-28 shrink-0">
+                        <span className="text-[11px] font-semibold text-gray-500">Charge</span>
+                        <div className="flex items-center gap-1 mt-0.5">
+                          <span className="text-gray-400 text-sm">$</span>
+                          <input type="number" step="0.01" min="0" placeholder="0.00" value={c.amount}
+                            onChange={e => patchCharge(i, { amount: e.target.value })}
+                            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" />
+                        </div>
+                      </label>
+                      {charges.length > 1 && (
+                        <button type="button"
+                          onClick={() => {
+                            setCharges(cs => cs.filter((_, n) => n !== i));
+                            setRateHints({});
+                          }}
+                          className="mt-5 text-gray-300 hover:text-red-500 shrink-0"
+                          aria-label={`Remove service ${i + 1}`}>
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                    {rateHints[i] && (
+                      <p className="text-[11px] text-brand-green mt-1">{rateHints[i]}</p>
+                    )}
+                    <input type="text" value={c.note}
+                      onChange={e => patchCharge(i, { note: e.target.value })}
+                      placeholder="Why not the card rate? e.g. 1/2 off, courtesy"
+                      className="mt-1.5 w-full border border-gray-200 rounded-lg px-2 py-1 text-[12px]" />
+                  </div>
+                ))}
+
+                <div className="flex items-center justify-between gap-3">
+                  <button type="button"
+                    onClick={() => setCharges(cs => [...cs, { service_type: '', amount: '', note: '' }])}
+                    className="text-xs font-bold text-brand-river hover:text-brand-navy inline-flex items-center gap-1">
+                    <Plus className="w-3.5 h-3.5" /> Add another service
+                  </button>
+                  {filledCharges.length > 1 && (
+                    <span className="text-xs font-bold text-brand-navy tabular-nums">
+                      GTS total ${feeTotal.toFixed(2)}
+                    </span>
+                  )}
+                </div>
+              </div>
               <div className="mt-3 space-y-2">
                 <p className="text-[11px] font-bold uppercase tracking-wide text-gray-500">Who pays for the groceries?</p>
                 {courtesyHint && (
@@ -930,19 +1045,32 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
               <p className="text-[10px] font-bold uppercase tracking-wide text-brand-navy/70 mb-1.5">What this bill will look like</p>
               {billGroceries ? (
                 <div className="text-xs text-brand-navy space-y-0.5">
-                  <div className="flex justify-between gap-3"><span>1. Delivery{serviceType ? ` — ${serviceType}` : ''}</span><span className="font-bold tabular-nums">${fee === '' ? '0.00' : Number(fee).toFixed(2)}</span></div>
-                  <div className="flex justify-between gap-3"><span>2. Sinclair&apos;s — Grocery Order</span><span className="font-bold tabular-nums">${groceryTotal === '' ? '—' : Number(groceryTotal).toFixed(2)}</span></div>
+                  {/* The same lines the email and the invoice will carry. A
+                      two-service bill shown here as one lump is a preview that
+                      does not preview the thing anyone needs to check. */}
+                  {(filledCharges.length ? filledCharges : [{ service_type: 'Delivery', amount: 0, note: '' }]).map((c, i) => (
+                    <div key={i} className="flex justify-between gap-3">
+                      <span>{i + 1}. {c.service_type}{c.note ? ` — ${c.note}` : ''}</span>
+                      <span className="font-bold tabular-nums">${c.amount.toFixed(2)}</span>
+                    </div>
+                  ))}
+                  <div className="flex justify-between gap-3"><span>{Math.max(filledCharges.length, 1) + 1}. Sinclair&apos;s — Grocery Order</span><span className="font-bold tabular-nums">${groceryTotal === '' ? '—' : Number(groceryTotal).toFixed(2)}</span></div>
                   <div className="flex justify-between gap-3 border-t border-brand-navy/10 pt-1 mt-1 font-bold"><span>Total (same as monthly QB)</span><span className="tabular-nums">${(Number(fee || 0) + Number(groceryTotal || 0)).toFixed(2)}</span></div>
                   <p className="text-[10px] text-gray-500 pt-1 leading-snug">Courtesy path — email + QuickBooks both carry delivery + one grocery lump.</p>
                 </div>
               ) : (
                 <div className="text-xs text-brand-navy space-y-0.5">
-                  <div className="flex justify-between gap-3"><span>Delivery / services only{serviceType ? ` — ${serviceType}` : ''}</span><span className="font-bold tabular-nums">${fee === '' ? '0.00' : Number(fee).toFixed(2)}</span></div>
+                  {(filledCharges.length ? filledCharges : [{ service_type: 'Delivery / services only', amount: 0, note: '' }]).map((c, i) => (
+                    <div key={i} className="flex justify-between gap-3">
+                      <span>{c.service_type}{c.note ? ` — ${c.note}` : ''}</span>
+                      <span className="font-bold tabular-nums">${c.amount.toFixed(2)}</span>
+                    </div>
+                  ))}
                   <p className="text-[10px] text-gray-500 pt-1 leading-snug">Boat pays Sinclair&apos;s directly — no grocery dollar on this email or the GTS QuickBooks invoice.</p>
                 </div>
               )}
-              {fee === '' && (
-                <p className="text-[10px] text-amber-700 mt-1.5">Pick a service type so the delivery fee auto-fills from the rate card.</p>
+              {filledCharges.length === 0 && (
+                <p className="text-[10px] text-amber-700 mt-1.5">Pick a service type so the charge auto-fills from the rate card. Add a second one if this trip also did a crew change or a pickup.</p>
               )}
               {slipUrl && (
                 <p className="text-[10px] text-green-700 mt-1.5">Signed delivery log is on this order — it shows in the email preview and goes out as its own attachment.</p>

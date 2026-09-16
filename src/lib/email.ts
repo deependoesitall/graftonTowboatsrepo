@@ -10,6 +10,18 @@ import {
 } from '@/lib/outside-pickup';
 import { ESTIMATED_EXPLANATION } from '@/lib/estimated-copy';
 import { accountUrl } from '@/lib/public-url';
+import { billableCharges, chargeLabel, orderServiceTotal } from '@/lib/service-charges';
+
+/**
+ * Escape text that staff typed into an HTML email.
+ *
+ * Service labels and their notes are free text from the send dialog. An
+ * ampersand in "Crew Change & Grocery" renders as a broken entity, and the
+ * general rule holds anyway: nothing typed by a person goes into markup raw.
+ */
+const esc = (s: string) => String(s ?? '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;');
 
 // Lazily construct the Resend client so importing this module (e.g. during
 // `next build` page-data collection) doesn't require RESEND_API_KEY to be set.
@@ -204,7 +216,13 @@ export function buildOrderEmailHtml(
   // Groceries are the actual register total when entered, else the estimate.
   // The delivery fee is GTS's own charge; whether groceries are on THIS bill
   // depends on bill_for_groceries (some barge lines pay Sinclair's directly).
-  const deliveryFee = Number(order.delivery_fee) || 0;
+  // ⚠️ ONE BOAT'S TRIP CAN CARRY SEVERAL CHARGES — a grocery delivery and a
+  // crew change on the same run are two lines at two prices, which is how
+  // GTS's own ledger has always recorded them. billableCharges returns the
+  // same shape for a single-charge order placed before 091, so there is one
+  // code path here rather than an old one and a new one.
+  const charges = billableCharges(order);
+  const deliveryFee = orderServiceTotal(order);
   const billGroceries = order.bill_for_groceries === true; // default false ? most boats pay Sinclair's directly
   // Company-billed groceries ONLY. orders.subtotal includes COD lines, and
   // CODs are settled personally at delivery — invoicing them would charge the
@@ -215,26 +233,28 @@ export function buildOrderEmailHtml(
     .reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0);
   const groceryTotal = order.register_total != null ? Number(order.register_total) : billableGroceryTotal;
   const grandTotal = (billGroceries ? groceryTotal : 0) + deliveryFee;
+  // Each service on its own line. A boat that reads "Delivery — $500" cannot
+  // check it against anything; "Grocery Delivery $350" and "Crew Change — 1/2
+  // off $150" is a bill somebody can agree with or query.
+  const chargeRows = charges.map(c => `<tr>
+          <td style="padding:8px 12px;color:#333;">${esc(chargeLabel(c))}</td>
+          <td style="padding:8px 12px;text-align:right;font-weight:700;">${formatCurrency(c.amount)}</td>
+        </tr>`).join('');
+
   const deliveryBox = opts.showDelivery ? `
     <div style="border:2px solid #1E3D1E;border-radius:6px;margin-bottom:18px;overflow:hidden;">
       <div style="background:#1E3D1E;color:#D9E84A;padding:8px 12px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;">
         Grafton Towboat Services — Final Charges
       </div>
       <table width="100%" style="border-collapse:collapse;font-size:13px;">
-        ${billGroceries ? `<tr>
-          <td style="padding:8px 12px;color:#333;">Delivery${order.delivery_service_type ? ` — ${order.delivery_service_type}` : ''}</td>
-          <td style="padding:8px 12px;text-align:right;font-weight:700;">${formatCurrency(deliveryFee)}</td>
-        </tr>
+        ${billGroceries ? `${chargeRows}
         <tr>
           <td style="padding:8px 12px;color:#333;">Sinclair&apos;s — Grocery Order${order.sinclairs_receipt_url ? ` <span style="color:#4d7c5f;font-size:10px;">— itemized receipt ${isLinked(order.sinclairs_receipt_url) ? 'linked below' : 'attached'}</span>` : ''}</td>
           <td style="padding:8px 12px;text-align:right;font-weight:700;">${formatCurrency(groceryTotal)}</td>
         </tr>` : `<tr>
           <td colspan="2" style="padding:8px 12px;color:#666;font-size:11px;font-style:italic;">No grocery charges on this GTS summary — the boat pays Sinclair&apos;s directly. Lines below are Grafton Towboat Services delivery / services only.</td>
         </tr>
-        <tr>
-          <td style="padding:8px 12px;color:#333;">Delivery${order.delivery_service_type ? ` — ${order.delivery_service_type}` : ''}</td>
-          <td style="padding:8px 12px;text-align:right;font-weight:700;">${formatCurrency(deliveryFee)}</td>
-        </tr>`}
+        ${chargeRows}`}
         <tr style="background:#D9E84A;">
           <td style="padding:10px 12px;font-size:14px;font-weight:900;color:#1E3D1E;text-transform:uppercase;">Final Total</td>
           <td style="padding:10px 12px;text-align:right;font-size:16px;font-weight:900;color:#1E3D1E;">${formatCurrency(grandTotal)}</td>

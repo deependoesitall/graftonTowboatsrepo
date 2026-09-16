@@ -253,6 +253,16 @@ export interface Order {
   deck_register_total?: number | null;
   /** GTS delivery billing — rides on the final email as a line item. */
   delivery_fee?: number | null;
+  /**
+   * GTS's own charges on this order: [{ service_type, amount, note }].
+   *
+   * ⚠️ WHEN THIS IS NON-EMPTY IT IS THE TRUTH, and delivery_fee (its sum)
+   * and delivery_service_type (the first label) are derived from it by
+   * migration 091's trigger. Read it through lib/service-charges rather than
+   * directly — billableCharges() also covers every order placed before 091,
+   * which carries one charge in the two scalar columns and nothing here.
+   */
+  service_charges?: Array<{ service_type: string; amount: number; note?: string }> | null;
   delivery_service_type?: string | null;
   delivery_company_id?: string | null;
   /** TRUE: GTS bills groceries + delivery together. FALSE: customer pays
