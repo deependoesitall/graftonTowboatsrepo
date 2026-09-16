@@ -54,6 +54,11 @@ import type { AdditionalServices } from '@/types';
 import {
   AdditionalServicesFields, emptyServices, countActiveServices,
 } from '@/components/order/ServiceFields';
+import { OrderDraftsBar, DraftSaveState } from '@/components/admin/OrderDrafts';
+import {
+  worthSaving, wasTouchedByAnotherSession,
+  type DraftState, type DraftRow,
+} from '@/lib/order-draft';
 
 /* ───────────────────────── types ───────────────────────── */
 
@@ -264,6 +269,27 @@ export default function NewOrderPage() {
   // staffer's own browser, and nothing about it should survive into the next
   // order they build.
   const [services, setServices] = useState<AdditionalServices>(emptyServices());
+
+  /* ── DRAFTED ORDERS ────────────────────────────────────────
+     A 200-line reorder is twenty minutes of work living in one tab's React
+     state. Clicking a notification used to be enough to lose all of it. This
+     parks that state on the server so the next person — or the next machine —
+     can carry on; see migration 090.
+
+     ⚠️ BEST EFFORT, ALWAYS. Every failure here is swallowed into a quiet
+     marker by the title. A drafts table that has not been migrated yet, or a
+     save that times out, must never block or interrupt placing the order,
+     because the order is the job and the draft is a convenience. */
+  const [draftId, setDraftId] = useState<string | null>(null);
+  const [draftSave, setDraftSave] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [draftTouchedBy, setDraftTouchedBy] = useState<string | null>(null);
+  const [draftsKey, setDraftsKey] = useState(0);
+  const [resumeError, setResumeError] = useState('');
+  /** Suspends autosave while a draft is being loaded into state. */
+  const loadingDraftRef = useRef(false);
+  const lastSaveIsoRef = useRef<string | null>(null);
+  const draftIdRef = useRef<string | null>(null);
+  draftIdRef.current = draftId;
 
   const [header, setHeader] = useState<HeaderState>({
     vessel_name: '', company_name: '', vessel_type: '',
@@ -721,6 +747,20 @@ export default function NewOrderPage() {
       }
 
       const j = await res.json();
+
+      // Close the draft out. Marked 'placed', not deleted: if a colleague still
+      // has this draft open, they have to be told the order has already gone
+      // out, and a deleted row cannot tell them anything. Fire-and-forget — a
+      // failure here must not hold up a confirmation for an order that is
+      // already placed.
+      if (draftIdRef.current) {
+        adminFetch(`/api/admin/order-drafts/${draftIdRef.current}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'placed', order_id: j.order_id }),
+        }).catch(() => { /* the order is placed; the draft row is bookkeeping */ });
+      }
+
       const email = j.confirmation_email === 'skipped' || j.confirmation_email === 'failed'
         ? j.confirmation_email
         : 'sent';
@@ -731,6 +771,132 @@ export default function NewOrderPage() {
       setSubmitting(false);
     }
   }
+
+  /* ───────────────────────── drafts ───────────────────────── */
+
+  const snapshot = useCallback((): DraftState => ({
+    v: 1,
+    header: header as unknown as Record<string, unknown>,
+    qty, linePay, customLines, extraById, services, sendConfirmation, mode, step,
+  }), [header, qty, linePay, customLines, extraById, services, sendConfirmation, mode, step]);
+
+  // ⚠️ DEBOUNCED, AND NEVER ON AN EMPTY BUILD.
+  //
+  // Autosaving on every keystroke would put a write behind every character
+  // typed into a 200-line order, and saving from the moment the page mounts
+  // would fill the shared drafts list with blank rows nobody started — which is
+  // how a list stops being read, taking the real drafts with it. A draft earns
+  // its place once it knows which boat it is for, or has a line on it.
+  useEffect(() => {
+    if (!ready || submitting) return;
+    if (loadingDraftRef.current) return;
+    if (!worthSaving(header.vessel_name, lineCount)) return;
+
+    const timer = setTimeout(async () => {
+      const body = {
+        company_name: header.company_name,
+        vessel_name: header.vessel_name,
+        line_count: lineCount,
+        subtotal: Math.round(total * 100) / 100,
+        state: snapshot(),
+      };
+      setDraftSave('saving');
+      try {
+        const id = draftIdRef.current;
+        const res = id
+          ? await adminFetch(`/api/admin/order-drafts/${id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body),
+            })
+          : await adminFetch('/api/admin/order-drafts', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body),
+            });
+        if (!res.ok) { setDraftSave('error'); return; }
+        const j = await res.json();
+        if (j?.draft?.id && !draftIdRef.current) setDraftId(j.draft.id);
+        lastSaveIsoRef.current = j?.draft?.updated_at || new Date().toISOString();
+        setDraftSave('saved');
+        setDraftsKey(k => k + 1);
+      } catch {
+        setDraftSave('error');
+      }
+    }, 1500);
+
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, submitting, header, qty, linePay, customLines, extraById, services, sendConfirmation, mode, step, lineCount, total]);
+
+  // Somebody else saving over this draft is not something to resolve silently.
+  // Saving replaces the state whole, so a merge would be a guess; the honest
+  // move is to say who else is in here and let the two of them sort it out.
+  useEffect(() => {
+    if (!draftId) return;
+    const poll = setInterval(async () => {
+      try {
+        const res = await adminFetch('/api/admin/order-drafts');
+        if (!res.ok) return;
+        const body = await res.json();
+        const mine = ((body.drafts as DraftRow[]) || []).find(d => d.id === draftIdRef.current);
+        if (!mine) return;
+        setDraftTouchedBy(
+          wasTouchedByAnotherSession(mine, lastSaveIsoRef.current, staffName)
+            ? (mine.updated_by || 'Someone else')
+            : null,
+        );
+      } catch { /* best effort */ }
+    }, 30000);
+    return () => clearInterval(poll);
+  }, [draftId, staffName]);
+
+  const resumeDraft = useCallback(async (id: string) => {
+    setResumeError('');
+    try {
+      const res = await adminFetch(`/api/admin/order-drafts/${id}`);
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setResumeError(j.error || 'That draft could not be opened.');
+        return;
+      }
+      const { draft } = await res.json();
+      const s = draft?.state as DraftState | undefined;
+      if (!s || s.v !== 1) {
+        setResumeError('That draft was saved by a newer version of this page and cannot be opened here.');
+        return;
+      }
+
+      // ⚠️ SUSPEND AUTOSAVE ACROSS THE LOAD. Without this the first setState
+      // schedules a save of a half-restored builder, which would overwrite the
+      // draft with a worse copy of itself.
+      loadingDraftRef.current = true;
+      setHeader(s.header as unknown as HeaderState);
+      setQty(s.qty || {});
+      setLinePay(s.linePay || {});
+      setCustomLines((s.customLines || []) as CustomLine[]);
+      setExtraById((s.extraById || {}) as Record<string, ExtraDraft>);
+      setServices(s.services || emptyServices());
+      setSendConfirmation(!!s.sendConfirmation);
+      setMode((s.mode as Mode) || 'sheet');
+      setStep((s.step as 'who' | 'what' | 'check') || 'who');
+      setDraftId(id);
+      draftIdRef.current = id;
+      lastSaveIsoRef.current = draft.updated_at || null;
+      setDraftTouchedBy(null);
+      setDraftSave('saved');
+      requestAnimationFrame(() => { loadingDraftRef.current = false; });
+    } catch {
+      setResumeError('Could not reach the server to open that draft.');
+    }
+  }, []);
+
+  // Deep link, so anything that wants to hand work to this page can: /admin/orders/new?draft=<id>
+  useEffect(() => {
+    if (!ready) return;
+    const id = new URLSearchParams(window.location.search).get('draft');
+    if (id) resumeDraft(id);
+  }, [ready, resumeDraft]);
 
   /* ───────────────────────── render ───────────────────────── */
 
@@ -750,11 +916,26 @@ export default function NewOrderPage() {
           <p className="text-gray-400 text-sm">
             For a boat that phoned, faxed or sent a paper form
           </p>
+          <div className="mt-1.5">
+            <DraftSaveState state={draftSave} touchedBy={draftTouchedBy} />
+          </div>
         </div>
         <button onClick={() => router.push('/admin/orders')} className="btn-outline text-sm px-3 py-2">
           Cancel
         </button>
       </div>
+
+      <OrderDraftsBar
+        currentDraftId={draftId}
+        onResume={resumeDraft}
+        refreshKey={draftsKey}
+      />
+
+      {resumeError && (
+        <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 flex gap-2">
+          <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /> {resumeError}
+        </div>
+      )}
 
       {loadError && (
         <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 flex gap-2">
