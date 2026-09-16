@@ -43,13 +43,17 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Search, Loader2, Check, X, Plus, Minus, ClipboardPaste, RotateCcw,
-  Keyboard, ListOrdered, ChevronRight, AlertCircle, Ship, Camera, FileUp, Mail, Users,
+  Keyboard, ListOrdered, ChevronRight, ChevronDown, AlertCircle, Ship, Camera, FileUp, Mail, MapPin,
 } from 'lucide-react';
 import { adminFetch, fetchAdminSession } from '@/lib/admin-auth';
 import { formatCurrency, formatArrivalTime } from '@/lib/utils';
 import { PaperFormImport, type ApplyLine, type CustomLine } from '@/components/admin/PaperFormImport';
 import { RegisterReceiptImport } from '@/components/admin/RegisterReceiptImport';
 import { RepeatOrderPicker, MissingLinesNotice } from '@/components/admin/RepeatOrderPicker';
+import type { AdditionalServices } from '@/types';
+import {
+  AdditionalServicesFields, emptyServices, countActiveServices,
+} from '@/components/order/ServiceFields';
 
 /* ───────────────────────── types ───────────────────────── */
 
@@ -144,7 +148,33 @@ interface HeaderState {
   crew_arriving: string;
   crew_departing: string;
   crew_change_notes: string;
+  // ── EVERYTHING THE CUSTOMER'S OWN FORM COLLECTS ────────────────────
+  //
+  // ⚠️ A FIELD ONLY ONE SIDE CAN FILL IN IS A FIELD SOMEBODY READS OFF A
+  // SCREEN THAT DOES NOT HAVE IT. /api/orders has accepted all of these since
+  // the customer checkout shipped; this builder simply never sent them, so an
+  // order a captain could place was an order staff could not — no second stop,
+  // no ETA, nobody recorded as having placed it.
+  eta: string;
+  secondary_terminal_name: string;
+  secondary_arrival_date: string;
+  secondary_arrival_time: string;
+  secondary_delivery_method: '' | 'boat' | 'van';
+  order_contact_name: string;
+  order_contact_title: string;
+  order_contact_phone: string;
+  order_contact_email: string;
+  personal_cod_notes: string;
 }
+
+const EMPTY_EXTENDED = {
+  eta: '',
+  secondary_terminal_name: '', secondary_arrival_date: '',
+  secondary_arrival_time: '', secondary_delivery_method: '' as const,
+  order_contact_name: '', order_contact_title: '',
+  order_contact_phone: '', order_contact_email: '',
+  personal_cod_notes: '',
+};
 
 /* ───────────────────────── helpers ───────────────────────── */
 
@@ -229,6 +259,11 @@ export default function NewOrderPage() {
   const [submitError, setSubmitError] = useState('');
   /** Paper transcription default: do not email the boat unless staff opts in. */
   const [sendConfirmation, setSendConfirmation] = useState(false);
+  // The same services a customer can add at checkout. Held here rather than in
+  // the cart helpers on purpose: this order belongs to the boat, not to the
+  // staffer's own browser, and nothing about it should survive into the next
+  // order they build.
+  const [services, setServices] = useState<AdditionalServices>(emptyServices());
 
   const [header, setHeader] = useState<HeaderState>({
     vessel_name: '', company_name: '', vessel_type: '',
@@ -238,6 +273,7 @@ export default function NewOrderPage() {
     delivery_method: '',
     approach_side: '', vhf_channel: '', po_number: '', notes: '',
     crew_change: 'no', crew_arriving: '', crew_departing: '', crew_change_notes: '',
+    ...EMPTY_EXTENDED,
   });
 
   /* ── load ── */
@@ -505,6 +541,7 @@ export default function NewOrderPage() {
       // would put it on an invoice Ingram's AP would then reject.
       po_number: '',
       crew_change: 'no', crew_arriving: '', crew_departing: '', crew_change_notes: '',
+    ...EMPTY_EXTENDED,
     }));
   }
 
@@ -582,7 +619,27 @@ export default function NewOrderPage() {
           crew_arriving: header.crew_arriving.trim(),
           crew_departing: header.crew_departing.trim(),
           notes: notesWithCod,
+          // ⚠️ THE REST OF THE CUSTOMER'S FORM. /api/orders has accepted every
+          // one of these since checkout shipped; this builder simply never
+          // sent them, so a staff-placed order silently lost its second stop,
+          // its ETA and whoever actually placed it. Zod strips unknown keys,
+          // which is why a field missing from this object does not error — it
+          // just disappears.
+          eta: header.eta.trim(),
+          secondary_terminal_name: header.secondary_terminal_name.trim(),
+          secondary_arrival_date: header.secondary_arrival_date,
+          secondary_arrival_time: header.secondary_arrival_time,
+          secondary_delivery_method: header.secondary_delivery_method,
+          order_contact_name: header.order_contact_name.trim(),
+          order_contact_title: header.order_contact_title.trim(),
+          order_contact_phone: header.order_contact_phone.trim(),
+          order_contact_email: header.order_contact_email.trim(),
+          personal_cod_notes: header.personal_cod_notes.trim(),
         },
+        // Parts pickup, package delivery, another-store items. The builder used
+        // to send nothing at all here, so a service taken down over the phone
+        // had to be typed into the notes and hoped for.
+        services,
         items: [...chosen.map(i => {
           const pay = linePay[i.id];
           return {
@@ -715,6 +772,8 @@ export default function NewOrderPage() {
           onNext={() => setStep('what')}
           catalogIds={catalogIds}
           onRepeatApply={handleRepeatApply}
+          services={services}
+          setServices={setServices}
         />
       )}
 
@@ -894,7 +953,10 @@ function ModeTabs({ mode, setMode, onRegisterTape }: {
 
 /* ── who ── */
 
-function WhoStep({ header, setHeader, vessels, terminals, applyVessel, onNext, catalogIds, onRepeatApply }: {
+function WhoStep({
+  header, setHeader, vessels, terminals, applyVessel, onNext, catalogIds, onRepeatApply,
+  services, setServices,
+}: {
   header: HeaderState;
   setHeader: React.Dispatch<React.SetStateAction<HeaderState>>;
   vessels: VesselHeader[];
@@ -902,6 +964,8 @@ function WhoStep({ header, setHeader, vessels, terminals, applyVessel, onNext, c
   applyVessel: (v: VesselHeader) => void;
   onNext: () => void;
   catalogIds: Set<string>;
+  services: AdditionalServices;
+  setServices: React.Dispatch<React.SetStateAction<AdditionalServices>>;
   onRepeatApply: (
     lines: ApplyLine[],
     mode: 'replace' | 'add',
@@ -915,6 +979,7 @@ function WhoStep({ header, setHeader, vessels, terminals, applyVessel, onNext, c
   const [hits, setHits] = useState<VesselHeader[] | null>(null);
   const [searching, setSearching] = useState(false);
   const [lookupError, setLookupError] = useState('');
+  const activeServiceCount = countActiveServices(services);
 
   useEffect(() => {
     // Search on whichever box is being typed in — the box at the top, or the
@@ -1107,58 +1172,44 @@ function WhoStep({ header, setHeader, vessels, terminals, applyVessel, onNext, c
         </div>
       </section>
 
-      <section className="card-base p-4 space-y-3">
-        <div className="flex items-center gap-2">
-          <Users className="w-4 h-4 text-gray-400" />
-          <h2 className="font-bold text-brand-navy text-sm">Crew change</h2>
+      {/* ── SECOND STOP / ETA / WHO PLACED IT ─────────────────────────
+          Collapsed by default: most orders are one stop placed by the captain,
+          and four empty fields at the top of every build is friction paid on
+          every order to serve a few. Opens with a badge when it holds anything,
+          so a filled second stop can never hide inside a closed section. */}
+      <ExtendedDeliveryFields header={header} setHeader={setHeader} terminals={terminals} />
+
+      {/* ── ADDITIONAL SERVICES — THE SAME FORM THE CUSTOMER GETS ──────────
+          ⚠️ This section did not exist. Crew change was here, hand-rolled, and
+          parts pickup / package delivery / another-store items were nowhere —
+          so staff taking an order over the phone could not record a service a
+          captain could add themselves on the website. It is the shared
+          component now, which means the two sides cannot drift apart again. */}
+      <section className="space-y-3">
+        <div>
+          <h2 className="font-bold text-brand-navy text-sm">
+            Additional services
+            {activeServiceCount + (header.crew_change !== 'no' ? 1 : 0) > 0 && (
+              <span className="ml-2 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded border bg-green-100 text-green-700 border-green-300">
+                {activeServiceCount + (header.crew_change !== 'no' ? 1 : 0)} added
+              </span>
+            )}
+          </h2>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Everything the boat could add themselves online. Crew change is GTS-only — Sinclair&apos;s never sees it.
+          </p>
         </div>
-        <p className="text-xs text-gray-500">
-          Paper forms often mark this. Sinclair&apos;s never sees it — GTS only.
-        </p>
-        <div className="flex gap-2">
-          {([['no', 'No'], ['maybe', 'Maybe'], ['yes', 'Yes']] as const).map(([val, lbl]) => (
-            <button
-              key={val}
-              type="button"
-              onClick={() => setHeader(h => ({ ...h, crew_change: val }))}
-              className={`flex-1 py-2 rounded-xl border-2 text-sm font-bold transition-all ${
-                header.crew_change === val
-                  ? val === 'maybe'
-                    ? 'border-amber-500 bg-amber-500 text-white'
-                    : 'border-brand-navy bg-brand-navy text-white'
-                  : 'border-gray-200 text-gray-500 hover:border-gray-300'
-              }`}
-            >
-              {lbl}
-            </button>
-          ))}
-        </div>
-        {header.crew_change === 'yes' && (
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="# Arriving" value={header.crew_arriving} onChange={set('crew_arriving')} />
-            <Field label="# Departing" value={header.crew_departing} onChange={set('crew_departing')} />
-            <div className="col-span-2">
-              <label className="label-base" htmlFor="crew-notes">Notes</label>
-              <textarea
-                id="crew-notes"
-                className="input-base min-h-[64px]"
-                value={header.crew_change_notes}
-                onChange={e => setHeader(h => ({ ...h, crew_change_notes: e.target.value }))}
-              />
-            </div>
-          </div>
-        )}
-        {header.crew_change === 'maybe' && (
-          <div>
-            <label className="label-base" htmlFor="crew-notes-m">Notes</label>
-            <textarea
-              id="crew-notes-m"
-              className="input-base min-h-[64px]"
-              value={header.crew_change_notes}
-              onChange={e => setHeader(h => ({ ...h, crew_change_notes: e.target.value }))}
-            />
-          </div>
-        )}
+        <AdditionalServicesFields
+          services={services}
+          onServicesChange={setServices}
+          crew={{
+            crew_change: header.crew_change,
+            crew_arriving: header.crew_arriving,
+            crew_departing: header.crew_departing,
+            crew_change_notes: header.crew_change_notes,
+          }}
+          onCrewChange={patch => setHeader(h => ({ ...h, ...patch }))}
+        />
       </section>
 
       {header.vessel_name.trim().length >= 2 && (
@@ -1200,6 +1251,122 @@ function Field({ label, value, onChange, required, hint, type = 'text', list }: 
              list={list} autoComplete="off" />
       {hint && <p className="text-xs text-gray-400 mt-1">{hint}</p>}
     </div>
+  );
+}
+
+/* ── second stop / ETA / who placed it ── */
+
+// ⚠️ COLLAPSED, BUT NEVER HIDDEN.
+//
+// Most orders are one stop placed by the captain, so putting these four groups
+// permanently at the top of the build costs every order to serve a few. They
+// collapse — but the summary line always states what is inside, and the
+// section refuses to close quietly on anything filled in. A second terminal
+// that nobody can see is a van at the wrong dock.
+function ExtendedDeliveryFields({ header, setHeader, terminals }: {
+  header: HeaderState;
+  setHeader: React.Dispatch<React.SetStateAction<HeaderState>>;
+  terminals: string[];
+}) {
+  const set = (k: keyof HeaderState) =>
+    (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
+      setHeader(h => ({ ...h, [k]: e.target.value }));
+
+  const filled = [
+    header.eta,
+    header.secondary_terminal_name, header.secondary_arrival_date,
+    header.secondary_arrival_time, header.secondary_delivery_method,
+    header.order_contact_name, header.order_contact_title,
+    header.order_contact_phone, header.order_contact_email,
+    header.personal_cod_notes,
+  ].filter(v => (v || '').trim()).length;
+
+  const [open, setOpen] = useState(false);
+  const show = open || filled > 0;
+
+  return (
+    <section className="card-base overflow-hidden">
+      <button type="button" onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center gap-3 p-4 text-left hover:bg-gray-50/60 transition-colors">
+        <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+          filled > 0 ? 'bg-brand-green text-white' : 'bg-gray-100 text-gray-400'
+        }`}>
+          <MapPin className="w-4 h-4" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="font-bold text-brand-navy text-sm">
+            Second stop, ETA &amp; who placed it
+            {filled > 0 && (
+              <span className="ml-2 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded border bg-green-100 text-green-700 border-green-300">
+                {filled} filled
+              </span>
+            )}
+          </p>
+          <p className="text-xs text-gray-400 mt-0.5">
+            Optional — the rest of what the boat&apos;s own checkout asks for.
+          </p>
+        </div>
+        <ChevronDown className={`w-5 h-5 text-gray-400 shrink-0 transition-transform ${show ? 'rotate-180' : ''}`} />
+      </button>
+
+      {show && (
+        <div className="border-t border-gray-100 p-4 space-y-4 bg-gray-50/40">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="ETA" value={header.eta} onChange={set('eta')}
+                   hint="Only if it says something the delivery time does not" />
+          </div>
+
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-2">Second stop</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <label className="label-base" htmlFor="terminal-2">Terminal</label>
+                <input id="terminal-2" className="input-base" list="terminal-list-2"
+                       value={header.secondary_terminal_name} onChange={set('secondary_terminal_name')} />
+              </div>
+              <Field label="Date" type="date" value={header.secondary_arrival_date}
+                     onChange={set('secondary_arrival_date')} />
+              <Field label="Time" type="time" value={header.secondary_arrival_time}
+                     onChange={set('secondary_arrival_time')} />
+              <div>
+                <label className="label-base" htmlFor="method-2">By boat or van</label>
+                <select id="method-2" className="input-base"
+                        value={header.secondary_delivery_method} onChange={set('secondary_delivery_method')}>
+                  <option value="">Not decided yet</option>
+                  <option value="boat">Boat</option>
+                  <option value="van">Van</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-2">
+              Placed by, if not the captain
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Name" value={header.order_contact_name} onChange={set('order_contact_name')} />
+              <Field label="Title" value={header.order_contact_title} onChange={set('order_contact_title')}
+                     hint="Cook, mate, port captain…" />
+              <Field label="Phone" value={header.order_contact_phone} onChange={set('order_contact_phone')} />
+              <Field label="Email" value={header.order_contact_email} onChange={set('order_contact_email')} />
+            </div>
+          </div>
+
+          <div>
+            <label className="label-base" htmlFor="personal-cod-notes">Personal / COD notes</label>
+            <textarea id="personal-cod-notes" className="input-base min-h-[64px]"
+                      value={header.personal_cod_notes}
+                      onChange={set('personal_cod_notes')}
+                      placeholder="Anything about who is paying for what at the dock" />
+          </div>
+
+          <datalist id="terminal-list-2">
+            {terminals.map(t => <option key={t} value={t} />)}
+          </datalist>
+        </div>
+      )}
+    </section>
   );
 }
 

@@ -1,16 +1,20 @@
 'use client';
 // src/components/catalog/OtherPickupCard.tsx
+//
 // "Other" third-party item request — lives at the bottom of the Sinclair's
-// groceries tab because Sinclair's (not Grafton) handles these pickups.
-// Supports MULTIPLE items (Jen: no limit) — each with a link + notes.
-// The category sidebar links here via the #other-pickup anchor.
+// groceries tab because Sinclair's (not Grafton) handles these pickups. The
+// category sidebar links here via the #other-pickup anchor.
+//
+// The cart-backed wrapper around OtherPickupFields. Same reasoning as
+// AdditionalServicesTab: the questions are shared with the admin order builder
+// and are defined once, in components/order/ServiceFields. This file owns the
+// framing copy and the fact that, here, the answers live in the cart.
 
 import { useState, useEffect } from 'react';
-import { Link2, Check, X, ShoppingBag, Plus, Trash2 } from 'lucide-react';
-import { AdditionalServices, OtherPickupItem } from '@/types';
+import { Check, X, ShoppingBag } from 'lucide-react';
+import { AdditionalServices } from '@/types';
 import { getAdditionalServices, saveAdditionalServices } from '@/lib/cart';
-
-const EMPTY_ENTRY: OtherPickupItem = { url: '', notes: '' };
+import { OtherPickupFields, EMPTY_OTHER_ENTRY } from '@/components/order/ServiceFields';
 
 export function OtherPickupCard() {
   const [services, setServices] = useState<AdditionalServices>(getAdditionalServices());
@@ -25,32 +29,7 @@ export function OtherPickupCard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [services]);
 
-  const other = services.other_pickup ?? { enabled: false, items: [{ ...EMPTY_ENTRY }] };
-  const entries = other.items?.length ? other.items : [{ ...EMPTY_ENTRY }];
-
-  function patch(p: Partial<AdditionalServices['other_pickup']>) {
-    setServices(prev => ({
-      ...prev,
-      other_pickup: { enabled: false, items: [{ ...EMPTY_ENTRY }], ...prev.other_pickup, ...p },
-    }));
-  }
-
-  function patchEntry(idx: number, p: Partial<OtherPickupItem>) {
-    const next = entries.map((e, i) => (i === idx ? { ...e, ...p } : e));
-    patch({ items: next });
-  }
-
-  function addEntry() {
-    patch({ items: [...entries, { ...EMPTY_ENTRY }] });
-  }
-
-  function removeEntry(idx: number) {
-    const next = entries.filter((_, i) => i !== idx);
-    patch({ items: next.length ? next : [{ ...EMPTY_ENTRY }] });
-  }
-
-  const filled = entries.filter(e => e.url.trim() || e.notes.trim());
-  const ready = filled.length > 0;
+  const other = services.other_pickup ?? { enabled: false, items: [{ ...EMPTY_OTHER_ENTRY }] };
 
   return (
     <div id="other-pickup"
@@ -73,94 +52,21 @@ export function OtherPickupCard() {
           </p>
         </div>
         {other.enabled && (
-          <button type="button" onClick={() => patch({ enabled: false })}
+          <button type="button"
+            onClick={() => setServices(s => ({
+              ...s,
+              other_pickup: { enabled: false, items: s.other_pickup?.items ?? [{ ...EMPTY_OTHER_ENTRY }] },
+            }))}
             className="flex items-center gap-1 text-xs font-bold text-red-400 hover:text-red-600 px-2.5 py-1.5 rounded-lg hover:bg-red-50 transition-colors shrink-0">
             <X className="w-3.5 h-3.5" /> Remove All
           </button>
         )}
       </div>
       <div className="border-t border-gray-100 px-4 pb-4 pt-3 space-y-3 bg-gray-50/50">
-        {entries.map((entry, idx) => (
-          <div key={idx} className="bg-white border border-gray-200 rounded-lg p-3 space-y-3">
-            <div className="flex items-center justify-between">
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Item {idx + 1}</p>
-              {entries.length > 1 && (
-                <button type="button" onClick={() => removeEntry(idx)}
-                  className="flex items-center gap-1 text-[11px] font-bold text-red-400 hover:text-red-600"
-                  aria-label={`Remove item ${idx + 1}`}>
-                  <Trash2 className="w-3 h-3" /> Remove
-                </button>
-              )}
-            </div>
-            <div>
-              <label className="label-base text-xs">Link to Item</label>
-              <div className="relative">
-                <Link2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input type="url" className="input-base text-sm pl-9 w-full"
-                  placeholder="https://www.walmart.com/…"
-                  value={entry.url}
-                  onChange={e => patchEntry(idx, { url: e.target.value })} />
-              </div>
-            </div>
-            <div>
-              <label className="label-base text-xs">Details — size, color, quantity</label>
-              <textarea className="input-base text-sm resize-none w-full" rows={2}
-                placeholder="e.g. Men's XL, blue, qty 2"
-                value={entry.notes}
-                onChange={e => patchEntry(idx, { notes: e.target.value })} />
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2 pt-1">
-              <span className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Who pays</span>
-              {/* These are ALWAYS COD — bought elsewhere and settled at
-                  delivery, never on the monthly invoice. The only question is
-                  whether the boat covers it or one crew member does. Stored
-                  values stay 'grocery'/'cod' so existing orders keep working. */}
-              {([['grocery', 'The boat'], ['cod', 'A crew member']] as const).map(([val, lbl]) => {
-                const on = (entry.paid_by ?? 'grocery') === val;
-                return (
-                  <button key={val} type="button"
-                    onClick={() => patchEntry(idx, { paid_by: val, ...(val === 'grocery' ? { cod_name: '' } : {}) })}
-                    className={`px-2.5 py-1 rounded-md text-xs font-bold border transition-colors ${
-                      on
-                        ? (val === 'cod'
-                            ? 'bg-purple-600 text-white border-purple-600'
-                            : 'bg-brand-navy text-white border-brand-navy')
-                        : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'
-                    }`}>
-                    {lbl}
-                  </button>
-                );
-              })}
-              {entry.paid_by === 'cod' && (
-                <input type="text"
-                  className="input-base text-sm py-1 flex-1 min-w-[140px]"
-                  placeholder="Which crew member? e.g. Andy"
-                  value={entry.cod_name ?? ''}
-                  onChange={e => patchEntry(idx, { cod_name: e.target.value })} />
-              )}
-            </div>
-            {entry.paid_by === 'cod' && !((entry.cod_name ?? '').trim()) && (
-              <p className="text-[11px] text-amber-600 font-semibold">
-                Add a name so we know who to collect from.
-              </p>
-            )}
-          </div>
-        ))}
-
-        <button type="button" onClick={addEntry}
-          className="flex items-center gap-1.5 text-xs font-bold text-brand-river hover:text-brand-navy transition-colors">
-          <Plus className="w-3.5 h-3.5" /> Add another item
-        </button>
-
-        {!other.enabled && (
-          ready
-            ? <button type="button" onClick={() => patch({ enabled: true })}
-                className="w-full btn-gold py-2.5 flex items-center justify-center gap-2 rounded-lg text-sm font-bold">
-                <Check className="w-4 h-4" /> Add {filled.length > 1 ? `${filled.length} Items` : ''} to Order
-              </button>
-            : <p className="text-xs text-gray-400 text-center pt-1">Add a link or details above to include this with your order.</p>
-        )}
+        <OtherPickupFields
+          value={services.other_pickup}
+          onChange={next => setServices(s => ({ ...s, other_pickup: next }))}
+        />
         <p className="text-[11px] text-gray-400 text-center">
           Handled by Sinclair&apos;s Foods · COD — final cost confirmed after purchase and collected at delivery, not on your monthly invoice
         </p>
