@@ -137,6 +137,34 @@ export function ourKeys(upc: string): string[] {
   return keys;
 }
 
+/**
+ * True when Freshop's short PLU disagrees with ours.
+ *
+ * Produce PLUs are 4–5 digits (bananas 4011, green grapes 4022). Matching
+ * via a truncated key once linked grapes UPC 4022 to TOP SOIL PLU 402 and
+ * wrote that name into details. Refuse cosmetic/id writes across that gap.
+ */
+export function shortPluConflict(ourUpc: string | null | undefined, hit: FreshopProduct): boolean {
+  const o = norm(ourUpc);
+  const h = norm(hit.upc);
+  if (!o || !h) return false;
+  if (o.length <= 5 && h.length <= 5 && o !== h) return true;
+  if (o.length <= 5 && h.length < o.length && o.startsWith(h)) return true;
+  if (h.length <= 5 && o.length < h.length && h.startsWith(o)) return true;
+  return false;
+}
+
+/** details carries `(plu N)` that is not this row's UPC — leftover collision. */
+export function detailsPluConflictsUpc(details: string | null | undefined, upc: string | null | undefined): boolean {
+  const d = String(details || '');
+  const m = d.match(/\(plu\s*(\d+)\)/i);
+  if (!m) return false;
+  const plu = m[1].replace(/^0+/, '') || m[1];
+  const u = norm(upc);
+  if (!u) return false;
+  return plu !== u;
+}
+
 // ── Field mappers (identical to the client enrich) ──
 function stripZzz(s: string): string {
   return s.replace(/\s*\(?\d+(\.\d+)?\s*zzz\)?/gi, '').trim();
@@ -248,10 +276,22 @@ export function computeFields(
   const locked = new Set(product.manual_fields || []);
   if (product.location_manual) { locked.add('location'); locked.add('location_seq'); }
 
+  // Never stamp another item's name/photo when short PLUs disagree.
+  const pluClash = shortPluConflict(product.upc, hit);
+
   const newDetails = detailsFrom(hit);
   const newImage = imageFrom(hit);
-  if (!locked.has('details') && newDetails && !product.details && newDetails !== product.details) { fields.details = newDetails; stats.details++; }
-  if (!locked.has('image_url') && newImage && !product.image_url && newImage !== product.image_url) { fields.image_url = newImage; fields.image_source = 'sinclair_sync'; stats.images++; }
+  // Fill missing, OR replace a details value that itself carries a conflicting
+  // `(plu N)` leftover from an older truncate collision.
+  const detailsPolluted = detailsPluConflictsUpc(product.details, product.upc);
+  if (!pluClash && !locked.has('details') && newDetails
+      && (!product.details || detailsPolluted)
+      && newDetails !== product.details) {
+    fields.details = newDetails; stats.details++;
+  }
+  if (!pluClash && !locked.has('image_url') && newImage && !product.image_url && newImage !== product.image_url) {
+    fields.image_url = newImage; fields.image_source = 'sinclair_sync'; stats.images++;
+  }
   if (!locked.has('billed_by_weight') && hit.is_weight_required && !product.billed_by_weight) { fields.billed_by_weight = true; stats.weightFlags++; }
   // Locations sync from Freshop's walkpath — EXCEPT where an admin corrected
   // one by hand: the humans in the store outrank the data.
@@ -308,7 +348,7 @@ export function computeFields(
     fields.quantity_size_ratio = newRatio;
   }
   const newFreshopId = hit.id != null ? String(hit.id) : null;
-  if (newFreshopId && newFreshopId !== product.freshop_id) {
+  if (!pluClash && newFreshopId && newFreshopId !== product.freshop_id) {
     fields.freshop_id = newFreshopId;
   }
   // Popularity rank — always synced (it shifts as the store's sales shift).

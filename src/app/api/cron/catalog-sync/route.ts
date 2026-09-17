@@ -545,7 +545,9 @@ async function handle(req: NextRequest) {
         if (fid) knownFreshopIds.add(fid);
         if (upcKey) {
           knownUpcKeys.add(upcKey);
-          if (upcKey.length >= 5) knownUpcKeys.add(upcKey.slice(0, -1));
+          // Same rule as ourKeys: only drop a check digit on full barcodes.
+          // Truncating 5-digit codes collides produce PLUs (40228→4022).
+          if (upcKey.length >= 8) knownUpcKeys.add(upcKey.slice(0, -1));
         }
       }
 

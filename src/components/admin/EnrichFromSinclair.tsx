@@ -82,6 +82,10 @@ function norm(raw: string | null | undefined): string {
   const s = String(raw ?? '').trim().replace(/\.0+$/, '');
   return s.replace(/\D/g, '').replace(/^0+/, '');
 }
+// Check-digit drop is ONLY for full barcodes (>=8). Short produce PLUs
+// (4011 bananas, 4022 green grapes) must match EXACTLY — truncating 4022→402
+// once wrote TOP SOIL onto the grapes barge row.
+const CHECKDIGIT_MIN_LEN = 8;
 function freshopKeys(p: FreshopProduct): string[] {
   const keys = new Set<string>();
   for (const raw of [p.upc, p.barcode_upc_a, p.barcode_ean13]) {
@@ -89,15 +93,26 @@ function freshopKeys(p: FreshopProduct): string[] {
     if (n.length >= 4) keys.add(n);
   }
   const upcA = norm(p.barcode_upc_a);
-  if (upcA.length >= 5) keys.add(upcA.slice(0, -1));
+  if (upcA.length >= CHECKDIGIT_MIN_LEN) keys.add(upcA.slice(0, -1));
   return Array.from(keys);
 }
 function ourKeys(upc: string): string[] {
   const n = norm(upc);
   if (n.length < 4) return [];
   const keys = [n];
-  if (n.length >= 5) keys.push(n.slice(0, -1));
+  if (n.length >= CHECKDIGIT_MIN_LEN) keys.push(n.slice(0, -1));
   return keys;
+}
+/** True when Freshop's short PLU is a different produce code than ours. */
+function shortPluConflict(ourUpc: string | null | undefined, hit: FreshopProduct): boolean {
+  const o = norm(ourUpc);
+  const h = norm(hit.upc);
+  if (!o || !h) return false;
+  if (o.length <= 5 && h.length <= 5 && o !== h) return true;
+  // Prefix trap leftovers: 402 vs 4022 even if one side is longer.
+  if (o.length <= 5 && h.length < o.length && o.startsWith(h)) return true;
+  if (h.length <= 5 && o.length < h.length && h.startsWith(o)) return true;
+  return false;
 }
 // Freshop sometimes puts junk like "1.0000 zzz" in size fields — strip it.
 function stripZzz(s: string): string {
@@ -506,11 +521,15 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
           continue;
         }
         matched++;
+        // Refuse cosmetic writes when the Freshop hit is a different short PLU
+        // (the 4022→402 TOP SOIL collision). Price/location still sync — those
+        // are operational — but never stamp another item's name/photo/id.
+        const pluClash = shortPluConflict(product.upc, hit);
         const fields: Record<string, unknown> = {};
         const newDetails = detailsFrom(hit);
         const newImage = imageFrom(hit);
-        if (newDetails && (overwrite || !product.details) && newDetails !== product.details) { fields.details = newDetails; details++; }
-        if (newImage && (overwrite || !product.image_url) && newImage !== product.image_url) { fields.image_url = newImage; images++; }
+        if (!pluClash && newDetails && (overwrite || !product.details) && newDetails !== product.details) { fields.details = newDetails; details++; }
+        if (!pluClash && newImage && (overwrite || !product.image_url) && newImage !== product.image_url) { fields.image_url = newImage; images++; }
         if (hit.is_weight_required && !product.billed_by_weight) { fields.billed_by_weight = true; weightFlags++; }
         // Item location + walkpath order: operational data, ALWAYS kept in
         // sync (stores rearrange aisles) — the overwrite toggle only guards
@@ -542,7 +561,7 @@ export function EnrichFromSinclair({ onDone }: { onDone: () => void }) {
         // Sinclair's internal product id — digital coupons reference products
         // by this id, so the coupon engine needs it. Always synced.
         const newFreshopId = hit.id != null ? String(hit.id) : null;
-        if (newFreshopId && newFreshopId !== product.freshop_id) {
+        if (!pluClash && newFreshopId && newFreshopId !== product.freshop_id) {
           fields.freshop_id = newFreshopId;
         }
         if (Object.keys(fields).length) updates.push({ id: product.id, fields });

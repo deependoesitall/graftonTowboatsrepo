@@ -60,7 +60,7 @@ export async function GET() {
     .select(`
       rail, position, sale_price, regular_price,
       product:products!inner (
-        id, description, details, category, pkg_size, uom, price, regular_price,
+        id, description, details, upc, category, pkg_size, uom, price, regular_price,
         sale_start_date, sale_finish_date, image_url,
         billed_by_weight, quantity_step, quantity_label,
         is_active, is_available

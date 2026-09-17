@@ -306,9 +306,22 @@ export function orderItemCount(items: CountableLine[] | null | undefined): numbe
  * Customers see the full name — like Sinclair's own site. `description`
  * stays untouched in the DB: the paper-order-form matcher depends on it.
  */
-export function productDisplayName(p: { description: string; details?: string | null }): string {
+export function productDisplayName(p: {
+  description: string;
+  details?: string | null;
+  upc?: string | null;
+}): string {
   const d = (p.details || '').trim();
-  return d.length >= 4 ? d : p.description;
+  if (d.length < 4) return p.description;
+  // Reject leftover enrich collisions: "TOP SOIL (plu 402)" on UPC 4022 grapes.
+  // Legitimate produce rows keep `(plu N)` only when N matches their UPC.
+  const m = d.match(/\(plu\s*(\d+)\)/i);
+  if (m) {
+    const plu = m[1].replace(/^0+/, '') || m[1];
+    const upc = String(p.upc || '').replace(/\D/g, '').replace(/^0+/, '');
+    if (upc && plu !== upc) return p.description;
+  }
+  return d;
 }
 
 export const MAIN_CATEGORIES = [
