@@ -109,16 +109,70 @@ function CatalogSyncStatus({ isOwner }: { isOwner: boolean }) {
   // freezing — which is exactly why a hand-kicked sync used to stall and fall
   // back to "Nightly sync runs at 12:05 AM". While this tab is open we keep
   // firing chunks ourselves until the route reports it's finished.
+  // Sync now only rebuilds the CATALOGUE. Best Sellers / On Sale live in
+  // catalog_rails and are built by /api/cron/catalog-rails (5am cron). Until
+  // we chain that here, Sync now can finish green while the storefront rail
+  // stays yesterday's wrong set — which is exactly what Deepen saw after
+  // Claude's pagination fix.
+  const [railsBusy, setRailsBusy] = useState(false);
+  const [railsNote, setRailsNote] = useState<string | null>(null);
+
+  async function rebuildRails() {
+    setRailsBusy(true);
+    setRailsNote(null);
+    try {
+      const res = await adminFetch('/api/cron/catalog-rails', { method: 'POST' });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setRailsNote(body.error || `Rails rebuild failed (${res.status})`);
+        return null;
+      }
+      const bs = body.best_sellers?.found ?? body.best_sellers;
+      const matched = body.matched;
+      const catalog = body.catalog;
+      const bits = [
+        typeof bs === 'number' ? `Best Sellers ${bs}` : null,
+        catalog != null ? `index ${catalog}` : null,
+        matched ? `matched freshop ${matched.freshop_id ?? 0} · upc ${matched.upc ?? 0} · miss ${matched.unmatched ?? 0}` : null,
+      ].filter(Boolean);
+      setRailsNote(bits.length ? bits.join(' · ') : 'Rails rebuilt');
+      return body;
+    } catch (e) {
+      setRailsNote(e instanceof Error ? e.message : 'Rails rebuild failed');
+      return null;
+    } finally {
+      setRailsBusy(false);
+    }
+  }
+
   async function syncNow() {
     setKicking(true);
+    setRailsNote(null);
     startPolling();
+    let finishedOk = false;
     try {
       for (let guard = 0; guard < 40; guard++) {
         const res = await adminFetch('/api/cron/catalog-sync', { method: 'POST' });
         if (!res.ok) break;
         const r = await res.json().catch(() => null);
         await load();
-        if (!r?.has_more) break;   // done, rate-limited, or waiting on Freshop
+        if (!r?.has_more) {
+          // has_more false = catalogue pass done (or rate-limited / waiting).
+          // Rebuild rails only when we are not mid-chunk; a waiting checkpoint
+          // still reports has_more false in some paths — only chain when the
+          // status says the sync is no longer in progress after load().
+          finishedOk = true;
+          break;
+        }
+      }
+      await load();
+      // Chain rails after a successful catalogue kick so Sync now actually
+      // refreshes Best Sellers. Skip if the catalogue is still marked in
+      // progress (paused / waiting on Freshop) — staff can hit Rebuild rails.
+      if (finishedOk) {
+        const stRes = await adminFetch('/api/admin/sync-status');
+        const st = stRes.ok ? await stRes.json().catch(() => null) : null;
+        if (!st?.in_progress) await rebuildRails();
       }
     } finally {
       setKicking(false);
@@ -154,12 +208,22 @@ function CatalogSyncStatus({ isOwner }: { isOwner: boolean }) {
           : <Moon className="w-3.5 h-3.5" />}
         <span>{label}</span>
         {isOwner && (
-          <button onClick={syncNow} disabled={kicking}
-            className="underline underline-offset-2 hover:text-brand-navy disabled:opacity-50">
-            {kicking ? 'syncing — keep this tab open…' : status?.in_progress ? 'Resume sync' : 'Sync now'}
-          </button>
+          <>
+            <button onClick={syncNow} disabled={kicking || railsBusy}
+              className="underline underline-offset-2 hover:text-brand-navy disabled:opacity-50">
+              {kicking ? 'syncing — keep this tab open…' : status?.in_progress ? 'Resume sync' : 'Sync now'}
+            </button>
+            <button onClick={() => { void rebuildRails(); }} disabled={kicking || railsBusy}
+              title="Rebuild Best Sellers and On Sale from Sinclair’s feed (does not re-download the whole catalogue)"
+              className="underline underline-offset-2 hover:text-brand-navy disabled:opacity-50">
+              {railsBusy ? 'rebuilding rails…' : 'Rebuild rails'}
+            </button>
+          </>
         )}
       </div>
+      {railsNote && (
+        <p className="text-[10px] text-brand-navy mt-0.5 max-w-xl text-right">{railsNote}</p>
+      )}
       {/* MIGRATION DRIFT — loud, red, and above everything else.
           A migration applied out of order once left the code calling a table
           that didn't exist; the sync reported success for days while the store

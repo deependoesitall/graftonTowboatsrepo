@@ -14,17 +14,37 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { buildBestSellers, buildOnSale, MIN_SALE_UPSTREAM, type RailBuild } from '@/lib/catalog-rails';
 import { loadProductIndex, matchProduct } from '@/lib/product-index';
+import { getAdminSession } from '@/lib/admin-auth-server';
 import { refreshBoatsOrderingRail } from '@/lib/boats-ordering';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
+/**
+ * ⚠️ AN ADMIN SESSION COUNTS, AND IT HAS TO.
+ *
+ * This accepted only Vercel's cron header or the CRON_SECRET, which meant the
+ * rails could be rebuilt exactly once a day at 5am and by nothing else. When
+ * the Best Sellers rail was wrong, there was no way for anyone at GTS to fix
+ * it — "Sync now" on the products page rebuilds the CATALOGUE, a different
+ * route entirely, and never touched the rails. So the rail stayed wrong for a
+ * day while it looked like the sync was ignoring it.
+ *
+ * Same gate the catalogue sync already uses. Rebuilding a rail is idempotent
+ * and reads only Sinclair's public feed; there is nothing here to protect that
+ * an admin session does not already cover.
+ */
 function authorised(req: NextRequest): boolean {
-  const secret = process.env.CRON_SECRET;
-  // Vercel signs its own cron invocations with this header.
   if (req.headers.get('x-vercel-cron')) return true;
+  if (getAdminSession(req)) return true;
+  const secret = process.env.CRON_SECRET;
   if (!secret) return false;
   return req.headers.get('authorization') === `Bearer ${secret}`;
+}
+
+// Same work either way — the cron GETs it, the dashboard POSTs it.
+export async function POST(req: NextRequest) {
+  return GET(req);
 }
 
 export async function GET(req: NextRequest) {
