@@ -116,6 +116,8 @@ function CatalogSyncStatus({ isOwner }: { isOwner: boolean }) {
   // Claude's pagination fix.
   const [railsBusy, setRailsBusy] = useState(false);
   const [railsNote, setRailsNote] = useState<string | null>(null);
+  /** Sync now kick feedback — throttle / silent-skip / force status (not rails). */
+  const [syncNote, setSyncNote] = useState<string | null>(null);
 
   async function rebuildRails() {
     setRailsBusy(true);
@@ -148,14 +150,50 @@ function CatalogSyncStatus({ isOwner }: { isOwner: boolean }) {
   async function syncNow() {
     setKicking(true);
     setRailsNote(null);
+    setSyncNote(null);
     startPolling();
     let finishedOk = false;
+    // Resume an unfinished sweep as-is. Only force a fresh session when today's
+    // nightly already completed — otherwise Sync now was a silent photo/rails no-op.
+    // Re-fetch status first so a click before the initial load resolves doesn't
+    // wipe an in-progress overnight chain with force=1.
+    let current = status;
+    try {
+      const stRes = await adminFetch('/api/admin/sync-status');
+      if (stRes.ok) {
+        current = await stRes.json();
+        setStatus(current);
+      }
+    } catch { /* use whatever we already have */ }
+    const resume = !!current?.in_progress;
     try {
       for (let guard = 0; guard < 40; guard++) {
-        const res = await adminFetch('/api/cron/catalog-sync', { method: 'POST' });
-        if (!res.ok) break;
+        // First poke only: force=1 clears completedAt for today (admin session).
+        // Later chunks must NOT force or each would wipe progress.
+        const path = (guard === 0 && !resume)
+          ? '/api/cron/catalog-sync?force=1'
+          : '/api/cron/catalog-sync';
+        const res = await adminFetch(path, { method: 'POST' });
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => null);
+          setSyncNote(errBody?.error || `Sync failed (${res.status})`);
+          break;
+        }
         const r = await res.json().catch(() => null);
         await load();
+
+        if (r?.status === 'rate-limited') {
+          setSyncNote('Freshop is throttling right now — wait a few minutes, then Sync now again. Not a silent skip.');
+          break;
+        }
+
+        // Without force, a completed-today response is photo-backfill only —
+        // do not pretend the catalogue refreshed.
+        if (guard === 0 && !resume && (r?.catalog_skipped || r?.photo_backfill_only)) {
+          setSyncNote('Catalog was not re-synced (server ignored force). Try again, or check you are signed in as owner.');
+          break;
+        }
+
         if (!r?.has_more) {
           // has_more false = catalogue pass done (or rate-limited / waiting).
           // Rebuild rails only when we are not mid-chunk; a waiting checkpoint
@@ -221,6 +259,9 @@ function CatalogSyncStatus({ isOwner }: { isOwner: boolean }) {
           </>
         )}
       </div>
+      {syncNote && (
+        <p className="text-[10px] text-amber-700 mt-0.5 max-w-xl text-right">{syncNote}</p>
+      )}
       {railsNote && (
         <p className="text-[10px] text-brand-navy mt-0.5 max-w-xl text-right">{railsNote}</p>
       )}

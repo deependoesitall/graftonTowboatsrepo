@@ -235,6 +235,22 @@ async function handle(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  // Admin "Sync now" may pass ?force=1 (or JSON {force:1}) to start a fresh
+  // catalog sweep even when today's nightly already completed. Vercel cron and
+  // CRON_SECRET-only callers MUST NOT force — otherwise we hammer Freshop all day.
+  const forceParam = new URL(req.url).searchParams.get('force');
+  let forceRequested = forceParam === '1' || forceParam === 'true';
+  if (!forceRequested && req.method === 'POST') {
+    try {
+      const body = await req.clone().json();
+      if (body && (body.force === true || body.force === 1 || body.force === '1')) {
+        forceRequested = true;
+      }
+    } catch { /* no/invalid JSON body — fine */ }
+  }
+  const isCronCaller = bearerOk || req.headers.get('x-vercel-cron') === '1';
+  const forceFreshSession = forceRequested && adminOk && !isCronCaller;
+
   const started = Date.now();
   const supabase = createServiceClient();
 
@@ -272,26 +288,40 @@ async function handle(req: NextRequest) {
 
   // Session logic: an UNFINISHED session continues across days (the very first
   // full-store sweep can span multiple nights). A COMPLETED session starts
-  // fresh on the next new day; completed-today invocations are no-ops.
+  // fresh on the next new day; completed-today invocations are no-ops —
+  // UNLESS an admin Sync now explicitly forces a new session for today.
   if (state.completedAt) {
     if (state.day === today) {
-      // Catalog sweep is done for today — but keep clearing the photo-match
-      // backlog and self-chain until it's empty, so Photo Review fills up in
-      // ONE night instead of only during the sweep's handful of runs.
-      let backfill: { processed: number; hasMore: boolean; error?: string } = { processed: 0, hasMore: false };
-      try { backfill = await runPhotoBackfill(supabase, started + TIME_BUDGET_MS - 5000); } catch { /* never break */ }
-      if (backfill.error) {
-        state.lastError = `Photo backfill write failed: ${backfill.error}`;
-        await saveState(supabase, state);
+      if (forceFreshSession) {
+        // Owner mid-day Sync now: discard today's completed checkpoint and
+        // start a fresh catalog sweep. Do NOT confuse this with photo-backfill
+        // leftovers from the overnight pass.
+        console.log('[catalog-sync] admin force=1 — starting fresh session for', today);
+        state = { day: today, syncVersion: SYNC_VERSION, stats: emptyStats(), applied: 0, inserted: 0 };
+        // fall through to discover + sweep
+      } else {
+        // Catalog sweep is done for today — but keep clearing the photo-match
+        // backlog and self-chain until it's empty, so Photo Review fills up in
+        // ONE night instead of only during the sweep's handful of runs.
+        let backfill: { processed: number; hasMore: boolean; error?: string } = { processed: 0, hasMore: false };
+        try { backfill = await runPhotoBackfill(supabase, started + TIME_BUDGET_MS - 5000); } catch { /* never break */ }
+        if (backfill.error) {
+          state.lastError = `Photo backfill write failed: ${backfill.error}`;
+          await saveState(supabase, state);
+        }
+        if (backfill.hasMore) chainSelf(secret);
+        return NextResponse.json({
+          status: 'done', day: today, completedAt: state.completedAt,
+          stats: state.stats, inserted: state.inserted || 0,
+          photo_backfill: backfill, has_more: backfill.hasMore,
+          /** Cron / non-force: catalog not re-run; only photo leftovers may remain. */
+          catalog_skipped: true,
+          photo_backfill_only: true,
+        });
       }
-      if (backfill.hasMore) chainSelf(secret);
-      return NextResponse.json({
-        status: 'done', day: today, completedAt: state.completedAt,
-        stats: state.stats, inserted: state.inserted || 0,
-        photo_backfill: backfill, has_more: backfill.hasMore,
-      });
+    } else {
+      state = { day: today, syncVersion: SYNC_VERSION, stats: emptyStats(), applied: 0, inserted: 0 };
     }
-    state = { day: today, syncVersion: SYNC_VERSION, stats: emptyStats(), applied: 0, inserted: 0 };
   } else if (!state.day || !state.depts) {
     state = { day: today, syncVersion: SYNC_VERSION, stats: emptyStats(), applied: 0, inserted: 0 };
   }
