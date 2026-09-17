@@ -19,7 +19,9 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Tag, TrendingUp, Plus, ChevronRight, Ship } from 'lucide-react';
 import { formatCurrency, productDisplayName } from '@/lib/utils';
+import { applyEffectiveCatalogPricing } from '@/lib/catalog-price';
 import { addToCart } from '@/lib/cart';
+import { ProductDetailModal } from '@/components/catalog/ProductDetailModal';
 import type { Product } from '@/types';
 
 type RailProduct = Product & {
@@ -31,6 +33,15 @@ export default function CatalogRails() {
   const [rails, setRails] = useState<{
     on_sale: RailProduct[]; best_sellers: RailProduct[]; boats_ordering: RailProduct[];
   } | null>(null);
+  // Same detail modal ProductGrid opens — one shared ProductDetailModal, not a second overlay.
+  const [detailProduct, setDetailProduct] = useState<{ product: Product; variants?: Product[] } | null>(null);
+
+  function openDetail(p: Product, variants?: Product[]) {
+    setDetailProduct({
+      product: applyEffectiveCatalogPricing(p),
+      variants: variants?.map(v => applyEffectiveCatalogPricing(v)),
+    });
+  }
 
   useEffect(() => {
     fetch('/api/catalog-rails')
@@ -84,6 +95,7 @@ export default function CatalogRails() {
           icon={Ship}
           accent="text-brand-green"
           items={rails.boats_ordering}
+          onOpenDetail={openDetail}
           viewAll={{
             href: `/catalog?ids=${rails.boats_ordering.map(p => p.id).join(',')}`,
             label: 'View all',
@@ -96,6 +108,7 @@ export default function CatalogRails() {
           icon={Tag}
           accent="text-brand-orange"
           items={rails.on_sale}
+          onOpenDetail={openDetail}
           viewAll={{
             href: `/catalog?ids=${rails.on_sale.map(p => p.id).join(',')}`,
             label: 'View all on sale',
@@ -108,19 +121,30 @@ export default function CatalogRails() {
           icon={TrendingUp}
           accent="text-brand-green"
           items={rails.best_sellers}
+          onOpenDetail={openDetail}
+        />
+      )}
+
+      {detailProduct && (
+        <ProductDetailModal
+          product={detailProduct.product}
+          variants={detailProduct.variants}
+          onClose={() => setDetailProduct(null)}
+          onSelectProduct={p => setDetailProduct({ product: p })}
         />
       )}
     </div>
   );
 }
 
-function Rail({ title, subtitle = "from Sinclair's this week", icon: Icon, accent, items, viewAll }: {
+function Rail({ title, subtitle = "from Sinclair's this week", icon: Icon, accent, items, viewAll, onOpenDetail }: {
   title: string;
   subtitle?: string;
   icon: typeof Tag;
   accent: string;
   items: RailProduct[];
   viewAll?: { href: string; label: string };
+  onOpenDetail: (p: Product, variants?: Product[]) => void;
 }) {
   return (
     <section className="bg-white border border-gray-200 rounded-xl px-4 py-3">
@@ -141,13 +165,16 @@ function Rail({ title, subtitle = "from Sinclair's this week", icon: Icon, accen
 
       {/* Snap scrolling, same density as the coupon strip it replaces. */}
       <div className="flex gap-2.5 overflow-x-auto pb-1 -mx-1 px-1 snap-x">
-        {items.map(p => <RailCard key={p.id} product={p} />)}
+        {items.map(p => <RailCard key={p.id} product={p} onOpenDetail={onOpenDetail} />)}
       </div>
     </section>
   );
 }
 
-function RailCard({ product }: { product: RailProduct }) {
+function RailCard({ product, onOpenDetail }: {
+  product: RailProduct;
+  onOpenDetail: (p: Product, variants?: Product[]) => void;
+}) {
   const [added, setAdded] = useState(false);
 
   const sale = product.rail_sale_price;
@@ -156,6 +183,7 @@ function RailCard({ product }: { product: RailProduct }) {
   // number equal to the sale price reads as a fake discount.
   const showStrike = sale != null && regular != null && regular > sale;
   const display = sale ?? product.price;
+  const name = productDisplayName(product);
 
   function add() {
     // Same shape ProductGrid uses, so a rail add and a grid add are
@@ -168,7 +196,7 @@ function RailCard({ product }: { product: RailProduct }) {
     // confirmation quietly disagree with the receipt.
     addToCart({
       product_id: product.id,
-      description: productDisplayName(product),
+      description: name,
       category: product.category,
       pkg_size: product.pkg_size,
       uom: product.uom,
@@ -185,42 +213,53 @@ function RailCard({ product }: { product: RailProduct }) {
 
   return (
     <div className="shrink-0 w-40 snap-start border border-gray-100 rounded-lg p-2.5 bg-gray-50/50 flex flex-col">
-      {product.image_url ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={product.image_url} alt=""
-          className="w-full h-20 object-contain mb-1.5 mix-blend-multiply" />
-      ) : (
-        <div className="w-full h-20 mb-1.5 rounded bg-gray-100" aria-hidden="true" />
-      )}
+      {/* Card body opens the same ProductDetailModal as the grid (recommended items). */}
+      <button
+        type="button"
+        onClick={() => onOpenDetail(product)}
+        className="text-left flex flex-col flex-1 w-full min-w-0 cursor-pointer rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-steel"
+        aria-label={`View details for ${name}`}
+      >
+        {product.image_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={product.image_url} alt=""
+            className="w-full h-20 object-contain mb-1.5 mix-blend-multiply" />
+        ) : (
+          <div className="w-full h-20 mb-1.5 rounded bg-gray-100" aria-hidden="true" />
+        )}
 
-      <p className="text-[11px] font-semibold text-brand-navy leading-snug line-clamp-2 min-h-[28px]">
-        {productDisplayName(product)}
-      </p>
-
-      {(product.pkg_size || product.uom) && (
-        <p className="text-[10px] text-gray-400 mt-0.5 truncate">
-          {[product.pkg_size, product.uom].filter(Boolean).join(' / ')}
+        <p className="text-[11px] font-semibold text-brand-navy leading-snug line-clamp-2 min-h-[28px]">
+          {name}
         </p>
-      )}
 
-      <div className="mt-1.5 mb-2 flex items-baseline gap-1.5 flex-wrap">
-        <span className={`text-sm font-bold ${sale != null ? 'text-red-600' : 'text-brand-navy'}`}>
-          {formatCurrency(Number(display) || 0)}
-        </span>
-        {showStrike && (
-          <span className="text-[11px] text-gray-400 line-through">
-            {formatCurrency(Number(regular))}
+        {(product.pkg_size || product.uom) && (
+          <p className="text-[10px] text-gray-400 mt-0.5 truncate">
+            {[product.pkg_size, product.uom].filter(Boolean).join(' / ')}
+          </p>
+        )}
+
+        <div className="mt-1.5 mb-2 flex items-baseline gap-1.5 flex-wrap">
+          <span className={`text-sm font-bold ${sale != null ? 'text-red-600' : 'text-brand-navy'}`}>
+            {formatCurrency(Number(display) || 0)}
           </span>
-        )}
-        {product.billed_by_weight && (
-          <span className="text-[9px] text-gray-400">/lb</span>
-        )}
-      </div>
+          {showStrike && (
+            <span className="text-[11px] text-gray-400 line-through">
+              {formatCurrency(Number(regular))}
+            </span>
+          )}
+          {product.billed_by_weight && (
+            <span className="text-[9px] text-gray-400">/lb</span>
+          )}
+        </div>
+      </button>
 
-      <button onClick={add}
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); add(); }}
         className={`mt-auto w-full py-1.5 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 transition-colors ${
           added ? 'bg-green-600 text-white' : 'bg-brand-navy text-white hover:bg-brand-steel'
-        }`}>
+        }`}
+      >
         <Plus className="w-3 h-3" />
         {added ? 'Added' : 'Add'}
       </button>
