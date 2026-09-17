@@ -7,6 +7,7 @@
 import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { fetchActiveDeals } from '@/lib/sinclair-offers';
+import { loadProductIndex } from '@/lib/product-index';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,18 +21,21 @@ export async function GET() {
     return NextResponse.json({ deals: [] });
   }
 
-  const [deals, { data: products }] = await Promise.all([
+  // ⚠️ THIS WAS `.select('id, freshop_id')` WITH NO RANGE, AND IT WAS HIDING
+  // MOST OF THE COUPONS.
+  //
+  // PostgREST caps an unbounded select at 1,000 rows and the catalogue is
+  // ~22,000, so the map was the first thousand products in arbitrary order. A
+  // deal on anything further down resolved to no product ids and was dropped
+  // by the `.filter(d => d.product_ids.length > 0)` below — silently, because
+  // a coupon that matches nothing looks exactly like a coupon that has expired.
+  //
+  // Same one-line mistake as the Best Sellers rail; see lib/product-index.
+  const [deals, index] = await Promise.all([
     fetchActiveDeals(),
-    supabase.from('products').select('id, freshop_id').not('freshop_id', 'is', null),
+    loadProductIndex(supabase),
   ]);
-
-  // Sinclair product id → our product uuid(s)
-  const byFreshop = new Map<string, string[]>();
-  (products || []).forEach((p: { id: string; freshop_id: string | null }) => {
-    if (!p.freshop_id) return;
-    if (!byFreshop.has(p.freshop_id)) byFreshop.set(p.freshop_id, []);
-    byFreshop.get(p.freshop_id)!.push(p.id);
-  });
+  const byFreshop = index.byFreshop;
 
   const mapped = deals
     .map(d => ({

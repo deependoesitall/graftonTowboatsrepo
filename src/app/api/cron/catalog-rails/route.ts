@@ -13,7 +13,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { buildBestSellers, buildOnSale, MIN_SALE_UPSTREAM, type RailBuild } from '@/lib/catalog-rails';
-import { excludeHotPrepared } from '@/lib/catalog-exclusions';
+import { loadProductIndex, matchProduct } from '@/lib/product-index';
 import { refreshBoatsOrderingRail } from '@/lib/boats-ordering';
 
 export const dynamic = 'force-dynamic';
@@ -34,23 +34,36 @@ export async function GET(req: NextRequest) {
 
   const supabase = createServiceClient();
 
-  // Freshop id → our uuid. Built once and shared by both rails.
-  const { data: products, error: pErr } = await excludeHotPrepared(
-    supabase
-    .from('products')
-    .select('id, freshop_id')
-    .not('freshop_id', 'is', null)
-    .eq('is_active', true),
-  );
-
-  if (pErr) return NextResponse.json({ error: pErr.message }, { status: 500 });
-
-  const byFreshop = new Map<string, string>();
-  for (const p of products || []) {
-    // First wins. Size variants share a Freshop id in a few cases and the rail
-    // only needs one card — the grouped product card handles sizes itself.
-    if (p.freshop_id && !byFreshop.has(p.freshop_id)) byFreshop.set(p.freshop_id, p.id);
+  // ── EVERY PRODUCT WE STOCK, NOT THE FIRST THOUSAND ───────────────────
+  //
+  // ⚠️ THIS LINE USED TO BE A PLAIN `.select('id, freshop_id')`, AND THAT IS
+  // THE WHOLE REASON THE RAIL NEVER MATCHED SINCLAIR'S.
+  //
+  // PostgREST caps an unbounded select at 1,000 rows. The catalogue is ~22,000.
+  // So the lookup was the first thousand products in whatever order Postgres
+  // returned them, with no error and no warning — and every best seller that
+  // happened to live further down was dropped by the `we don't stock it` branch
+  // below, which was asserting something untrue.
+  //
+  // Measured against the live store: Sinclair's top items are Yellow Bananas
+  // (#1), Ground Beef (#4), Sweet Corn (#5), Eggs (#6), Mac & Cheese (#7),
+  // Calhoun Peaches and Russet Potato (#11). Ours showed the beef and the
+  // peaches. The query asking Freshop for the right products was fixed; the
+  // query asking OUR OWN DATABASE which of them we carry was not.
+  let index;
+  try {
+    index = await loadProductIndex(supabase, { activeOnly: true, excludeHotPrepared: true });
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : 'Could not load the catalogue' },
+      { status: 500 },
+    );
   }
+
+  /** Freshop ids we resolved only by barcode — written back after the rails. */
+  const learned = new Map<string, string>();
+  const matchStats = { freshop_id: 0, upc: 0, unmatched: 0 };
+  const unmatchedNames: string[] = [];
 
   const result: Record<string, { found: number; skipped: number; error?: string }> = {};
 
@@ -92,8 +105,26 @@ export async function GET(req: NextRequest) {
 
     const rows = items
       .map(it => {
-        const productId = byFreshop.get(it.freshopId);
-        if (!productId) return null;   // we don't stock it — skip, don't store
+        // Freshop id first, barcode second. The second is what rescues an item
+        // the enrich step has not linked yet; see lib/product-index for why
+        // there is deliberately no name match.
+        const hit = matchProduct(index, {
+          id: it.freshopId,
+          upc: it.upc,
+          barcode_upc_a: it.barcode_upc_a,
+          barcode_ean13: it.barcode_ean13,
+        });
+        if (!hit) {
+          matchStats.unmatched++;
+          if (unmatchedNames.length < 15) unmatchedNames.push(it.freshopId);
+          return null;               // genuinely not in the catalogue
+        }
+        matchStats[hit.by]++;
+        // Matched on a barcode, so our row is missing the id. Recorded now and
+        // written back below, which makes tonight's rescue permanent instead of
+        // a lookup we repeat every night for ever.
+        if (hit.by === 'upc') learned.set(hit.productId, it.freshopId);
+        const productId = hit.productId;
         return {
           rail,
           product_id: productId,
@@ -139,6 +170,24 @@ export async function GET(req: NextRequest) {
     const boats = await refreshBoatsOrderingRail(supabase);
     result.boats_ordering = { found: boats.wrote, skipped: 0, error: boats.error };
 
+    // ── TEACH THE CATALOGUE WHAT WE LEARNED ──────────────────────────
+    //
+    // Anything matched by barcode has a row with no freshop_id on it, which is
+    // an enrich gap this rail just happened to close. Writing it back makes
+    // tonight's rescue permanent: tomorrow it is an exact id match here, and
+    // the deals matcher and the nightly enrich get it for free.
+    //
+    // One row at a time and every failure swallowed — this is a bonus, and it
+    // must never be the reason a rail build reports failure.
+    for (const [productId, freshopId] of learned) {
+      const { error: learnErr } = await supabase
+        .from('products')
+        .update({ freshop_id: freshopId })
+        .eq('id', productId)
+        .is('freshop_id', null);
+      if (learnErr) console.warn('[catalog-rails] freshop_id not written back:', learnErr.message);
+    }
+
     // Availability last, so a build that threw leaves yesterday's answer in
     // place rather than half of today's.
     const { data: settingsRow } = await supabase
@@ -158,5 +207,15 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  return NextResponse.json({ ok: true, ...result });
+  // Said out loud so a rail that is short can be diagnosed from the cron's own
+  // response instead of by staring at the storefront and guessing. `catalog`
+  // is the number the 1,000-row cap used to hide.
+  return NextResponse.json({
+    ok: true,
+    ...result,
+    catalog: index.count,
+    matched: matchStats,
+    learned_freshop_ids: learned.size,
+    ...(unmatchedNames.length ? { unmatched_freshop_ids: unmatchedNames } : {}),
+  });
 }

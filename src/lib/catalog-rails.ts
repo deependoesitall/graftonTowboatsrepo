@@ -73,6 +73,15 @@ export interface RailItem {
   position: number;
   salePrice: number | null;
   regularPrice: number | null;
+  /**
+   * ⚠️ CARRIED SO THE RAIL CAN STILL FIND THE PRODUCT WHEN freshop_id WAS
+   * NEVER LINKED ON OUR ROW. Without these, an item the enrich step has not
+   * reached yet is unmatchable and silently drops off the rail — see
+   * lib/product-index.
+   */
+  upc: string | null;
+  barcode_upc_a: string | null;
+  barcode_ean13: string | null;
 }
 
 /**
@@ -234,6 +243,9 @@ export async function buildBestSellers(): Promise<RailBuild> {
       position: i,
       salePrice: null,
       regularPrice: Number(p.base_price ?? p.unit_price) || null,
+      upc: p.upc ?? null,
+      barcode_upc_a: p.barcode_upc_a ?? null,
+      barcode_ean13: p.barcode_ean13 ?? null,
     }));
 
   // Best sellers is the store's own ranking of its own catalogue. There is no
@@ -276,6 +288,9 @@ export async function buildOnSale(): Promise<RailBuild> {
         Number(p.base_price) > (Number(p.offer_sale_price) || 0)
           ? Number(p.base_price)
           : null,
+      upc: p.upc ?? null,
+      barcode_upc_a: p.barcode_upc_a ?? null,
+      barcode_ean13: p.barcode_ean13 ?? null,
     }));
 
   // ⚠️ `upstream` IS SINCLAIR'S ANSWER, NOT OURS. It is the size of their sale
