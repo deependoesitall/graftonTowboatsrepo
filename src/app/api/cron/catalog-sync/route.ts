@@ -397,12 +397,14 @@ async function handle(req: NextRequest) {
   };
   const storeByFreshopId = new Map<string, StoreMeta>();
   const storeByUpcKey = new Map<string, StoreMeta>();
-  for (let from = 0; ; from += 5000) {
+  // PostgREST max-rows is 1000; paging at 5000 silently truncated to ~1k and
+  // left ~10k store_only IDs unknown → mass duplicate inserts → uniq_store_freshop_id 409 storm.
+  for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase
       .from('products')
       .select('id, upc, freshop_id, description, pkg_size, price, regular_price, sale_start_date, sale_finish_date, popularity, is_active, is_available, manual_fields')
       .eq('store_only', true)
-      .range(from, from + 4999);
+      .range(from, from + 999);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     const rowsIn = (data || []) as Array<{
       id: string; upc: string | null; freshop_id: string | null;
@@ -435,7 +437,7 @@ async function handle(req: NextRequest) {
       }
       knownFreshopIds.add(`${productMatchKey(String(r.description || ''), String(r.pkg_size || ''))}|${r.price}`);
     }
-    if (!data || data.length < 5000) break;
+    if (!data || data.length < 1000) break;
   }
 
   // ── Fetch a chunk of pages, walking department by department ──
@@ -634,9 +636,18 @@ async function handle(req: NextRequest) {
         // the in-memory dedupe missed. That's the guard doing its job, NOT a
         // sync failure — retry the batch row by row so the good rows still land.
         if (insErr.code === '23505') {
+          // Row-by-row so non-colliding rows still land. Count skips once —
+          // don't flood Postgres/logs with thousands of per-row 23505s when
+          // identity paging was truncated (fixed above: page size 1000).
+          let skipped = 0;
           for (const row of batchInserts) {
             const { error: rowErr } = await supabase.from('products').insert(row);
             if (!rowErr) state.inserted = (state.inserted || 0) + 1;
+            else if (rowErr.code === '23505') skipped++;
+          }
+          if (skipped) {
+            state.lastNotice = `${skipped} store_only insert(s) skipped (unique)`;
+            console.warn('[catalog-sync]', state.lastNotice);
           }
         } else {
           state.lastError = `store import insert: ${insErr.message}`;
