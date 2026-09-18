@@ -11,12 +11,13 @@ interface AuthModalProps {
   onClose: () => void;
   defaultMode?: 'signin' | 'signup';
   defaultEmail?: string;
+  defaultCompany?: string;
   title?: string;
 }
 
 type Screen = 'signin' | 'signup' | 'forgot' | 'forgot_sent' | 'email_confirm';
 
-export function AuthModal({ open, onClose, defaultMode = 'signin', defaultEmail = '', title }: AuthModalProps) {
+export function AuthModal({ open, onClose, defaultMode = 'signin', defaultEmail = '', defaultCompany = '', title }: AuthModalProps) {
   const { signIn, signUp, resetPassword } = useAuth();
   const [screen, setScreen] = useState<Screen>(defaultMode);
   const [email, setEmail] = useState(defaultEmail);
@@ -42,11 +43,11 @@ export function AuthModal({ open, onClose, defaultMode = 'signin', defaultEmail 
       setShowConfirmPassword(false);
       setFirstName('');
       setLastName('');
-      setCompanyName('');
+      setCompanyName(defaultCompany || '');
       setScreen(defaultMode);
       setEmail(defaultEmail || '');
     }
-  }, [open, defaultMode, defaultEmail]);
+  }, [open, defaultMode, defaultEmail, defaultCompany]);
 
   if (!open || !mounted) return null;
 

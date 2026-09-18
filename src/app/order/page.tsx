@@ -17,7 +17,8 @@ import {
 } from '@/lib/cart';
 import { formatCurrency, formatLb, formatQty, isPoundQty, lbStepsFor, usesLbSteps, formatArrivalTime, formatCalendarDate } from '@/lib/utils';
 import { CartItem, VesselInfo, AdditionalServices, VESSEL_TYPES, PreferredSubMode, Product } from '@/types';
-import { SiteHeader } from '@/components/layout/SiteHeader';
+import { SiteHeader } from '@/components/layout/SiteHeader'
+import { BoatSwitcher } from '@/components/boat/BoatSwitcher';
 import { ContactPhones } from '@/components/layout/ContactPhones';
 import { AuthModal } from '@/components/auth/AuthModal';
 import { useToast } from '@/hooks/use-toast';
@@ -1187,6 +1188,7 @@ export default function OrderPage() {
     <div className="min-h-screen bg-brand-cream flex flex-col">
       <SiteHeader />
       <main className="flex-1 max-w-3xl mx-auto w-full px-4 py-6 pb-20">
+        <div className="mb-4"><BoatSwitcher variant="panel" /></div>
         <button onClick={() => setStep(1)}
           className="inline-flex items-center gap-1.5 text-brand-river text-sm mb-6 hover:text-brand-steel">
           <ArrowLeft className="w-4 h-4" /> Back to Items

@@ -1,49 +1,17 @@
 'use client';
 // src/components/auth/SaveOrderPrompt.tsx
 //
-// THE ONE MOMENT WORTH INTERRUPTING.
-//
-// A captain who has just submitted an order is the only person on this site who
-// has already done all the work an account would have saved him. He typed his
-// boat's name, his terminal, his captain's phone, and picked his items one at a
-// time. Thirty seconds later he is gone, and the next trip he does all of it
-// again from a blank page.
-//
-// Every other place to ask — a banner on the catalog, a card in the footer —
-// asks someone to imagine a benefit. This asks nothing: it names the work he
-// just finished and offers to make it the last time he does it.
-//
-// ── RULES THIS FOLLOWS, BECAUSE INTERRUPTING HAS TO BE EARNED ────────────
-//
-// 1. THE ORDER IS NEVER HELD HOSTAGE. It is already placed, already emailed,
-//    already on Sinclair's phones. The modal says so. An upsell that makes a
-//    working man wonder whether his food is actually coming is worth less than
-//    nothing, on a river where his alternative is phoning Jen like he always has.
-//
-// 2. IT WAITS FOR THE CONFIRMATION TO LAND. The order number is what he came to
-//    this page for; covering it the instant it renders reads as a pop-up ad and
-//    trains people to dismiss without reading. A short beat first.
-//
-// 3. IT ASKS ONCE, PER ORDER. Dismissal is remembered. A refresh, a back
-//    button, or opening the confirmation link again from his email does not
-//    re-ask. The card lower down the page stays for anyone who changes his mind.
-//
-// 4. IT NEVER APPEARS FOR SOMEONE ALREADY SIGNED IN.
+// Guest → account victory lap. One screen, celebratory, prefilled from the order.
+// Google + email. Order is already placed — never held hostage.
 
 import { useEffect, useState } from 'react';
-import { X, History, Zap, Ship, ShieldCheck } from 'lucide-react';
+import { X, History, Zap, Ship, ShieldCheck, PartyPopper, Loader2 } from 'lucide-react';
 import type { Order } from '@/types';
 import { countableUnits } from '@/lib/utils';
+import { createClient } from '@/lib/supabase/client';
+import { saveVesselInfo, getVesselInfo } from '@/lib/cart';
 
-/** Remembered per order, so re-opening the emailed link doesn't re-ask. */
 const dismissKey = (orderId: string) => `gts-save-order-dismissed:${orderId}`;
-
-/**
- * Long enough for the green tick and the order number to register as "done",
- * short enough to still belong to the same moment. Under half a second this
- * reads as a pop-up that was waiting to fire; over about two, attention has
- * already moved to the items list.
- */
 const APPEAR_AFTER_MS = 900;
 
 export function SaveOrderPrompt({ order, orderNumber, onCreateAccount }: {
@@ -53,16 +21,14 @@ export function SaveOrderPrompt({ order, orderNumber, onCreateAccount }: {
 }) {
   const [open, setOpen] = useState(false);
   const [leaving, setLeaving] = useState(false);
+  const [googleBusy, setGoogleBusy] = useState(false);
 
   const orderId = order?.id || '';
-  // The address the confirmation was just sent to. Using it means the account
-  // is created against an address he has already proved he reads, and the
-  // claim-orders step then finds this very order waiting for him.
-  // `customer_email` is the billing address on Order; there is no bare
-  // `email` field. The vessel's own address wins because that is where the
-  // confirmation just went, and matching it is what lets claim-orders pull
-  // this order into the new account.
   const email = (order?.vessel_email || order?.customer_email || '').trim();
+  const company = (order?.company_name || '').trim();
+  const vessel = (order?.vessel_name || '').trim();
+  const contact = (order?.contact_name || '').trim();
+  const phone = (order?.phone || '').trim();
 
   useEffect(() => {
     if (!orderId || !email) return;
@@ -70,12 +36,24 @@ export function SaveOrderPrompt({ order, orderNumber, onCreateAccount }: {
     try { dismissed = !!localStorage.getItem(dismissKey(orderId)); } catch { /* private window */ }
     if (dismissed) return;
 
+    // Seed vessel_info so Profile merge / checkout autofill already have the win.
+    try {
+      const cur = getVesselInfo();
+      saveVesselInfo({
+        ...cur,
+        company_name: company || cur.company_name,
+        vessel_name: vessel || cur.vessel_name,
+        contact_name: contact || cur.contact_name,
+        phone: phone || cur.phone,
+        email: email || cur.email,
+        vessel_email: (order?.vessel_email || '').trim() || cur.vessel_email,
+      });
+    } catch { /* fine */ }
+
     const t = setTimeout(() => setOpen(true), APPEAR_AFTER_MS);
     return () => clearTimeout(t);
-  }, [orderId, email]);
+  }, [orderId, email, company, vessel, contact, phone, order?.vessel_email]);
 
-  // Escape closes, and the background stops scrolling underneath — a modal you
-  // can scroll behind feels broken on a phone.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
@@ -95,14 +73,47 @@ export function SaveOrderPrompt({ order, orderNumber, onCreateAccount }: {
     setTimeout(() => { setOpen(false); setLeaving(false); }, 140);
   }
 
+  async function continueWithGoogle() {
+    setGoogleBusy(true);
+    try {
+      try { localStorage.setItem(dismissKey(orderId), '1'); } catch { /* fine */ }
+      // Stash so account can celebrate the claim after OAuth lands.
+      try {
+        sessionStorage.setItem('gts_guest_victory', JSON.stringify({
+          orderId,
+          orderNumber,
+          company,
+          vessel,
+          contact,
+          email,
+        }));
+      } catch { /* fine */ }
+      const next = orderId
+        ? `/confirm?order=${encodeURIComponent(orderId)}${orderNumber ? `&num=${encodeURIComponent(orderNumber)}` : ''}`
+        : '/account';
+      const supabase = createClient();
+      await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+        },
+      });
+    } catch {
+      setGoogleBusy(false);
+    }
+  }
+
   if (!open) return null;
 
-  // Real numbers from his real order. "Reorder these 23 items" is an offer;
-  // "reorder your items" is a slogan.
   const itemCount = (order?.items || [])
     .filter(i => i.item_type !== 'service')
     .reduce((s, i) => s + countableUnits(i), 0);
-  const vessel = (order?.vessel_name || '').trim();
+
+  const filledBits = [
+    company && vessel ? `${company} · ${vessel}` : company || vessel,
+    contact,
+    email,
+  ].filter(Boolean);
 
   return (
     <div
@@ -123,56 +134,95 @@ export function SaveOrderPrompt({ order, orderNumber, onCreateAccount }: {
           <X className="w-4 h-4" />
         </button>
 
-        {/* Reassurance FIRST, in the header, before a single word of pitch. */}
         <div className="bg-brand-navy px-6 pt-6 pb-5 text-white">
-          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-brand-gold mb-2">
+          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-brand-gold mb-2 flex items-center gap-1.5">
+            <PartyPopper className="w-3.5 h-3.5" />
             Order {orderNumber || ''} is placed
           </p>
           <h2 id="save-order-title" className="font-display text-2xl font-bold leading-tight">
-            Next time, this takes<br />ten seconds.
+            Save this order to an account
           </h2>
           <p className="text-white/70 text-sm mt-2 leading-relaxed">
             {vessel
-              ? <>You just filled in {vessel}&rsquo;s details and picked {itemCount} item{itemCount === 1 ? '' : 's'}. An account remembers both.</>
-              : <>You just filled in your boat&rsquo;s details and picked {itemCount} item{itemCount === 1 ? '' : 's'}. An account remembers both.</>}
+              ? <>{vessel}&rsquo;s details and {itemCount} item{itemCount === 1 ? '' : 's'} are ready — keep them for next trip.</>
+              : <>Your boat details and {itemCount} item{itemCount === 1 ? '' : 's'} are ready — keep them for next trip.</>}
           </p>
         </div>
 
         <div className="px-6 py-5">
-          <ul className="flex flex-col gap-4">
+          {filledBits.length > 0 && (
+            <div className="mb-4 rounded-xl border border-brand-green/15 bg-brand-sand/50 px-3.5 py-3">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-brand-green/50 mb-1.5">
+                Already filled in
+              </p>
+              <ul className="space-y-1">
+                {(company || vessel) && (
+                  <li className="text-sm font-semibold text-brand-navy flex items-center gap-2">
+                    <Ship className="w-3.5 h-3.5 text-brand-orange shrink-0" />
+                    {[company, vessel].filter(Boolean).join(' · ')}
+                  </li>
+                )}
+                {contact && (
+                  <li className="text-sm text-brand-navy/80 pl-5.5" style={{ paddingLeft: '1.375rem' }}>
+                    {contact}{phone ? ` · ${phone}` : ''}
+                  </li>
+                )}
+                {email && (
+                  <li className="text-sm text-brand-navy/80 break-all" style={{ paddingLeft: '1.375rem' }}>
+                    {email}
+                  </li>
+                )}
+              </ul>
+            </div>
+          )}
+
+          <ul className="flex flex-col gap-3 mb-4">
             <Benefit
               icon={Zap}
               title="Reorder in one tap"
-              body="Your last order becomes your next one. Change the quantities, send it."
-            />
-            <Benefit
-              icon={Ship}
-              title="Your boat, already filled in"
-              body="Terminal, captain, phone, boat or van — typed once, never again."
+              body="This list becomes your next order."
             />
             <Benefit
               icon={History}
-              title="Every order, kept"
-              body="What you ordered last trip and what it cost, without digging through email."
+              title="Track what happens next"
+              body="Received → Shopping → On the way → Done."
             />
           </ul>
 
-          <div className="mt-5 rounded-lg bg-brand-sand/60 px-3 py-2.5 flex items-start gap-2">
+          <div className="rounded-lg bg-brand-sand/60 px-3 py-2.5 flex items-start gap-2 mb-4">
             <ShieldCheck className="w-4 h-4 text-brand-green mt-0.5 shrink-0" />
             <p className="text-xs text-brand-green/80 leading-relaxed">
-              {/* Naming the address matters: it removes the "what do they want
-                  from me" question before it forms, and it is the same address
-                  the confirmation just landed in. */}
-              We&rsquo;ll use <b className="font-semibold break-all">{email}</b> — the address your
-              confirmation just went to. Pick a password and you&rsquo;re done.
+              Free, no card, and this order is already on its way either way.
+              We&rsquo;ll use <b className="font-semibold break-all">{email}</b>.
             </p>
           </div>
 
           <button
-            onClick={() => { close(); onCreateAccount(email); }}
-            className="mt-4 w-full bg-brand-orange text-white font-bold uppercase tracking-wide text-sm
+            type="button"
+            disabled={googleBusy}
+            onClick={() => { void continueWithGoogle(); }}
+            className="w-full flex items-center justify-center gap-2 border-2 border-brand-green/20 bg-white
+                       text-brand-navy font-bold text-sm px-4 py-3.5 rounded-full hover:border-brand-green/40
+                       hover:bg-brand-sand/40 transition-colors disabled:opacity-60"
+          >
+            {googleBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <GoogleMark />}
+            Continue with Google
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              try {
+                sessionStorage.setItem('gts_guest_victory', JSON.stringify({
+                  orderId, orderNumber, company, vessel, contact, email,
+                }));
+              } catch { /* fine */ }
+              close();
+              onCreateAccount(email);
+            }}
+            className="mt-2.5 w-full bg-brand-orange text-white font-bold uppercase tracking-wide text-sm
                        px-4 py-3.5 rounded-full hover:bg-brand-ored transition-colors">
-            Create my free account
+            Create with email
           </button>
 
           <button
@@ -180,11 +230,6 @@ export function SaveOrderPrompt({ order, orderNumber, onCreateAccount }: {
             className="mt-2 w-full text-center text-sm text-brand-navy/50 hover:text-brand-navy/80 py-2">
             Not now
           </button>
-
-          {/* The whole promise, in one line, at the moment of decision. */}
-          <p className="text-[11px] text-brand-navy/40 text-center mt-1 leading-relaxed">
-            Free, no card, and this order is already on its way either way.
-          </p>
         </div>
       </div>
     </div>
@@ -204,5 +249,16 @@ function Benefit({ icon: Icon, title, body }: {
         <span className="block text-brand-navy/55 text-[13px] leading-relaxed mt-0.5">{body}</span>
       </span>
     </li>
+  );
+}
+
+function GoogleMark() {
+  return (
+    <svg className="w-4 h-4" viewBox="0 0 24 24" aria-hidden="true">
+      <path fill="#EA4335" d="M12 10.2v3.6h5.1c-.2 1.2-.9 2.2-1.9 2.9l3.1 2.4c1.8-1.7 2.9-4.1 2.9-7 0-.7-.1-1.3-.2-1.9H12z" />
+      <path fill="#34A853" d="M5.3 14.3l-.8.6-2.4 1.9C3.7 20.1 7.5 22.5 12 22.5c2.7 0 5-.9 6.7-2.4l-3.1-2.4c-.9.6-2 1-3.6 1-2.8 0-5.1-1.9-6-4.4z" />
+      <path fill="#4A90E2" d="M3.1 7.2C2.4 8.6 2 10.2 2 12s.4 3.4 1.1 4.8l3.2-2.5C5.8 13.5 5.5 12.8 5.5 12s.3-1.5.8-2.3L3.1 7.2z" />
+      <path fill="#FBBC05" d="M12 5.5c1.5 0 2.8.5 3.8 1.5l2.8-2.8C16.9 2.5 14.7 1.5 12 1.5 7.5 1.5 3.7 3.9 2.1 7.2l3.2 2.5C6.9 7.4 9.2 5.5 12 5.5z" />
+    </svg>
   );
 }

@@ -52,7 +52,7 @@ const LIMIT = 50;
 /** Rows scanned when matching orders that predate the boat being onboarded. */
 const LEGACY_SCAN = 300;
 
-type Row = Order & { id: string; created_at: string; user_id: string | null };
+type Row = Order & { id: string; created_at: string; user_id: string | null; vessel_id?: string | null };
 
 async function identify(req: NextRequest) {
   const authHeader = req.headers.get('authorization');
@@ -159,9 +159,30 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const orders = [...byId.values()]
+  let orders = [...byId.values()]
     .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
     .slice(0, LIMIT);
+
+  // Optional boat scope (multi-boat switcher). Never widens access — only
+  // narrows within the membership-safe set already loaded above.
+  const vesselIdQ = (req.nextUrl.searchParams.get('vessel_id') || '').trim();
+  const companyQ = (req.nextUrl.searchParams.get('company') || '').trim();
+  const boatQ = (req.nextUrl.searchParams.get('boat') || '').trim();
+  if (vesselIdQ || (companyQ && boatQ)) {
+    const boatKey = boatQ ? vesselNameKey(boatQ) : '';
+    // Must be a boat this login crews — refuse fishing other Ingram boats.
+    const allowed = vesselIdQ
+      ? vesselIds.includes(vesselIdQ)
+      : boats.some(b => b.company === companyQ && b.key === boatKey);
+    if (!allowed) {
+      return NextResponse.json({ error: 'Not a boat on your account.' }, { status: 403 });
+    }
+    orders = orders.filter(o => {
+      if (vesselIdQ && o.vessel_id && String(o.vessel_id) === vesselIdQ) return true;
+      if (companyQ && boatKey) return orderMatchesVessel(o, companyQ, boatKey);
+      return false;
+    });
+  }
 
   return NextResponse.json({ orders, claimed });
 }

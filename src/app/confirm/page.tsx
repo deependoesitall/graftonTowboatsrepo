@@ -7,14 +7,16 @@ import { clearCart } from '@/lib/cart';
 import { formatCurrency, formatDate, formatQty, isWeighedLine } from '@/lib/utils';
 import { Order } from '@/types';
 import { SiteHeader } from '@/components/layout/SiteHeader';
-import { CheckCircle2, Download, ShoppingCart, Anchor, Star, History } from 'lucide-react';
+import { CheckCircle2, Download, ShoppingCart, Anchor, Star, History, PartyPopper } from 'lucide-react';
 import { ContactPhones } from '@/components/layout/ContactPhones';
 import { EstimatedInfo } from '@/components/ui/EstimatedInfo';
 import { useAuth } from '@/lib/auth-context';
 import { AuthModal } from '@/components/auth/AuthModal';
 import { SaveOrderPrompt } from '@/components/auth/SaveOrderPrompt';
 import { DeliverySummary } from '@/components/order/DeliverySummary';
+import { OrderStatusTimeline } from '@/components/order/OrderStatusTimeline';
 import { createClient } from '@/lib/supabase/client';
+import { getVesselInfo, saveVesselInfo } from '@/lib/cart';
 
 function ConfirmContent() {
   const { user, loading: authLoading } = useAuth();
@@ -87,7 +89,7 @@ function ConfirmContent() {
               </p>
             </div>
             <p className="text-gray-500 text-sm leading-relaxed mb-2">
-              Your order has been sent to Grafton Towboat Services. We&apos;ll be in touch shortly.
+              Thanks — we&apos;ve received your order and will begin preparing your delivery.
             </p>
             {order && (
               <p className="text-gray-400 text-xs">
@@ -95,6 +97,14 @@ function ConfirmContent() {
                 {' · '}Placed {formatDate(order.created_at)}
               </p>
             )}
+          </div>
+
+          {/* What happens next — honest timeline for cooks */}
+          <div className="mb-6">
+            <OrderStatusTimeline
+              status={order?.status || 'new'}
+              deliveryMethod={order?.delivery_method || getVesselInfo().delivery_method || ''}
+            />
           </div>
 
           {/* Actions */}
@@ -193,30 +203,47 @@ function ConfirmContent() {
             </div>
           )}
 
-          {/* Create account prompt -- only for confirmed guests (not loading) */}
+          {/* Guest victory lap (inline) — modal SaveOrderPrompt is the primary ask */}
           {!authLoading && !user && (
             <div className="card-base p-5 mt-6 border-brand-orange/30 bg-gradient-to-br from-white to-brand-yellow/10">
               <div className="flex items-start gap-3">
                 <div className="w-10 h-10 bg-brand-orange/10 rounded-full flex items-center justify-center shrink-0">
-                  <Star className="w-5 h-5 text-brand-orange" />
+                  <PartyPopper className="w-5 h-5 text-brand-orange" />
                 </div>
-                <div className="flex-1">
+                <div className="flex-1 min-w-0">
                   <p className="font-bold text-brand-green text-sm mb-1">
-                    Ordering again next trip?
+                    Save this order to an account
                   </p>
-                  <p className="text-brand-green/60 text-xs leading-relaxed mb-3">
-                    An account keeps this order, fills your boat&rsquo;s details in for you, and turns
-                    the whole thing into one tap next time.
+                  <p className="text-brand-green/60 text-xs leading-relaxed mb-2">
+                    Company, vessel, and contact from this order are ready to keep — Google or email, your choice.
                   </p>
-                  <div className="flex items-center gap-2">
+                  {(order?.company_name || order?.vessel_name) && (
+                    <p className="text-xs font-semibold text-brand-navy mb-3 truncate">
+                      {[order?.company_name, order?.vessel_name].filter(Boolean).join(' · ')}
+                      {order?.contact_name ? ` · ${order.contact_name}` : ''}
+                    </p>
+                  )}
+                  <div className="flex flex-wrap items-center gap-2">
                     <button onClick={() => {
-                      setAuthEmail((order?.vessel_email || order?.customer_email || '').trim());
+                      const em = (order?.vessel_email || order?.customer_email || '').trim();
+                      try {
+                        const cur = getVesselInfo();
+                        saveVesselInfo({
+                          ...cur,
+                          company_name: order?.company_name || cur.company_name,
+                          vessel_name: order?.vessel_name || cur.vessel_name,
+                          contact_name: order?.contact_name || cur.contact_name,
+                          phone: order?.phone || cur.phone,
+                          email: em || cur.email,
+                        });
+                      } catch { /* fine */ }
+                      setAuthEmail(em);
                       setAuthOpen(true);
                     }}
                       className="bg-brand-orange text-white text-xs font-bold uppercase tracking-wide px-4 py-2 rounded-full hover:bg-brand-ored transition-colors">
-                      Create Free Account
+                      Save with email
                     </button>
-                    <span className="text-brand-green/40 text-xs">Takes 10 seconds &middot; totally optional</span>
+                    <span className="text-brand-green/40 text-xs">Google is on the popup · optional</span>
                   </div>
                 </div>
               </div>
@@ -247,7 +274,8 @@ function ConfirmContent() {
       )}
       <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} defaultMode="signup"
         defaultEmail={authEmail}
-        title="Create Free Account" />
+        defaultCompany={(order?.company_name || getVesselInfo().company_name || '').trim()}
+        title="Save this order to an account" />
     </div>
   );
 }

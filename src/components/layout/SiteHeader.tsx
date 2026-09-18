@@ -7,6 +7,7 @@ import { getCart, getCartCount, getCartTotal } from '@/lib/cart';
 import { formatCurrency } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
 import { AuthModal } from '@/components/auth/AuthModal';
+import { BoatSwitcher } from '@/components/boat/BoatSwitcher';
 
 export function SiteHeader() {
   const [cartCount, setCartCount] = useState(0);
@@ -49,7 +50,8 @@ export function SiteHeader() {
         </nav>
 
         {/* Cart + hamburger */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <BoatSwitcher className="" />
           {user ? (
             <Link href="/account"
               className="hidden sm:flex flex-col items-end leading-tight text-right group"

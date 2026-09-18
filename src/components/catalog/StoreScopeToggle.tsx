@@ -6,6 +6,7 @@
 // too hidden; she missed it entirely. This puts it front and center up top.
 import Link from 'next/link';
 import { Ship, Store } from 'lucide-react';
+import { FullStoreCoach } from '@/components/catalog/FullStoreCoach';
 
 export function StoreScopeToggle({ storeAll, bargeHref, storeAllHref, bargeCount, fullCount }: {
   storeAll: boolean;
@@ -16,6 +17,7 @@ export function StoreScopeToggle({ storeAll, bargeHref, storeAllHref, bargeCount
 }) {
   return (
     <div className="mb-4">
+      <FullStoreCoach storeAll={storeAll} />
       <div className="relative grid grid-cols-2 gap-1 bg-gray-100 border border-gray-200 rounded-2xl p-1">
         {/* Sliding highlight */}
         <span

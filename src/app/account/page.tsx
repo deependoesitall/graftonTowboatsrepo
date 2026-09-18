@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   Star, History, User, LogOut, Loader2, ShoppingCart,
-  RotateCcw, ChevronRight, Save, Package, AlertTriangle, RefreshCw, Ship
+  RotateCcw, ChevronRight, Save, Package, AlertTriangle, RefreshCw, Ship, PartyPopper
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import {
@@ -15,6 +15,14 @@ import {
   namesFromUserMetadata,
   mergeGuestVesselIntoProfile,
 } from '@/lib/customer-profile';
+import { customerOrderStatus } from '@/lib/customer-order-status';
+import {
+  getActiveBoat,
+  orderMatchesActiveBoat,
+  subscribeActiveBoat,
+  type ActiveBoat,
+} from '@/lib/active-boat';
+import { BoatSwitcher } from '@/components/boat/BoatSwitcher';
 import { AuthModal } from '@/components/auth/AuthModal';
 import { SiteHeader } from '@/components/layout/SiteHeader';
 import { CartBar } from '@/components/cart/CartBar';
@@ -26,13 +34,6 @@ import { Product, Order, VESSEL_TYPES } from '@/types';
 import { readCodPayments } from '@/lib/cod-payments';
 import { useToast } from '@/hooks/use-toast';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
-
-const STATUS_STYLES: Record<string, string> = {
-  new: 'bg-blue-50 text-blue-700 border-blue-200',
-  in_progress: 'bg-amber-50 text-amber-700 border-amber-200',
-  fulfilled: 'bg-green-50 text-green-700 border-green-200',
-  cancelled: 'bg-red-50 text-red-600 border-red-200',
-};
 
 function AccountContent() {
   const { user, loading, signOut, refreshProfile } = useAuth();
@@ -51,6 +52,8 @@ function AccountContent() {
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [ordersError, setOrdersError] = useState<string | null>(null);
+  const [activeBoat, setActiveBoatState] = useState<ActiveBoat | null>(null);
+  const [victoryLap, setVictoryLap] = useState<{ vessel?: string; company?: string; count?: number } | null>(null);
 
   // Favorites
   const [favorites, setFavorites] = useState<Product[]>([]);
@@ -68,7 +71,7 @@ function AccountContent() {
   const [savingProfile, setSavingProfile] = useState(false);
   // Boats this login is a member of (company · boat) — read-only membership.
   // Preferred company/vessel for checkout autofill live in profile fields above.
-  const [boatLinks, setBoatLinks] = useState<Array<{ company: string; boat: string; role: string }>>([]);
+  const [boatLinks, setBoatLinks] = useState<Array<{ company: string; boat: string; role: string; vesselId?: string }>>([]);
 
   // Only trigger data loading once we're sure user is logged in
   useEffect(() => {
@@ -78,7 +81,25 @@ function AccountContent() {
     loadFavorites();
     loadProfile();
     loadBoatLinks();
+    setActiveBoatState(getActiveBoat());
+    // Guest → account victory: OAuth/email signup just claimed an order
+    try {
+      const raw = sessionStorage.getItem('gts_guest_victory');
+      if (raw) {
+        const v = JSON.parse(raw);
+        sessionStorage.removeItem('gts_guest_victory');
+        setVictoryLap({
+          vessel: v.vessel || '',
+          company: v.company || '',
+          count: 1,
+        });
+      }
+    } catch { /* fine */ }
   }, [user, loading]);
+
+  useEffect(() => subscribeActiveBoat((b) => {
+    setActiveBoatState(b);
+  }), []);
 
   // Confirmation email deep-link: /account?order=<id> → always Past Orders.
   useEffect(() => {
@@ -135,7 +156,11 @@ function AccountContent() {
         throw new Error(body.error || 'We could not load your orders just now.');
       }
       const body = await res.json();
-      setOrders((body.orders as Order[]) || []);
+      const list = (body.orders as Order[]) || [];
+      setOrders(list);
+      if ((body.claimed || 0) > 0) {
+        setVictoryLap(prev => prev || { count: body.claimed });
+      }
     } catch (err) {
       // Deliberately NOT falling back to an empty list — see above.
       setOrders([]);
@@ -162,11 +187,12 @@ function AccountContent() {
       const supabase = createClient();
       const { data } = await supabase
         .from('vessel_members')
-        .select('role, vessel:vessels(name, company:companies(name))');
+        .select('role, vessel_id, vessel:vessels(id, name, company:companies(name))');
       const rows = (data || []).map((row: any) => ({
         role: row.role || 'cook',
         boat: row.vessel?.name || '',
         company: row.vessel?.company?.name || '',
+        vesselId: String(row.vessel_id || row.vessel?.id || '') || undefined,
       })).filter((r: any) => r.boat);
       setBoatLinks(rows);
     } catch {
@@ -286,21 +312,6 @@ function AccountContent() {
     } finally {
       setSavingProfile(false);
     }
-  }
-
-  function useLinkedBoat(b: { company: string; boat: string }) {
-    setProfile(p => ({
-      ...p,
-      company_name: b.company || p.company_name,
-      vessel_name: b.boat || p.vessel_name,
-    }));
-    setTab('profile');
-    toast({
-      title: 'Preferred boat set',
-      description: 'Save Profile to use this company and vessel at checkout.',
-      variant: 'success',
-      duration: 2500,
-    });
   }
 
   /**
@@ -569,26 +580,27 @@ function AccountContent() {
           </button>
         </div>
 
-        {boatLinks.length > 0 && (
-          <div className="mb-4 rounded-xl border border-brand-gold/30 bg-brand-sand/50 px-4 py-3 text-sm">
-            <p className="text-[10px] font-bold uppercase tracking-wide text-brand-green/50 mb-1.5">Linked boats</p>
-            {boatLinks.map((b, i) => (
-              <div key={i} className="flex items-center justify-between gap-2 py-0.5">
-                <div className="font-semibold text-brand-navy min-w-0">
-                  {b.company || 'Company'} · {b.boat}
-                  <span className="ml-2 text-xs font-normal text-brand-green/50 capitalize">{b.role}</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => useLinkedBoat(b)}
-                  className="shrink-0 text-[11px] font-bold uppercase tracking-wide text-brand-orange hover:underline"
-                >
-                  Use for checkout
-                </button>
-              </div>
-            ))}
-            <p className="text-xs text-brand-green/50 mt-1">
-              Membership is read-only here. &ldquo;Use for checkout&rdquo; sets your preferred company and vessel for autofill — then Save Profile.
+        {boatLinks.length > 1 && (
+          <div className="mb-4">
+            <BoatSwitcher
+              variant="panel"
+              onChanged={(b) => {
+                setActiveBoatState(b);
+                setProfile(p => ({
+                  ...p,
+                  company_name: b.company || p.company_name,
+                  vessel_name: b.boat || p.vessel_name,
+                }));
+              }}
+            />
+          </div>
+        )}
+        {boatLinks.length === 1 && (
+          <div className="mb-4 rounded-xl border border-brand-gold/20 bg-brand-sand/40 px-4 py-2.5 text-sm">
+            <p className="text-[10px] font-bold uppercase tracking-wide text-brand-green/50 mb-0.5">Your boat</p>
+            <p className="font-semibold text-brand-navy">
+              {boatLinks[0].company || 'Company'} · {boatLinks[0].boat}
+              <span className="ml-2 text-xs font-normal text-brand-green/50 capitalize">{boatLinks[0].role}</span>
             </p>
           </div>
         )}
@@ -618,6 +630,30 @@ function AccountContent() {
                   Open Profile →
                 </button>
               )}
+            </div>
+          </div>
+        )}
+
+        {victoryLap && (
+          <div className="mb-4 rounded-xl border border-brand-orange/30 bg-gradient-to-br from-white to-brand-yellow/20 px-4 py-3.5 flex gap-3 items-start">
+            <div className="w-10 h-10 rounded-full bg-brand-orange/10 flex items-center justify-center shrink-0">
+              <PartyPopper className="w-5 h-5 text-brand-orange" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="font-bold text-brand-navy text-sm">Order saved to your account</p>
+              <p className="text-sm text-brand-green/70 leading-relaxed mt-0.5">
+                {[victoryLap.company, victoryLap.vessel].filter(Boolean).join(' · ') || 'Your guest order'}
+                {' '}is on Past Orders
+                {victoryLap.count && victoryLap.count > 1 ? ` (${victoryLap.count} linked)` : ''}.
+                Finish Profile if anything&rsquo;s still blank — checkout will autofill next time.
+              </p>
+              <button
+                type="button"
+                onClick={() => setVictoryLap(null)}
+                className="mt-1.5 text-[11px] font-bold uppercase tracking-wide text-brand-orange hover:underline"
+              >
+                Got it
+              </button>
             </div>
           </div>
         )}
@@ -661,7 +697,7 @@ function AccountContent() {
               </div>
               <p className="font-bold text-brand-green text-base mb-2">No past orders yet</p>
               <p className="text-brand-green/50 text-sm leading-relaxed mb-5 max-w-xs mx-auto">
-                Orders you place while signed in will appear here. You can view order details, check delivery status, and reorder everything in one tap.
+                Place an order once — it shows up here so you can track it and reorder next trip.
               </p>
               <Link href="/catalog" className="btn-primary inline-flex items-center gap-2">
                 <ShoppingCart className="w-4 h-4" /> Browse Items
@@ -669,17 +705,20 @@ function AccountContent() {
             </div>
           ) : (
             <div className="space-y-3">
-              {orders.map(order => (
+              {orders.filter(o => boatLinks.length < 2 || orderMatchesActiveBoat(o, activeBoat)).map(order => {
+                const cx = customerOrderStatus(order.status, order.delivery_method);
+                return (
                 <div key={order.id} className="card-base p-4 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <span className="font-mono text-sm font-bold text-brand-green">{order.order_number}</span>
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase ${STATUS_STYLES[order.status] || ''}`}>
-                        {order.status.replace('_', ' ')}
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${cx.chipClass}`}>
+                        {cx.label}
                       </span>
                     </div>
+                    <p className="text-xs text-brand-green/60 leading-snug mb-1">{cx.nextStep}</p>
                     <p className="text-sm text-brand-green/70 truncate">
-                      {order.company_name}{' · '}{formatDate(order.created_at)}
+                      {[order.company_name, order.vessel_name].filter(Boolean).join(' · ')}{' · '}{formatDate(order.created_at)}
                     </p>
                     <p className="text-xs text-brand-green/40 mt-0.5">
                       {order.items?.length || 0} line items{' · '}<span className="font-bold text-brand-green">{formatCurrency(order.subtotal)}</span>
@@ -724,6 +763,10 @@ function AccountContent() {
                   </div>
                   {expandedOrderId === order.id && (
                     <div className="w-full basis-full mt-3 border-t border-brand-green/10 pt-3 space-y-1.5">
+                      <div className="rounded-lg bg-brand-sand/50 px-3 py-2 mb-2">
+                        <p className="text-xs font-bold text-brand-navy">{cx.label}</p>
+                        <p className="text-xs text-brand-green/70 leading-relaxed">{cx.nextStep}</p>
+                      </div>
                       <p className="text-[10px] font-bold uppercase tracking-wide text-brand-green/50 mb-1">Full substitution record</p>
                       {(() => {
                         const lines = (order.items || []).filter(i => i.item_type !== 'service');
@@ -794,7 +837,13 @@ function AccountContent() {
                     </div>
                   )}
                 </div>
-              ))}
+              );})}
+              {orders.length > 0 && boatLinks.length > 1 && orders.filter(o => orderMatchesActiveBoat(o, activeBoat)).length === 0 && (
+                <div className="card-base p-8 text-center">
+                  <p className="font-bold text-brand-green text-sm mb-1">No orders for this boat yet</p>
+                  <p className="text-brand-green/50 text-sm">Switch boats above, or place an order while ordering as this one.</p>
+                </div>
+              )}
             </div>
           )
         )}
@@ -810,7 +859,7 @@ function AccountContent() {
               </div>
               <p className="font-bold text-brand-green text-base mb-2">No saved favorites yet</p>
               <p className="text-brand-green/50 text-sm leading-relaxed mb-5 max-w-xs mx-auto">
-                Tap the star icon on any item in the catalog to save it here. Your favorites are always one tap away from being added to your next order.
+                Tap the star on any catalog item to pin it here for one-tap add next time.
               </p>
               <Link href="/catalog" className="btn-primary inline-flex items-center gap-2">
                 <Star className="w-4 h-4" /> Browse Catalog
