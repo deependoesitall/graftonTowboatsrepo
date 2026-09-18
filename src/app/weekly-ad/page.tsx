@@ -1,12 +1,13 @@
 'use client';
 // src/app/weekly-ad/page.tsx
 // Sinclair's weekly ad rendered as fast, lazy-loaded page images (mobile
-// first — no PDF iframe lag or iPhone zoom issues). The PDF is fetched only
-// when the customer taps Print.
+// first). Tap a page → fullscreen lightbox with hi-res srcLarge + pinch/pan.
+// The PDF is fetched only when the customer taps Print / Open ad.
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Printer, ArrowLeft, Loader2, FileX } from 'lucide-react';
+import { Printer, ArrowLeft, Loader2, FileX, ZoomIn, ExternalLink } from 'lucide-react';
 import { SiteHeader } from '@/components/layout/SiteHeader';
+import { WeeklyAdLightbox, type WeeklyAdLightboxPage } from '@/components/weekly-ad/WeeklyAdLightbox';
 
 interface AdPage {
   sequence: number;
@@ -23,9 +24,14 @@ interface AdData {
   pages?: AdPage[];
 }
 
+const HINT_KEY = 'gts-weekly-ad-zoom-hint-seen';
+
 export default function WeeklyAdPage() {
   const [ad, setAd] = useState<AdData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [lightbox, setLightbox] = useState<WeeklyAdLightboxPage | null>(null);
+  const [showHint, setShowHint] = useState(false);
+  const [isNarrow, setIsNarrow] = useState(false);
 
   useEffect(() => {
     fetch('/api/weekly-ad/pages')
@@ -35,8 +41,40 @@ export default function WeeklyAdPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    try {
+      if (!localStorage.getItem(HINT_KEY)) setShowHint(true);
+    } catch {
+      setShowHint(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    const sync = () => setIsNarrow(mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
+
+  function dismissHint() {
+    setShowHint(false);
+    try { localStorage.setItem(HINT_KEY, '1'); } catch { /* private mode */ }
+  }
+
+  function openPage(p: AdPage, index: number, total: number) {
+    dismissHint();
+    setLightbox({
+      sequence: p.sequence,
+      src: p.src,
+      srcLarge: p.srcLarge,
+      width: p.width,
+      height: p.height,
+      label: `Page ${index + 1} of ${total}`,
+    });
+  }
+
   function printAd() {
-    // The PDF proxy is only touched here — never for on-screen viewing
     window.open('/api/weekly-ad', '_blank');
   }
 
@@ -80,7 +118,6 @@ export default function WeeklyAdPage() {
           </div>
         )}
 
-        {/* Plain-English pricing note (replaces the old "circular" jargon) */}
         {!loading && (hasPages || pdfFallback) && (
           <div className="bg-brand-sand/50 border border-brand-gold/30 rounded-xl px-4 py-3 mb-4">
             <p className="text-xs text-brand-navy leading-relaxed">
@@ -91,13 +128,37 @@ export default function WeeklyAdPage() {
           </div>
         )}
 
-        {/* Fast path: lazy-loaded page images */}
+        {/* First-visit hint — tap to zoom */}
+        {!loading && hasPages && showHint && (
+          <div className="mb-3 flex items-start gap-2 rounded-xl bg-brand-river/10 border border-brand-river/25 px-3 py-2.5">
+            <ZoomIn className="w-4 h-4 text-brand-river shrink-0 mt-0.5" />
+            <p className="text-sm text-brand-navy flex-1">
+              <span className="font-bold">Tap a page to zoom.</span> Pinch or double-tap to read the fine print.
+            </p>
+            <button
+              type="button"
+              onClick={dismissHint}
+              className="text-xs text-brand-river font-semibold shrink-0 px-2 py-1"
+              aria-label="Dismiss hint"
+            >
+              Got it
+            </button>
+          </div>
+        )}
+
+        {/* Fast path: lazy-loaded page images — tap opens lightbox */}
         {!loading && hasPages && (
           <>
             <div className="space-y-3">
               {ad!.pages!.map((p, i) => (
-                <div key={p.sequence} className="card-base overflow-hidden">
-                  {/* aspect-ratio reserves space so lazy pages don't cause layout jumps */}
+                <button
+                  key={p.sequence}
+                  type="button"
+                  onClick={() => openPage(p, i, ad!.pages!.length)}
+                  className="card-base overflow-hidden w-full text-left block cursor-zoom-in focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-river"
+                  aria-label={`Zoom page ${i + 1} of ${ad!.pages!.length}`}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={p.src}
                     srcSet={`${p.src} 900w, ${p.srcLarge} 1600w`}
@@ -107,13 +168,14 @@ export default function WeeklyAdPage() {
                     height={p.height}
                     loading={i === 0 ? 'eager' : 'lazy'}
                     decoding="async"
-                    className="w-full h-auto block"
+                    className="w-full h-auto block pointer-events-none"
                     style={{ aspectRatio: `${p.width} / ${p.height}` }}
                   />
-                  <p className="text-center text-[11px] text-gray-300 py-1.5">
-                    Page {i + 1} of {ad!.pages!.length}
+                  <p className="text-center text-[11px] text-gray-300 py-1.5 flex items-center justify-center gap-1">
+                    <ZoomIn className="w-3 h-3" />
+                    Page {i + 1} of {ad!.pages!.length} — tap to zoom
                   </p>
-                </div>
+                </button>
               ))}
             </div>
             {ad!.disclaimer && (
@@ -122,14 +184,40 @@ export default function WeeklyAdPage() {
           </>
         )}
 
-        {/* Fallback: manual PDF override is set — embed the proxied PDF */}
+        {/* PDF-only override: on mobile Safari iframes often won't pinch-zoom.
+            Prefer a big Open ad button; keep iframe on wider screens. */}
         {!loading && pdfFallback && (
-          <div className="card-base overflow-hidden flex-1 min-h-[75vh]">
-            <iframe
-              src="/api/weekly-ad"
-              title="Sinclair's Weekly Ad"
-              className="w-full h-full min-h-[75vh] border-0"
-            />
+          <div className="card-base overflow-hidden flex-1 min-h-[50vh] flex flex-col">
+            {isNarrow ? (
+              <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8 text-center">
+                <p className="text-brand-navy font-bold text-lg">This week&apos;s ad is a PDF</p>
+                <p className="text-sm text-gray-500 max-w-sm">
+                  Mobile browsers can&apos;t zoom inside an embedded PDF. Open it in Safari&apos;s PDF viewer to pinch-zoom deals.
+                </p>
+                <a
+                  href="/api/weekly-ad"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn-primary text-base px-6 py-3.5 flex items-center gap-2 min-h-[48px]"
+                >
+                  <ExternalLink className="w-5 h-5" />
+                  Open ad
+                </a>
+                <button
+                  type="button"
+                  onClick={printAd}
+                  className="text-sm text-brand-river underline flex items-center gap-1.5"
+                >
+                  <Printer className="w-4 h-4" /> Print / save PDF
+                </button>
+              </div>
+            ) : (
+              <iframe
+                src="/api/weekly-ad"
+                title="Sinclair's Weekly Ad"
+                className="w-full h-full min-h-[75vh] border-0"
+              />
+            )}
           </div>
         )}
 
@@ -140,6 +228,10 @@ export default function WeeklyAdPage() {
           </p>
         )}
       </main>
+
+      {lightbox && (
+        <WeeklyAdLightbox page={lightbox} onClose={() => setLightbox(null)} />
+      )}
     </div>
   );
 }

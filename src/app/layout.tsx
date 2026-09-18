@@ -79,7 +79,9 @@ export const viewport: Viewport = {
   themeColor: '#1E3D1E',
   width: 'device-width',
   initialScale: 1,
-  maximumScale: 1,
+  // Allow pinch-zoom for a11y + weekly-ad readability.
+  // maximumScale: 1 blocked Safari pinch site-wide (including /weekly-ad).
+  // Sticky headers tolerate browser zoom; lightbox is the primary ad zoom UX.
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
