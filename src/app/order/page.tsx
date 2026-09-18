@@ -510,6 +510,7 @@ export default function OrderPage() {
       setVessel(prev => ({
         ...prev,
         company_name: prev.company_name || (profile?.company_name ?? ''),
+        vessel_name:  prev.vessel_name  || (profile?.vessel_name  ?? ''),
         contact_name: prev.contact_name || (profile?.contact_name ?? ''),
         phone:        prev.phone        || (profile?.phone        ?? ''),
         email:        prev.email        || user.email             || '',

@@ -60,9 +60,9 @@ export function SiteHeader() {
                   ? `${profile.first_name}${profile.last_name ? ' ' + profile.last_name : ''}`
                   : 'My Account'}
               </span>
-              {profile?.company_name && (
+              {(profile?.company_name || profile?.vessel_name) && (
                 <span className="text-brand-green/50 text-[11px] font-semibold -mt-0.5">
-                  {profile.company_name}
+                  {[profile?.company_name, profile?.vessel_name].filter(Boolean).join(' · ')}
                 </span>
               )}
             </Link>
@@ -123,9 +123,9 @@ export function SiteHeader() {
                     ? `${profile.first_name}${profile.last_name ? ' ' + profile.last_name : ''}`
                     : 'My Account'}
                 </span>
-                {profile?.company_name && (
+                {(profile?.company_name || profile?.vessel_name) && (
                   <span className="block text-brand-yellow/60 text-[11px] font-semibold normal-case">
-                    {profile.company_name}
+                    {[profile?.company_name, profile?.vessel_name].filter(Boolean).join(' · ')}
                   </span>
                 )}
               </span>

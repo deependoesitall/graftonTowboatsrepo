@@ -9,6 +9,8 @@ export interface CustomerProfile {
   first_name: string | null;
   last_name: string | null;
   company_name: string | null;
+  /** Preferred vessel for checkout autofill (separate from company). */
+  vessel_name: string | null;
   contact_name: string | null;
   phone: string | null;
 }

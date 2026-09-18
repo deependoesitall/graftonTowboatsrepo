@@ -6,9 +6,15 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   Star, History, User, LogOut, Loader2, ShoppingCart,
-  RotateCcw, ChevronRight, Save, Package, AlertTriangle, RefreshCw
+  RotateCcw, ChevronRight, Save, Package, AlertTriangle, RefreshCw, Ship
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
+import {
+  isProfileComplete,
+  missingProfileFields,
+  namesFromUserMetadata,
+  mergeGuestVesselIntoProfile,
+} from '@/lib/customer-profile';
 import { AuthModal } from '@/components/auth/AuthModal';
 import { SiteHeader } from '@/components/layout/SiteHeader';
 import { CartBar } from '@/components/cart/CartBar';
@@ -33,8 +39,12 @@ function AccountContent() {
   const router = useRouter();
   const { toast } = useToast();
   const { confirm: confirmDialog, dialog: confirmDialogEl } = useConfirm();
+  // Default tab starts as orders; after profile hydrate we may switch to
+  // profile when incomplete (unless ?order= deep-link — that always wins).
   const [tab, setTab] = useState<'orders' | 'favorites' | 'profile'>('orders');
   const [authOpen, setAuthOpen] = useState(false);
+  const [profileHydrated, setProfileHydrated] = useState(false);
+  const [defaultTabApplied, setDefaultTabApplied] = useState(false);
 
   // Past orders
   const [orders, setOrders] = useState<Order[]>([]);
@@ -46,10 +56,18 @@ function AccountContent() {
   const [favorites, setFavorites] = useState<Product[]>([]);
   const [favsLoading, setFavsLoading] = useState(false);
 
-  // Profile
-  const [profile, setProfile] = useState({ first_name: '', last_name: '', company_name: '', contact_name: '', phone: '' });
+  // Profile — company + vessel are separate (mirrors admin / checkout).
+  const [profile, setProfile] = useState({
+    first_name: '',
+    last_name: '',
+    company_name: '',
+    vessel_name: '',
+    contact_name: '',
+    phone: '',
+  });
   const [savingProfile, setSavingProfile] = useState(false);
-  // Boats this login is a member of (company · boat)
+  // Boats this login is a member of (company · boat) — read-only membership.
+  // Preferred company/vessel for checkout autofill live in profile fields above.
   const [boatLinks, setBoatLinks] = useState<Array<{ company: string; boat: string; role: string }>>([]);
 
   // Only trigger data loading once we're sure user is logged in
@@ -62,14 +80,32 @@ function AccountContent() {
     loadBoatLinks();
   }, [user, loading]);
 
-  // Confirmation email deep-link: /account?order=<id>
+  // Confirmation email deep-link: /account?order=<id> → always Past Orders.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const id = new URLSearchParams(window.location.search).get('order');
     if (!id) return;
     setTab('orders');
     setExpandedOrderId(id);
+    setDefaultTabApplied(true); // honor deep-link over incomplete-profile default
   }, [user]);
+
+  // Profile-first for incomplete profiles (new Google cooks, empty profiles).
+  // Returning users with a complete profile keep Past Orders as the default.
+  useEffect(() => {
+    if (!user || !profileHydrated || defaultTabApplied) return;
+    if (typeof window !== 'undefined') {
+      const id = new URLSearchParams(window.location.search).get('order');
+      if (id) {
+        setDefaultTabApplied(true);
+        return;
+      }
+    }
+    if (!isProfileComplete(profile)) {
+      setTab('profile');
+    }
+    setDefaultTabApplied(true);
+  }, [user, profileHydrated, defaultTabApplied, profile]);
 
   // ⚠️ ORDER HISTORY COMES FROM THE SERVER, NOT FROM RLS.
   //
@@ -141,17 +177,91 @@ function AccountContent() {
     try {
       const supabase = createClient();
       const { data } = await supabase.from('customer_profiles').select('*').maybeSingle();
-      if (data) setProfile({
-        first_name: data.first_name || '',
-        last_name: data.last_name || '',
-        company_name: data.company_name || '',
-        contact_name: data.contact_name || '',
-        phone: data.phone || '',
-      });
+
+      // Start from DB row (or empty), then layer Google metadata + guest vessel_info
+      // only into fields that are still blank — never clobber a saved value.
+      let next = {
+        first_name: data?.first_name || '',
+        last_name: data?.last_name || '',
+        company_name: data?.company_name || '',
+        vessel_name: data?.vessel_name || '',
+        contact_name: data?.contact_name || '',
+        phone: data?.phone || '',
+      };
+
+      // Google OAuth often lands with an empty customer_profiles row; names live
+      // on user.user_metadata (given_name / family_name / full_name).
+      const fromGoogle = namesFromUserMetadata(user?.user_metadata as Record<string, unknown> | undefined);
+      if (!next.first_name.trim() && fromGoogle.first_name) next.first_name = fromGoogle.first_name;
+      if (!next.last_name.trim() && fromGoogle.last_name) next.last_name = fromGoogle.last_name;
+
+      // Guest → account: cart vessel_info from the order they just placed.
+      next = mergeGuestVesselIntoProfile(next, getVesselInfo());
+
+      // If membership already links a boat and preferred company/vessel are still
+      // empty, seed from the first linked boat (they can edit before saving).
+      // boatLinks may not be loaded yet — seed is applied in a follow-up effect.
+
+      setProfile(next);
+
+      // Persist soft merges (Google name / guest vessel) when the DB row was empty
+      // for those fields, so checkout autofill works even if they leave without
+      // clicking Save. Only upsert when we actually filled something blank.
+      const filledSomething =
+        (!data?.first_name && !!next.first_name) ||
+        (!data?.last_name && !!next.last_name) ||
+        (!data?.company_name && !!next.company_name) ||
+        (!data?.vessel_name && !!next.vessel_name) ||
+        (!data?.contact_name && !!next.contact_name) ||
+        (!data?.phone && !!next.phone);
+      if (user && filledSomething) {
+        const { error } = await supabase.from('customer_profiles').upsert({
+          user_id: user.id,
+          ...next,
+        });
+        if (!error) {
+          const existing = getVesselInfo();
+          saveVesselInfo({
+            ...existing,
+            company_name: next.company_name || existing.company_name,
+            vessel_name: next.vessel_name || existing.vessel_name,
+            contact_name: next.contact_name || existing.contact_name,
+            phone: next.phone || existing.phone,
+          });
+          await refreshProfile();
+        }
+      }
     } catch {
-      // no profile yet — leave defaults
+      // no profile yet — still try Google + guest prefills
+      const fromGoogle = namesFromUserMetadata(user?.user_metadata as Record<string, unknown> | undefined);
+      const merged = mergeGuestVesselIntoProfile({
+        first_name: fromGoogle.first_name,
+        last_name: fromGoogle.last_name,
+        company_name: '',
+        vessel_name: '',
+        contact_name: '',
+        phone: '',
+      }, getVesselInfo());
+      setProfile(merged);
+    } finally {
+      setProfileHydrated(true);
     }
   }
+
+  // When vessel_members links boats and preferred company/vessel are still blank,
+  // seed from the first linked boat (read-only list stays; fields remain editable).
+  useEffect(() => {
+    if (!profileHydrated || boatLinks.length === 0) return;
+    setProfile(p => {
+      if ((p.company_name || '').trim() && (p.vessel_name || '').trim()) return p;
+      const first = boatLinks[0];
+      return {
+        ...p,
+        company_name: (p.company_name || '').trim() || first.company || '',
+        vessel_name: (p.vessel_name || '').trim() || first.boat || '',
+      };
+    });
+  }, [boatLinks, profileHydrated]);
 
   async function saveProfile() {
     if (!user) return;
@@ -160,9 +270,15 @@ function AccountContent() {
       const supabase = createClient();
       const { error } = await supabase.from('customer_profiles').upsert({ user_id: user.id, ...profile });
       if (error) throw error;
-      // Also save to localStorage so order form auto-fills
+      // Keep local cart vessel_info in sync so checkout autofills company + vessel.
       const existing = getVesselInfo();
-      saveVesselInfo({ ...existing, company_name: profile.company_name, contact_name: profile.contact_name, phone: profile.phone });
+      saveVesselInfo({
+        ...existing,
+        company_name: profile.company_name,
+        vessel_name: profile.vessel_name,
+        contact_name: profile.contact_name,
+        phone: profile.phone,
+      });
       await refreshProfile();
       toast({ title: 'Profile saved', variant: 'success', duration: 2000 });
     } catch (err: any) {
@@ -170,6 +286,21 @@ function AccountContent() {
     } finally {
       setSavingProfile(false);
     }
+  }
+
+  function useLinkedBoat(b: { company: string; boat: string }) {
+    setProfile(p => ({
+      ...p,
+      company_name: b.company || p.company_name,
+      vessel_name: b.boat || p.vessel_name,
+    }));
+    setTab('profile');
+    toast({
+      title: 'Preferred boat set',
+      description: 'Save Profile to use this company and vessel at checkout.',
+      variant: 'success',
+      duration: 2500,
+    });
   }
 
   /**
@@ -440,13 +571,54 @@ function AccountContent() {
 
         {boatLinks.length > 0 && (
           <div className="mb-4 rounded-xl border border-brand-gold/30 bg-brand-sand/50 px-4 py-3 text-sm">
+            <p className="text-[10px] font-bold uppercase tracking-wide text-brand-green/50 mb-1.5">Linked boats</p>
             {boatLinks.map((b, i) => (
-              <div key={i} className="font-semibold text-brand-navy">
-                {b.company || 'Company'} · {b.boat}
-                <span className="ml-2 text-xs font-normal text-brand-green/50 capitalize">{b.role}</span>
+              <div key={i} className="flex items-center justify-between gap-2 py-0.5">
+                <div className="font-semibold text-brand-navy min-w-0">
+                  {b.company || 'Company'} · {b.boat}
+                  <span className="ml-2 text-xs font-normal text-brand-green/50 capitalize">{b.role}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => useLinkedBoat(b)}
+                  className="shrink-0 text-[11px] font-bold uppercase tracking-wide text-brand-orange hover:underline"
+                >
+                  Use for checkout
+                </button>
               </div>
             ))}
-            <p className="text-xs text-brand-green/50 mt-1">Past orders for this boat are shared with the other logins on it.</p>
+            <p className="text-xs text-brand-green/50 mt-1">
+              Membership is read-only here. &ldquo;Use for checkout&rdquo; sets your preferred company and vessel for autofill — then Save Profile.
+            </p>
+          </div>
+        )}
+
+        {/* Soft nudge — only while incomplete; gated by saved fields via isProfileComplete */}
+        {profileHydrated && !isProfileComplete(profile) && (
+          <div className="mb-4 rounded-xl border border-brand-orange/25 bg-brand-orange/5 px-4 py-3 flex gap-3 items-start">
+            <div className="w-9 h-9 rounded-full bg-brand-orange/10 flex items-center justify-center shrink-0 mt-0.5">
+              <Ship className="w-4 h-4 text-brand-orange" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="font-bold text-brand-navy text-sm">Finish this so checkout autofills</p>
+              <p className="text-sm text-brand-green/70 leading-relaxed mt-0.5">
+                A quick save of your name, company, and vessel means the next order form
+                fills itself in — no retyping on the river. You can keep browsing; this
+                is just a friendly reminder
+                {missingProfileFields(profile).length > 0
+                  ? <> (still need {missingProfileFields(profile).join(', ')})</>
+                  : null}.
+              </p>
+              {tab !== 'profile' && (
+                <button
+                  type="button"
+                  onClick={() => setTab('profile')}
+                  className="mt-2 text-xs font-bold uppercase tracking-wide text-brand-orange hover:underline"
+                >
+                  Open Profile →
+                </button>
+              )}
+            </div>
           </div>
         )}
 
@@ -678,6 +850,14 @@ function AccountContent() {
         {/* —— PROFILE —— */}
         {tab === 'profile' && (
           <div className="space-y-4">
+            {profileHydrated && !isProfileComplete(profile) && (
+              <div className="rounded-xl border border-brand-orange/20 bg-white/80 px-4 py-3 text-sm text-brand-green/80 leading-relaxed">
+                <span className="font-bold text-brand-navy">Almost ready for one-tap checkout. </span>
+                Add your first name, company, and vessel below — we&rsquo;ll remember them for next time.
+                Contact name and phone help the store reach you, but they&rsquo;re optional here.
+              </div>
+            )}
+
             <div className="card-base p-6 space-y-4">
               <div>
                 <h2 className="font-bold text-brand-green mb-1">Your Info</h2>
@@ -699,21 +879,28 @@ function AccountContent() {
 
             <div className="card-base p-6 space-y-4">
               <div>
-                <h2 className="font-bold text-brand-green mb-1">Saved Vessel Info</h2>
-                <p className="text-xs text-brand-green/50">This auto-fills your checkout form on future orders.</p>
+                <h2 className="font-bold text-brand-green mb-1">Preferred company &amp; vessel</h2>
+                <p className="text-xs text-brand-green/50">
+                  Separate lines — same as admin. These auto-fill checkout. If you cook for more than one boat, pick the one you use most (or use &ldquo;Use for checkout&rdquo; on a linked boat above).
+                </p>
               </div>
               <div>
-                <label className="label-base">Company / Vessel Name</label>
-                <input className="input-base" placeholder="M/V River Hawk" value={profile.company_name}
+                <label className="label-base">Company</label>
+                <input className="input-base" placeholder="e.g. River Queen LLC" value={profile.company_name}
                   onChange={e => setProfile(p => ({ ...p, company_name: e.target.value }))} />
               </div>
               <div>
-                <label className="label-base">Contact Name</label>
+                <label className="label-base">Vessel</label>
+                <input className="input-base" placeholder="e.g. M/V River Hawk" value={profile.vessel_name}
+                  onChange={e => setProfile(p => ({ ...p, vessel_name: e.target.value }))} />
+              </div>
+              <div>
+                <label className="label-base">Contact Name <span className="text-gray-400 font-normal normal-case">(optional)</span></label>
                 <input className="input-base" placeholder="Captain Smith" value={profile.contact_name}
                   onChange={e => setProfile(p => ({ ...p, contact_name: e.target.value }))} />
               </div>
               <div>
-                <label className="label-base">Phone</label>
+                <label className="label-base">Phone <span className="text-gray-400 font-normal normal-case">(optional)</span></label>
                 <input className="input-base" type="tel" placeholder="(618) 555-0000" value={profile.phone}
                   onChange={e => setProfile(p => ({ ...p, phone: e.target.value }))} />
               </div>
