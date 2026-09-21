@@ -550,7 +550,14 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
   .bc { flex: 0 0 auto; background: #fff;
         print-color-adjust: exact; -webkit-print-color-adjust: exact; }
   .bc svg { height: 42px; width: auto; display: block; }
-  .bc svg rect[fill="#fff"], .bc svg rect:first-child { fill: #fff; }
+  /* ⚠️ DO NOT ADD A rect:first-child RULE HERE. One was added on 21 Sept:
+         .bc svg rect[fill="#fff"], .bc svg rect:first-child { fill: #fff; }
+     upcASvg emits the white background rect, then <g fill="#000"> whose FIRST
+     CHILD is the first bar of the left guard. rect:first-child matches that
+     bar too and painted it white, so every barcode on the sheet shipped
+     without the leading guard bar. Phone apps reconstructed it; the register
+     gun saw no start pattern and stayed silent. Style the <span class="bc">,
+     never the rects inside the symbol. */
   .scan { font-size: 7.5px; line-height: 1.05; color: #000; text-align: center; font-weight: 700; }
   .scan b { font-size: 11px; }
   .wgt { flex: 1; }
