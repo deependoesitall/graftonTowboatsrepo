@@ -60,6 +60,23 @@ export function hasPermission(session: AdminSessionPayload, permission: AdminPer
   return (session.permissions ?? []).includes(permission);
 }
 
+/**
+ * Is this admin_users row a Sinclair Foods account (Dave's team)?
+ * Never true for Owner / GTS Manager — even if someone toggled a flag by mistake.
+ */
+export function isSinclairStaffAccount(u: {
+  role: string;
+  permissions?: string[] | null;
+}): boolean {
+  if (u.role === 'owner' || u.role === 'gts_manager') return false;
+  return u.role === 'manager' || (u.permissions || []).includes('sinclair');
+}
+
+/** Owner manages everyone; Sinclair's Manager may manage Sinclair staff only. */
+export function canManageAdminUsers(session: AdminSessionPayload): boolean {
+  return session.role === 'owner' || session.role === 'manager';
+}
+
 function getSecret(): string {
   const secret = process.env.ADMIN_SECRET_KEY;
   if (!secret || secret.length < 16) {

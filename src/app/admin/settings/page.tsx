@@ -99,6 +99,8 @@ const ROLE_COLORS: Record<string, string> = {
 };
 
 function isSinclairStaff(u: { role: string; permissions?: string[] | null }) {
+  // Match server isSinclairStaffAccount — never treat Owner / GTS Manager as Sinclair staff.
+  if (u.role === 'owner' || u.role === 'gts_manager') return false;
   return u.role === 'manager' || (u.permissions || []).includes('sinclair');
 }
 
@@ -271,7 +273,7 @@ export default function AdminSettingsPage() {
       setSessionRole(session.role);
       // Managers only see the Sinclair tools + their own password.
       // The server scopes the settings API the same way.
-      if (session.role === 'manager') setTab('sinclair');
+      if (session.role === 'manager') { setTab('sinclair'); loadUsers(); }
       else if (session.role === 'owner') { setTab('email'); loadUsers(); }
       loadSettings();
     })();
@@ -495,16 +497,34 @@ export default function AdminSettingsPage() {
   async function addUser() {
     if (!newUser.username || !newUser.password) return;
     setAddingUser(true);
+    const payload = sessionRole === 'manager'
+      ? {
+          username: newUser.username,
+          password: newUser.password,
+          display_name: newUser.display_name || newUser.username,
+          role: newUser.role === 'manager' ? 'manager' : 'staff',
+          permissions: ['sinclair'],
+        }
+      : { ...newUser, display_name: newUser.display_name || newUser.username };
     const res = await adminFetch('/api/admin/users', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...newUser, display_name: newUser.display_name || newUser.username }),
+      body: JSON.stringify(payload),
     });
     if (res.ok) {
       const u = await res.json();
       setUsers(us => [...us, u]);
-      setNewUser({ username: '', password: '', role: 'staff', display_name: '', permissions: [] });
+      setNewUser({
+        username: '', password: '', role: 'staff', display_name: '',
+        permissions: sessionRole === 'manager' ? ['sinclair'] : [],
+      });
       setShowAddUser(false);
+    } else {
+      try {
+        const err = await res.json();
+        setSaveMsg(err?.error || 'Could not add user');
+        setTimeout(() => setSaveMsg(''), 4000);
+      } catch { /* ignore */ }
     }
     setAddingUser(false);
   }
@@ -553,7 +573,9 @@ export default function AdminSettingsPage() {
           const err = await res.json();
           if (err?.error) msg = err.error;
         } catch { /* ignore */ }
-        if (res.status === 403) msg = 'Only Owners can reset team passwords.';
+        if (res.status === 403) msg = sessionRole === 'manager'
+          ? "You can only set passwords for Sinclair's staff."
+          : 'Only Owners can reset team passwords.';
         if (res.status === 401) msg = 'Session expired — sign in again, then retry.';
         setPwResetError(msg);
         return;
@@ -594,23 +616,25 @@ export default function AdminSettingsPage() {
     setUsers(us => us.filter(u => u.id !== id));
   }
 
+  const isSinclairManager = sessionRole === 'manager';
   const allTabs = [
     // Managers get the log too — server-side scoped to Sinclair-relevant
     // entries (order shopping / status changes, catalog activity).
-    { key: 'logs',     label: 'Logs',         ownerOnly: false },
-    { key: 'sinclair', label: "Sinclair's",   ownerOnly: false },
-    { key: 'password', label: 'Password',     ownerOnly: false },
-    { key: 'users',    label: 'Admin Users',  ownerOnly: true },
-    { key: 'email',    label: 'Email',        ownerOnly: true },
-    { key: 'features', label: 'Features',     ownerOnly: true },
+    { key: 'logs',     label: 'Logs',         ownerOnly: false, managerOk: true },
+    { key: 'sinclair', label: "Sinclair's",   ownerOnly: false, managerOk: true },
+    { key: 'password', label: 'Password',     ownerOnly: false, managerOk: true },
+    // Sinclair managers may onboard their own staff (server enforces Sinclair-only).
+    { key: 'users',    label: isSinclairManager ? "Sinclair's staff" : 'Admin Users', ownerOnly: false, managerOk: true, ownerOrManager: true },
+    { key: 'email',    label: 'Email',        ownerOnly: true,  managerOk: false },
+    { key: 'features', label: 'Features',     ownerOnly: true,  managerOk: false },
   ] as const;
-  // Owner-only tabs (Admin Users, Email, Features) must not show for
-  // gts_manager/staff/manager — the users API is ownerOnly and used to 403
-  // silently when Set password was clicked from a non-owner session.
-  // General was removed: it only duplicated Email's business_email field.
+  // Owner sees everything. Sinclair manager sees Logs / Sinclair's / Password /
+  // Sinclair's staff. gts_manager/staff keep the non-ownerOnly tabs except users.
   const tabs = sessionRole === 'owner'
     ? allTabs
-    : allTabs.filter(t => !t.ownerOnly);
+    : sessionRole === 'manager'
+      ? allTabs.filter(t => t.managerOk)
+      : allTabs.filter(t => !t.ownerOnly && !('ownerOrManager' in t && t.ownerOrManager));
 
   if (denied) return (
     <div className="flex flex-col items-center justify-center py-32 text-center px-4">
@@ -1095,10 +1119,21 @@ export default function AdminSettingsPage() {
           <div className="card-base overflow-hidden">
             <div className="bg-brand-navy px-6 py-4 flex items-center justify-between">
               <div>
-                <h2 className="text-white font-bold">Staff logins</h2>
-                <p className="text-white/60 text-xs mt-0.5">GTS team and Sinclair&apos;s team — set passwords without knowing the old one</p>
+                <h2 className="text-white font-bold">
+                  {sessionRole === 'manager' ? "Sinclair's staff logins" : 'Staff logins'}
+                </h2>
+                <p className="text-white/60 text-xs mt-0.5">
+                  {sessionRole === 'manager'
+                    ? 'Add shoppers and set passwords for your team only — typed passwords, no generate'
+                    : "GTS team and Sinclair's team — set passwords without knowing the old one"}
+                </p>
               </div>
-              <button onClick={() => setShowAddUser(s => !s)}
+              <button onClick={() => {
+                setShowAddUser(s => !s);
+                if (sessionRole === 'manager') {
+                  setNewUser(u => ({ ...u, role: 'staff', permissions: ['sinclair'] }));
+                }
+              }}
                 className="flex items-center gap-1.5 bg-brand-gold text-white text-xs font-bold uppercase tracking-wide px-3 py-1.5 rounded-full hover:bg-brand-amber transition-colors">
                 <UserPlus className="w-3.5 h-3.5" /> Add User
               </button>
@@ -1140,16 +1175,21 @@ export default function AdminSettingsPage() {
                         setNewUser(u => ({
                           ...u,
                           role,
-                          // Managers here are Sinclair's staff — pre-check their access flag
-                          permissions: role === 'manager' && !u.permissions.includes('sinclair')
-                            ? [...u.permissions, 'sinclair']
+                          permissions: sessionRole === 'manager' || role === 'manager'
+                            ? (u.permissions.includes('sinclair') ? u.permissions : [...u.permissions, 'sinclair'])
                             : u.permissions,
                         }));
                       }}>
-                      <option value="owner">Owner — Full access</option>
-                      <option value="gts_manager">GTS Manager — GTS ops (no admin logs)</option>
-                      <option value="manager">Sinclair's Manager — grocery orders, products, weekly ad, coupons</option>
-                      <option value="staff">Staff — Orders only</option>
+                      {sessionRole === 'owner' && (
+                        <>
+                          <option value="owner">Owner — Full access</option>
+                          <option value="gts_manager">GTS Manager — GTS ops (no admin logs)</option>
+                        </>
+                      )}
+                      <option value="manager">Sinclair&apos;s Manager — grocery orders, products, weekly ad, coupons</option>
+                      <option value="staff">
+                        {sessionRole === 'manager' ? "Sinclair's Staff — grocery orders / shopping" : 'Staff — Orders only'}
+                      </option>
                     </select>
                     {newUser.role === 'manager' && (
                       <p className="text-[11px] text-gray-400 mt-1">
@@ -1159,7 +1199,8 @@ export default function AdminSettingsPage() {
                     )}
                   </div>
                 </div>
-                {/* Permissions */}
+                {/* Permissions — Owner can toggle; Sinclair managers always grant Sinclair access. */}
+                {sessionRole === 'owner' ? (
                 <div className="mt-4 border border-gray-200 rounded-lg p-4 bg-white">
                   <p className="text-xs font-bold text-gray-600 uppercase tracking-wide mb-3">Permissions</p>
                   <label className="flex items-start gap-3 cursor-pointer">
@@ -1177,6 +1218,11 @@ export default function AdminSettingsPage() {
                     </div>
                   </label>
                 </div>
+                ) : (
+                <p className="mt-3 text-[11px] text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">
+                  New accounts are Sinclair Foods shoppers — grocery orders only. They cannot see GTS Owner tools.
+                </p>
+                )}
                 <div className="flex gap-2 mt-4">
                   <button onClick={addUser} disabled={addingUser || !newUser.username || !newUser.password}
                     className="btn-primary text-sm flex items-center gap-2">
@@ -1197,19 +1243,19 @@ export default function AdminSettingsPage() {
             ) : (
               <div className="space-y-0">
                 {([
-                  {
-                    key: 'gts',
+                  ...(sessionRole === 'owner' ? [{
+                    key: 'gts' as const,
                     title: 'GTS staff',
                     hint: 'Owner, GTS Manager, and Staff without Sinclair scope',
                     list: users.filter(u => !isSinclairStaff(u)),
-                  },
+                  }] : []),
                   {
-                    key: 'sinclair',
+                    key: 'sinclair' as const,
                     title: "Sinclair's staff",
                     hint: "Sinclair's Manager role, or anyone with Sinclair permission",
                     list: users.filter(u => isSinclairStaff(u)),
                   },
-                ] as const).map(group => (
+                ]).map(group => (
                   <div key={group.key}>
                     <div className={`px-6 py-3 border-b border-gray-100 ${
                       group.key === 'gts' ? 'bg-brand-navy/5' : 'bg-emerald-50/80'
@@ -1244,13 +1290,15 @@ export default function AdminSettingsPage() {
                             Sinclair
                           </span>
                         )}
-                        <button
-                          onClick={() => togglePermission(u, 'sinclair')}
-                          title={u.permissions?.includes('sinclair') ? 'Remove Sinclair access' : 'Grant Sinclair access'}
-                          className="text-xs text-gray-400 hover:text-emerald-600 transition-colors"
-                        >
-                          {u.permissions?.includes('sinclair') ? '− Sinclair' : '+ Sinclair'}
-                        </button>
+                        {sessionRole === 'owner' && (
+                          <button
+                            onClick={() => togglePermission(u, 'sinclair')}
+                            title={u.permissions?.includes('sinclair') ? 'Remove Sinclair access' : 'Grant Sinclair access'}
+                            className="text-xs text-gray-400 hover:text-emerald-600 transition-colors"
+                          >
+                            {u.permissions?.includes('sinclair') ? '− Sinclair' : '+ Sinclair'}
+                          </button>
+                        )}
                         <button
                           onClick={() => {
                             const next = pwResetUser === u.id ? null : u.id;
@@ -1266,10 +1314,12 @@ export default function AdminSettingsPage() {
                           className="text-xs text-gray-400 hover:text-brand-river transition-colors">
                           {u.is_active ? 'Deactivate' : 'Activate'}
                         </button>
-                        <button onClick={() => deleteUser(u.id)}
-                          className="text-gray-300 hover:text-red-500 transition-colors">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {sessionRole === 'owner' && (
+                          <button onClick={() => deleteUser(u.id)}
+                            className="text-gray-300 hover:text-red-500 transition-colors">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     </div>
 
@@ -1317,6 +1367,12 @@ export default function AdminSettingsPage() {
             )}
 
             <div className="bg-gray-50 px-6 py-3 text-xs text-gray-400 border-t border-gray-100 space-y-1">
+              {sessionRole === 'manager' ? (
+                <p>
+                  You can add Sinclair shoppers and set their passwords. GTS Owner / Jen / MK accounts stay with Grafton.
+                </p>
+              ) : (
+                <>
               <p>
                 <span className="font-semibold text-brand-navy">Roles:</span>{' '}
                 Owner = all access · GTS Manager = everything except admin logs · Sinclair&apos;s Manager = grocery orders + products + weekly ad + coupons + own password · Staff = orders only
@@ -1324,6 +1380,8 @@ export default function AdminSettingsPage() {
               <p>
                 <span className="text-emerald-600 font-semibold">Sinclair permission</span> scopes the order list to grocery items (crew-change / service-only hidden).
               </p>
+                </>
+              )}
             </div>
           </div>
         </div>
