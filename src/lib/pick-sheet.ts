@@ -180,24 +180,18 @@ function itemCard(
 ): string {
   const weighable = isWeighable(i);
   const qtyLabel = formatQty(i.quantity, isPoundQty(i.uom, i.quantity));
-  // ⚠️ THESE TWO NUMBERS AND THE .bc svg HEIGHT IN THE CSS ARE ONE SETTING.
+  // ⚠️ THIS AND THE .bc svg HEIGHT IN THE CSS ARE THE 27 JULY 2026 PAIR.
   //
-  // upcASvg emits 113 modules across (95 data + a 9-module quiet zone each
-  // side) and (height + 7*moduleWidth + 2) tall. The CSS sizes it by HEIGHT,
-  // so the printed bar width is:
-  //     moduleWidth * (cssHeight / svgHeight) / 96  inches
-  // moduleWidth 2 / height 65, scaled to 78px tall, = 2.27in wide, bars
-  // 0.65in tall, X-dimension 0.51mm (20 mil).
+  // moduleWidth 2 / height 52, scaled to 42px tall, is what was live on the
+  // sheet Deepen scanned at Sinclair's register on 27 July. Every barcode read.
+  // It is the only configuration with a witnessed clean run on their gun.
   //
-  // WHY 20 MIL. Sinclair's register gun is a Honeywell 1900GSR, rated to
-  // 13 mil for UPC/EAN. From 19 July to 21 Sept this printed at 12.9 mil —
-  // just UNDER that floor. Phone cameras read it fine; the gun stayed silent.
-  // 20 mil is 154% UPC-A magnification (the spec allows 80-200%), which puts
-  // us half again above what the gun needs instead of underneath it.
-  //
-  // Do not shrink these to fit more cards per row. Four columns is what
-  // forced 12.9 mil in the first place.
-  const svg = weighable ? null : upcASvg(i.upc, { moduleWidth: 2, height: 65 });
+  // These numbers were NOT what broke scanning in September — they were byte
+  // for byte identical on both the sheet that worked and the sheet that went
+  // silent. What broke it was the print geometry around them: a black 1px card
+  // border beside the quiet zone, and a landscape page. See the .item and
+  // @page rules. Fix scanning there, not here.
+  const svg = weighable ? null : upcASvg(i.upc, { moduleWidth: 2, height: 52 });
   const scanTimes = !weighable && svg && Number.isInteger(i.quantity) && i.quantity > 0
     ? `Scan<br/><b>&times;${i.quantity}</b>` : '';
   const cod = i.paid_by === 'cod';
@@ -444,11 +438,11 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: Arial, Helvetica, sans-serif; color: #000; font-size: 9.5px; padding: 8px; }
-  /* LANDSCAPE. THREE cards per row. Dave asked for more barcodes across the
-     page and this was four, but four columns only leave room for a 12.9 mil
-     barcode — under what Sinclair's gun can resolve. A code that scans beats
-     a code that fits. */
-  @page { size: letter landscape; margin: 7.5mm; }
+/* PORTRAIT, three cards per row — the 27 July geometry, restored.
+     It was switched to letter landscape / four columns in September and the
+     sheets stopped scanning at the register. Do not switch it back without a
+     witnessed scan test at Sinclair's. */
+  @page { margin: 8mm; }
   @media print {
     body { padding: 0; }
     .bc, .bc svg { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
@@ -482,12 +476,15 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
   .loc-count { font-weight: normal; color: #444; font-size: 8px; margin-left: 4px; }
 
   .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; padding: 3px 0; }
-  .item { border: 1px solid #000; border-radius: 0; padding: 3px 4px;
+  /* ⚠️ PALE border, 5px side padding. A 1px BLACK rule one padding-width
+     from the barcode's quiet zone is read as a bar by the register gun and
+     kills the scan. #c9d2dc is what was live on 27 July. Do not darken it. */
+  .item { border: 1px solid #c9d2dc; border-radius: 4px; padding: 3px 5px;
           break-inside: avoid; page-break-inside: avoid; background: #fff; }
-  .item.cod { border: 2px solid #000; background: #fff; }
+  .item.cod { border: 1.5px solid #555; background: #fff; }
   .item.oos { opacity: .72; }
   .item.is-sub { border-style: dashed; }
-  .item.nested { margin-top: 2px; border-left: 3px solid #000; }
+  .item.nested { margin-top: 2px; border-left: 3px solid #c9d2dc; }
   .pair { display: contents; }
   .line1 { display: flex; gap: 3px; align-items: center; }
   .qty { font-size: 12px; font-weight: 900; color: #000; white-space: nowrap; }
@@ -545,16 +542,14 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
   .sub-tag { color: #000; font-weight: 900; font-size: 7.5px; }
 
   .scanrow { display: flex; align-items: center; gap: 5px; margin-top: 2px; }
-  /* ⚠️ SIZE THE BARCODE BY ITS HEIGHT AND LET THE WIDTH FOLLOW. NEVER SET
-     AN INCH WIDTH HERE — that fights the SVG's own aspect ratio.
-
-     78px against the SVG's 81 units (height 65 + 16 of digit text) prints the
-     bars at 20 mil / 0.51mm and the whole symbol 2.27in wide. See the long
-     note at the upcASvg call in itemCard — this height and that moduleWidth
-     move together or not at all. */
+/* ⚠️ 42px against the SVG's 68 units (height 52 + 16 of digit text) is the
+     27 July pairing: 1.45in wide, bars 0.33mm / 13 mil. Never set an inch
+     width here. Change this only together with the moduleWidth at the
+     upcASvg call — and read the note there first, because the size is not
+     what makes these scan or not scan. */
   .bc { flex: 0 0 auto; background: #fff;
         print-color-adjust: exact; -webkit-print-color-adjust: exact; }
-  .bc svg { height: 78px; width: auto; display: block; }
+  .bc svg { height: 42px; width: auto; display: block; }
   .bc svg rect[fill="#fff"], .bc svg rect:first-child { fill: #fff; }
   .scan { font-size: 7.5px; line-height: 1.05; color: #000; text-align: center; font-weight: 700; }
   .scan b { font-size: 11px; }
