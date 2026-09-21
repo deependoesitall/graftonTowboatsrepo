@@ -36,6 +36,10 @@ export async function GET(
   if (searchParams.has('delivery_service_type')) merged.delivery_service_type = searchParams.get('delivery_service_type');
   if (searchParams.has('bill_for_groceries')) merged.bill_for_groceries = searchParams.get('bill_for_groceries') === 'true';
   if (searchParams.has('register_total')) merged.register_total = Number(searchParams.get('register_total')) || null;
+  if (searchParams.has('grocery_handling_fee')) {
+    const n = Number(searchParams.get('grocery_handling_fee'));
+    merged.grocery_handling_fee = Number.isFinite(n) && n > 0 ? n : null;
+  }
   // ⚠️ A TWO-SERVICE BILL CANNOT BE DESCRIBED BY A FEE AND A LABEL, so the
   // preview takes the whole breakdown. Parsed defensively: this is a query
   // string, and a preview that throws is worse than one that falls back to the

@@ -57,6 +57,12 @@ const REQUIRED: Requirement[] = [
     breaks: 'Register totals and the COD handling fee cannot be saved.',
   },
   {
+    table: 'orders',
+    columns: ['grocery_handling_fee'],
+    migration: '096_grocery_handling_fee.sql',
+    breaks: 'Optional grocery handling fee cannot be saved on the register-total step.',
+  },
+  {
     table: 'order_items',
     columns: ['regular_price', 'sale_finish_date', 'paid_by', 'cod_name', 'service_details'],
     migration: '060_sale_prices.sql',
