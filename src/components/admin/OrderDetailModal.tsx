@@ -19,6 +19,26 @@ import { PickSheetOverlay } from '@/components/admin/PickSheetOverlay';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { readCodPayments, codMethodSentence } from '@/lib/cod-payments';
 import {
+
+/** America/Chicago calendar day — same clock the pick sheet uses for sale expiry. */
+function chicagoToday(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago' }).format(new Date());
+}
+
+function saleLapsedForUi(item: OrderItem): boolean {
+  if (!item.regular_price || !item.sale_finish_date) return false;
+  return String(item.sale_finish_date).slice(0, 10) < chicagoToday();
+}
+
+function quotedSaleForUi(item: OrderItem): number {
+  const sale = Number(item.sale_unit_price ?? 0);
+  if (sale > 0) return sale;
+  const unit = Number(item.unit_price);
+  const regular = Number(item.regular_price ?? 0);
+  if (regular > 0 && unit < regular) return unit;
+  return unit;
+}
+
   splitOutsidePickups, pickupPay, pickupPayLabel, pickupLabel,
   pickupIsPriced, lineAmount, groupCodCollect, BOAT_COD_NAME,
 } from '@/lib/outside-pickup';
@@ -927,6 +947,36 @@ export function OrderDetailModal({
         >
           <Replace className="w-4 h-4" />
         </button>
+        {saleLapsedForUi(item) && item.item_type !== 'service' && (
+          <>
+            <button
+              type="button"
+              disabled={rowBusy === item.id}
+              onClick={() => itemAction(item.id, { action: 'honor_expired_sale', honor: true })}
+              className={`text-[10px] font-bold uppercase tracking-wide px-1.5 py-1 rounded border transition-colors ${
+                item.honor_expired_sale === true
+                  ? 'bg-emerald-600 text-white border-emerald-700'
+                  : 'text-emerald-800 border-emerald-300 hover:bg-emerald-50'
+              }`}
+              title="Honor the expired sale — keep the boat's quoted price"
+            >
+              Honor sale
+            </button>
+            <button
+              type="button"
+              disabled={rowBusy === item.id}
+              onClick={() => itemAction(item.id, { action: 'honor_expired_sale', honor: false })}
+              className={`text-[10px] font-bold uppercase tracking-wide px-1.5 py-1 rounded border transition-colors ${
+                item.honor_expired_sale === false
+                  ? 'bg-amber-700 text-white border-amber-800'
+                  : 'text-amber-900 border-amber-300 hover:bg-amber-50'
+              }`}
+              title="Do not honor — charge the regular register price"
+            >
+              Charge regular
+            </button>
+          </>
+        )}
         <button
           onClick={() => deleteItem(item.id)}
           disabled={deletingItemId === item.id}
@@ -1462,6 +1512,19 @@ export function OrderDetailModal({
                             <span className="text-gray-400"> × {formatCurrency(item.unit_price)} = </span>
                             <b className="text-brand-navy">{formatCurrency(item.actual_total ?? item.unit_price * item.quantity)}</b>
                           </p>
+                          {saleLapsedForUi(item) && (
+                            <p className={`text-[11px] font-semibold mt-1 ${
+                              item.honor_expired_sale === true ? 'text-emerald-700'
+                              : item.honor_expired_sale === false ? 'text-amber-800'
+                              : 'text-red-700'
+                            }`}>
+                              Sale ended {String(item.sale_finish_date).slice(5)} — quoted {formatCurrency(quotedSaleForUi(item))},
+                              regular {formatCurrency(Number(item.regular_price))}
+                              {item.honor_expired_sale === true ? ' · HONORED'
+                                : item.honor_expired_sale === false ? ' · charging regular'
+                                : ' · decide below'}
+                            </p>
+                          )}
                         </div>
                       </div>
                       {canEdit && (

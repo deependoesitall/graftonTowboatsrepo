@@ -58,6 +58,12 @@ const bodySchema = z.discriminatedUnion('action', [
     paid_by: z.enum(['vessel', 'deck', 'cod']),
     cod_name: z.string().max(80).optional().default(''),
   }),
+  // Dave: honor or refuse a lapsed shelf sale on this line (pick-sheet callout).
+  // true = keep/restore sale unit price; false = charge regular_price; null = clear.
+  z.object({
+    action: z.literal('honor_expired_sale'),
+    honor: z.union([z.boolean(), z.null()]),
+  }),
 ]);
 
 /** If the order is still 'new', advance it to 'in_progress' (first item action). */
@@ -310,6 +316,56 @@ export async function PATCH(
       .single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     // Subtotal unchanged — billing attribution only.
+    return NextResponse.json({ item: updated });
+  }
+
+  // ── HONOR / REFUSE EXPIRED SALE ───────────────────────────────────────────
+  if (action === 'honor_expired_sale') {
+    const { honor } = parsed.data;
+    const regular = Number(item.regular_price ?? 0);
+    const finish = (item.sale_finish_date || '').toString().slice(0, 10);
+    if (!regular || !finish) {
+      return NextResponse.json(
+        { error: 'This line was not quoted on a shelf sale.' },
+        { status: 400 },
+      );
+    }
+    // Capture the sale quote once so refuse → honor can restore it.
+    let saleUnit = Number(item.sale_unit_price ?? 0);
+    const currentUnit = Number(item.unit_price);
+    if (!saleUnit || saleUnit <= 0) {
+      if (currentUnit > 0 && currentUnit < regular) saleUnit = currentUnit;
+      else {
+        return NextResponse.json(
+          { error: 'Cannot find the original sale price on this line.' },
+          { status: 400 },
+        );
+      }
+    }
+
+    const qty = Number(item.quantity) || 1;
+    const nextUnit = honor === false ? regular : saleUnit;
+    // honor === null clears the decision but keeps current unit_price
+    const unit_price = honor === null ? currentUnit : nextUnit;
+    const line_total = unit_price * qty;
+    const actual_total = item.actual_weight != null
+      ? Number(item.actual_weight) * unit_price
+      : item.actual_total;
+
+    const { data: updated, error } = await supabase
+      .from('order_items')
+      .update({
+        honor_expired_sale: honor,
+        sale_unit_price: saleUnit,
+        unit_price,
+        line_total,
+        actual_total,
+      })
+      .eq('id', itemId)
+      .select()
+      .single();
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    await recalcSubtotal(supabase, orderId);
     return NextResponse.json({ item: updated });
   }
 

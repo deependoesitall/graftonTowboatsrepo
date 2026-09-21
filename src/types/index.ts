@@ -305,6 +305,10 @@ export interface OrderItem {
   /** Sale snapshot, as quoted at order time. NULL = wasn't on sale then. */
   regular_price?: number | null;
   sale_finish_date?: string | null;
+  /** Quoted sale unit price (kept when unit_price flips to regular on refuse). */
+  sale_unit_price?: number | null;
+  /** null=undecided; true=honor lapsed sale; false=charge regular. */
+  honor_expired_sale?: boolean | null;
   quantity: number;
   line_total: number;
   shopping_status: 'pending' | 'shopped' | 'out_of_stock';

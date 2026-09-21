@@ -54,21 +54,37 @@ function shoppingDay(): string {
  * price and the customer's estimate is short.
  */
 function saleLapsed(i: OrderItem, today: string): boolean {
+  // regular_price is only set when the boat was quoted a sale (migration 060).
+  // Do NOT compare to current unit_price — after a refuse, unit_price equals
+  // regular and the old check would hide the callout Dave already decided on.
   const regular = Number(i.regular_price ?? 0);
-  if (!regular || regular <= Number(i.unit_price)) return false;
+  if (!regular) return false;
   const end = (i.sale_finish_date || '').slice(0, 10);
   return !!end && end < today;
 }
 
+function quotedSalePrice(i: OrderItem): number {
+  const sale = Number(i.sale_unit_price ?? 0);
+  if (sale > 0) return sale;
+  const unit = Number(i.unit_price);
+  const regular = Number(i.regular_price ?? 0);
+  if (regular > 0 && unit < regular) return unit;
+  return unit;
+}
+
 function salePriceHtml(i: OrderItem, today: string): string {
   const regular = Number(i.regular_price ?? 0);
-  if (!regular || regular <= Number(i.unit_price)) return '';
+  if (!regular) return '';
+  const quoted = quotedSalePrice(i);
+  if (regular <= quoted && i.honor_expired_sale == null) return '';
   const end = (i.sale_finish_date || '').slice(0, 10);
   const lapsed = saleLapsed(i, today);
+  const showing = Number(i.unit_price);
   // A lapsed sale is a decision, not a note — see expiredSaleHtml below. The
-  // price line just stops pretending the sale is still on.
-  const cls = lapsed ? 'sale sale-dead' : 'sale';
-  return `<span class="${cls}">${formatCurrency(i.unit_price)}${
+  // price line just stops pretending the sale is still on (unless honored).
+  const dead = lapsed && i.honor_expired_sale !== true;
+  const cls = dead ? 'sale sale-dead' : 'sale';
+  return `<span class="${cls}">${formatCurrency(showing)}${
     end ? ` <span class="sale-dates">(${lapsed ? 'ended' : 'thru'} ${shortDate(end)})</span>` : ''
   } <s>${formatCurrency(regular)}</s></span>`;
 }
@@ -92,15 +108,24 @@ function salePriceHtml(i: OrderItem, today: string): string {
 function expiredSaleHtml(i: OrderItem, today: string): string {
   if (!saleLapsed(i, today)) return '';
   const regular = Number(i.regular_price);
-  const quoted = Number(i.unit_price);
+  const quoted = quotedSalePrice(i);
   const qty = Number(i.quantity) || 1;
   const diff = (regular - quoted) * qty;
   const end = (i.sale_finish_date || '').slice(0, 10);
+  const honor = i.honor_expired_sale;
+  let decision: string;
+  if (honor === true) {
+    decision = '<span class="sale-honor sale-honor-yes">&#9745; HONORED — charge sale</span>';
+  } else if (honor === false) {
+    decision = '<span class="sale-honor sale-honor-no">&#9746; NOT honored — charge regular</span>';
+  } else {
+    decision = '<label class="sale-honor">&#9744; honored anyway (set on Order Details)</label>';
+  }
   return `<div class="sale-expired">
     <b>SALE ENDED ${shortDate(end)}</b> — boat was quoted ${formatCurrency(quoted)},
-    register will ring ${formatCurrency(regular)}
+    register rings ${formatCurrency(regular)}
     <span class="sale-diff">(${formatCurrency(diff)} more${qty > 1 ? ` on ${qty}` : ''})</span>
-    <label class="sale-honor">&#9744; honored anyway</label>
+    ${decision}
   </div>`;
 }
 
@@ -470,6 +495,8 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
   .sale-expired b { color: #000; }
   .sale-diff { font-weight: 800; }
   .sale-honor { display: inline-block; margin-left: 3px; font-weight: 800; white-space: nowrap; }
+  .sale-honor-yes { color: #000; }
+  .sale-honor-no { color: #333; }
 
   /* ── Thumbnails ── big enough to read a package at arm's length. */
   .thumb { width: 38px; height: 38px; object-fit: contain; flex: 0 0 auto;

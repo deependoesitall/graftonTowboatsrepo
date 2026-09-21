@@ -499,6 +499,10 @@ export async function POST(req: NextRequest) {
           cod_name: item.paid_by === 'cod' ? (item.cod_name || null) : null,
           regular_price: saleMap[item.product_id]?.regular_price ?? null,
           sale_finish_date: saleMap[item.product_id]?.sale_finish_date ?? null,
+          // Keep the quoted sale so Dave can refuse→honor without losing it.
+          sale_unit_price: (saleMap[item.product_id]?.regular_price != null
+            ? (saleMap[item.product_id]?.price ?? item.price)
+            : null),
           // Preferred sub: authenticated customers only. Guests have no UI and
           // must not smuggle preferences onto the order record.
           ...(userId ? (() => {
@@ -631,7 +635,7 @@ export async function POST(req: NextRequest) {
         'order_id', 'product_id', 'description', 'category', 'pkg_size', 'uom', 'upc',
         'location', 'location_seq', 'image_url', 'unit_price', 'quantity', 'line_total',
         'item_type', 'service_type', 'service_details', 'paid_by', 'cod_name',
-        'regular_price', 'sale_finish_date',
+        'regular_price', 'sale_finish_date', 'sale_unit_price', 'honor_expired_sale',
         'preferred_sub_mode', 'preferred_sub_product_id', 'preferred_sub_description',
       ] as const;
       const normalisedItems = allOrderItems.map(row =>
