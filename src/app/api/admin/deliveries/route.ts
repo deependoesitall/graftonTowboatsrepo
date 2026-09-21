@@ -25,6 +25,9 @@ const FIELDS = [
   'grocery_mode', 'side_purchases',
   'customer_invoiced_in_qb', 'driver_paid_in_qb',
   'not_billable', 'not_billable_reason',
+  // Migration 064 — link to the web order that spawned this ledger row.
+  // Without this, linking an order in the editor never persisted.
+  'order_id',
 ];
 
 /** Columns that are NOT NULL in the database — blank must not become null. */
@@ -54,6 +57,52 @@ function pick(body: Record<string, unknown>) {
   return out;
 }
 
+/**
+ * When billing Sinclair's groceries and the total is blank, pull the linked
+ * order's register_total if it is a real number. Never invent from subtotal —
+ * that is an estimate and must stay a deliberate UI action, not a silent fill.
+ * Returns { row, autofilledFrom } so the client can show the source.
+ */
+async function autofillGroceryFromOrder(
+  supabase: ReturnType<typeof createServiceClient>,
+  row: Record<string, unknown>,
+): Promise<{ row: Record<string, unknown>; autofilledFrom: number | null }> {
+  // Keep bill_for_groceries in step with grocery_mode when the mode is present.
+  if (typeof row.grocery_mode === 'string') {
+    const mode = row.grocery_mode;
+    if (mode === 'sinclair_courtesy' || mode === 'gts_purchased') {
+      row.bill_for_groceries = true;
+    } else if (mode === 'none') {
+      row.bill_for_groceries = false;
+    }
+  }
+
+  const wantsGrocery =
+    row.bill_for_groceries === true || row.grocery_mode === 'sinclair_courtesy';
+  const blank =
+    row.sinclairs_grocery_total === null ||
+    row.sinclairs_grocery_total === undefined ||
+    row.sinclairs_grocery_total === '';
+  const orderId = typeof row.order_id === 'string' ? row.order_id : null;
+  if (!wantsGrocery || !blank || !orderId) {
+    return { row, autofilledFrom: null };
+  }
+
+  const { data: order } = await supabase
+    .from('orders')
+    .select('register_total')
+    .eq('id', orderId)
+    .maybeSingle();
+
+  const rt = order?.register_total;
+  if (rt == null || rt === '') return { row, autofilledFrom: null };
+  const n = Number(rt);
+  if (!Number.isFinite(n)) return { row, autofilledFrom: null };
+
+  row.sinclairs_grocery_total = n;
+  return { row, autofilledFrom: n };
+}
+
 export async function GET(req: NextRequest) {
   const session = requireAdmin(req, { area: 'reports' });
   if (session instanceof NextResponse) return session;
@@ -74,7 +123,7 @@ export async function GET(req: NextRequest) {
     .order('delivery_date', { ascending: false, nullsFirst: false });
 
   // Used by the final-email dialog to default courtesy billing from ledger history.
-  // Jen (Sept 2026): courtesy billing is BY BOAT, not by company ? prefer vessel_name.
+  // Jen (Sept 2026): courtesy billing is BY BOAT, not by company — prefer vessel_name.
   if (vesselNameFilter && vesselNameFilter.trim()) {
     query = query.ilike('vessel_name', `%${vesselNameFilter.trim()}%`).limit(25);
   } else if (companyIdFilter) {
@@ -121,15 +170,50 @@ export async function POST(req: NextRequest) {
   if (session instanceof NextResponse) return session;
   const body = await req.json();
   const supabase = createServiceClient();
+
+  // One-shot backfill: fill blank Sinclair totals from linked order register_total.
+  if (body?.action === 'backfill_grocery_totals') {
+    const { data: candidates, error: listErr } = await supabase
+      .from('deliveries')
+      .select('id, order_id, bill_for_groceries, grocery_mode, sinclairs_grocery_total')
+      .not('order_id', 'is', null)
+      .is('sinclairs_grocery_total', null);
+    if (listErr) return NextResponse.json({ error: listErr.message }, { status: 500 });
+
+    let filled = 0;
+    const updated: string[] = [];
+    for (const d of candidates || []) {
+      const wants =
+        d.bill_for_groceries === true || d.grocery_mode === 'sinclair_courtesy';
+      if (!wants || !d.order_id) continue;
+      const { data: order } = await supabase
+        .from('orders')
+        .select('register_total')
+        .eq('id', d.order_id)
+        .maybeSingle();
+      const n = order?.register_total == null ? NaN : Number(order.register_total);
+      if (!Number.isFinite(n)) continue;
+      const { error: upErr } = await supabase
+        .from('deliveries')
+        .update({ sinclairs_grocery_total: n, updated_at: new Date().toISOString() })
+        .eq('id', d.id);
+      if (!upErr) {
+        filled += 1;
+        updated.push(d.id);
+      }
+    }
+    return NextResponse.json({ filled, updated });
+  }
+
+  const picked = pick(body);
+  const { row, autofilledFrom } = await autofillGroceryFromOrder(supabase, picked);
   const { data, error } = await supabase
     .from('deliveries')
-    .insert(pick(body))
-    // requires_signed_receipt drives the "need slip" warning on the QuickBooks
-    // pack — without it here, every row looks like it needs a slip or none do.
+    .insert(row)
     .select('*, company:companies(id, name, requires_signed_receipt)')
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ delivery: data });
+  return NextResponse.json({ delivery: data, autofilledFrom });
 }
 
 export async function PATCH(req: NextRequest) {
@@ -138,16 +222,16 @@ export async function PATCH(req: NextRequest) {
   const { id, ...body } = await req.json();
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
   const supabase = createServiceClient();
+  const picked = pick(body);
+  const { row, autofilledFrom } = await autofillGroceryFromOrder(supabase, picked);
   const { data, error } = await supabase
     .from('deliveries')
-    .update({ ...pick(body), updated_at: new Date().toISOString() })
+    .update({ ...row, updated_at: new Date().toISOString() })
     .eq('id', id)
-    // requires_signed_receipt drives the "need slip" warning on the QuickBooks
-    // pack — without it here, every row looks like it needs a slip or none do.
     .select('*, company:companies(id, name, requires_signed_receipt)')
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ delivery: data });
+  return NextResponse.json({ delivery: data, autofilledFrom });
 }
 
 export async function DELETE(req: NextRequest) {

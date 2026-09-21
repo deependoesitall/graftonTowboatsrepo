@@ -5,7 +5,7 @@
 // rate card, and an editable rate-card manager. No more Google Drive.
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Truck, Plus, Pencil, Trash2, X, Loader2, DollarSign, Check, SlidersHorizontal, FileText, Search, Download, Receipt } from 'lucide-react';
+import { Truck, Plus, Pencil, Trash2, X, Loader2, DollarSign, Check, SlidersHorizontal, FileText, Search, Download, Receipt, Upload, Eye, EyeOff } from 'lucide-react';
 import QbPackPanel from '@/components/admin/QbPackPanel';
 import { formatCurrency } from '@/lib/utils';
 import { adminFetch } from '@/lib/admin-auth';
@@ -66,8 +66,17 @@ interface Delivery {
   order_id: string | null;
 }
 
-// Deliveries began January 2026 — never offer a month before that.
-const LEDGER_YEAR = 2026;
+// Ledger years currently in production. CoS seeded 2025 fee history;
+// 2026 is the live year. Importer is the path for leftovers — do not
+// re-bulk-insert from the PDF.
+const LEDGER_YEARS = [2026, 2025] as const;
+const DEFAULT_LEDGER_YEAR = 2026;
+
+function isTestOrNotBillable(d: Delivery): boolean {
+  if (d.not_billable) return true;
+  const k = vesselKey(d.vessel_name);
+  return k === 'testship' || k.startsWith('test');
+}
 
 export default function DeliveriesPage() {
   // 'all' = whole-year list (default); otherwise a specific 'YYYY-MM'.
@@ -79,6 +88,9 @@ export default function DeliveriesPage() {
   const [editing, setEditing] = useState<Delivery | 'new' | null>(null);
   const [showRates, setShowRates] = useState(false);
   const [showQb, setShowQb] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [ledgerYear, setLedgerYear] = useState<number>(DEFAULT_LEDGER_YEAR);
+  const [hideTestBoats, setHideTestBoats] = useState(true);
   const [search, setSearch] = useState('');
   // Badge count comes from the SAME query the queue opens with (all months,
   // not just the view on screen) — otherwise the badge promises rows the queue
@@ -117,7 +129,11 @@ export default function DeliveriesPage() {
     }
     return out;
   }, [rows, q]);
-  const visibleRows = useMemo(() => matches.map(m => m.d), [matches]);
+  const filteredMatches = useMemo(() => {
+    if (!hideTestBoats) return matches;
+    return matches.filter(({ d }) => !isTestOrNotBillable(d));
+  }, [matches, hideTestBoats]);
+  const visibleRows = useMemo(() => filteredMatches.map(m => m.d), [filteredMatches]);
 
   // TOTALS ARE DERIVED FROM WHAT'S ON SCREEN — never fetched separately.
   //
@@ -138,11 +154,11 @@ export default function DeliveriesPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const q = month === 'all' ? `year=${LEDGER_YEAR}` : `month=${month}`;
+    const q = month === 'all' ? `year=${ledgerYear}` : `month=${month}`;
     const res = await adminFetch(`/api/admin/deliveries?${q}`);
     if (res.ok) { const d = await res.json(); setRows(d.deliveries); }
     setLoading(false);
-  }, [month]);
+  }, [month, ledgerYear]);
 
   const loadMeta = useCallback(async () => {
     const [c, s] = await Promise.all([
@@ -162,16 +178,19 @@ export default function DeliveriesPage() {
     load();
   }
 
-  // Filter options: "All of 2026" first, then Jan 2026 up to the current month
-  // (never before the ledger's Jan-2026 start, never into empty future months).
+  // Filter options: whole year, then months. Past years show all 12 months;
+  // the current year stops at this month so empty future months stay hidden.
   const now = new Date();
-  const lastMonth = now.getFullYear() > LEDGER_YEAR ? 12 : now.getMonth() + 1;
+  const lastMonth =
+    now.getFullYear() > ledgerYear ? 12
+    : now.getFullYear() < ledgerYear ? 12
+    : now.getMonth() + 1;
   const monthOpts = [
-    { v: 'all', label: `All of ${LEDGER_YEAR}` },
+    { v: 'all', label: `All of ${ledgerYear}` },
     ...Array.from({ length: lastMonth }, (_, i) => {
       const m = i + 1;
-      const v = `${LEDGER_YEAR}-${String(m).padStart(2, '0')}`;
-      return { v, label: new Date(LEDGER_YEAR, i, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' }) };
+      const v = `${ledgerYear}-${String(m).padStart(2, '0')}`;
+      return { v, label: new Date(ledgerYear, i, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' }) };
     }).reverse(),
   ];
 
@@ -192,10 +211,25 @@ export default function DeliveriesPage() {
               placeholder="Search boat, company, driver…"
               className="border border-gray-200 rounded-lg pl-9 pr-3 py-2 text-sm w-56" />
           </div>
+          <select value={ledgerYear} onChange={e => { setLedgerYear(Number(e.target.value)); setMonth('all'); }}
+            className="border border-gray-200 rounded-lg px-3 py-2 text-sm font-medium text-brand-navy"
+            title="Ledger year">
+            {LEDGER_YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
           <select value={month} onChange={e => setMonth(e.target.value)}
             className="border border-gray-200 rounded-lg px-3 py-2 text-sm font-medium text-brand-navy">
             {monthOpts.map(m => <option key={m.v} value={m.v}>{m.label}</option>)}
           </select>
+          <label className="flex items-center gap-1.5 text-xs text-gray-600 border border-gray-200 rounded-lg px-2.5 py-2 cursor-pointer select-none"
+            title="Hides TestShip-like names and rows marked not billable">
+            <input type="checkbox" checked={hideTestBoats} onChange={e => setHideTestBoats(e.target.checked)}
+              className="w-3.5 h-3.5 accent-brand-green" />
+            {hideTestBoats ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+            Hide test / not billable
+          </label>
+          <button onClick={() => setShowImport(true)} className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5">
+            <Upload className="w-4 h-4" /> Import sheet
+          </button>
           <button onClick={() => setShowRates(true)} className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5">
             <SlidersHorizontal className="w-4 h-4" /> Rate Cards
           </button>
@@ -240,7 +274,7 @@ export default function DeliveriesPage() {
           Showing <span className="font-bold text-brand-navy">{totals.count}</span> of{' '}
           <span className="font-semibold">{rows.length}</span> deliveries matching{' '}
           &ldquo;<span className="font-semibold text-brand-navy">{search}</span>&rdquo;
-          {month === 'all' ? ` in ${LEDGER_YEAR}` : ''}.{' '}
+          {month === 'all' ? ` in ${ledgerYear}` : ''}.{' '}
           <button onClick={() => setSearch('')} className="text-brand-river font-semibold hover:underline">
             Clear search
           </button>
@@ -254,7 +288,7 @@ export default function DeliveriesPage() {
         ) : visibleRows.length === 0 ? (
           <div className="py-16 text-center text-gray-400 text-sm">
             {search
-              ? <>No deliveries match &ldquo;{search}&rdquo; in this view. Try &ldquo;All of {LEDGER_YEAR}&rdquo;.</>
+              ? <>No deliveries match &ldquo;{search}&rdquo; in this view. Try &ldquo;All of {ledgerYear}&rdquo;.</>
               : 'No deliveries logged for this month yet.'}
           </div>
         ) : (
@@ -262,37 +296,56 @@ export default function DeliveriesPage() {
             <thead>
               <tr className="bg-brand-green/95 text-white text-left text-xs uppercase tracking-wide">
                 <th className="px-3 py-2.5">Date</th>
-                <th className="px-3 py-2.5">Company</th>
-                <th className="px-3 py-2.5">Vessel</th>
+                <th className="px-3 py-2.5">Company / Vessel</th>
                 <th className="px-3 py-2.5">Service</th>
                 <th className="px-3 py-2.5 text-right">Fee</th>
                 <th className="px-3 py-2.5 text-right">Groceries</th>
-                <th className="px-3 py-2.5">Billed?</th>
                 <th className="px-3 py-2.5">Driver</th>
+                <th className="px-3 py-2.5 text-right">Hrs / Pay</th>
                 <th className="px-3 py-2.5">Invoice</th>
                 <th className="px-3 py-2.5"></th>
               </tr>
             </thead>
             <tbody>
-              {matches.map(({ d, via }) => (
-                <tr key={d.id} className="border-b border-gray-100 hover:bg-gray-50">
-                  <td className="px-3 py-2.5 whitespace-nowrap">
+              {filteredMatches.map(({ d, via }) => {
+                const groceryMissing = !!d.bill_for_groceries && d.sinclairs_grocery_total == null;
+                const rowTint = groceryMissing
+                  ? 'bg-red-50/70 hover:bg-red-50'
+                  : d.not_billable
+                    ? 'bg-gray-50 text-gray-500 hover:bg-gray-100'
+                    : 'hover:bg-gray-50';
+                return (
+                <tr key={d.id} className={`border-b border-gray-100 ${rowTint}`}>
+                  <td className="px-3 py-2.5 whitespace-nowrap align-top">
                     {d.delivery_date || '—'}
-                    {/* Provenance. Jen needs to know at a glance which rows she
-                        still has to fill in a driver for, and which arrived on
-                        their own — and that editing an auto row is safe, because
-                        the sync never overwrites her driver/pay/hours columns. */}
                     {d.order_id && (
                       <span className="block text-[10px] font-semibold text-brand-river mt-0.5"
                         title="Created automatically from a web order. Deleting the order removes this row. Your driver, hours and pay entries are never overwritten.">
                         from an online order
                       </span>
                     )}
+                    {d.not_billable && (
+                      <span className="block text-[10px] font-semibold text-gray-500 mt-0.5"
+                        title={d.not_billable_reason || 'Marked not billable'}>
+                        not billable{d.not_billable_reason ? ` · ${d.not_billable_reason}` : ''}
+                      </span>
+                    )}
                   </td>
-                  <td className="px-3 py-2.5 font-medium text-brand-navy">{d.company?.name || '—'}</td>
-                  <td className="px-3 py-2.5">
-                    {d.vessel_name || '—'}
-                    {/* Why this row is here when nothing on screen says so. */}
+                  <td className="px-3 py-2.5 align-top">
+                    <div className="font-medium text-brand-navy">{d.company?.name || '—'}</div>
+                    <div className="text-sm text-gray-700">{d.vessel_name || '—'}</div>
+                    {(d.location_delivered || d.gts_correspondent || d.phone_number_used || d.issues_comments) && (
+                      <div className="mt-0.5 text-[11px] text-gray-400 leading-snug space-y-0.5">
+                        {d.location_delivered && <div>Loc: {d.location_delivered}</div>}
+                        {d.phone_number_used && <div>Phone: {d.phone_number_used}</div>}
+                        {d.gts_correspondent && <div>GTS: {d.gts_correspondent}</div>}
+                        {d.issues_comments && (
+                          <div className="truncate max-w-[18rem]" title={d.issues_comments}>
+                            “{d.issues_comments}”
+                          </div>
+                        )}
+                      </div>
+                    )}
                     {via && (
                       <span className="block text-[10px] text-amber-700 font-semibold mt-0.5"
                         title={`This row matched your search in its ${via} field, which isn't shown as a column.`}>
@@ -300,39 +353,36 @@ export default function DeliveriesPage() {
                       </span>
                     )}
                   </td>
-                  {/* Missing service or fee = this row can't be invoiced. It's
-                      not an error — a delivery gets logged before the fee is
-                      known — but it must be findable later. Amber, not red:
-                      it's unfinished, not wrong. */}
-                  <td className={`px-3 py-2.5 ${d.service_type ? 'text-gray-600' : 'bg-amber-50 text-amber-700 font-semibold'}`}>
+                  <td className={`px-3 py-2.5 align-top ${d.service_type ? 'text-gray-600' : 'bg-amber-50 text-amber-700 font-semibold'}`}>
                     {d.service_type || 'no service'}
+                    {d.bill_for_groceries && (
+                      <span className="block text-[10px] font-semibold text-green-700 mt-0.5">Bill groceries</span>
+                    )}
                   </td>
-                  <td className={`px-3 py-2.5 text-right font-semibold ${d.delivery_fee == null ? 'bg-amber-50 text-amber-700' : ''}`}>
+                  <td className={`px-3 py-2.5 text-right font-semibold align-top ${d.delivery_fee == null ? 'bg-amber-50 text-amber-700' : ''}`}>
                     {d.delivery_fee != null ? formatCurrency(d.delivery_fee) : 'no fee'}
                   </td>
-                  {/* GROCERIES: em dash when GTS isn't billing them.
-                      A figure here on a not-billed row read as money owed and
-                      invited double-charging a boat that pays Sinclair's
-                      direct. If we're not billing it, the number is Sinclair's
-                      business and doesn't belong in a GTS money column. */}
-                  <td className="px-3 py-2.5 text-right">
+                  <td className={`px-3 py-2.5 text-right align-top ${groceryMissing ? 'bg-red-100/80' : ''}`}>
                     {d.bill_for_groceries
                       ? (d.sinclairs_grocery_total != null
                           ? formatCurrency(d.sinclairs_grocery_total)
-                          : <span className="text-red-600 font-semibold text-xs">missing</span>)
+                          : <span className="text-red-700 font-bold text-xs">missing</span>)
                       : <span className="text-gray-300">—</span>}
                   </td>
-                  <td className="px-3 py-2.5">{d.bill_for_groceries ? <span className="text-green-700 font-bold text-xs">Yes</span> : <span className="text-gray-400 text-xs">No</span>}</td>
-                  <td className="px-3 py-2.5 text-gray-600">{d.delivery_driver || '—'}</td>
-                  <td className="px-3 py-2.5 text-xs">{d.invoice_sent ? <span className="text-green-700">Sent {d.invoice_sent}</span> : <span className="text-amber-600 font-semibold">Not sent</span>}</td>
-                  <td className="px-3 py-2.5">
+                  <td className="px-3 py-2.5 text-gray-600 align-top">{d.delivery_driver || '—'}</td>
+                  <td className="px-3 py-2.5 text-right text-gray-600 align-top whitespace-nowrap">
+                    <div>{d.hours_worked != null ? `${d.hours_worked}h` : '—'}</div>
+                    <div className="text-xs">{d.amount_paid_driver != null ? formatCurrency(d.amount_paid_driver) : '—'}</div>
+                  </td>
+                  <td className="px-3 py-2.5 text-xs align-top">{d.invoice_sent ? <span className="text-green-700">Sent {d.invoice_sent}</span> : <span className="text-amber-600 font-semibold">Not sent</span>}</td>
+                  <td className="px-3 py-2.5 align-top">
                     <div className="flex items-center gap-1">
                       <button onClick={() => setEditing(d)} className="p-1 text-gray-400 hover:text-brand-navy"><Pencil className="w-4 h-4" /></button>
                       <button onClick={() => remove(d)} className="p-1 text-gray-300 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
                     </div>
                   </td>
                 </tr>
-              ))}
+              );})}
             </tbody>
           </table>
         )}
@@ -359,6 +409,13 @@ export default function DeliveriesPage() {
       {showRates && (
         <RateCardEditor companies={companies} serviceTypes={serviceTypes} deliveries={rows}
           onClose={() => setShowRates(false)} onChanged={loadMeta} />
+      )}
+      {showImport && (
+        <ImportSheetModal
+          companies={companies}
+          onClose={() => setShowImport(false)}
+          onApplied={() => { setShowImport(false); load(); loadMeta(); }}
+        />
       )}
     </div>
   );
@@ -902,11 +959,15 @@ function DeliveryEditor({ delivery, companies, serviceTypes, vesselRecords = [],
     helper_name: (delivery as any)?.helper_name || '',
     helper_hours: (delivery as any)?.helper_hours ?? '',
     helper_pay: (delivery as any)?.helper_pay ?? '',
+    order_id: delivery?.order_id || '',
   }));
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [rateHint, setRateHint] = useState<string>('');
   const [cardRate, setCardRate] = useState<number | null>(null);
+  const [groceryAutofillNote, setGroceryAutofillNote] = useState<string>('');
+  const [orderRegisterTotal, setOrderRegisterTotal] = useState<number | null>(null);
+  const [orderSubtotal, setOrderSubtotal] = useState<number | null>(null);
   const set = (k: string, v: any) => setF(p => ({ ...p, [k]: v }));
 
   // DIRTY TRACKING — snapshot the initial state once, compare against it.
@@ -1016,6 +1077,55 @@ function DeliveryEditor({ delivery, companies, serviceTypes, vesselRecords = [],
     [vesselRecords, f.company_id],
   );
 
+  // When an online order is linked and Sinclair's total is blank, offer /
+  // auto-fill from orders.register_total. Never invent from subtotal.
+  useEffect(() => {
+    const oid = (f.order_id || '').trim();
+    if (!oid) {
+      setOrderRegisterTotal(null);
+      setOrderSubtotal(null);
+      setGroceryAutofillNote('');
+      return;
+    }
+    let cancelled = false;
+    adminFetch(`/api/admin/deliveries/order-grocery?order_id=${encodeURIComponent(oid)}`)
+      .then(async r => {
+        if (!r.ok) {
+          // Fallback: lightweight deliveries-adjacent probe via a dedicated
+          // field on save; if the orders GET isn't available, stay quiet.
+          return null;
+        }
+        return r.json();
+      })
+      .then(d => {
+        if (cancelled || !d) return;
+        const order = d.order || d;
+        const rt = order.register_total == null ? null : Number(order.register_total);
+        const st = order.subtotal == null ? null : Number(order.subtotal);
+        setOrderRegisterTotal(Number.isFinite(rt as number) ? (rt as number) : null);
+        setOrderSubtotal(Number.isFinite(st as number) ? (st as number) : null);
+        const wants =
+          f.grocery_mode === 'sinclair_courtesy' || !!f.bill_for_groceries;
+        const blank = f.sinclairs_grocery_total === '' || f.sinclairs_grocery_total == null;
+        if (wants && blank && Number.isFinite(rt as number) && (rt as number) != null) {
+          setF(p => {
+            if (p.sinclairs_grocery_total !== '' && p.sinclairs_grocery_total != null) return p;
+            return { ...p, sinclairs_grocery_total: Number(rt).toFixed(2), bill_for_groceries: true };
+          });
+          setGroceryAutofillNote(`Filled from order register total ($${Number(rt).toFixed(2)})`);
+        } else if (wants && blank) {
+          setGroceryAutofillNote(
+            rt == null
+              ? 'Linked order has no register total yet — leave blank or fill from subtotal estimate below.'
+              : '',
+          );
+        }
+      })
+      .catch(() => { /* orders GET may 404 on older deploys — save-time autofill still runs */ });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [f.order_id, f.grocery_mode, f.bill_for_groceries]);
+
   // Typed company → existing row (case-insensitive), or a brand-new one.
   const typedCompany = (f.company_name || '').trim();
   const matchedCompany = companies.find(
@@ -1023,11 +1133,11 @@ function DeliveryEditor({ delivery, companies, serviceTypes, vesselRecords = [],
   );
   const isNewCompany = typedCompany.length > 0 && !matchedCompany;
 
-  // HARD BLOCK: billing for groceries with no amount produces an invoice line
-  // that says "groceries" and charges nothing. It's the one combination that
-  // silently loses GTS money, so it's the one thing that can't be saved.
+  // Soft missing: bill groceries with no total. We try autofill first (API +
+  // editor). If the receipt isn't in yet, Mary-Karen still needs to log the
+  // trip — allow save, keep the red highlight so it stays findable.
   const groceriesMissingTotal =
-    !!f.bill_for_groceries &&
+    (f.grocery_mode === 'sinclair_courtesy' || !!f.bill_for_groceries) &&
     (f.sinclairs_grocery_total === '' || f.sinclairs_grocery_total == null);
 
   async function save() {
@@ -1076,6 +1186,9 @@ function DeliveryEditor({ delivery, companies, serviceTypes, vesselRecords = [],
     const payload = {
       ...rest,
       company_id: companyId,
+      order_id: rest.order_id || null,
+      bill_for_groceries:
+        rest.grocery_mode === 'sinclair_courtesy' || rest.grocery_mode === 'gts_purchased',
       delivery_fee: num(rest.delivery_fee),
       sinclairs_grocery_total: num(rest.sinclairs_grocery_total),
       hours_worked: num(rest.hours_worked),
@@ -1098,8 +1211,13 @@ function DeliveryEditor({ delivery, companies, serviceTypes, vesselRecords = [],
     const body = delivery ? { id: delivery.id, ...payload } : payload;
     const res = await adminFetch('/api/admin/deliveries', { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     setSaving(false);
-    if (res.ok) onSaved();
-    else {
+    if (res.ok) {
+      const data = await res.json().catch(() => ({}));
+      if (data.autofilledFrom != null) {
+        setGroceryAutofillNote(`Server filled grocery total from order register ($${Number(data.autofilledFrom).toFixed(2)})`);
+      }
+      onSaved();
+    } else {
       const err = await res.json().catch(() => ({ error: 'Could not save this delivery' }));
       setSaveError(err.error || 'Could not save this delivery');
     }
@@ -1222,7 +1340,14 @@ function DeliveryEditor({ delivery, companies, serviceTypes, vesselRecords = [],
               line or leaves GTS owing tax it never collected. */}
           <label className="block col-span-2">
             <span className="text-xs font-semibold text-gray-500">Groceries on this delivery</span>
-            <select value={f.grocery_mode} onChange={e => set('grocery_mode', e.target.value)}
+            <select value={f.grocery_mode} onChange={e => {
+                const mode = e.target.value;
+                setF(p => ({
+                  ...p,
+                  grocery_mode: mode,
+                  bill_for_groceries: mode === 'sinclair_courtesy' || mode === 'gts_purchased',
+                }));
+              }}
               className="mt-0.5 w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm">
               <option value="none">None</option>
               <option value="sinclair_courtesy">Sinclair&apos;s courtesy — pass through their register total (no QBO tax)</option>
@@ -1256,9 +1381,30 @@ function DeliveryEditor({ delivery, companies, serviceTypes, vesselRecords = [],
                     groceriesMissingTotal ? 'border-red-300 bg-red-50' : 'border-gray-200'
                   }`} />
               </div>
+              {groceryAutofillNote && (
+                <span className="block mt-1 text-[11px] font-semibold text-brand-river">
+                  {groceryAutofillNote}
+                </span>
+              )}
               {groceriesMissingTotal && (
                 <span className="block mt-1 text-[11px] font-semibold text-red-600">
-                  Required while &ldquo;Bill for groceries&rdquo; is on.
+                  Missing Sinclair&apos;s total — you can still save; this row stays highlighted red until the receipt lands.
+                </span>
+              )}
+              {groceriesMissingTotal && orderRegisterTotal == null && orderSubtotal != null && (
+                <button type="button"
+                  onClick={() => {
+                    set('sinclairs_grocery_total', Number(orderSubtotal).toFixed(2));
+                    setGroceryAutofillNote(`Filled from order subtotal estimate ($${Number(orderSubtotal).toFixed(2)}) — not a register total`);
+                  }}
+                  className="mt-1.5 text-[11px] font-bold text-amber-800 underline">
+                  Fill from order subtotal (estimate)
+                </button>
+              )}
+              {f.order_id && (
+                <span className="block mt-1 text-[10px] text-gray-400">
+                  Linked order: {f.order_id.slice(0, 8)}…
+                  {orderRegisterTotal != null ? ` · register $${orderRegisterTotal.toFixed(2)}` : ' · no register total'}
                 </span>
               )}
             </label>
@@ -1435,8 +1581,8 @@ function DeliveryEditor({ delivery, companies, serviceTypes, vesselRecords = [],
         )}
         <div className="px-5 py-4 border-t border-gray-100 flex gap-3">
           <button onClick={attemptClose} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50">Cancel</button>
-          <button onClick={save} disabled={saving || groceriesMissingTotal}
-            title={groceriesMissingTotal ? "Enter the Sinclair's grocery total first" : undefined}
+          <button onClick={save} disabled={saving}
+            title={groceriesMissingTotal ? "Sinclair's total still missing — row will stay highlighted" : undefined}
             className="flex-1 py-2.5 rounded-xl bg-brand-green text-white text-sm font-bold flex items-center justify-center gap-1.5 hover:bg-brand-gmed disabled:opacity-50">
             {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : <><Check className="w-4 h-4" /> Save</>}
           </button>
@@ -1444,6 +1590,242 @@ function DeliveryEditor({ delivery, companies, serviceTypes, vesselRecords = [],
       </div>
     </div>,
     document.body
+  );
+}
+
+// ── Sheet → ledger import / diff ─────────────────────────────────────────
+// CSV or XLSX upload. Preview adds / updates / unchanged / errors, then
+// confirm applies. Idempotent on date + vesselKey + driver + fee so Mary-Karen
+// can re-run without duplicates. Never invents invoice_sent.
+function ImportSheetModal({ companies: _companies, onClose, onApplied }: {
+  companies: Company[];
+  onClose: () => void;
+  onApplied: () => void;
+}) {
+  void _companies;
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [headers, setHeaders] = useState<string[]>([]);
+  const [rows, setRows] = useState<Record<string, unknown>[]>([]);
+  const [preview, setPreview] = useState<{
+    summary: { adds: number; updates: number; unchanged: number; errors: number };
+    diffs: Array<{
+      kind: string; key: string; error?: string; changes?: string[];
+      unmatchedCompany?: boolean;
+      row: { delivery_date?: string | null; vessel_name?: string | null; delivery_driver?: string | null; delivery_fee?: number | null; company_name?: string | null };
+    }>;
+    headerMap?: Record<string, string>;
+  } | null>(null);
+  const [createMissingCompanies, setCreateMissingCompanies] = useState(false);
+  const [applyResult, setApplyResult] = useState<string>('');
+
+  async function parseFile(file: File) {
+    setError('');
+    setPreview(null);
+    setApplyResult('');
+    setBusy(true);
+    try {
+      const name = file.name.toLowerCase();
+      let parsedHeaders: string[] = [];
+      let parsedRows: Record<string, unknown>[] = [];
+
+      if (name.endsWith('.csv') || name.endsWith('.txt')) {
+        const text = await file.text();
+        const Papa = (await import('papaparse')).default;
+        const result = Papa.parse(text, { header: true, skipEmptyLines: true });
+        parsedHeaders = result.meta.fields || [];
+        parsedRows = (result.data as Record<string, unknown>[]).filter(r =>
+          Object.values(r).some(v => String(v ?? '').trim() !== ''),
+        );
+      } else if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
+        const XLSX = await import('xlsx');
+        const buf = await file.arrayBuffer();
+        const wb = XLSX.read(buf, { type: 'array', cellDates: true });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
+        parsedRows = json.filter(r => Object.values(r).some(v => String(v ?? '').trim() !== ''));
+        parsedHeaders = parsedRows.length ? Object.keys(parsedRows[0]) : [];
+      } else {
+        setError('Upload a .csv or .xlsx file');
+        setBusy(false);
+        return;
+      }
+
+      setHeaders(parsedHeaders);
+      setRows(parsedRows);
+
+      const res = await adminFetch('/api/admin/deliveries/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'preview',
+          headers: parsedHeaders,
+          rows: parsedRows,
+          createMissingCompanies,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || 'Preview failed');
+        setBusy(false);
+        return;
+      }
+      setPreview(data);
+    } catch (e: any) {
+      setError(e?.message || 'Could not read that file');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function apply() {
+    if (!preview || !rows.length) return;
+    setBusy(true);
+    setError('');
+    try {
+      const res = await adminFetch('/api/admin/deliveries/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'apply',
+          headers,
+          rows,
+          createMissingCompanies,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || 'Apply failed');
+        setBusy(false);
+        return;
+      }
+      const a = data.applied || {};
+      setApplyResult(
+        `Applied: ${a.inserted || 0} added, ${a.updated || 0} updated` +
+          (a.createdCompanies ? `, ${a.createdCompanies} companies created` : '') +
+          (a.applyErrors?.length ? ` · ${a.applyErrors.length} errors` : ''),
+      );
+      setPreview(data);
+      if (!a.applyErrors?.length) {
+        setTimeout(() => onApplied(), 600);
+      }
+    } catch (e: any) {
+      setError(e?.message || 'Apply failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const summary = preview?.summary;
+
+  return createPortal(
+    <div className="fixed inset-0 z-[95] bg-black/60 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] flex flex-col">
+        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+          <div>
+            <h3 className="font-display text-lg font-bold text-brand-navy flex items-center gap-2">
+              <Upload className="w-5 h-5 text-brand-green" /> Import sheet
+            </h3>
+            <p className="text-xs text-gray-400 mt-0.5">
+              CSV or XLSX. Re-runs are safe — same date + vessel + driver + fee is a no-op.
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+        </div>
+
+        <div className="p-5 overflow-y-auto space-y-4">
+          <label className={`flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-xl px-4 py-8 cursor-pointer transition-colors ${
+            busy ? 'border-gray-200 bg-gray-50' : 'border-brand-green/40 hover:bg-brand-sand/20'
+          }`}>
+            {busy ? <Loader2 className="w-6 h-6 animate-spin text-brand-green" /> : <Upload className="w-6 h-6 text-brand-green" />}
+            <span className="text-sm font-semibold text-brand-navy">Drop a deliveries sheet, or click to browse</span>
+            <span className="text-xs text-gray-400">Headers like Date, Delivery Driver, Vessel Name, Barge Line, Delivery Fee…</span>
+            <input type="file" accept=".csv,.xlsx,.xls,text/csv" className="hidden"
+              onChange={e => { const f = e.target.files?.[0]; if (f) parseFile(f); }} />
+          </label>
+
+          <label className="flex items-center gap-2 text-xs text-gray-600">
+            <input type="checkbox" checked={createMissingCompanies}
+              onChange={e => setCreateMissingCompanies(e.target.checked)}
+              className="w-3.5 h-3.5 accent-brand-green" />
+            On apply, create unmatched company names (name only — no rate card)
+          </label>
+
+          {error && (
+            <p className="text-xs font-semibold text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>
+          )}
+          {applyResult && (
+            <p className="text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">{applyResult}</p>
+          )}
+
+          {summary && (
+            <div className="grid grid-cols-4 gap-2">
+              {[
+                { label: 'Adds', n: summary.adds, c: 'text-brand-green' },
+                { label: 'Updates', n: summary.updates, c: 'text-amber-700' },
+                { label: 'Unchanged', n: summary.unchanged, c: 'text-gray-500' },
+                { label: 'Errors', n: summary.errors, c: 'text-red-600' },
+              ].map(x => (
+                <div key={x.label} className="card-base p-3 text-center">
+                  <p className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold">{x.label}</p>
+                  <p className={`text-xl font-bold ${x.c}`}>{x.n}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {preview && (
+            <div className="border border-gray-100 rounded-xl overflow-hidden max-h-72 overflow-y-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-gray-50 text-left text-[10px] uppercase tracking-wide text-gray-500">
+                    <th className="px-2 py-1.5">Status</th>
+                    <th className="px-2 py-1.5">Date</th>
+                    <th className="px-2 py-1.5">Vessel</th>
+                    <th className="px-2 py-1.5">Driver</th>
+                    <th className="px-2 py-1.5 text-right">Fee</th>
+                    <th className="px-2 py-1.5">Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.diffs.slice(0, 200).map((d, i) => (
+                    <tr key={i} className="border-t border-gray-50">
+                      <td className="px-2 py-1.5 font-semibold">
+                        {d.kind === 'add' && <span className="text-brand-green">add</span>}
+                        {d.kind === 'update' && <span className="text-amber-700">update</span>}
+                        {d.kind === 'unchanged' && <span className="text-gray-400">same</span>}
+                        {d.kind === 'error' && <span className="text-red-600">error</span>}
+                      </td>
+                      <td className="px-2 py-1.5 whitespace-nowrap">{d.row.delivery_date || '—'}</td>
+                      <td className="px-2 py-1.5">{d.row.vessel_name || '—'}</td>
+                      <td className="px-2 py-1.5">{d.row.delivery_driver || '—'}</td>
+                      <td className="px-2 py-1.5 text-right">{d.row.delivery_fee != null ? formatCurrency(d.row.delivery_fee) : '—'}</td>
+                      <td className="px-2 py-1.5 text-gray-500">
+                        {d.error || (d.changes ? d.changes.join(', ') : '')}
+                        {d.unmatchedCompany && !d.error ? ` · unmatched co: ${d.row.company_name}` : ''}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {preview.diffs.length > 200 && (
+                <p className="text-[10px] text-gray-400 px-2 py-1">Showing first 200 of {preview.diffs.length}</p>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="px-5 py-4 border-t border-gray-100 flex gap-3">
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50">Cancel</button>
+          <button onClick={apply}
+            disabled={busy || !preview || (summary?.adds === 0 && summary?.updates === 0)}
+            className="flex-1 py-2.5 rounded-xl bg-brand-green text-white text-sm font-bold flex items-center justify-center gap-1.5 hover:bg-brand-gmed disabled:opacity-50">
+            {busy ? <><Loader2 className="w-4 h-4 animate-spin" /> Working…</> : <><Check className="w-4 h-4" /> Confirm import</>}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
