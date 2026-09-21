@@ -14,7 +14,7 @@
 //    fire hydrants — and at this volume a hidden field stops essentially all of
 //    the automated traffic that would otherwise arrive.
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Send, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 
 type Status = 'idle' | 'sending' | 'sent' | 'error';
@@ -22,6 +22,8 @@ type Status = 'idle' | 'sending' | 'sent' | 'error';
 export default function ContactForm() {
   const [status, setStatus] = useState<Status>('idle');
   const [error, setError] = useState('');
+  // Mount time for min-fill-time check on the server (bots POST instantly).
+  const startedMs = useRef(Date.now());
   const [form, setForm] = useState({
     name: '', email: '', phone: '', vessel: '', message: '',
     // Honeypot. Real people never see it, so anything that fills it is a bot.
@@ -50,7 +52,7 @@ export default function ContactForm() {
       const res = await fetch('/api/site-contact', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, form_started_ms: startedMs.current }),
       });
       if (!res.ok) {
         const msg = await res.json().then(j => j.error).catch(() => null);

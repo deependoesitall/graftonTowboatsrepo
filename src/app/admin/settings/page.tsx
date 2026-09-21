@@ -412,6 +412,8 @@ export default function AdminSettingsPage() {
   async function patchSinclairTest(partial: {
     sinclair_email_test_mode: boolean;
     sinclair_test_emails?: string;
+    /** On restore: re-assert held store inboxes if they were blank. */
+    sinclair_order_emails?: string;
   }) {
     setSinclairTestBusy(true);
     setSaveMsg('');
@@ -432,9 +434,19 @@ export default function AdminSettingsPage() {
       loadSettings();
       return;
     }
+    // Prefer server row so Restore flips the UI off test mode even if a field
+    // was stale in local state — Deepen will hit this during the live demo.
+    try {
+      const saved = await res.json();
+      if (saved && typeof saved === 'object' && 'sinclair_email_test_mode' in saved) {
+        setSettings(s => ({ ...s, ...saved }));
+      }
+    } catch {
+      /* keep optimistic merge */
+    }
     setSaveMsg(partial.sinclair_email_test_mode
       ? 'Test mode on — Sinclair copies come to you.'
-      : "Sinclair's emails restored.");
+      : "Sinclair's emails restored — next Shop-now goes to the store inboxes.");
     setTimeout(() => setSaveMsg(''), 4000);
   }
 
@@ -448,7 +460,15 @@ export default function AdminSettingsPage() {
   }
 
   function restoreSinclairEmails() {
-    return patchSinclairTest({ sinclair_email_test_mode: false });
+    // Held addresses stay in sinclair_order_emails while test mode is on.
+    // If that field was somehow empty, refill the known Sinclair desk so
+    // Restore never leaves Shop-now with nowhere to go.
+    const HELD_DEFAULT = 'sinclairfoods@jerseyville-il.net, dwittman@jerseyville-il.net';
+    const held = (settings.sinclair_order_emails || '').trim() || HELD_DEFAULT;
+    return patchSinclairTest({
+      sinclair_email_test_mode: false,
+      sinclair_order_emails: held,
+    });
   }
 
   async function changePassword() {

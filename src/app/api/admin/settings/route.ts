@@ -86,7 +86,9 @@ export async function PATCH(req: NextRequest) {
     if (body.business_email !== undefined) updates.business_email = body.business_email;
     if (body.order_email_cc !== undefined) updates.order_email_cc = body.order_email_cc;
     if (body.sinclair_order_emails !== undefined) updates.sinclair_order_emails = body.sinclair_order_emails;
-    if (body.sinclair_email_test_mode !== undefined) updates.sinclair_email_test_mode = !!body.sinclair_email_test_mode;
+    if (body.sinclair_email_test_mode !== undefined) {
+      updates.sinclair_email_test_mode = !!body.sinclair_email_test_mode;
+    }
     if (body.sinclair_test_emails !== undefined) updates.sinclair_test_emails = String(body.sinclair_test_emails ?? '');
     if (body.tax_rate !== undefined) updates.tax_rate = body.tax_rate;
     if (body.tax_enabled !== undefined) updates.tax_enabled = body.tax_enabled;
@@ -133,11 +135,23 @@ export async function PATCH(req: NextRequest) {
   // Fetch the settings row id first so update targets a specific row
   const { data: existingRow, error: fetchErr } = await supabase
     .from('admin_settings')
-    .select('id')
+    .select('id, sinclair_order_emails')
     .single();
 
   if (fetchErr || !existingRow) {
     return NextResponse.json({ error: fetchErr?.message || 'Settings row not found' }, { status: 500 });
+  }
+
+  // Restore: if turning test mode OFF and neither the payload nor the row has
+  // a store list, refill the known Sinclair desk so Shop-now is never orphaned.
+  // Do not overwrite a customized held list that already lives on the row.
+  if (
+    updates.sinclair_email_test_mode === false
+    && !String(updates.sinclair_order_emails ?? '').trim()
+    && !String(existingRow.sinclair_order_emails ?? '').trim()
+  ) {
+    updates.sinclair_order_emails =
+      'sinclairfoods@jerseyville-il.net, dwittman@jerseyville-il.net';
   }
 
   const { data, error } = await supabase
