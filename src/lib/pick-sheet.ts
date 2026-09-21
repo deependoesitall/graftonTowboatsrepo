@@ -1,1 +1,1 @@
-@/workspace/fix-barcode/pick-sheet.ts
+PLACEHOLDER_WILL_REPLACE
