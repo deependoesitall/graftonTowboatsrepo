@@ -180,17 +180,24 @@ function itemCard(
 ): string {
   const weighable = isWeighable(i);
   const qtyLabel = formatQty(i.quantity, isPoundQty(i.uom, i.quantity));
-  // ⚠️ THESE TWO NUMBERS AND THE .bc svg HEIGHT ARE ONE SETTING.
+  // ⚠️ THESE TWO NUMBERS AND THE .bc svg HEIGHT IN THE CSS ARE ONE SETTING.
   //
-  // moduleWidth 2 / height 52, scaled to 42px tall by the CSS, prints 1.45in
-  // wide with a 0.33mm X-dimension — UPC-A nominal, and the combination that
-  // has read on Sinclair's guns since 19 July 2026.
+  // upcASvg emits 113 modules across (95 data + a 9-module quiet zone each
+  // side) and (height + 7*moduleWidth + 2) tall. The CSS sizes it by HEIGHT,
+  // so the printed bar width is:
+  //     moduleWidth * (cssHeight / svgHeight) / 96  inches
+  // moduleWidth 2 / height 65, scaled to 78px tall, = 2.27in wide, bars
+  // 0.65in tall, X-dimension 0.51mm (20 mil).
   //
-  // Enlarging the SVG and then pinning it to an inch width in CSS (tried on
-  // 21 Sept: moduleWidth 3, then 5 with width: 1.5in) stopped the sheets
-  // scanning. Bigger source bars do not survive being scaled to an unrelated
-  // target width. Change these with the CSS, or leave them alone.
-  const svg = weighable ? null : upcASvg(i.upc, { moduleWidth: 2, height: 52 });
+  // WHY 20 MIL. Sinclair's register gun is a Honeywell 1900GSR, rated to
+  // 13 mil for UPC/EAN. From 19 July to 21 Sept this printed at 12.9 mil —
+  // just UNDER that floor. Phone cameras read it fine; the gun stayed silent.
+  // 20 mil is 154% UPC-A magnification (the spec allows 80-200%), which puts
+  // us half again above what the gun needs instead of underneath it.
+  //
+  // Do not shrink these to fit more cards per row. Four columns is what
+  // forced 12.9 mil in the first place.
+  const svg = weighable ? null : upcASvg(i.upc, { moduleWidth: 2, height: 65 });
   const scanTimes = !weighable && svg && Number.isInteger(i.quantity) && i.quantity > 0
     ? `Scan<br/><b>&times;${i.quantity}</b>` : '';
   const cod = i.paid_by === 'cod';
@@ -437,8 +444,10 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: Arial, Helvetica, sans-serif; color: #000; font-size: 9.5px; padding: 8px; }
-  /* LANDSCAPE. Dave: more barcodes across the page. Four cards per row —
-     room for gun-readable codes + identifiable thumbs. moduleWidth 2. */
+  /* LANDSCAPE. THREE cards per row. Dave asked for more barcodes across the
+     page and this was four, but four columns only leave room for a 12.9 mil
+     barcode — under what Sinclair's gun can resolve. A code that scans beats
+     a code that fits. */
   @page { size: letter landscape; margin: 7.5mm; }
   @media print {
     body { padding: 0; }
@@ -472,7 +481,7 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
               padding: 1px 4px; margin-top: 1px; break-after: avoid; page-break-after: avoid; }
   .loc-count { font-weight: normal; color: #444; font-size: 8px; margin-left: 4px; }
 
-  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; padding: 3px 0; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; padding: 3px 0; }
   .item { border: 1px solid #000; border-radius: 0; padding: 3px 4px;
           break-inside: avoid; page-break-inside: avoid; background: #fff; }
   .item.cod { border: 2px solid #000; background: #fff; }
@@ -536,22 +545,16 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
   .sub-tag { color: #000; font-weight: 900; font-size: 7.5px; }
 
   .scanrow { display: flex; align-items: center; gap: 5px; margin-top: 2px; }
-  /* ⚠️ SIZE THE BARCODE BY ITS HEIGHT AND LET THE WIDTH FOLLOW. DO NOT SET
-     AN INCH WIDTH HERE.
+  /* ⚠️ SIZE THE BARCODE BY ITS HEIGHT AND LET THE WIDTH FOLLOW. NEVER SET
+     AN INCH WIDTH HERE — that fights the SVG's own aspect ratio.
 
-     moduleWidth 2 / height 52 in the SVG, scaled to 42px tall by this rule, is
-     the pairing that has scanned on Sinclair's guns since 19 July 2026. It
-     prints 1.45in wide with a 0.33mm X-dimension — UPC-A nominal.
-
-     It was changed twice on 21 Sept (moduleWidth 3, then 5 with
-     width: 1.5in !important) and the sheets stopped reading. Forcing a width
-     in inches while the SVG is generated at a different module size makes the
-     printed bar edges fall wherever the scale factor happens to put them; the
-     two numbers have to be chosen together, and these two were. Change the
-     height here and the moduleWidth above together, or not at all. */
+     78px against the SVG's 81 units (height 65 + 16 of digit text) prints the
+     bars at 20 mil / 0.51mm and the whole symbol 2.27in wide. See the long
+     note at the upcASvg call in itemCard — this height and that moduleWidth
+     move together or not at all. */
   .bc { flex: 0 0 auto; background: #fff;
         print-color-adjust: exact; -webkit-print-color-adjust: exact; }
-  .bc svg { height: 42px; width: auto; display: block; }
+  .bc svg { height: 78px; width: auto; display: block; }
   .bc svg rect[fill="#fff"], .bc svg rect:first-child { fill: #fff; }
   .scan { font-size: 7.5px; line-height: 1.05; color: #000; text-align: center; font-weight: 700; }
   .scan b { font-size: 11px; }
