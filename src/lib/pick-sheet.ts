@@ -180,12 +180,11 @@ function itemCard(
 ): string {
   const weighable = isWeighable(i);
   const qtyLabel = formatQty(i.quantity, isPoundQty(i.uom, i.quantity));
-  // Sized for first-scan reliability: at print resolution this yields bars
-  // ~0.4mm wide × ~12mm tall — comfortably above UPC-A scanner minimums, so
-  // even a toner-tired office printer produces gun-readable codes.
-  // SCAN FIRST: densify yielded. moduleWidth 3 / height 60 / CSS matches intrinsic (no downscale).
-  // 3-col grid so flex cannot crush bars. flex-shrink:0 + quiet pad.
-  const svg = weighable ? null : upcASvg(i.upc, { moduleWidth: 3, height: 60 });
+  // SCAN FIRST vs Sinclair working shelf tags (photo PDF 2026-09-21):
+  // their guns need ~1.4–1.5in wide / ≥0.45in tall bars. moduleWidth 5 +
+  // barH 170 + CSS width 1.5in keeps modules thick when printed; 2-col grid
+  // so the card never CSS-crushes the SVG. Density loses to scanning.
+  const svg = weighable ? null : upcASvg(i.upc, { moduleWidth: 5, height: 170 });
   const scanTimes = !weighable && svg && Number.isInteger(i.quantity) && i.quantity > 0
     ? `Scan<br/><b>&times;${i.quantity}</b>` : '';
   const cod = i.paid_by === 'cod';
@@ -432,12 +431,12 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: Arial, Helvetica, sans-serif; color: #000; font-size: 9.5px; padding: 8px; }
-  /* LANDSCAPE. Dave: more barcodes across the page. Four cards per row —
-     3 cards/row so barcodes keep moduleWidth 3 without CSS crush. */
-  @page { size: letter landscape; margin: 7.5mm; }
+  /* LANDSCAPE. SCAN FIRST: 2 cards/row so 1.5in barcodes fit without crush. */
+  @page { size: letter landscape; margin: 8mm; }
   @media print {
     body { padding: 0; }
     .bc, .bc svg { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+    .bc svg { width: 1.5in !important; height: auto !important; }
   }
 
   /* Dense layout — max scannable barcodes per page, minimal dead space */
@@ -467,8 +466,8 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
               padding: 1px 4px; margin-top: 1px; break-after: avoid; page-break-after: avoid; }
   .loc-count { font-weight: normal; color: #444; font-size: 8px; margin-left: 4px; }
 
-  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; padding: 2px 0; }
-  .item { border: 1px solid #000; border-radius: 0; padding: 3px 4px;
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; padding: 3px 0; }
+  .item { border: 1px solid #000; border-radius: 0; padding: 4px 5px;
           break-inside: avoid; page-break-inside: avoid; background: #fff; }
   .item.cod { border: 2px solid #000; background: #fff; }
   .item.oos { opacity: .72; }
@@ -530,10 +529,20 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
   .cod-bag { margin-left: auto; font-size: 8.5px; color: #000; font-weight: 700; }
   .sub-tag { color: #000; font-weight: 900; font-size: 7.5px; }
 
-  .scanrow { display: flex; align-items: center; gap: 4px; margin-top: 1px; }
-  /* Never CSS-scale barcodes down — that thins modules and kills handheld scans. */
-  .bc { flex: 0 0 auto; padding: 2px 6px; background: #fff; overflow: visible; }
-  .bc svg { height: auto; width: auto; max-width: none; display: block; }
+  .scanrow { display: flex; align-items: center; gap: 6px; margin-top: 2px; flex-wrap: nowrap; }
+  /* PHYSICAL print size matching Sinclair shelf tags that DO scan.
+     Explicit inches beat intrinsic SVG px — browsers were shrinking bars to fit 3-col cards. */
+  .bc { flex: 0 0 auto; padding: 4px 8px; background: #fff; overflow: visible;
+        min-width: 1.5in; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .bc svg {
+    width: 1.5in !important;
+    height: auto !important;
+    max-width: none !important;
+    max-height: none !important;
+    display: block;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
   .bc svg rect[fill="#fff"], .bc svg rect:first-child { fill: #fff; }
   .scan { font-size: 7.5px; line-height: 1.05; color: #000; text-align: center; font-weight: 700; }
   .scan b { font-size: 11px; }
