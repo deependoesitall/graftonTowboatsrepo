@@ -330,7 +330,7 @@ export async function PATCH(
         { status: 400 },
       );
     }
-    // Capture the sale quote once so refuse → honor can restore it.
+    // Capture the sale quote once so refuse -> honor can restore it.
     let saleUnit = Number(item.sale_unit_price ?? 0);
     const currentUnit = Number(item.unit_price);
     if (!saleUnit || saleUnit <= 0) {

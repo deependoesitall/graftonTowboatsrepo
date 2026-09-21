@@ -1518,11 +1518,11 @@ export function OrderDetailModal({
                               : item.honor_expired_sale === false ? 'text-amber-800'
                               : 'text-red-700'
                             }`}>
-                              Sale ended {String(item.sale_finish_date).slice(5)} — quoted {formatCurrency(quotedSaleForUi(item))},
+                              Sale ended {String(item.sale_finish_date).slice(5)} - quoted {formatCurrency(quotedSaleForUi(item))},
                               regular {formatCurrency(Number(item.regular_price))}
-                              {item.honor_expired_sale === true ? ' · HONORED'
-                                : item.honor_expired_sale === false ? ' · charging regular'
-                                : ' · decide below'}
+                              {item.honor_expired_sale === true ? ' - HONORED'
+                                : item.honor_expired_sale === false ? ' - charging regular'
+                                : ' - decide below'}
                             </p>
                           )}
                         </div>
