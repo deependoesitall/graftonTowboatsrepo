@@ -183,7 +183,7 @@ function itemCard(
   // Sized for first-scan reliability: at print resolution this yields bars
   // ~0.4mm wide × ~12mm tall — comfortably above UPC-A scanner minimums, so
   // even a toner-tired office printer produces gun-readable codes.
-  // KEEP restored sizes: moduleWidth 2 / height 52 / CSS .bc svg 42px / thumbs 38px / 4-col.
+  // KEEP barcodes: moduleWidth 2 / height 52 / CSS .bc svg 42px. Thumbs 28px / denser 4-col.
   const svg = weighable ? null : upcASvg(i.upc, { moduleWidth: 2, height: 52 });
   const scanTimes = !weighable && svg && Number.isInteger(i.quantity) && i.quantity > 0
     ? `Scan<br/><b>&times;${i.quantity}</b>` : '';
@@ -433,7 +433,7 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
   body { font-family: Arial, Helvetica, sans-serif; color: #000; font-size: 9.5px; padding: 8px; }
   /* LANDSCAPE. Dave: more barcodes across the page. Four cards per row —
      room for gun-readable codes + identifiable thumbs. moduleWidth 2. */
-  @page { size: letter landscape; margin: 7.5mm; }
+  @page { size: letter landscape; margin: 6mm; }
   @media print {
     body { padding: 0; }
     .bc, .bc svg { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
@@ -447,35 +447,36 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
   .ordmeta { text-align: right; font-size: 8.5px; line-height: 1.25; }
   .ordmeta .num { font-size: 11px; font-weight: bold; color: #000; margin-right: 5px; }
 
-  .facts { display: flex; flex-wrap: wrap; gap: 1px 10px; background: #fff; border: 1px solid #000;
-           border-radius: 2px; padding: 2px 6px; margin-bottom: 3px; font-size: 9px; }
+  .facts { display: flex; flex-wrap: wrap; gap: 1px 8px; background: #fff; border: 1px solid #000;
+           border-radius: 2px; padding: 1px 5px; margin-bottom: 2px; font-size: 8.5px; }
   .facts b { color: #000; }
   .warn-sale { background:#fff !important; border-color:#000 !important; color:#000 !important; font-weight: 700; }
-  .warn { background: #fff; border: 1.5px solid #000; border-radius: 2px; padding: 2px 6px; margin-bottom: 3px; font-size: 9px; font-weight: 700; }
-  .notes { background: #fff; border: 1px solid #000; border-radius: 2px; padding: 2px 6px; margin-bottom: 3px; font-size: 9px; }
+  .warn { background: #fff; border: 1.5px solid #000; border-radius: 2px; padding: 1px 5px; margin-bottom: 2px; font-size: 8.5px; font-weight: 700; }
+  .notes { background: #fff; border: 1px solid #000; border-radius: 2px; padding: 1px 5px; margin-bottom: 2px; font-size: 8.5px; }
 
   /* No forced page-breaks — let the browser pack as many cards per page as fit.
      Meat & Seafood / Produce section headers are the department handoff cue. */
   .dept-head { display: flex; align-items: baseline; gap: 6px; background: #000; color: #fff;
-               padding: 2px 6px; border-radius: 0; margin-top: 3px; }
+               padding: 2px 5px; border-radius: 0; margin-top: 2px;
+               break-after: avoid; page-break-after: avoid; }
   .dept-head h2 { font-size: 10px; text-transform: uppercase; letter-spacing: .8px; }
   .dept-note { font-size: 8px; color: #ddd; }
 
-  .loc-head { background: #fff; border-left: 3px solid #000; border-bottom: 1px solid #000; font-weight: bold; font-size: 9px;
-              padding: 1px 5px; margin-top: 2px; }
+  .loc-head { background: #fff; border-left: 3px solid #000; border-bottom: 1px solid #000; font-weight: bold; font-size: 8.5px;
+              padding: 1px 4px; margin-top: 1px; break-after: avoid; page-break-after: avoid; }
   .loc-count { font-weight: normal; color: #444; font-size: 8px; margin-left: 4px; }
 
-  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; padding: 3px 0; }
-  .item { border: 1px solid #000; border-radius: 0; padding: 3px 4px;
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px; padding: 2px 0; }
+  .item { border: 1px solid #000; border-radius: 0; padding: 2px 3px;
           break-inside: avoid; page-break-inside: avoid; background: #fff; }
   .item.cod { border: 2px solid #000; background: #fff; }
   .item.oos { opacity: .72; }
   .item.is-sub { border-style: dashed; }
   .item.nested { margin-top: 2px; border-left: 3px solid #000; }
   .pair { display: contents; }
-  .line1 { display: flex; gap: 4px; align-items: center; }
-  .qty { font-size: 13px; font-weight: 900; color: #000; white-space: nowrap; }
-  .desc { font-weight: bold; font-size: 9.5px; line-height: 1.15; }
+  .line1 { display: flex; gap: 3px; align-items: center; }
+  .qty { font-size: 12px; font-weight: 900; color: #000; white-space: nowrap; }
+  .desc { font-weight: bold; font-size: 9px; line-height: 1.12; }
   .desc.struck { text-decoration: line-through; }
   .pref-note { color: #000; font-weight: 900; font-size: 7.5px; text-transform: uppercase;
                border: 1px solid #000; padding: 1px 3px; margin-top: 1px; }
@@ -499,14 +500,14 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
   .sale-honor-no { color: #333; }
 
   /* ── Thumbnails ── big enough to read a package at arm's length. */
-  .thumb { width: 38px; height: 38px; object-fit: contain; flex: 0 0 auto;
-           border: 1px solid #000; border-radius: 0; background: #fff; margin-right: 3px; }
+  .thumb { width: 28px; height: 28px; object-fit: contain; flex: 0 0 auto;
+           border: 1px solid #000; border-radius: 0; background: #fff; margin-right: 2px; }
   .thumb-empty { display: inline-block; background: #e8e8e8; }
 
   /* ── Section tones ── a shopper holding three stapled blocks needs to know
      which one they're in without reading the header. */
   .dept-total { margin-left: auto; font-size: 8.5px; color: #fff; white-space: nowrap; font-weight: 700; }
-  .counts { display: flex; gap: 14px; margin: 3px 0 1px; }
+  .counts { display: flex; gap: 10px; margin: 2px 0 1px; }
   .count-label { display: block; font-size: 8px; font-weight: 800; color: #000; line-height: 1.1; }
   .count-value { display: block; font-size: 10px; color: #000; margin-top: 1px; font-weight: 700; }
   /* Section tones stay black heads — grocery/deck/COD still separate blocks;
@@ -528,7 +529,8 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
   .cod-bag { margin-left: auto; font-size: 8.5px; color: #000; font-weight: 700; }
   .sub-tag { color: #000; font-weight: 900; font-size: 7.5px; }
 
-  .scanrow { display: flex; align-items: center; gap: 5px; margin-top: 2px; }
+  .scanrow { display: flex; align-items: center; gap: 4px; margin-top: 1px; }
+  .bc { padding: 0 2px; background: #fff; }
   .bc svg { height: 42px; width: auto; display: block; }
   .bc svg rect[fill="#fff"], .bc svg rect:first-child { fill: #fff; }
   .scan { font-size: 7.5px; line-height: 1.05; color: #000; text-align: center; font-weight: 700; }
