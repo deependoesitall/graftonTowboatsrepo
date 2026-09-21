@@ -783,8 +783,16 @@ function AccountContent() {
               {section.list.map(order => {
                 const cx = customerOrderStatus(order.status, order.delivery_method);
                 const shop = order.status === 'in_progress' ? customerShoppingProgress(order.items) : null;
+                const open = expandedOrderId === order.id;
+                const toggle = () => setExpandedOrderId(open ? null : order.id);
                 return (
-                <div key={order.id} className="card-base p-4 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
+                <div key={order.id} className="card-base overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={toggle}
+                    aria-expanded={open}
+                    className="w-full text-left p-4 hover:bg-brand-sand/40 transition-colors"
+                  >
                   <div className="flex-1 min-w-0 w-full">
                     <div className="flex items-center gap-2 mb-2 flex-wrap">
                       <span className="font-mono text-sm font-bold text-brand-green">{order.order_number}</span>
@@ -836,27 +844,31 @@ function AccountContent() {
                         )}
                       </div>
                     )}
+                    <p className="mt-3 inline-flex items-center gap-1 text-xs font-bold uppercase tracking-wide text-brand-green/60">
+                      {open ? 'Collapse' : 'Details'}
+                      <ChevronRight className={`w-3.5 h-3.5 transition-transform ${open ? 'rotate-90' : ''}`} />
+                    </p>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button onClick={() => { void repeatOrder(order); }}
-                      className="flex items-center gap-1.5 bg-brand-orange text-white text-xs font-bold uppercase tracking-wide px-3.5 py-2 rounded-full hover:bg-brand-ored transition-colors">
-                      <RotateCcw className="w-3.5 h-3.5" /> Repeat Order
-                    </button>
+                  </button>
+                  <div className="px-4 pb-3 -mt-1">
                     <button
                       type="button"
-                      onClick={() => setExpandedOrderId(expandedOrderId === order.id ? null : order.id)}
-                      className="flex items-center gap-1 text-xs text-brand-green/50 hover:text-brand-green font-semibold transition-colors"
+                      onClick={() => { void repeatOrder(order); }}
+                      className="flex items-center gap-1.5 bg-brand-orange text-white text-xs font-bold uppercase tracking-wide px-3.5 py-2 rounded-full hover:bg-brand-ored transition-colors"
                     >
-                      {expandedOrderId === order.id ? 'Hide lines' : 'View lines'} <ChevronRight className={`w-3.5 h-3.5 transition-transform ${expandedOrderId === order.id ? 'rotate-90' : ''}`} />
+                      <RotateCcw className="w-3.5 h-3.5" /> Repeat Order
                     </button>
-                    <a href={`/api/orders/${order.id}/pdf?audience=customer`} target="_blank" rel="noreferrer"
-                      className="flex items-center gap-1 text-xs text-brand-green/50 hover:text-brand-green font-semibold transition-colors">
-                      PDF
-                    </a>
                   </div>
-                  {expandedOrderId === order.id && (
-                    <div className="w-full basis-full mt-3 border-t border-brand-green/10 pt-3 space-y-1.5">
-                      <p className="text-[10px] font-bold uppercase tracking-wide text-brand-green/50 mb-1">Full substitution record</p>
+                  {open && (
+                    <div className="border-t border-brand-green/10 px-4 py-3 space-y-1.5">
+                      <button
+                        type="button"
+                        onClick={toggle}
+                        className="w-full mb-2 flex items-center justify-center gap-1.5 rounded-lg border border-brand-green/20 bg-white py-2 text-xs font-bold uppercase tracking-wide text-brand-navy hover:bg-brand-sand/60"
+                      >
+                        Collapse
+                      </button>
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-brand-green/50 mb-1">Order details</p>
                       {(() => {
                         const lines = (order.items || []).filter(i => i.item_type !== 'service');
                         const byParent = lines
@@ -924,6 +936,13 @@ function AccountContent() {
                         });
                       })()}
                       <SinclairCharges order={order} />
+                      <button
+                        type="button"
+                        onClick={toggle}
+                        className="w-full mt-3 flex items-center justify-center gap-1.5 rounded-lg bg-brand-green py-2.5 text-xs font-bold uppercase tracking-wide text-white hover:bg-brand-green/90"
+                      >
+                        Collapse order
+                      </button>
                     </div>
                   )}
                 </div>
