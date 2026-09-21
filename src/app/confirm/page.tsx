@@ -66,7 +66,7 @@ function ConfirmContent() {
 
   function openPdf() {
     if (!orderId) return;
-    window.open(`/api/orders/${orderId}/pdf`, '_blank');
+    window.open(`/api/orders/${orderId}/pdf?audience=customer`, '_blank');
   }
 
   return (

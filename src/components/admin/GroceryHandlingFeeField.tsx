@@ -1,6 +1,7 @@
 'use client';
-// Optional GTS grocery handling fee — polished field for the register-total step.
-// Distinct from COD handling fee (cod_fee_*). Empty by default; $50 is a soft suggest only.
+// Optional Sinclair's grocery handling fee — sits under the register total.
+// Distinct from COD handling (cod_fee_*) and from Grafton's delivery fee.
+// Empty by default; $50 is a soft suggest only.
 
 import { cn } from '@/lib/utils';
 
@@ -95,7 +96,7 @@ export function GroceryHandlingFeeField({
       </div>
       {hasValue && !Number.isNaN(num) && num > 0 && (
         <p className="mt-1.5 text-[11px] text-amber-900/70 font-medium">
-          Added on top of the register total for grocery billing — not COD, not delivery.
+          Sinclair&apos;s charge, on top of the register. Not COD handling, and not Grafton&apos;s delivery fee.
         </p>
       )}
     </div>

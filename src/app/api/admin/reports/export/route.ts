@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/admin-auth-server';
 import { TIME_ZONE, orderItemCount } from '@/lib/utils';
+import { groceryBilledTotal, groceryHandlingFeeAmount } from '@/lib/grocery-handling-fee';
 
 function csvEscape(val: unknown): string {
   const s = String(val ?? '');
@@ -57,7 +58,7 @@ export async function GET(req: NextRequest) {
   const supabase = createServiceClient();
 
   const SELECT_FULL =
-    'id, order_number, company_name, vessel_name, contact_name, phone, customer_email, vessel_email, po_number, terminal_name, delivery_method, arrival_date, arrival_time, crew_change, notes, eta, subtotal, discount_total, register_total, deck_register_total, delivery_fee, delivery_service_type, bill_for_groceries, invoice_number, status, source, purchased_at, created_at, items:order_items(description, category, quantity, unit_price, line_total, paid_by, item_type)';
+    'id, order_number, company_name, vessel_name, contact_name, phone, customer_email, vessel_email, po_number, terminal_name, delivery_method, arrival_date, arrival_time, crew_change, notes, eta, subtotal, discount_total, register_total, grocery_handling_fee, deck_register_total, delivery_fee, delivery_service_type, bill_for_groceries, invoice_number, status, source, purchased_at, created_at, items:order_items(description, category, quantity, unit_price, line_total, paid_by, item_type)';
   const SELECT_CORE =
     'id, order_number, company_name, vessel_name, contact_name, phone, customer_email, vessel_email, po_number, terminal_name, delivery_method, arrival_date, arrival_time, crew_change, notes, eta, subtotal, discount_total, register_total, deck_register_total, delivery_fee, delivery_service_type, bill_for_groceries, invoice_number, status, created_at, items:order_items(description, category, quantity, unit_price, line_total, paid_by, item_type)';
 
@@ -80,6 +81,7 @@ export async function GET(req: NextRequest) {
     subtotal: number;
     discount_total: number | null;
     register_total: number | null;
+    grocery_handling_fee?: number | null;
     deck_register_total: number | null;
     delivery_fee: number | null;
     delivery_service_type: string | null;
@@ -139,6 +141,8 @@ export async function GET(req: NextRequest) {
       'Discount',
       'Order Estimate',
       'Register Total',
+      'Handling Fee',
+      'Grocery Billed',
       'Deck Register Total',
       'Delivery Fee',
       'Delivery Type',
@@ -178,6 +182,8 @@ export async function GET(req: NextRequest) {
         money(o.discount_total),
         money(o.subtotal),
         o.register_total != null ? money(o.register_total) : '',
+        groceryHandlingFeeAmount(o) > 0 ? money(groceryHandlingFeeAmount(o)) : '',
+        o.register_total != null ? money(groceryBilledTotal(o)) : '',
         o.deck_register_total != null ? money(o.deck_register_total) : '',
         o.delivery_fee != null ? money(o.delivery_fee) : '',
         o.delivery_service_type || '',

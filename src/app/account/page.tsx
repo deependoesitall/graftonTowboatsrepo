@@ -30,10 +30,66 @@ import { createClient } from '@/lib/supabase/client';
 import { getFavoriteProducts, removeFavorite } from '@/lib/favorites';
 import { addToCart, saveCart, getCart, saveVesselInfo, getVesselInfo, saveCodPayments, clearCodPayments, type StoredCodPay } from '@/lib/cart';
 import { formatCurrency, formatDate, formatQty, isWeighedLine, productDisplayName } from '@/lib/utils';
+import { groceryBilledTotal, groceryHandlingFeeAmount } from '@/lib/grocery-handling-fee';
 import { Product, Order, VESSEL_TYPES } from '@/types';
 import { readCodPayments } from '@/lib/cod-payments';
 import { useToast } from '@/hooks/use-toast';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
+
+/** Sinclair's grocery charges on the boat dashboard. Never Grafton's delivery fee. */
+function SinclairCharges({ order }: { order: Order }) {
+  const fee = groceryHandlingFeeAmount(order);
+  const rung = order.register_total != null && Number.isFinite(Number(order.register_total));
+  const delivered = order.status === 'fulfilled';
+  return (
+    <div className="mt-3 rounded-xl border border-brand-green/15 bg-white px-3 py-2.5">
+      <p className="text-[10px] font-bold uppercase tracking-wide text-brand-green/60 mb-1.5">
+        Sinclair&apos;s charges
+      </p>
+      {rung ? (
+        <>
+          <div className="flex justify-between gap-3 text-xs text-brand-navy">
+            <span>Register total</span>
+            <span className="font-bold tabular-nums">{formatCurrency(Number(order.register_total))}</span>
+          </div>
+          {fee > 0 && (
+            <div className="flex justify-between gap-3 text-xs text-amber-900 mt-1">
+              <span>Handling fee</span>
+              <span className="font-bold tabular-nums">{formatCurrency(fee)}</span>
+            </div>
+          )}
+          <div className="flex justify-between gap-3 text-sm mt-1.5 pt-1.5 border-t border-brand-green/10">
+            <span className="font-bold text-brand-navy">Grocery total</span>
+            <span className="font-bold text-brand-navy tabular-nums">{formatCurrency(groceryBilledTotal(order))}</span>
+          </div>
+          {order.deck_register_total != null && (
+            <div className="flex justify-between gap-3 text-xs text-teal-800 mt-1">
+              <span>Deck — separate from groceries</span>
+              <span className="font-bold tabular-nums">{formatCurrency(Number(order.deck_register_total))}</span>
+            </div>
+          )}
+        </>
+      ) : (
+        <p className="text-xs text-brand-green/70 leading-relaxed">
+          The amount on this order is still the catalog estimate
+          {order.subtotal != null ? ` (${formatCurrency(order.subtotal)})` : ''}.
+          Sinclair&apos;s register total, and any handling fee, show here once the order is shopped.
+        </p>
+      )}
+      {order.sinclairs_receipt_url && (
+        <a href={order.sinclairs_receipt_url} target="_blank" rel="noreferrer"
+          className="inline-block mt-2 text-xs font-bold text-brand-green underline underline-offset-2">
+          Sinclair&apos;s register receipt
+        </a>
+      )}
+      <p className="text-[10px] text-brand-green/50 mt-2 leading-snug">
+        {delivered
+          ? 'Delivered. Grafton Towboat’s delivery charge was on the delivered email — it is not listed with Sinclair’s charges here.'
+          : 'Grafton Towboat’s delivery charge is not on this page. It goes out on the delivered email when Grafton marks the order delivered.'}
+      </p>
+    </div>
+  );
+}
 
 function AccountContent() {
   const { user, loading, signOut, refreshProfile } = useAuth();
@@ -721,7 +777,12 @@ function AccountContent() {
                       {[order.company_name, order.vessel_name].filter(Boolean).join(' · ')}{' · '}{formatDate(order.created_at)}
                     </p>
                     <p className="text-xs text-brand-green/40 mt-0.5">
-                      {order.items?.length || 0} line items{' · '}<span className="font-bold text-brand-green">{formatCurrency(order.subtotal)}</span>
+                      {order.items?.length || 0} line items{' · '}
+                      {order.register_total != null ? (
+                        <span className="font-bold text-brand-green">{formatCurrency(groceryBilledTotal(order))} Sinclair&apos;s</span>
+                      ) : (
+                        <span className="font-bold text-brand-green">{formatCurrency(order.subtotal)}</span>
+                      )}
                       {(Number(order.discount_total) || 0) > 0 && (
                         <span className="ml-1.5 text-green-600 font-semibold">{`\u2212`}{formatCurrency(Number(order.discount_total))} coupons</span>
                       )}
@@ -756,7 +817,7 @@ function AccountContent() {
                     >
                       {expandedOrderId === order.id ? 'Hide lines' : 'View lines'} <ChevronRight className={`w-3.5 h-3.5 transition-transform ${expandedOrderId === order.id ? 'rotate-90' : ''}`} />
                     </button>
-                    <a href={`/api/orders/${order.id}/pdf`} target="_blank" rel="noreferrer"
+                    <a href={`/api/orders/${order.id}/pdf?audience=customer`} target="_blank" rel="noreferrer"
                       className="flex items-center gap-1 text-xs text-brand-green/50 hover:text-brand-green font-semibold transition-colors">
                       PDF
                     </a>
@@ -834,6 +895,7 @@ function AccountContent() {
                           );
                         });
                       })()}
+                      <SinclairCharges order={order} />
                     </div>
                   )}
                 </div>

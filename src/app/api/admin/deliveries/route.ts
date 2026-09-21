@@ -5,6 +5,7 @@
 // PATCH  — edit a delivery
 // DELETE — remove a delivery
 
+import { groceryBilledTotal } from '@/lib/grocery-handling-fee';
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/admin-auth-server';
@@ -59,8 +60,8 @@ function pick(body: Record<string, unknown>) {
 
 /**
  * When billing Sinclair's groceries and the total is blank, pull the linked
- * order's register_total if it is a real number. Never invent from subtotal —
- * that is an estimate and must stay a deliberate UI action, not a silent fill.
+ * order's register total plus any Sinclair's handling fee. Never invent from
+ * subtotal — that is an estimate and must stay a deliberate UI action.
  * Returns { row, autofilledFrom } so the client can show the source.
  */
 async function autofillGroceryFromOrder(
@@ -88,15 +89,24 @@ async function autofillGroceryFromOrder(
     return { row, autofilledFrom: null };
   }
 
-  const { data: order } = await supabase
+  const full = await supabase
     .from('orders')
-    .select('register_total')
+    .select('register_total, grocery_handling_fee')
     .eq('id', orderId)
     .maybeSingle();
+  let order: { register_total?: number | null; grocery_handling_fee?: number | null } | null = full.data;
+  if (full.error && /grocery_handling_fee/i.test(full.error.message)) {
+    const retry = await supabase
+      .from('orders')
+      .select('register_total')
+      .eq('id', orderId)
+      .maybeSingle();
+    order = retry.data;
+  }
 
   const rt = order?.register_total;
-  if (rt == null || rt === '') return { row, autofilledFrom: null };
-  const n = Number(rt);
+  if (rt == null) return { row, autofilledFrom: null };
+  const n = groceryBilledTotal(order);
   if (!Number.isFinite(n)) return { row, autofilledFrom: null };
 
   row.sinclairs_grocery_total = n;
@@ -186,12 +196,21 @@ export async function POST(req: NextRequest) {
       const wants =
         d.bill_for_groceries === true || d.grocery_mode === 'sinclair_courtesy';
       if (!wants || !d.order_id) continue;
-      const { data: order } = await supabase
+      const fullOrder = await supabase
         .from('orders')
-        .select('register_total')
+        .select('register_total, grocery_handling_fee')
         .eq('id', d.order_id)
         .maybeSingle();
-      const n = order?.register_total == null ? NaN : Number(order.register_total);
+      let order: { register_total?: number | null; grocery_handling_fee?: number | null } | null = fullOrder.data;
+      if (fullOrder.error && /grocery_handling_fee/i.test(fullOrder.error.message)) {
+        const retry = await supabase
+          .from('orders')
+          .select('register_total')
+          .eq('id', d.order_id)
+          .maybeSingle();
+        order = retry.data;
+      }
+      const n = order?.register_total == null ? NaN : groceryBilledTotal(order);
       if (!Number.isFinite(n)) continue;
       const { error: upErr } = await supabase
         .from('deliveries')

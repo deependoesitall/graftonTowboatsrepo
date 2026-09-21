@@ -7,6 +7,8 @@ import { formatCurrency, formatDate, orderItemCount } from './utils';
 import { codFeePercent, codTotalWithFee } from '@/lib/cod-fee';
 import { splitOutsidePickups, groupCodCollect, lineAmount } from '@/lib/outside-pickup';
 import { accountUrl } from '@/lib/public-url';
+import { billableCharges, chargeLabel } from '@/lib/service-charges';
+import { groceryBilledTotal, groceryHandlingFeeAmount } from '@/lib/grocery-handling-fee';
 
 // ─── Colours / brand ─────────────────────────────────────────
 const DARK_GREEN = '#1E3D1E';
@@ -20,8 +22,15 @@ const PAGE_W    = 612;  // US Letter points
 const MARGIN    = 40;
 const CONTENT_W = PAGE_W - MARGIN * 2;
 
-/** Returns a Buffer containing a complete PDF for the given order. */
-export async function generateOrderPdfBuffer(order: Order): Promise<Buffer> {
+/**
+ * PDF attached to order emails.
+ * includeGtsCharges is for the delivered email only. The confirmation
+ * attachment stays a Sinclair's order sheet — no Grafton delivery fee.
+ */
+export async function generateOrderPdfBuffer(
+  order: Order,
+  opts: { includeGtsCharges?: boolean } = {},
+): Promise<Buffer> {
   // Dynamic import keeps pdfkit out of the browser bundle
   const PDFDocument = (await import('pdfkit')).default;
 
@@ -316,6 +325,34 @@ export async function generateOrderPdfBuffer(order: Order): Promise<Buffer> {
        .text(`ESTIMATED TOTAL TO THE BOAT  ${formatCurrency(boatGroceryTotal)}`, totalRowX + 8, y + 7,
          { width: totalRowW - 16, align: 'right' });
     y += 28;
+    const handlingFee = groceryHandlingFeeAmount(order);
+    const registerRing = order.register_total != null && Number.isFinite(Number(order.register_total))
+      ? Number(order.register_total)
+      : null;
+    if (registerRing != null) {
+      const sinclairLines: Array<[string, string]> = [
+        ["Sinclair's register", formatCurrency(registerRing)],
+      ];
+      if (handlingFee > 0) sinclairLines.push(["Sinclair's handling fee", formatCurrency(handlingFee)]);
+      sinclairLines.push(["Sinclair's grocery total", formatCurrency(groceryBilledTotal(order))]);
+      for (const [label, value] of sinclairLines) {
+        if (y > 700) { doc.addPage(); y = MARGIN; }
+        doc.fillColor(handlingFee > 0 && label.includes('handling') ? '#92400e' : DARK_GREEN)
+           .fontSize(9).font('Helvetica-Bold')
+           .text(`${label}  ${value}`, totalRowX, y, { width: totalRowW, align: 'right' });
+        y += 13;
+      }
+      y += 4;
+    }
+    if (opts.includeGtsCharges) {
+      for (const c of billableCharges(order)) {
+        if (y > 700) { doc.addPage(); y = MARGIN; }
+        doc.fillColor(DARK_GREEN).fontSize(9).font('Helvetica-Bold')
+           .text(`GTS ${chargeLabel(c)}  ${formatCurrency(c.amount)}`, totalRowX, y, { width: totalRowW, align: 'right' });
+        y += 13;
+      }
+      y += 4;
+    }
     const groceryCodAmt = groceryVisible.filter(i => i.paid_by === 'cod')
       .reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0);
     if (groceryCodAmt > 0) {

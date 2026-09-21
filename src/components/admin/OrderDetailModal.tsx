@@ -16,6 +16,8 @@ import { ShoppingModeModal } from '@/components/admin/ShoppingModeModal';
 import { adminFetch, isGtsRole, getAdminRole, hasAdminPermission } from '@/lib/admin-auth';
 import { codFeeLabel, codTotalWithFee, allocateCodTotals } from '@/lib/cod-fee';
 import { PickSheetOverlay } from '@/components/admin/PickSheetOverlay';
+import { GroceryHandlingFeeField } from '@/components/admin/GroceryHandlingFeeField';
+import { parseGroceryHandlingFeeInput } from '@/lib/grocery-handling-fee';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { readCodPayments, codMethodSentence } from '@/lib/cod-payments';
 import {
@@ -180,6 +182,11 @@ export function OrderDetailModal({
     order.deck_register_total != null ? String(order.deck_register_total) : ''
   );
   const [deckSaved, setDeckSaved] = useState(order.deck_register_total != null);
+  const [handlingFee, setHandlingFee] = useState<string>(
+    order.grocery_handling_fee != null && Number(order.grocery_handling_fee) > 0
+      ? String(order.grocery_handling_fee)
+      : ''
+  );
 
   /**
    * Confirm the register total — Sinclair's "we're done shopping" action.
@@ -201,7 +208,11 @@ export function OrderDetailModal({
       const res = await adminFetch(`/api/orders/${order.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ register_total: val, deck_register_total: deckVal }),
+        body: JSON.stringify({
+          register_total: val,
+          deck_register_total: deckVal,
+          grocery_handling_fee: parseGroceryHandlingFeeInput(handlingFee),
+        }),
       });
       if (!res.ok) return;               // leave it unsaved so it can be retried
       setRegisterSaved(true);
@@ -431,7 +442,11 @@ export function OrderDetailModal({
       const res = await adminFetch(`/api/orders/${order.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ register_total: val, deck_register_total: deckVal }),
+        body: JSON.stringify({
+          register_total: val,
+          deck_register_total: deckVal,
+          grocery_handling_fee: parseGroceryHandlingFeeInput(handlingFee),
+        }),
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
@@ -1573,6 +1588,12 @@ export function OrderDetailModal({
                         </button>
                       </div>
                     </label>
+                    <GroceryHandlingFeeField
+                      compact
+                      value={handlingFee}
+                      disabled={registerTotalSaving}
+                      onChange={next => { setHandlingFee(next); setRegisterSaved(false); }}
+                    />
                     {deckItems.length > 0 && (
                       <label className="block text-xs font-bold text-teal-700 uppercase">
                         Deck register
@@ -1895,6 +1916,15 @@ export function OrderDetailModal({
                               Shopping complete — this is the amount the order bills from.
                             </p>
                           )}
+                        </td>
+                      </tr>
+                      <tr className="bg-white">
+                        <td colSpan={canEdit ? 8 : 7} className="px-3 py-2">
+                          <GroceryHandlingFeeField
+                            value={handlingFee}
+                            disabled={registerTotalSaving}
+                            onChange={next => { setHandlingFee(next); setRegisterSaved(false); }}
+                          />
                         </td>
                       </tr>
 
@@ -2666,6 +2696,12 @@ export function OrderDetailModal({
                     />
                   </div>
                 </label>
+                <GroceryHandlingFeeField
+                  compact
+                  value={handlingFee}
+                  disabled={fillingAll}
+                  onChange={next => { setHandlingFee(next); setRegisterSaved(false); }}
+                />
                 {deckItems.length > 0 && (
                   <label className="block text-xs font-bold text-teal-700 uppercase tracking-wide">
                     Deck register total
@@ -2705,8 +2741,13 @@ export function OrderDetailModal({
                 <h2 className="font-display text-lg font-bold text-brand-navy">Mark this order Shopped?</h2>
                 <p className="text-sm text-gray-600 leading-relaxed">
                   Pick list is done and the register rang{' '}
-                  <b className="text-brand-navy">{formatCurrency(parseFloat(registerTotal) || 0)}</b>.
-                  Shopped means Sinclair&apos;s is finished — GTS delivers next. You can leave it
+                  <b className="text-brand-navy">{formatCurrency(parseFloat(registerTotal) || 0)}</b>
+                  {parseGroceryHandlingFeeInput(handlingFee) != null && (
+                    <> plus <b className="text-brand-navy">{formatCurrency(parseGroceryHandlingFeeInput(handlingFee) || 0)}</b> Sinclair&apos;s handling fee</>
+                  )}
+                  .
+                  Shopped means Sinclair&apos;s is finished — GTS delivers next, and Grafton&apos;s
+                  delivery charge goes out on the delivered email, not on this total. You can leave it
                   In Progress if you still have a note to key.
                 </p>
                 {finishError && <p className="text-sm text-red-600">{finishError}</p>}

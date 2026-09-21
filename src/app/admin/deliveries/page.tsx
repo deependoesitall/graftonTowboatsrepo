@@ -1101,18 +1101,24 @@ function DeliveryEditor({ delivery, companies, serviceTypes, vesselRecords = [],
         if (cancelled || !d) return;
         const order = d.order || d;
         const rt = order.register_total == null ? null : Number(order.register_total);
+        const billed = order.grocery_billed == null ? rt : Number(order.grocery_billed);
+        const handling = Number(order.grocery_handling_fee) || 0;
         const st = order.subtotal == null ? null : Number(order.subtotal);
         setOrderRegisterTotal(Number.isFinite(rt as number) ? (rt as number) : null);
         setOrderSubtotal(Number.isFinite(st as number) ? (st as number) : null);
         const wants =
           f.grocery_mode === 'sinclair_courtesy' || !!f.bill_for_groceries;
         const blank = f.sinclairs_grocery_total === '' || f.sinclairs_grocery_total == null;
-        if (wants && blank && Number.isFinite(rt as number) && (rt as number) != null) {
+        if (wants && blank && Number.isFinite(billed as number) && (billed as number) != null) {
           setF(p => {
             if (p.sinclairs_grocery_total !== '' && p.sinclairs_grocery_total != null) return p;
-            return { ...p, sinclairs_grocery_total: Number(rt).toFixed(2), bill_for_groceries: true };
+            return { ...p, sinclairs_grocery_total: Number(billed).toFixed(2), bill_for_groceries: true };
           });
-          setGroceryAutofillNote(`Filled from order register total ($${Number(rt).toFixed(2)})`);
+          setGroceryAutofillNote(
+            handling > 0
+              ? `Filled from register $${Number(rt).toFixed(2)} plus $${handling.toFixed(2)} Sinclair's handling`
+              : `Filled from order register total ($${Number(rt).toFixed(2)})`,
+          );
         } else if (wants && blank) {
           setGroceryAutofillNote(
             rt == null

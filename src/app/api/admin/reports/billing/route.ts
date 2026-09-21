@@ -29,8 +29,23 @@ export async function GET(req: NextRequest) {
   if (from) query = query.gte('created_at', from);
   if (to) query = query.lte('created_at', to);
 
-  const { data, error } = await query;
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  const first = await query;
+  if (!first.error) return NextResponse.json({ orders: first.data || [] });
 
-  return NextResponse.json({ orders: data || [] });
+  // 096 not applied yet — the named column fails the whole select. Retry
+  // without it so the billing packet still loads; handling fee shows as none.
+  if (!/grocery_handling_fee/i.test(first.error.message)) {
+    return NextResponse.json({ error: first.error.message }, { status: 500 });
+  }
+  let fallback = supabase
+    .from('orders')
+    .select('id, order_number, company_name, contact_name, phone, customer_email, po_number, vessel_name, terminal_name, delivery_method, arrival_date, arrival_time, subtotal, discount_total, register_total, delivery_fee, delivery_service_type, delivery_company_id, bill_for_groceries, invoice_number, status, created_at, extended_info, items:order_items(id, description, category, pkg_size, uom, upc, quantity, unit_price, line_total, shopping_status, actual_total, actual_weight, is_substitution, substitutes_item_id, item_type, service_type, service_details, paid_by, cod_name), discounts:order_discounts(id, name, description, amount)')
+    .neq('status', 'cancelled')
+    .order('company_name', { ascending: true })
+    .order('created_at', { ascending: true });
+  if (from) fallback = fallback.gte('created_at', from);
+  if (to) fallback = fallback.lte('created_at', to);
+  const retry = await fallback;
+  if (retry.error) return NextResponse.json({ error: retry.error.message }, { status: 500 });
+  return NextResponse.json({ orders: retry.data || [] });
 }

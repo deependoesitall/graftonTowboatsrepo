@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/admin-auth-server';
 import { sendOrderShoppedEmail } from '@/lib/email';
+import { normalizeGroceryHandlingFee } from '@/lib/grocery-handling-fee';
 import { Order } from '@/types';
 
 export async function POST(
@@ -30,6 +31,10 @@ export async function POST(
   if ('bill_for_groceries' in body) deliveryUpdate.bill_for_groceries = !!body.bill_for_groceries;
   // Grocery total from Sinclair's receipt (only sent for grocery-billed orders).
   if (body.register_total != null && body.register_total !== '') deliveryUpdate.register_total = Number(body.register_total);
+  // Sinclair's optional handling fee. Blank clears it. Not the GTS delivery fee.
+  if ('grocery_handling_fee' in body) {
+    deliveryUpdate.grocery_handling_fee = normalizeGroceryHandlingFee(body.grocery_handling_fee);
+  }
 
   // ── GTS'S SERVICES ON THIS ORDER ────────────────────────────────
   //
@@ -56,19 +61,18 @@ export async function POST(
   }
 
   if (Object.keys(deliveryUpdate).length) {
-    const { error: updErr } = await supabase.from('orders').update(deliveryUpdate).eq('id', id);
-    if (updErr) {
-      // ⚠️ A DATABASE WITHOUT 091 HAS NO service_charges COLUMN, and the whole
-      // update fails with it — taking the fee and the bill-for-groceries choice
-      // down too, which is the part that actually has to be saved. Retry
-      // without it so the single-charge path still works on an un-migrated
-      // database, exactly as it did before this feature existed.
-      const { service_charges: _dropped, ...withoutCharges } = deliveryUpdate;
-      void _dropped;
-      if (Object.keys(withoutCharges).length) {
-        await supabase.from('orders').update(withoutCharges).eq('id', id);
-      }
-      console.warn('[send-shopped-email] service_charges not saved:', updErr.message);
+    let patch: Record<string, unknown> = { ...deliveryUpdate };
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const { error: updErr } = await supabase.from('orders').update(patch).eq('id', id);
+      if (!updErr) break;
+      const before = Object.keys(patch).length;
+      // A missing column fails the WHOLE update. Drop the column the database
+      // doesn't have and retry so the delivery fee still saves.
+      if (/grocery_handling_fee/i.test(updErr.message)) delete patch.grocery_handling_fee;
+      else if (/service_charges/i.test(updErr.message)) delete patch.service_charges;
+      else if ('service_charges' in patch) delete patch.service_charges;
+      console.warn('[send-shopped-email] order update retry:', updErr.message);
+      if (Object.keys(patch).length === 0 || Object.keys(patch).length === before) break;
     }
   }
 

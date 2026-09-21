@@ -1,7 +1,8 @@
 // src/lib/grocery-handling-fee.ts
 //
-// Optional flat GTS grocery handling fee. Distinct from COD handling
-// (see src/lib/cod-fee.ts). register_total stays the Sinclair register ring;
+// Optional flat Sinclair's grocery handling fee (Dave's usual $50).
+// Distinct from COD handling (src/lib/cod-fee.ts) and from Grafton's
+// delivery fee. register_total stays the Sinclair register ring;
 // billable grocery figures add this fee on top when present.
 
 export interface GroceryHandlingFeeSource {
@@ -50,4 +51,14 @@ export function parseGroceryHandlingFeeInput(raw: string): number | null {
   if (Number.isNaN(n) || n < 0) return null;
   if (n === 0) return null;
   return round2(n);
+}
+
+/** API / form value → null (no fee) or a positive dollar amount. */
+export function normalizeGroceryHandlingFee(raw: unknown): number | null {
+  if (raw == null || raw === '') return null;
+  if (typeof raw === 'number') {
+    if (!Number.isFinite(raw) || raw <= 0) return null;
+    return round2(raw);
+  }
+  return parseGroceryHandlingFeeInput(String(raw));
 }

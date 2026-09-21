@@ -12,6 +12,8 @@ import { formatCurrency, formatDateOnly } from '@/lib/utils';
 import { AdminRole, AdminPermission, setAdminSession, setAdminUiState, fetchAdminSession, adminFetch, isGtsRole, getAdminRole } from '@/lib/admin-auth';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import PushBell from '@/components/admin/PushBell';
+import { GroceryHandlingFeeField } from '@/components/admin/GroceryHandlingFeeField';
+import { parseGroceryHandlingFeeInput } from '@/lib/grocery-handling-fee';
 
 export default function AdminDashboard() {
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
@@ -399,6 +401,7 @@ interface QueueOrder {
   customer_email: string | null;
   shopped_email_sent_at: string | null;
   register_total: number | null;
+  grocery_handling_fee?: number | null;
   sinclairs_receipt_url: string | null;
   bill_for_groceries?: boolean | null;
   /** Signed delivery log / receipt acknowledgement — the clipboard photo. */
@@ -583,6 +586,12 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
   }, []);
   // Grocery billing: Sinclair's actual receipt total + the receipt PDF itself.
   const [groceryTotal, setGroceryTotal] = useState(order.register_total != null ? String(order.register_total) : '');
+  const [handlingFee, setHandlingFee] = useState(
+    order.grocery_handling_fee != null && Number(order.grocery_handling_fee) > 0
+      ? String(order.grocery_handling_fee)
+      : '',
+  );
+  const handlingAmt = parseGroceryHandlingFeeInput(handlingFee) ?? 0;
   const [receiptUrl, setReceiptUrl] = useState<string | null>(order.sinclairs_receipt_url);
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
   // The signed delivery log / receipt acknowledgement — the clipboard the
@@ -716,6 +725,7 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
   if (filledCharges.length) previewQuery.set('service_charges', JSON.stringify(filledCharges));
   previewQuery.set('bill_for_groceries', String(billGroceries));
   if (billGroceries && groceryTotal !== '') previewQuery.set('register_total', groceryTotal);
+  previewQuery.set('grocery_handling_fee', String(handlingAmt));
   if (staffNote.trim()) previewQuery.set('staff_note', staffNote.trim());
   const emailPreviewSrc = `/api/orders/${order.id}/email-preview?${previewQuery.toString()}`;
 
@@ -759,6 +769,7 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
           delivery_company_id: companyId || null,
           bill_for_groceries: billGroceries,
           register_total: billGroceries && groceryTotal !== '' ? Number(groceryTotal) : undefined,
+          grocery_handling_fee: parseGroceryHandlingFeeInput(handlingFee),
           staff_note: staffNote.trim() || undefined,
         }),
       });
@@ -928,9 +939,17 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
                 >
                   <span className="block text-sm font-bold text-brand-navy">Courtesy billing — GTS bills the groceries</span>
                   <span className="block text-[11px] text-gray-500 mt-0.5 leading-snug">
-                    Rare (Scott Noble / Ingram). Email + QuickBooks get <strong>two lines</strong>: (1) delivery fee (2) Sinclair&apos;s grocery order as one lump matching the register. Attach the register receipt.
+                    Rare (Scott Noble / Ingram). Email + QuickBooks get <strong>two lines</strong>: (1) Grafton delivery fee (2) Sinclair&apos;s grocery order as one lump — the register plus any handling fee. Attach the register receipt.
                   </span>
                 </button>
+              </div>
+
+              <div className="mt-3">
+                <GroceryHandlingFeeField
+                  compact
+                  value={handlingFee}
+                  onChange={setHandlingFee}
+                />
               </div>
 
               {/* Grocery-billed orders REQUIRE Sinclair's actual receipt total
@@ -1054,8 +1073,11 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
                       <span className="font-bold tabular-nums">${c.amount.toFixed(2)}</span>
                     </div>
                   ))}
-                  <div className="flex justify-between gap-3"><span>{Math.max(filledCharges.length, 1) + 1}. Sinclair&apos;s — Grocery Order</span><span className="font-bold tabular-nums">${groceryTotal === '' ? '—' : Number(groceryTotal).toFixed(2)}</span></div>
-                  <div className="flex justify-between gap-3 border-t border-brand-navy/10 pt-1 mt-1 font-bold"><span>Total (same as monthly QB)</span><span className="tabular-nums">${(Number(fee || 0) + Number(groceryTotal || 0)).toFixed(2)}</span></div>
+                  <div className="flex justify-between gap-3"><span>{Math.max(filledCharges.length, 1) + 1}. Sinclair&apos;s — Grocery Order</span><span className="font-bold tabular-nums">${groceryTotal === '' ? '—' : (Number(groceryTotal) + handlingAmt).toFixed(2)}</span></div>
+                  {handlingAmt > 0 && groceryTotal !== '' && (
+                    <p className="text-[10px] text-amber-800">Includes ${handlingAmt.toFixed(2)} Sinclair&apos;s handling fee on top of the register.</p>
+                  )}
+                  <div className="flex justify-between gap-3 border-t border-brand-navy/10 pt-1 mt-1 font-bold"><span>Total (same as monthly QB)</span><span className="tabular-nums">${(Number(fee || 0) + (groceryTotal === '' ? 0 : Number(groceryTotal) + handlingAmt)).toFixed(2)}</span></div>
                   <p className="text-[10px] text-gray-500 pt-1 leading-snug">Courtesy path — email + QuickBooks both carry delivery + one grocery lump.</p>
                 </div>
               ) : (
@@ -1066,7 +1088,10 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
                       <span className="font-bold tabular-nums">${c.amount.toFixed(2)}</span>
                     </div>
                   ))}
-                  <p className="text-[10px] text-gray-500 pt-1 leading-snug">Boat pays Sinclair&apos;s directly — no grocery dollar on this email or the GTS QuickBooks invoice.</p>
+                  <p className="text-[10px] text-gray-500 pt-1 leading-snug">Boat pays Sinclair&apos;s directly — no grocery dollar on this GTS bill. Sinclair&apos;s register and handling fee still show in the grocery section of the email.</p>
+                  {handlingAmt > 0 && (
+                    <p className="text-[10px] text-amber-800">Sinclair&apos;s handling fee ${handlingAmt.toFixed(2)} is on that grocery section, not on this delivery charge.</p>
+                  )}
                 </div>
               )}
               {filledCharges.length === 0 && (

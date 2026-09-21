@@ -184,5 +184,14 @@ export async function GET(req: NextRequest) {
     });
   }
 
+  // Grafton's delivery fee is not a customer-app figure. It goes out on the
+  // delivered email when GTS marks the order delivered. Sinclair's register
+  // total and handling fee stay — those are the grocery charges.
+  const gtsOnly = ['delivery_fee', 'service_charges', 'delivery_service_type', 'delivery_company_id'] as const;
+  for (const o of orders) {
+    const row = o as unknown as Record<string, unknown>;
+    for (const key of gtsOnly) delete row[key];
+  }
+
   return NextResponse.json({ orders, claimed });
 }

@@ -11,8 +11,10 @@ import { X, Printer, Loader2, AlertCircle, Check } from 'lucide-react';
 import { buildPickSheetForOrder } from '@/lib/pick-sheet';
 import { adminFetch } from '@/lib/admin-auth';
 import { formatCurrency } from '@/lib/utils';
+import { GroceryHandlingFeeField } from '@/components/admin/GroceryHandlingFeeField';
+import { parseGroceryHandlingFeeInput } from '@/lib/grocery-handling-fee';
 
-export function PickSheetOverlay({ orderId, orderNumber, onClose, registerStep = false, estimatedTotal, initialRegisterTotal, addonOnly = false }: {
+export function PickSheetOverlay({ orderId, orderNumber, onClose, registerStep = false, estimatedTotal, initialRegisterTotal, initialHandlingFee, addonOnly = false }: {
   orderId: string;
   orderNumber?: string;
   onClose: () => void;
@@ -23,6 +25,8 @@ export function PickSheetOverlay({ orderId, orderNumber, onClose, registerStep =
   registerStep?: boolean;
   estimatedTotal?: number;
   initialRegisterTotal?: number | null;
+  /** Sinclair's optional grocery handling fee. Not COD, not GTS delivery. */
+  initialHandlingFee?: number | null;
 }) {
   const [html, setHtml] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -30,6 +34,9 @@ export function PickSheetOverlay({ orderId, orderNumber, onClose, registerStep =
 
   // ── Register total: what Sinclair's actually rang after scanning ──
   const [regTotal, setRegTotal] = useState(initialRegisterTotal != null ? String(initialRegisterTotal) : '');
+  const [handlingFee, setHandlingFee] = useState(
+    initialHandlingFee != null && Number(initialHandlingFee) > 0 ? String(initialHandlingFee) : '',
+  );
   const [savingTotal, setSavingTotal] = useState(false);
   const [savedTotal, setSavedTotal] = useState(initialRegisterTotal != null);
   const [totalError, setTotalError] = useState('');
@@ -42,7 +49,10 @@ export function PickSheetOverlay({ orderId, orderNumber, onClose, registerStep =
       const res = await adminFetch(`/api/orders/${orderId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ register_total: val }),
+        body: JSON.stringify({
+          register_total: val,
+          grocery_handling_fee: parseGroceryHandlingFeeInput(handlingFee),
+        }),
       });
       if (!res.ok) throw new Error('Could not save — try again');
       setSavedTotal(true);
@@ -135,6 +145,14 @@ export function PickSheetOverlay({ orderId, orderNumber, onClose, registerStep =
             </p>
           )}
           {totalError && <p className="max-w-4xl mx-auto text-xs text-red-600 mt-1">{totalError}</p>}
+          <div className="max-w-4xl mx-auto mt-2">
+            <GroceryHandlingFeeField
+              compact
+              value={handlingFee}
+              disabled={savingTotal}
+              onChange={next => { setHandlingFee(next); setSavedTotal(false); }}
+            />
+          </div>
         </div>
       )}
 

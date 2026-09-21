@@ -3,6 +3,7 @@
 import { Order } from '@/types';
 import { formatCurrency, formatDate, formatArrivalTime, formatCalendarDate, orderItemCount } from './utils';
 import { billableCharges, chargeLabel } from '@/lib/service-charges';
+import { groceryBilledTotal, groceryHandlingFeeAmount } from '@/lib/grocery-handling-fee';
 
 /** Service labels are staff free text and this is markup. */
 const escHtml = (s: string) => String(s ?? '')
@@ -13,7 +14,10 @@ import {
   splitOutsidePickups, groupCodCollect, pickupPayLabel, pickupIsPriced, lineAmount, pickupLabel,
 } from '@/lib/outside-pickup';
 
-export function generateOrderHTML(order: Order): string {
+export function generateOrderHTML(order: Order, opts: { showGtsCharges?: boolean } = {}): string {
+  // Customer copies (boat dashboard, confirmation download) omit Grafton's
+  // delivery fee. That charge is on the delivered email GTS sends.
+  const showGtsCharges = opts.showGtsCharges !== false;
   const outOfStockMap = new Map<string, string>(
     order.items
       .filter(i => i.shopping_status === 'out_of_stock')
@@ -84,6 +88,10 @@ export function generateOrderHTML(order: Order): string {
     : order.cod_payment_method === 'cashapp' ? 'Cash App — send a payment request'
     : order.cod_payment_method === 'cash' ? 'Cash (legacy)' : null;
   const codFeePct = codFeePercent(order);
+  const handlingFee = groceryHandlingFeeAmount(order);
+  const registerRing = order.register_total != null && Number.isFinite(Number(order.register_total))
+    ? Number(order.register_total)
+    : null;
   const isFulfilled       = order.status === 'fulfilled';
   const itemCount         = orderItemCount(
     groceryItems.filter(i => i.shopping_status !== 'out_of_stock'),
@@ -490,14 +498,24 @@ ${groceryItems.length > 0 ? `
               crew change on the same trip is billed for two things, and this
               is the copy it keeps. billableCharges yields the same shape for a
               single-charge order from before 091, so there is one path here. */''}
-        ${gtsCharges.map(c => `<tr>
+        ${registerRing != null ? `<tr>
+          <td style="padding:6px 8px;font-size:11px;color:#1E3D1E;font-weight:700;">Sinclair&apos;s register</td>
+          <td style="padding:6px 8px;text-align:right;font-size:12px;font-weight:800;color:#1E3D1E;">${formatCurrency(registerRing)}</td>
+        </tr>
+        ${handlingFee > 0 ? `<tr>
+          <td style="padding:6px 8px;font-size:11px;color:#92400e;font-weight:700;">Sinclair&apos;s handling fee</td>
+          <td style="padding:6px 8px;text-align:right;font-size:12px;font-weight:800;color:#92400e;">${formatCurrency(handlingFee)}</td>
+        </tr>` : ''}
+        <tr>
+          <td style="padding:6px 8px;font-size:11px;color:#1E3D1E;font-weight:800;">Sinclair&apos;s grocery total</td>
+          <td style="padding:6px 8px;text-align:right;font-size:12px;font-weight:900;color:#1E3D1E;">${formatCurrency(groceryBilledTotal(order))}</td>
+        </tr>` : ''}
+        ${showGtsCharges ? gtsCharges.map(c => `<tr>
           <td style="padding:6px 8px;font-size:11px;color:#1E3D1E;font-weight:700;">GTS ${escHtml(chargeLabel(c))}</td>
           <td style="padding:6px 8px;text-align:right;font-size:12px;font-weight:800;color:#1E3D1E;">${formatCurrency(c.amount)}</td>
-        </tr>`).join('')}
-        ${order.bill_for_groceries === true && order.register_total != null ? `<tr>
-          <td style="padding:6px 8px;font-size:11px;color:#1E3D1E;font-weight:700;">Sinclair&apos;s grocery (register)</td>
-          <td style="padding:6px 8px;text-align:right;font-size:12px;font-weight:800;color:#1E3D1E;">${formatCurrency(Number(order.register_total))}</td>
-        </tr>` : ''}
+        </tr>`).join('') : `<tr>
+          <td colspan="2" style="padding:6px 8px;font-size:10px;color:#6b7280;line-height:1.45;">Grafton Towboat&apos;s delivery charge is not on this copy. It is on the delivered email Grafton sends when the order is marked delivered.</td>
+        </tr>`}
       </table>
     </td>
   </tr>

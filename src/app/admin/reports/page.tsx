@@ -20,6 +20,7 @@ import {
 import { fetchAdminSession, canAccess, adminFetch } from '@/lib/admin-auth';
 import { billingKey, canonicalVesselName } from '@/lib/vessel';
 import { formatCurrency, orderItemCount, formatCalendarDate, formatArrivalTime } from '@/lib/utils';
+import { groceryBilledTotal, groceryHandlingFeeAmount } from '@/lib/grocery-handling-fee';
 
 // ─── Analytics types ──────────────────────────────────────────
 interface Stats {
@@ -90,6 +91,8 @@ interface BillingOrder {
   discount_total: number;
   /** Actual Sinclair's register total, when entered (beats the estimate). */
   register_total?: number | null;
+  /** Sinclair's optional handling fee, added on top of the register. Not GTS delivery. */
+  grocery_handling_fee?: number | null;
   /** GTS delivery charge + whether groceries ride on this invoice. */
   delivery_fee?: number | null;
   delivery_service_type?: string | null;
@@ -215,7 +218,9 @@ function vesselTotal(o: BillingOrder): number {
 // Prefers the ACTUAL register total once it's been entered on the order, so
 // the packet reconciles against Sinclair's receipt instead of our estimate.
 function netTotal(o: BillingOrder): number {
-  if (o.register_total != null) return Number(o.register_total);
+  // Register ring plus Sinclair's handling fee. The tape itself is still
+  // register_total — the fee is not rung into it.
+  if (o.register_total != null) return groceryBilledTotal(o);
   return Math.max(0, vesselTotal(o) - (Number(o.discount_total) || 0));
 }
 /**
@@ -403,6 +408,15 @@ function orderDetailSheet(o: BillingOrder, groupLabel: string, monthLabel: strin
         <td colspan="8" style="padding:3px 6px;font-size:9px;text-align:right;color:${diff > 0 ? ORANGE : GREEN};font-weight:800;">Difference vs. estimate (weights / substitutions):</td>
         <td style="padding:3px 6px;text-align:right;font-size:10px;font-weight:900;color:${diff > 0 ? ORANGE : GREEN};">${diff > 0 ? '+' : ''}${money(diff)}</td>
       </tr>` : ''}
+      ${groceryHandlingFeeAmount(o) > 0 ? `
+      <tr>
+        <td colspan="8" style="padding:3px 6px;font-size:9px;text-align:right;color:#92400e;font-weight:800;">Sinclair&apos;s handling fee (not on the register tape, not GTS delivery):</td>
+        <td style="padding:3px 6px;text-align:right;font-size:10px;font-weight:900;color:#92400e;">${money(groceryHandlingFeeAmount(o))}</td>
+      </tr>
+      <tr>
+        <td colspan="8" style="padding:3px 6px;font-size:9px;text-align:right;color:${GREEN};font-weight:800;">Grocery billed (register + handling):</td>
+        <td style="padding:3px 6px;text-align:right;font-size:11px;font-weight:900;color:${GREEN};">${money(netTotal(o))}</td>
+      </tr>` : ''}
     </tfoot>
   </table>
 
@@ -445,7 +459,8 @@ function orderDetailSheet(o: BillingOrder, groupLabel: string, monthLabel: strin
       <td style="padding:10px 14px;">
         <div style="font-size:9px;font-weight:900;color:#555;text-transform:uppercase;letter-spacing:1px;">&#128206; Attach Sinclair&#39;s register receipt for ${esc(o.order_number)} here</div>
         <div style="font-size:9px;color:#777;margin-top:4px;line-height:1.8;">
-          Receipt total $__________ &nbsp;should match the <strong>Actual</strong> column total above (${money(actual)}).
+          Receipt total $__________ &nbsp;should match the register tape${o.register_total != null ? ` (${money(Number(o.register_total))})` : ` / Actual column above (${money(actual)})`}.
+          ${groceryHandlingFeeAmount(o) > 0 ? `Sinclair&apos;s handling fee ${money(groceryHandlingFeeAmount(o))} is not on that tape — grocery billed is ${money(netTotal(o))}. ` : ''}
           COD items were rung up separately and are not on the company invoice.<br>
           Cross-checked line by line &#9744; &nbsp;&nbsp; Entered in QuickBooks &#9744; &nbsp;&nbsp; Initials ________ &nbsp; Date ________
         </div>
@@ -1074,6 +1089,9 @@ function BillingOrderTable({ orders, selected, onToggle, showCompany = false, sh
                 )}
                 <td className="px-4 py-2.5 text-right font-bold text-brand-navy whitespace-nowrap">
                   {formatCurrency(netTotal(o))}
+                  {groceryHandlingFeeAmount(o) > 0 && (
+                    <span className="block text-[10px] font-semibold text-amber-800">incl. {formatCurrency(groceryHandlingFeeAmount(o))} handling</span>
+                  )}
                   {(Number(o.discount_total) || 0) > 0 && (
                     <span className="block text-[10px] font-semibold text-green-600">🏷 −{formatCurrency(Number(o.discount_total))} coupons</span>
                   )}

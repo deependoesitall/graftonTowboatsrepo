@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin, isGtsRole, isSinclairScoped } from '@/lib/admin-auth-server';
 import { hydrateOrderItemCatalog } from '@/lib/order-item-catalog';
+import { normalizeGroceryHandlingFee } from '@/lib/grocery-handling-fee';
 
 export async function GET(
   req: NextRequest,
@@ -38,6 +39,9 @@ export async function PATCH(
 
   const { id } = await params;
   const body = await req.json();
+  if (body && typeof body === 'object' && 'grocery_handling_fee' in body) {
+    body.grocery_handling_fee = normalizeGroceryHandlingFee(body.grocery_handling_fee);
+  }
 
   // ── SINCLAIR'S PIPELINE ENDS AT 'SHOPPED' ──
   // 'fulfilled' means Grafton delivered to the vessel AND sent the customer
@@ -86,15 +90,26 @@ export async function PATCH(
     .eq('id', id)
     .single();
 
-  const { data, error } = await supabase
+  let updateBody: Record<string, unknown> = {
+    ...body,
+    updated_at: new Date().toISOString(),
+  };
+  let { data, error } = await supabase
     .from('orders')
-    .update({
-      ...body,
-      updated_at: new Date().toISOString(),
-    })
+    .update(updateBody)
     .eq('id', id)
     .select()
     .single();
+
+  // A database that has not run 096 has no grocery_handling_fee column.
+  // Dropping just that key keeps the register total (and everything else
+  // in this patch) from failing with it.
+  if (error && /grocery_handling_fee/i.test(error.message) && 'grocery_handling_fee' in updateBody) {
+    delete updateBody.grocery_handling_fee;
+    const retry = await supabase.from('orders').update(updateBody).eq('id', id).select().single();
+    data = retry.data;
+    error = retry.error;
+  }
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 

@@ -1076,6 +1076,7 @@ export function ShoppingModeModal({ order, onClose, onComplete }: ShoppingModeMo
             .filter(i => i.item_type !== 'service' && i.shopping_status !== 'out_of_stock')
             .reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0)}
           initialRegisterTotal={order.register_total ?? null}
+          initialHandlingFee={order.grocery_handling_fee ?? null}
           onClose={() => { setShowRegisterSheet(false); onComplete(); }}
         />
       )}

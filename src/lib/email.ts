@@ -11,6 +11,7 @@ import {
 import { ESTIMATED_EXPLANATION } from '@/lib/estimated-copy';
 import { accountUrl } from '@/lib/public-url';
 import { billableCharges, chargeLabel, orderServiceTotal } from '@/lib/service-charges';
+import { groceryBilledTotal, groceryHandlingFeeAmount } from '@/lib/grocery-handling-fee';
 
 /**
  * Escape text that staff typed into an HTML email.
@@ -231,7 +232,13 @@ export function buildOrderEmailHtml(
   const billableGroceryTotal = groceryItems
     .filter(i => i.paid_by !== 'cod' && i.shopping_status !== 'out_of_stock')
     .reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0);
-  const groceryTotal = order.register_total != null ? Number(order.register_total) : billableGroceryTotal;
+  // Sinclair's handling fee rides on the grocery total, never on Grafton's
+  // delivery lines. The register ring itself stays untouched.
+  const handlingFee = groceryHandlingFeeAmount(order);
+  const registerRing = order.register_total != null && Number.isFinite(Number(order.register_total))
+    ? Number(order.register_total)
+    : null;
+  const groceryTotal = registerRing != null ? groceryBilledTotal(order) : billableGroceryTotal;
   const grandTotal = (billGroceries ? groceryTotal : 0) + deliveryFee;
   // Each service on its own line. A boat that reads "Delivery — $500" cannot
   // check it against anything; "Grocery Delivery $350" and "Crew Change — 1/2
@@ -249,7 +256,7 @@ export function buildOrderEmailHtml(
       <table width="100%" style="border-collapse:collapse;font-size:13px;">
         ${billGroceries ? `${chargeRows}
         <tr>
-          <td style="padding:8px 12px;color:#333;">Sinclair&apos;s — Grocery Order${order.sinclairs_receipt_url ? ` <span style="color:#4d7c5f;font-size:10px;">— itemized receipt ${isLinked(order.sinclairs_receipt_url) ? 'linked below' : 'attached'}</span>` : ''}</td>
+          <td style="padding:8px 12px;color:#333;">Sinclair&apos;s — Grocery Order${handlingFee > 0 && registerRing != null ? `<div style="font-size:10px;font-weight:500;color:#4d7c5f;margin-top:2px;">Register ${formatCurrency(registerRing)} + handling fee ${formatCurrency(handlingFee)}</div>` : ''}${order.sinclairs_receipt_url ? ` <span style="color:#4d7c5f;font-size:10px;">— itemized receipt ${isLinked(order.sinclairs_receipt_url) ? 'linked below' : 'attached'}</span>` : ''}</td>
           <td style="padding:8px 12px;text-align:right;font-weight:700;">${formatCurrency(groceryTotal)}</td>
         </tr>` : `<tr>
           <td colspan="2" style="padding:8px 12px;color:#666;font-size:11px;font-style:italic;">No grocery charges on this GTS summary — the boat pays Sinclair&apos;s directly. Lines below are Grafton Towboat Services delivery / services only.</td>
@@ -582,9 +589,18 @@ export function buildOrderEmailHtml(
           }</td>
         </tr>` : ''}
         ${order.register_total != null ? `
+        ${handlingFee > 0 ? `
+        <tr style="background:#fffbeb;">
+          <td colspan="5" style="padding:6px 10px;font-size:12px;font-weight:700;color:#1E3D1E;">Sinclair&apos;s register</td>
+          <td style="padding:6px 10px;text-align:right;font-size:13px;font-weight:800;color:#1E3D1E;">${formatCurrency(registerRing)}</td>
+        </tr>
+        <tr style="background:#fffbeb;">
+          <td colspan="5" style="padding:6px 10px;font-size:12px;font-weight:700;color:#92400e;">Sinclair&apos;s handling fee <span style="font-weight:500;color:#a16207;">— not Grafton delivery</span></td>
+          <td style="padding:6px 10px;text-align:right;font-size:13px;font-weight:800;color:#92400e;">${formatCurrency(handlingFee)}</td>
+        </tr>` : ''}
         <tr style="background:#D9E84A;">
-          <td colspan="5" style="padding:10px;font-size:14px;font-weight:900;color:#1E3D1E;text-transform:uppercase;">${deckItems.length > 0 ? 'Grocery Total' : 'Total'}</td>
-          <td style="padding:10px;text-align:right;font-size:16px;font-weight:900;color:#1E3D1E;">${formatCurrency(order.register_total)}</td>
+          <td colspan="5" style="padding:10px;font-size:14px;font-weight:900;color:#1E3D1E;text-transform:uppercase;">${deckItems.length > 0 || handlingFee > 0 ? 'Grocery Total' : 'Total'}</td>
+          <td style="padding:10px;text-align:right;font-size:16px;font-weight:900;color:#1E3D1E;">${formatCurrency(handlingFee > 0 ? groceryTotal : order.register_total)}</td>
         </tr>
         <tr style="background:#f5f5f5;">
           <td colspan="5" style="padding:6px 10px;font-size:11px;color:#666;">System estimate</td>
@@ -840,7 +856,7 @@ export async function sendOrderShoppedEmail(
   const fromEmail  = process.env.EMAIL_FROM || 'onboarding@resend.dev';
   const toEmail    = opts.businessEmail || process.env.BUSINESS_EMAIL || 'GraftonTowboatServices@gmail.com';
   const ccList     = parseCcList(opts.ccEmailRaw ?? process.env.ORDER_EMAIL_CC ?? '');
-  const pdfBuffer2 = await generateOrderPdfBuffer(order);
+  const pdfBuffer2 = await generateOrderPdfBuffer(order, { includeGtsCharges: true });
   const attachments: Array<{ filename: string; content: Buffer }> = [
     { filename: `order-${order.order_number}-fulfilled.pdf`, content: pdfBuffer2 },
   ];

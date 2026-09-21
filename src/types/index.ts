@@ -248,6 +248,13 @@ export interface Order {
   discounts?: OrderDiscount[];
   subtotal: number;
   register_total?: number | null;
+  /**
+   * Optional Sinclair's grocery handling fee in dollars (flat, often $50).
+   * NULL or 0 = no fee. Not COD handling (cod_fee_*) and not Grafton's
+   * delivery_fee. Does not change register_total.
+   * Billable grocery = register_total + this fee.
+   */
+  grocery_handling_fee?: number | null;
   /** DECK total rung at the register — invoiced separately from the
    *  grocery allowance. NULL = no deck lines, or not yet keyed. */
   deck_register_total?: number | null;
