@@ -48,7 +48,7 @@ export function OtherPickupCard() {
             Paste links to items from other stores (Walmart, anywhere) and they&apos;ll come with your
             groceries. Add as many as you need. These are <strong>COD</strong> — we can&apos;t know the
             price until it&apos;s bought, so they aren&apos;t in your estimated total and are collected at
-            delivery (plus the same handling fee as other COD items) rather than on your monthly invoice.
+            delivery (plus the same handling fee as other COD items) rather than on the company invoice.
           </p>
         </div>
         {other.enabled && (
@@ -68,7 +68,7 @@ export function OtherPickupCard() {
           onChange={next => setServices(s => ({ ...s, other_pickup: next }))}
         />
         <p className="text-[11px] text-gray-400 text-center">
-          Handled by Sinclair&apos;s Foods · COD — final cost confirmed after purchase and collected at delivery, not on your monthly invoice
+          Handled by Sinclair&apos;s Foods · COD — final cost confirmed after purchase and collected at delivery, not on the company invoice
         </p>
       </div>
     </div>

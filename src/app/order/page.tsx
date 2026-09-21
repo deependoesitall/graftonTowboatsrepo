@@ -1231,7 +1231,7 @@ export default function OrderPage() {
                 onChange={e => setV('phone', e.target.value)} />
             </Field>
             <Field label="Billing Email" error={errors.email} col2
-              hint="Optional — the home office gets the monthly bill, not every order">
+              hint="Optional — the home office gets the invoice, not every order">
               <input type="email" className={`input-base w-full ${errors.email ? 'border-red-400' : ''}`}
                 placeholder="billing@example.com (optional)" value={vessel.email}
                 onChange={e => { setV('email', e.target.value); setEmailHasAccount(false); }}

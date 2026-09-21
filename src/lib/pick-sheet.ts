@@ -649,7 +649,7 @@ export function pickSheetHtml(order: Order, zoneOrder: string[] = DEFAULT_ZONE_O
 
   ${sectionHtml(
     'Grocery',
-    'Walk order — start here · boat allowance · billed monthly',
+    'Walk order — start here · boat allowance',
     groceryGroups,
     today,
     { subtotal: grocerySubtotal, tone: 'grocery', byParent },

@@ -185,7 +185,7 @@ export function SaveOrderPrompt({ order, orderNumber, onCreateAccount }: {
             <Benefit
               icon={History}
               title="Track what happens next"
-              body="Received → Shopping → On the way → Done."
+              body="Received → Sinclair's shopping → Grafton on the way → Delivered."
             />
           </ul>
 

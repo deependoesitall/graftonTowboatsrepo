@@ -24,7 +24,7 @@ import {
 import { AdditionalServicesFields, type CrewChangeState } from '@/components/order/ServiceFields';
 
 const DISCLAIMER =
-  'Additional services shown below have no fixed price at checkout. Final charges — including any delivery or pickup fees — are confirmed after fulfillment and billed on your regular monthly invoice. Questions? Call Grafton Towboat Services at (618) 556-0290.';
+  'Additional services shown below have no fixed price at checkout. Final charges — including any delivery or pickup fees — are confirmed after fulfillment. Your company will receive an invoice from QuickBooks for Grafton\'s services. Questions? Call Grafton Towboat Services at (618) 556-0290.';
 
 export function AdditionalServicesTab() {
   const [services, setServices] = useState<AdditionalServices>(getAdditionalServices());

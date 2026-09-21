@@ -925,7 +925,7 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
                 >
                   <span className="block text-sm font-bold text-brand-navy">Boat pays Sinclair&apos;s directly</span>
                   <span className="block text-[11px] text-gray-500 mt-0.5 leading-snug">
-                    Most boats (like Kirby). Email + monthly QuickBooks show <strong>GTS delivery / services only</strong> — no Sinclair grocery dollar. They won&apos;t think they owe GTS or Sinclair&apos;s for groceries.
+                    Most boats (like Kirby). The QuickBooks invoice is <strong>GTS delivery / services only</strong> — no Sinclair grocery dollar. A separate invoice comes from Sinclair&apos;s for the groceries.
                   </span>
                 </button>
                 <button
@@ -1077,7 +1077,7 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
                   {handlingAmt > 0 && groceryTotal !== '' && (
                     <p className="text-[10px] text-amber-800">Includes ${handlingAmt.toFixed(2)} Sinclair&apos;s handling fee on top of the register.</p>
                   )}
-                  <div className="flex justify-between gap-3 border-t border-brand-navy/10 pt-1 mt-1 font-bold"><span>Total (same as monthly QB)</span><span className="tabular-nums">${(Number(fee || 0) + (groceryTotal === '' ? 0 : Number(groceryTotal) + handlingAmt)).toFixed(2)}</span></div>
+                  <div className="flex justify-between gap-3 border-t border-brand-navy/10 pt-1 mt-1 font-bold"><span>Total (same as the QuickBooks invoice)</span><span className="tabular-nums">${(Number(fee || 0) + (groceryTotal === '' ? 0 : Number(groceryTotal) + handlingAmt)).toFixed(2)}</span></div>
                   <p className="text-[10px] text-gray-500 pt-1 leading-snug">Courtesy path — email + QuickBooks both carry delivery + one grocery lump.</p>
                 </div>
               ) : (

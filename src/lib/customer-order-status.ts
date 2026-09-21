@@ -4,7 +4,7 @@
 // Maps the real OrderStatus values honestly. Never invents steps we cannot know.
 //
 // Pipeline (staff): new → in_progress → shopped → fulfilled (or cancelled)
-// Cooks see:        Received → Shopping → On the way / ready for boat → Done
+// Cooks see:        Received → Sinclair's shopping → Grafton on the way → Delivered
 
 export type CustomerStatusKey =
   | 'received'
@@ -31,10 +31,10 @@ function readyLabel(delivery: DeliveryHint): string {
 
 function readyNext(delivery: DeliveryHint): string {
   if (delivery === 'van') {
-    return 'Shopped and ready — pick up when you get to Grafton.';
+    return "Sinclair's is finished shopping. It's ready for the van when you get to Grafton.";
   }
   // boat (default) and unknown: Grafton brings it to the boat / landing
-  return 'Shopped and ready — Grafton is getting it to your boat.';
+  return "Sinclair's is finished shopping. Grafton is getting it to your boat.";
 }
 
 /**
@@ -51,14 +51,14 @@ export function customerOrderStatus(
       return {
         key: 'received',
         label: 'Received',
-        nextStep: "We got your order. Sinclair's will start shopping it soon.",
+        nextStep: "Grafton has your order. Sinclair's will start shopping it soon.",
         chipClass: 'bg-blue-50 text-blue-700 border-blue-200',
       };
     case 'in_progress':
       return {
         key: 'shopping',
-        label: 'Shopping',
-        nextStep: "Sinclair's is shopping your list now.",
+        label: "Shopping",
+        nextStep: "Sinclair's has this in progress and is shopping your list.",
         chipClass: 'bg-amber-50 text-amber-800 border-amber-200',
       };
     case 'shopped':
@@ -71,8 +71,8 @@ export function customerOrderStatus(
     case 'fulfilled':
       return {
         key: 'done',
-        label: 'Done',
-        nextStep: "Delivered — you're all set. Check your email for the final summary.",
+        label: 'Delivered',
+        nextStep: "Grafton marked this delivered. The final email has Grafton's delivery charge — Sinclair's totals stay on this page.",
         chipClass: 'bg-green-50 text-green-700 border-green-200',
       };
     case 'cancelled':
@@ -133,19 +133,19 @@ export function customerOrderTimeline(
     {
       key: 'shopping',
       label: 'Shopping',
-      blurb: "Sinclair's shops your list.",
+      blurb: "Sinclair's is working your list.",
     },
     {
       key: 'ready',
       label: deliveryMethod === 'van' ? 'Ready for van' : 'On the way',
       blurb: deliveryMethod === 'van'
-        ? 'Ready when you get to Grafton.'
-        : 'Grafton brings it to your boat.',
+        ? "Sinclair's is done. Pick up in Grafton."
+        : "Sinclair's is done. Grafton is on the way.",
     },
     {
       key: 'done',
-      label: 'Done',
-      blurb: 'Delivered — final summary by email.',
+      label: 'Delivered',
+      blurb: 'Grafton marked it delivered.',
     },
   ];
 
@@ -154,4 +154,14 @@ export function customerOrderTimeline(
     ...o,
     state: i < idx ? 'past' : i === idx ? 'current' : 'upcoming',
   }));
+}
+
+/** How far Sinclair's has gotten through the grocery lines. Substitutes don't double-count. */
+export function customerShoppingProgress(
+  items: Array<{ item_type?: string | null; shopping_status?: string | null; is_substitution?: boolean | null }> | null | undefined,
+): { done: number; total: number } {
+  const lines = (items || []).filter(i => i.item_type !== 'service' && !i.is_substitution);
+  const total = lines.length;
+  const done = lines.filter(i => i.shopping_status === 'shopped' || i.shopping_status === 'out_of_stock').length;
+  return { done, total };
 }

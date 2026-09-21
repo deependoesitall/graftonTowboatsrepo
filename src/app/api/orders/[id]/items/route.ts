@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { effectiveCatalogPrice } from '@/lib/catalog-price';
 import { createServiceClient } from '@/lib/supabase/server';
-import { requireAdmin, isSinclairScoped } from '@/lib/admin-auth-server';
+import { requireAdmin, isSinclairScoped, isGtsRole } from '@/lib/admin-auth-server';
 import { z } from 'zod';
 import { recalcSubtotal } from '@/lib/recalc-subtotal';
 import { refreshBoatsOrderingRail } from '@/lib/boats-ordering';
@@ -146,7 +146,9 @@ export async function POST(
     return NextResponse.json({ error: 'Order not found' }, { status: 404 });
   }
 
-  const partB = (order as { status?: string }).status === 'shopped';
+  // Part B is Grafton's extra run. Sinclair's write-ins on a shopped order
+  // (cigarettes, charcoal) stay ordinary lines — they are not Part B.
+  const partB = isGtsRole(session.role) && (order as { status?: string }).status === 'shopped';
 
   // ── CATALOG GROCERY ───────────────────────────────────────────────────────
   if ('product_id' in data && data.product_id) {

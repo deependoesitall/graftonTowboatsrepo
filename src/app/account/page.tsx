@@ -15,7 +15,8 @@ import {
   namesFromUserMetadata,
   mergeGuestVesselIntoProfile,
 } from '@/lib/customer-profile';
-import { customerOrderStatus } from '@/lib/customer-order-status';
+import { customerOrderStatus, customerShoppingProgress } from '@/lib/customer-order-status';
+import { OrderStatusTimeline } from '@/components/order/OrderStatusTimeline';
 import {
   getActiveBoat,
   orderMatchesActiveBoat,
@@ -760,19 +761,50 @@ function AccountContent() {
               </Link>
             </div>
           ) : (
-            <div className="space-y-3">
-              {orders.filter(o => boatLinks.length < 2 || orderMatchesActiveBoat(o, activeBoat)).map(order => {
+            <div className="space-y-6">
+              {([
+                {
+                  title: 'In progress',
+                  hint: "Sinclair's shops it, then Grafton delivers it.",
+                  list: orders.filter(o => (boatLinks.length < 2 || orderMatchesActiveBoat(o, activeBoat)) && o.status !== 'fulfilled' && o.status !== 'cancelled'),
+                },
+                {
+                  title: 'Earlier orders',
+                  hint: 'Delivered or cancelled. Sinclair\'s charges stay here. Grafton\'s delivery fee was on the delivered email.',
+                  list: orders.filter(o => (boatLinks.length < 2 || orderMatchesActiveBoat(o, activeBoat)) && (o.status === 'fulfilled' || o.status === 'cancelled')),
+                },
+              ]).filter(section => section.list.length > 0).map(section => (
+              <section key={section.title}>
+                <div className="mb-2 px-0.5">
+                  <h2 className="text-xs font-bold uppercase tracking-wide text-brand-navy">{section.title}</h2>
+                  <p className="text-[11px] text-brand-green/50 leading-snug">{section.hint}</p>
+                </div>
+                <div className="space-y-3">
+              {section.list.map(order => {
                 const cx = customerOrderStatus(order.status, order.delivery_method);
+                const shop = order.status === 'in_progress' ? customerShoppingProgress(order.items) : null;
                 return (
                 <div key={order.id} className="card-base p-4 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                  <div className="flex-1 min-w-0 w-full">
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
                       <span className="font-mono text-sm font-bold text-brand-green">{order.order_number}</span>
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${cx.chipClass}`}>
                         {cx.label}
                       </span>
                     </div>
-                    <p className="text-xs text-brand-green/60 leading-snug mb-1">{cx.nextStep}</p>
+                    <OrderStatusTimeline status={order.status} deliveryMethod={order.delivery_method} variant="rail" />
+                    <p className="text-xs text-brand-green/70 leading-snug mt-2">{cx.nextStep}</p>
+                    {shop && shop.total > 0 && (
+                      <div className="mt-2">
+                        <div className="flex justify-between text-[10px] font-bold uppercase tracking-wide text-amber-800/80">
+                          <span>Sinclair&apos;s shopping</span>
+                          <span>{shop.done} of {shop.total} lines</span>
+                        </div>
+                        <div className="mt-1 h-1.5 rounded-full bg-amber-100 overflow-hidden" role="progressbar" aria-valuenow={shop.done} aria-valuemin={0} aria-valuemax={shop.total} aria-label="Lines Sinclair's has finished">
+                          <div className="h-full bg-amber-500 rounded-full" style={{ width: `${Math.round((shop.done / shop.total) * 100)}%` }} />
+                        </div>
+                      </div>
+                    )}
                     <p className="text-sm text-brand-green/70 truncate">
                       {[order.company_name, order.vessel_name].filter(Boolean).join(' · ')}{' · '}{formatDate(order.created_at)}
                     </p>
@@ -824,10 +856,6 @@ function AccountContent() {
                   </div>
                   {expandedOrderId === order.id && (
                     <div className="w-full basis-full mt-3 border-t border-brand-green/10 pt-3 space-y-1.5">
-                      <div className="rounded-lg bg-brand-sand/50 px-3 py-2 mb-2">
-                        <p className="text-xs font-bold text-brand-navy">{cx.label}</p>
-                        <p className="text-xs text-brand-green/70 leading-relaxed">{cx.nextStep}</p>
-                      </div>
                       <p className="text-[10px] font-bold uppercase tracking-wide text-brand-green/50 mb-1">Full substitution record</p>
                       {(() => {
                         const lines = (order.items || []).filter(i => i.item_type !== 'service');
@@ -900,6 +928,9 @@ function AccountContent() {
                   )}
                 </div>
               );})}
+                </div>
+              </section>
+              ))}
               {orders.length > 0 && boatLinks.length > 1 && orders.filter(o => orderMatchesActiveBoat(o, activeBoat)).length === 0 && (
                 <div className="card-base p-8 text-center">
                   <p className="font-bold text-brand-green text-sm mb-1">No orders for this boat yet</p>

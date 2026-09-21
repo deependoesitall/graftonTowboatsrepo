@@ -76,9 +76,14 @@ export function OrderDetailModal({
     : (!isGtsRole(getAdminRole()) || hasAdminPermission('sinclair'));
   const canEditCrew = canEdit && !isSinclairScoped;
   const canAddGtsServices = canEdit && !isSinclairScoped;
-  /** Mid-fulfill phone-add: hide once delivered or voided. Shopped uses Part B. */
+  /** Mid-fulfill phone-add: hide once delivered or voided. */
   const canAddToOrder = canEdit && order.status !== 'fulfilled' && order.status !== 'cancelled';
-  const canAddPartB = canEdit && order.status === 'shopped';
+  // Part B is Grafton's extra run after Sinclair has shopped. Owner and
+  // GTS manager only — Sinclair's never sees that banner or those buttons.
+  const canSeePartB = isGtsRole(getAdminRole());
+  const canAddPartB = canEdit && order.status === 'shopped' && canSeePartB;
+  /** Shopped order, Sinclair's side: write-ins (cigarettes, charcoal), not Part B. */
+  const canAddWriteIn = canEdit && order.status === 'shopped' && !canSeePartB;
   const [shoppingMode, setShoppingMode] = useState(false);
   const [markingFulfilled, setMarkingFulfilled] = useState(false);
   const [showPickSheet, setShowPickSheet] = useState(false);
@@ -694,7 +699,7 @@ export function OrderDetailModal({
     setAddResults([]);
     setAddSelected(null);
     setAddQty('1');
-    setAddPaidBy(addAsPartB || order.status === 'shopped' ? 'cod' : 'vessel');
+    setAddPaidBy(addAsPartB ? 'cod' : 'vessel');
     setAddCodName('');
     setWriteDesc('');
     setWritePrice('0');
@@ -1513,7 +1518,7 @@ export function OrderDetailModal({
                         <div className="min-w-0 flex-1">
                           <p className={`font-medium text-brand-navy text-sm leading-snug ${item.shopping_status === 'out_of_stock' ? 'line-through' : ''}`}>
                             {item.description}
-                            {item.added_after_shopped && (
+                            {canSeePartB && item.added_after_shopped && (
                               <span className="ml-1.5 inline-block text-[9px] font-bold uppercase tracking-wide text-amber-800 bg-amber-100 px-1 py-0.5 rounded align-middle">Part B</span>
                             )}
                           </p>
@@ -1662,7 +1667,7 @@ export function OrderDetailModal({
                                 DECK
                               </span>
                             )}
-                            {item.added_after_shopped && (
+                            {canSeePartB && item.added_after_shopped && (
                               <span className="inline-block text-[9px] font-bold uppercase tracking-wide text-amber-800 bg-amber-100 px-1 py-0.5 rounded mr-1"
                                 title="Added after Sinclair shopped — extra run / Part B">
                                 Part B
@@ -1804,7 +1809,7 @@ export function OrderDetailModal({
                       {(codItems.length > 0 || deckItems.length > 0 || outsidePickups.length > 0) && (
                         <>
                           <tr className="bg-white border-t border-gray-200">
-                            <td colSpan={6} className="px-3 py-1.5 text-xs text-gray-500">Grocery — boat allowance (invoiced monthly)</td>
+                            <td colSpan={6} className="px-3 py-1.5 text-xs text-gray-500">Grocery — boat allowance</td>
                             <td className="px-3 py-1.5 text-right text-xs font-bold text-brand-navy">{formatCurrency(groceryAllowance)}</td>
                             {canEdit && <td />}
                           </tr>
@@ -2074,7 +2079,15 @@ export function OrderDetailModal({
                       <div className="rounded-lg border-2 border-dashed border-amber-400 bg-amber-50 px-3 py-2.5">
                         <p className="text-xs font-bold text-amber-900 uppercase tracking-wide">Part B — extra run</p>
                         <p className="text-[11px] text-amber-800/90 mt-0.5 leading-snug">
-                          Sinclair already shopped Part A. Boat called with extras GTS (or Sinclair) will grab now — usually COD, like Jen picking up 20 cases of water on the way to deliver.
+                          Sinclair already shopped Part A. Boat called with extras Grafton will grab now — usually COD, like Jen picking up 20 cases of water on the way to deliver.
+                        </p>
+                      </div>
+                    )}
+                    {canAddWriteIn && !addingItem && (
+                      <div className="rounded-lg border border-purple-200 bg-purple-50 px-3 py-2.5">
+                        <p className="text-xs font-bold text-purple-900 uppercase tracking-wide">Write-ins</p>
+                        <p className="text-[11px] text-purple-800/90 mt-0.5 leading-snug">
+                          Off the shelf — cigarettes, a bag of charcoal, and the like. These are COD unless the boat is paying. Not Grafton&apos;s extra run.
                         </p>
                       </div>
                     )}
@@ -2094,6 +2107,19 @@ export function OrderDetailModal({
                         >
                           <Plus className="w-3.5 h-3.5" /> Add Part B extras
                         </button>
+                      ) : canAddWriteIn ? (
+                        <button
+                          onClick={() => {
+                            setAddAsPartB(false);
+                            setAddPaidBy('cod');
+                            setAddMode('writein');
+                            setAddingItem(true);
+                            setItemError('');
+                          }}
+                          className="flex items-center gap-1.5 text-xs font-bold text-white bg-purple-700 hover:bg-purple-800 rounded-lg px-3 py-2"
+                        >
+                          <Plus className="w-3.5 h-3.5" /> Add write-in
+                        </button>
                       ) : (
                       <button
                         onClick={() => { setAddAsPartB(false); setAddingItem(true); setAddMode(null); setItemError(''); }}
@@ -2102,7 +2128,7 @@ export function OrderDetailModal({
                         <Plus className="w-3.5 h-3.5" /> Add to order
                       </button>
                       )}
-                      {localItems.some(i => i.added_after_shopped) && (
+                      {canSeePartB && localItems.some(i => i.added_after_shopped) && (
                         <button
                           type="button"
                           onClick={() => setShowPickSheetAddon(true)}
@@ -2128,7 +2154,11 @@ export function OrderDetailModal({
                       <div className="mt-3 w-full border border-brand-sky/30 rounded-lg bg-blue-50/40 p-3 space-y-2">
                         <div className="flex items-center justify-between gap-2">
                           <p className="text-xs font-bold text-brand-navy uppercase tracking-wide">
-                            {addAsPartB || order.status === 'shopped' ? 'Part B — extra items' : 'Add to order'}
+                            {canSeePartB && (addAsPartB || order.status === 'shopped')
+                              ? 'Part B — extra items'
+                              : addMode === 'writein'
+                                ? 'Write-in'
+                                : 'Add to order'}
                           </p>
                           <button onClick={cancelAdd} className="text-xs text-gray-500 hover:text-gray-700">Cancel</button>
                         </div>
@@ -2149,7 +2179,7 @@ export function OrderDetailModal({
                                 if (mode === 'writein') {
                                   setAddPaidBy('cod');
                                 } else if (mode === 'catalog') {
-                                  setAddPaidBy(addAsPartB || order.status === 'shopped' ? 'cod' : 'vessel');
+                                  setAddPaidBy(addAsPartB ? 'cod' : 'vessel');
                                 } else if (mode === 'service') {
                                   setSvcKind(canAddGtsServices ? 'parts_pickup' : 'other_pickup');
                                 }
@@ -2268,7 +2298,7 @@ export function OrderDetailModal({
                             <label className="block text-xs font-bold text-gray-600">
                               Item name
                               <input className="input-base mt-0.5" value={writeDesc} onChange={e => setWriteDesc(e.target.value)}
-                                placeholder="e.g. Marlboro Red carton" autoFocus />
+                                placeholder="e.g. Marlboro Red carton, bag of charcoal" autoFocus />
                             </label>
                             <div className="flex flex-wrap gap-2">
                               <label className="text-xs font-bold text-gray-600">
@@ -2545,8 +2575,30 @@ export function OrderDetailModal({
             )}
 
 
-            {/* Sinclair Foods Summary */}
-            {groceryItems.length > 0 && (
+            {/* Sinclair Foods Summary — estimate until the register is saved,
+                then the rung total (plus handling) through shopped and delivered. */}
+            {groceryItems.length > 0 && (() => {
+              const typedRegister = parseFloat(String(registerTotal).replace(/[^0-9.]/g, ''));
+              const registerAmount = registerSaved && Number.isFinite(typedRegister)
+                ? typedRegister
+                : (order.register_total != null && Number.isFinite(Number(order.register_total))
+                    ? Number(order.register_total)
+                    : null);
+              const handlingAmount = registerSaved
+                ? (parseGroceryHandlingFeeInput(handlingFee) ?? 0)
+                : (Number(order.grocery_handling_fee) > 0 ? Number(order.grocery_handling_fee) : 0);
+              const typedDeck = parseFloat(String(deckTotal).replace(/[^0-9.]/g, ''));
+              const deckAmount = deckSaved && deckTotal.trim() !== '' && Number.isFinite(typedDeck)
+                ? typedDeck
+                : (order.deck_register_total != null && Number.isFinite(Number(order.deck_register_total))
+                    ? Number(order.deck_register_total)
+                    : null);
+              const pastShopping = order.status === 'shopped' || order.status === 'fulfilled';
+              const summaryItems = pastShopping
+                ? groceryItems.filter(i => i.shopping_status !== 'out_of_stock')
+                : groceryItems;
+              const useRegister = registerAmount != null && (pastShopping || registerSaved);
+              return (
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                 <p className="text-xs font-bold text-blue-700 uppercase tracking-wide mb-2 flex items-center gap-1.5">
                   <Printer className="w-3.5 h-3.5" /> Sinclair Foods Summary
@@ -2560,11 +2612,28 @@ export function OrderDetailModal({
                     <p><strong>Arrival:</strong> {[order.arrival_date, formatArrivalTime(order.arrival_time)].filter(Boolean).join(', ')}</p>
                   )}
                   {order.eta && <p><strong>ETA:</strong> {order.eta}</p>}
-                  <p><strong>Total Items:</strong> {orderItemCount(groceryItems)}</p>
-                  <p><strong>Order Total:</strong> {formatCurrency(grocerySubtotal)}</p>
+                  {pastShopping && (
+                    <p><strong>Status:</strong> {order.status === 'fulfilled' ? 'Delivered' : 'Shopped'}</p>
+                  )}
+                  <p><strong>Total Items:</strong> {orderItemCount(summaryItems)}</p>
+                  {useRegister ? (
+                    <>
+                      <p><strong>Register total:</strong> {formatCurrency(registerAmount)}</p>
+                      {handlingAmount > 0 && (
+                        <p><strong>Handling fee:</strong> {formatCurrency(handlingAmount)}</p>
+                      )}
+                      <p><strong>Grocery total:</strong> {formatCurrency(registerAmount + handlingAmount)}</p>
+                      {deckAmount != null && (
+                        <p><strong>Deck total:</strong> {formatCurrency(deckAmount)} <span className="font-normal">— separate from groceries</span></p>
+                      )}
+                    </>
+                  ) : (
+                    <p><strong>Estimated total:</strong> {formatCurrency(grocerySubtotal)}</p>
+                  )}
                 </div>
               </div>
-            )}
+              );
+            })()}
 
             {/* Billing documents + invoice — owner only */}
             {isOwner && (

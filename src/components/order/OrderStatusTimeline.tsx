@@ -7,10 +7,13 @@ export function OrderStatusTimeline({
   status,
   deliveryMethod,
   compact = false,
+  variant = 'list',
 }: {
   status?: string | null;
   deliveryMethod?: string | null;
   compact?: boolean;
+  /** list = the confirmation page. rail = a slim four-step bar for the boat dashboard. */
+  variant?: 'list' | 'rail';
 }) {
   const steps = customerOrderTimeline(status, deliveryMethod);
   if (steps.length === 1 && steps[0].key === 'cancelled') {
@@ -18,6 +21,46 @@ export function OrderStatusTimeline({
       <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 font-semibold">
         {steps[0].blurb}
       </div>
+    );
+  }
+
+  if (variant === 'rail') {
+    return (
+      <ol className="flex items-start gap-0" aria-label="Order progress">
+        {steps.map((step, i) => {
+          const current = step.state === 'current';
+          const past = step.state === 'past';
+          return (
+            <li key={step.key} className="flex items-start flex-1 min-w-0">
+              <div className="flex flex-col items-center w-full min-w-0">
+                <div className="flex items-center w-full">
+                  <span className={`h-0.5 flex-1 ${i === 0 ? 'bg-transparent' : past || current ? 'bg-brand-green/50' : 'bg-brand-green/15'}`} />
+                  <span
+                    className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 border-2 ${
+                      current
+                        ? 'bg-brand-orange border-brand-orange text-white'
+                        : past
+                          ? 'bg-brand-green border-brand-green text-white'
+                          : 'bg-white border-brand-green/25 text-brand-green/30'
+                    }`}
+                    aria-current={current ? 'step' : undefined}
+                  >
+                    {past ? <Check className="w-3 h-3" strokeWidth={3} /> : (
+                      <span className={`w-1.5 h-1.5 rounded-full ${current ? 'bg-white' : 'bg-current'}`} />
+                    )}
+                  </span>
+                  <span className={`h-0.5 flex-1 ${i === steps.length - 1 ? 'bg-transparent' : past ? 'bg-brand-green/50' : 'bg-brand-green/15'}`} />
+                </div>
+                <p className={`mt-1 text-[10px] font-bold leading-tight text-center px-0.5 ${
+                  current ? 'text-brand-navy' : past ? 'text-brand-green' : 'text-brand-green/40'
+                }`}>
+                  {step.label}
+                </p>
+              </div>
+            </li>
+          );
+        })}
+      </ol>
     );
   }
 
