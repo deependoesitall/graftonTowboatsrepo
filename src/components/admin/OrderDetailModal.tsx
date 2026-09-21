@@ -19,8 +19,11 @@ import { PickSheetOverlay } from '@/components/admin/PickSheetOverlay';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { readCodPayments, codMethodSentence } from '@/lib/cod-payments';
 import {
+  splitOutsidePickups, pickupPay, pickupPayLabel, pickupLabel,
+  pickupIsPriced, lineAmount, groupCodCollect, BOAT_COD_NAME,
+} from '@/lib/outside-pickup';
 
-/** America/Chicago calendar day — same clock the pick sheet uses for sale expiry. */
+/** America/Chicago calendar day - same clock the pick sheet uses for sale expiry. */
 function chicagoToday(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago' }).format(new Date());
 }
@@ -38,10 +41,6 @@ function quotedSaleForUi(item: OrderItem): number {
   if (regular > 0 && unit < regular) return unit;
   return unit;
 }
-
-  splitOutsidePickups, pickupPay, pickupPayLabel, pickupLabel,
-  pickupIsPriced, lineAmount, groupCodCollect, BOAT_COD_NAME,
-} from '@/lib/outside-pickup';
 
 interface OrderDetailModalProps {
   order: Order;
