@@ -41,7 +41,7 @@ function brandBar(rangeLabel: string, generated: string): string {
         <div style="font-size:9px;font-weight:700;color:${ORANGE};letter-spacing:1px;">GROCERIES, SUPPLIES &amp; CREW CHANGE</div>
         <div style="font-size:9px;color:#a8c86a;margin-top:4px;line-height:1.6;">
           25 Dagget Hollow · Grafton, IL 62037 · Mile Marker 219 Mississippi River / Mile Marker 0 Illinois River<br>
-          (618) 556-0290 · GraftonTowboatServices@gmail.com · Channel 68 via Grafton Harbor
+          (618) 556-0290 · GraftonTowboatServices@gmail.com · VHF 13 (tow/barge) · VHF 68 (pleasure craft)
         </div>
       </td>
       <td style="padding:16px 22px;text-align:right;vertical-align:top;">

@@ -2,7 +2,15 @@
 // Helpers for company → boat → crew membership.
 import { vesselKey } from '@/lib/vessel';
 
-export type VesselMemberRole = 'cook' | 'captain' | 'other';
+export type VesselMemberRole = string;
+
+export const CREW_ROLE_CHIPS = ['cook', 'captain', 'other'] as const;
+export const CREW_ROLE_MAX = 40;
+
+export function normalizeCrewRole(raw: unknown): string {
+  const role = String(raw ?? '').trim().replace(/\s+/g, ' ').slice(0, CREW_ROLE_MAX);
+  return role || 'cook';
+}
 
 /** Stable key for UNIQUE(company_id, name_key) — same rules as vesselKey. */
 export function vesselNameKey(name: string): string {

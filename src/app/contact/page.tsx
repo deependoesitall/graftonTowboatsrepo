@@ -48,7 +48,7 @@ export default function ContactPage() {
                 { icon: Mail, label: 'Email', value: BUSINESS.email, href: `mailto:${BUSINESS.email}` },
                 { icon: MapPin, label: 'Find us', value: `${BUSINESS.street}\n${BUSINESS.cityStateZip}`, href: null },
                 { icon: Radio, label: 'On the water', value: BUSINESS.mileMarkers, href: null },
-                { icon: Clock, label: 'VHF', value: BUSINESS.vhf, href: null },
+                { icon: Clock, label: 'VHF', value: BUSINESS.vhfLong, href: null },
               ].map(({ icon: Icon, label, value, href }) => {
                 const body = (
                   <div className="flex items-start gap-3.5">

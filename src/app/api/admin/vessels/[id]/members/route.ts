@@ -1,11 +1,13 @@
 // src/app/api/admin/vessels/[id]/members/route.ts
-// GET   — list members for a vessel
-// POST  — create a crew login and link them to the vessel
-// PATCH — set/reset a member's password (typed only; staff types it)
+// GET    — list members for a vessel
+// POST   — create a crew login and link them to the vessel
+// PATCH  — set/reset a member's password (typed only; staff types it)
+// DELETE — remove the boat-login link and the auth user. Boat + orders stay.
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/admin-auth-server';
-import { vesselNameKey, orderMatchesVessel } from '@/lib/vessel-membership';
+import { vesselNameKey, orderMatchesVessel, normalizeCrewRole } from '@/lib/vessel-membership';
+import { MIN_PASSWORD_LENGTH } from '@/lib/password-rules';
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -34,15 +36,16 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const password = String(body.password || '');
   const firstName = String(body.first_name || '').trim();
   const lastName = String(body.last_name || '').trim();
-  const roleRaw = String(body.role || 'cook').trim().toLowerCase();
-  const role = (['cook', 'captain', 'other'].includes(roleRaw) ? roleRaw : 'cook') as
-    'cook' | 'captain' | 'other';
+  const role = normalizeCrewRole(body.role);
 
   if (!email || !email.includes('@')) {
     return NextResponse.json({ error: 'Valid email required' }, { status: 400 });
   }
-  if (password.trim().length < 4) {
-    return NextResponse.json({ error: 'Password must be at least 4 characters' }, { status: 400 });
+  if (password.trim().length < MIN_PASSWORD_LENGTH) {
+    return NextResponse.json(
+      { error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` },
+      { status: 400 },
+    );
   }
   if (!firstName) {
     return NextResponse.json({ error: 'First name required' }, { status: 400 });
@@ -140,9 +143,9 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const memberId = String(body.member_id || '').trim();
   const password = String(body.password || '');
 
-  if (password.trim().length < 4) {
+  if (password.trim().length < MIN_PASSWORD_LENGTH) {
     return NextResponse.json(
-      { error: 'Password must be at least 4 characters' },
+      { error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` },
       { status: 400 },
     );
   }
@@ -177,6 +180,59 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     member.user_id,
     { password: password.trim() },
   );
+  if (authErr) {
+    return NextResponse.json({ error: authErr.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ ok: true });
+}
+
+export async function DELETE(req: NextRequest, ctx: Ctx) {
+  const session = requireAdmin(req, { gtsOnly: true });
+  if (session instanceof NextResponse) return session;
+  const { id: vesselId } = await ctx.params;
+
+  const body = await req.json().catch(() => ({}));
+  const userId = String(body.user_id || '').trim();
+  const memberId = String(body.member_id || '').trim();
+
+  if (!userId && !memberId) {
+    return NextResponse.json(
+      { error: 'user_id or member_id required' },
+      { status: 400 },
+    );
+  }
+
+  const supabase = createServiceClient();
+
+  let memberQuery = supabase
+    .from('vessel_members')
+    .select('id, user_id, vessel_id, email, display_name')
+    .eq('vessel_id', vesselId);
+
+  if (userId) memberQuery = memberQuery.eq('user_id', userId);
+  else memberQuery = memberQuery.eq('id', memberId);
+
+  const { data: member, error: mErr } = await memberQuery.maybeSingle();
+  if (mErr) return NextResponse.json({ error: mErr.message }, { status: 500 });
+  if (!member?.user_id) {
+    return NextResponse.json(
+      { error: 'That login is not a member of this boat' },
+      { status: 404 },
+    );
+  }
+
+  const uid = member.user_id;
+
+  const { error: unlinkErr } = await supabase
+    .from('vessel_members')
+    .delete()
+    .eq('user_id', uid);
+  if (unlinkErr) return NextResponse.json({ error: unlinkErr.message }, { status: 500 });
+
+  await supabase.from('customer_profiles').delete().eq('user_id', uid);
+
+  const { error: authErr } = await supabase.auth.admin.deleteUser(uid);
   if (authErr) {
     return NextResponse.json({ error: authErr.message }, { status: 500 });
   }

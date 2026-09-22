@@ -27,7 +27,7 @@ import type { Metadata } from 'next';
 import { ShoppingCart, Phone, ChevronRight, Radio } from 'lucide-react';
 import { SiteShell, Photo, CtaBand } from '@/components/site/SiteChrome';
 import PartnerLockup from '@/components/site/PartnerLockup';
-import { HOME, SERVICES, CTA, BUSINESS, IMAGES } from '@/app/site/content';
+import { HOME, HOME_SERVICES, CTA, BUSINESS, IMAGES } from '@/app/site/content';
 
 export const metadata: Metadata = {
   title: HOME.meta.title,
@@ -138,7 +138,7 @@ export default function MarketingHome() {
         </p>
 
         <div className="grid md:grid-cols-3 gap-6">
-          {SERVICES.map(s => (
+          {HOME_SERVICES.map(s => (
             <div key={s.slug}
               className="bg-white/65 backdrop-blur-sm rounded-2xl border border-brand-green/10 overflow-hidden flex flex-col hover:bg-white/85 transition-colors">
               <div className="p-4 pb-0">
