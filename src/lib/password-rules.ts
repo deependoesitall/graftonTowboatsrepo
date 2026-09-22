@@ -1,3 +1,5 @@
-// Shared floor for crew/customer passwords. Admin login creation, reset, and
-// the storefront forms must stay on the same number.
-export const MIN_PASSWORD_LENGTH = 4;
+// Shared floor for crew/customer passwords. Must match hosted Supabase Auth
+// (password_min_length defaults to 6 and hosted projects will not go lower).
+// The form, API, and helper text all use this so staff never see "min 4"
+// then get rejected for 6.
+export const MIN_PASSWORD_LENGTH = 6;

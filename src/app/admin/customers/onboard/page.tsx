@@ -505,13 +505,22 @@ export default function OnboardBoatPage() {
           <input className="input-base sm:col-span-2" placeholder="Email" type="email" value={email}
             onChange={e => setEmail(e.target.value)} disabled={!vessel} />
           <input className="input-base" placeholder={`Password (type it — min ${MIN_PASSWORD_LENGTH})`} type="text" value={password}
-            onChange={e => setPassword(e.target.value)} disabled={!vessel} autoComplete="new-password" />
+            onChange={e => setPassword(e.target.value)} disabled={!vessel} autoComplete="new-password"
+            minLength={MIN_PASSWORD_LENGTH} />
           <div className="sm:col-span-2">
             <p className="label-base mb-1.5">Role</p>
             <CrewRoleField value={role} onChange={setRole} disabled={!vessel} />
           </div>
         </div>
-        <button type="button" className="btn-primary text-sm" disabled={busy || !vessel} onClick={addMember}>
+        {error && (
+          <div className="rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm px-4 py-3">{error}</div>
+        )}
+        <button
+          type="button"
+          className="btn-primary text-sm"
+          disabled={busy || !vessel || !firstName.trim() || !email.trim() || password.trim().length < MIN_PASSWORD_LENGTH}
+          onClick={addMember}
+        >
           Add login
         </button>
       </section>

@@ -64,27 +64,20 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   const companyRel = (vessel as { company?: { name?: string } | { name?: string }[] | null }).company;
   const companyName = Array.isArray(companyRel) ? companyRel[0]?.name : companyRel?.name;
-
-  const { data: created, error: authErr } = await supabase.auth.admin.createUser({
-    email,
-    password: password.trim(),
-    email_confirm: true,
-    user_metadata: {
-      first_name: firstName,
-      last_name: lastName,
-      vessel_id: vesselId,
-      company_name: companyName || null,
-    },
-  });
-
-  if (authErr || !created.user) {
-    const msg = authErr?.message || 'Failed to create login';
-    const status = /already|registered|exists/i.test(msg) ? 409 : 500;
-    return NextResponse.json({ error: msg }, { status });
-  }
-
-  const userId = created.user.id;
   const displayName = [firstName, lastName].filter(Boolean).join(' ');
+  const pw = password.trim();
+  const meta = {
+    first_name: firstName,
+    last_name: lastName,
+    vessel_id: vesselId,
+    company_name: companyName || null,
+  };
+
+  const ensured = await ensureCrewAuthUser(supabase, { email, password: pw, meta });
+  if ('error' in ensured) {
+    return NextResponse.json({ error: ensured.error }, { status: ensured.status });
+  }
+  const userId = ensured.user.id;
 
   await supabase.from('customer_profiles').upsert({
     user_id: userId,
@@ -96,13 +89,13 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   const { data: member, error: mErr } = await supabase
     .from('vessel_members')
-    .insert({
+    .upsert({
       vessel_id: vesselId,
       user_id: userId,
       role,
       display_name: displayName,
       email,
-    })
+    }, { onConflict: 'vessel_id,user_id' })
     .select('*')
     .single();
 
@@ -181,7 +174,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     { password: password.trim() },
   );
   if (authErr) {
-    return NextResponse.json({ error: authErr.message }, { status: 500 });
+    const mapped = mapCrewAuthError(authErr.message);
+    return NextResponse.json({ error: mapped.error }, { status: mapped.status });
   }
 
   return NextResponse.json({ ok: true });
@@ -238,4 +232,57 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   }
 
   return NextResponse.json({ ok: true });
+}
+
+type ServiceClient = ReturnType<typeof createServiceClient>;
+
+function mapCrewAuthError(message: string | undefined): { status: number; error: string } {
+  const msg = (message || '').trim() || 'Failed to create login';
+  if (/at least \d+ characters/i.test(msg)) {
+    return { status: 400, error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.` };
+  }
+  if (/pwned|leaked password|weak.?password|not strong enough|compromised/i.test(msg)) {
+    return {
+      status: 400,
+      error: 'That password is too common. Use a different one — six or more characters is enough.',
+    };
+  }
+  if (/already|registered|exists/i.test(msg)) {
+    return { status: 409, error: 'That email already has a login. Set a new password on the existing row, or use a different email.' };
+  }
+  return { status: 500, error: msg };
+}
+
+async function findAuthUserByEmail(supabase: ServiceClient, email: string) {
+  const { data, error } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
+  if (error) return { user: null as { id: string } | null, error };
+  const user = (data.users || []).find(u => (u.email || '').toLowerCase() === email) || null;
+  return { user, error: null };
+}
+
+async function ensureCrewAuthUser(
+  supabase: ServiceClient,
+  opts: { email: string; password: string; meta: Record<string, unknown> },
+): Promise<{ user: { id: string } } | { error: string; status: number }> {
+  const { data: created, error: authErr } = await supabase.auth.admin.createUser({
+    email: opts.email,
+    password: opts.password,
+    email_confirm: true,
+    user_metadata: opts.meta,
+  });
+  if (!authErr && created?.user) return { user: created.user };
+
+  const exists = /already|registered|exists/i.test(authErr?.message || '');
+  if (!exists) return mapCrewAuthError(authErr?.message);
+
+  const found = await findAuthUserByEmail(supabase, opts.email);
+  if (!found.user) return mapCrewAuthError(authErr?.message);
+
+  const { error: updErr } = await supabase.auth.admin.updateUserById(found.user.id, {
+    password: opts.password,
+    email_confirm: true,
+    user_metadata: opts.meta,
+  });
+  if (updErr) return mapCrewAuthError(updErr.message);
+  return { user: found.user };
 }

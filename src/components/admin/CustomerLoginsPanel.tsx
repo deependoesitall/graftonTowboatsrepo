@@ -275,14 +275,14 @@ export function CustomerLoginsPanel() {
               onChange={e => setQaEmail(e.target.value)} />
             <input className="input-base" placeholder={`Password (type it — min ${MIN_PASSWORD_LENGTH})`} type="text"
               value={qaPassword} onChange={e => setQaPassword(e.target.value)}
-              autoComplete="new-password" />
+              autoComplete="new-password" minLength={MIN_PASSWORD_LENGTH} />
             <div className="sm:col-span-2">
               <p className="label-base mb-1.5">Role</p>
               <CrewRoleField value={qaRole} onChange={setQaRole} />
             </div>
           </div>
           <div className="flex flex-wrap gap-2 items-center">
-            <button type="button" className="btn-primary text-sm" disabled={qaBusy} onClick={quickAddMember}>
+            <button type="button" className="btn-primary text-sm" disabled={qaBusy || !qaVesselId || !qaFirst.trim() || !qaEmail.trim() || qaPassword.trim().length < MIN_PASSWORD_LENGTH} onClick={quickAddMember}>
               {qaBusy ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : <Plus className="w-4 h-4 inline mr-1" />}
               Add login
             </button>
