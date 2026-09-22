@@ -73,7 +73,9 @@
     @apply w-full px-3 py-2.5 border border-brand-green/30 rounded-lg font-body text-sm
            bg-white text-brand-green
            focus:outline-none focus:ring-2 focus:ring-brand-glight focus:border-brand-glight
-           placeholder:text-brand-green/30 transition-shadow;
+           placeholder:text-brand-green/30 transition-shadow
+           disabled:bg-gray-100 disabled:text-brand-green/45 disabled:cursor-not-allowed disabled:border-brand-green/15
+           read-only:bg-gray-50;
   }
 
   .label-base {

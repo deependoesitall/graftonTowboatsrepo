@@ -268,14 +268,14 @@ export function CustomerLoginsPanel() {
               </select>
             </div>
             <input className="input-base" placeholder="First name" value={qaFirst}
-              onChange={e => setQaFirst(e.target.value)} />
+              onChange={e => setQaFirst(e.target.value)} autoComplete="off" />
             <input className="input-base" placeholder="Last name" value={qaLast}
-              onChange={e => setQaLast(e.target.value)} />
+              onChange={e => setQaLast(e.target.value)} autoComplete="off" />
             <input className="input-base sm:col-span-2" placeholder="Email" type="email" value={qaEmail}
-              onChange={e => setQaEmail(e.target.value)} />
+              onChange={e => setQaEmail(e.target.value)} autoComplete="off" />
             <input className="input-base" placeholder={`Password (type it — min ${MIN_PASSWORD_LENGTH})`} type="text"
               value={qaPassword} onChange={e => setQaPassword(e.target.value)}
-              autoComplete="new-password" minLength={MIN_PASSWORD_LENGTH} />
+              autoComplete="off" minLength={MIN_PASSWORD_LENGTH} />
             <div className="sm:col-span-2">
               <p className="label-base mb-1.5">Role</p>
               <CrewRoleField value={qaRole} onChange={setQaRole} />
@@ -385,7 +385,7 @@ export function CustomerLoginsPanel() {
                                     onKeyDown={e => e.key === 'Enter' && setMemberPassword(m)}
                                     placeholder={`Type new password (min ${MIN_PASSWORD_LENGTH} chars)`}
                                     className="input-base text-sm flex-1 min-w-[12rem]"
-                                    autoComplete="new-password"
+                                    autoComplete="off"
                                   />
                                   <button type="button" onClick={() => setMemberPassword(m)}
                                     disabled={pwSaving || pwValue.trim().length < MIN_PASSWORD_LENGTH}

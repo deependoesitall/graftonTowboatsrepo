@@ -390,8 +390,7 @@ export default function OnboardBoatPage() {
                 setVesselName(e.target.value);
                 if (ledgerPick && ledgerPick !== TYPE_NEW) setLedgerPick(TYPE_NEW);
               }}
-              disabled={!!vessel || (pickedFromLedger && !!vesselName && ledgerPick !== TYPE_NEW)}
-              readOnly={pickedFromLedger && ledgerPick !== TYPE_NEW}
+              disabled={!!vessel}
             />
           </div>
         )}
@@ -417,7 +416,7 @@ export default function OnboardBoatPage() {
         </h2>
         <p className="text-xs text-brand-green/50">
           Anyone on the boat who orders — cook, captain, steward, whoever. Separate emails and passwords, shared boat history.
-          Type a password (browsers may suggest one — that is fine). Use Set password on a row below to change one on the fly — or later from Customers → Logins.
+          Type a password. Use Set password on a row below to change one on the fly — or later from Customers → Logins.
         </p>
 
                 {members.length > 0 && (
@@ -469,7 +468,7 @@ export default function OnboardBoatPage() {
                         onKeyDown={e => e.key === 'Enter' && setMemberPassword(m)}
                         placeholder={`Type new password (min ${MIN_PASSWORD_LENGTH})`}
                         className="input-base text-sm flex-1 min-w-[12rem]"
-                        autoComplete="new-password"
+                        autoComplete="off"
                       />
                       <button
                         type="button"
@@ -499,17 +498,17 @@ export default function OnboardBoatPage() {
 
         <div className="grid sm:grid-cols-2 gap-3">
           <input className="input-base" placeholder="First name" value={firstName}
-            onChange={e => setFirstName(e.target.value)} disabled={!vessel} />
+            onChange={e => setFirstName(e.target.value)} autoComplete="off" />
           <input className="input-base" placeholder="Last name" value={lastName}
-            onChange={e => setLastName(e.target.value)} disabled={!vessel} />
+            onChange={e => setLastName(e.target.value)} autoComplete="off" />
           <input className="input-base sm:col-span-2" placeholder="Email" type="email" value={email}
-            onChange={e => setEmail(e.target.value)} disabled={!vessel} />
+            onChange={e => setEmail(e.target.value)} autoComplete="off" />
           <input className="input-base" placeholder={`Password (type it — min ${MIN_PASSWORD_LENGTH})`} type="text" value={password}
-            onChange={e => setPassword(e.target.value)} disabled={!vessel} autoComplete="new-password"
+            onChange={e => setPassword(e.target.value)} autoComplete="off"
             minLength={MIN_PASSWORD_LENGTH} />
           <div className="sm:col-span-2">
             <p className="label-base mb-1.5">Role</p>
-            <CrewRoleField value={role} onChange={setRole} disabled={!vessel} />
+            <CrewRoleField value={role} onChange={setRole} />
           </div>
         </div>
         {error && (
