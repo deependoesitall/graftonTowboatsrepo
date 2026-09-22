@@ -10,6 +10,7 @@ import Link from 'next/link';
 import { Loader2, CheckCircle2, Anchor } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { SiteHeader } from '@/components/layout/SiteHeader';
+import { MIN_PASSWORD_LENGTH } from '@/lib/password-rules';
 
 export default function ResetPasswordPage() {
   const router = useRouter();
@@ -31,7 +32,10 @@ export default function ResetPasswordPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
-    if (password.length < 6) { setError('Password must be at least 6 characters.'); return; }
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
+      return;
+    }
     if (password !== confirm) { setError('Passwords do not match.'); return; }
 
     setBusy(true);
@@ -87,7 +91,7 @@ export default function ResetPasswordPage() {
                       <input
                         type="password"
                         className="input-base"
-                        placeholder="At least 6 characters"
+                        placeholder={`At least ${MIN_PASSWORD_LENGTH} characters`}
                         value={password}
                         onChange={e => setPassword(e.target.value)}
                         autoComplete="new-password"

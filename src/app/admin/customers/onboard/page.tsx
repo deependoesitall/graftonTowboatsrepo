@@ -3,9 +3,12 @@
 // Company → boat → crew logins. Pick boats from the deliveries ledger when they already exist.
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Loader2, Plus, Ship, UserPlus, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, Loader2, Plus, Ship, Trash2, UserPlus, CheckCircle2 } from 'lucide-react';
 import { adminFetch, fetchAdminSession, canAccess } from '@/lib/admin-auth';
 import { useRouter } from 'next/navigation';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
+import { CrewRoleField } from '@/components/admin/CrewRoleField';
+import { MIN_PASSWORD_LENGTH } from '@/lib/password-rules';
 
 interface Company { id: string; name: string; is_active?: boolean }
 interface Vessel {
@@ -47,13 +50,15 @@ export default function OnboardBoatPage() {
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState<'cook' | 'captain' | 'other'>('cook');
+  const [role, setRole] = useState('cook');
 
   // Inline set-password on existing crew rows (same API as Customers → Logins)
   const [pwFor, setPwFor] = useState<string | null>(null);
   const [pwValue, setPwValue] = useState('');
   const [pwSaving, setPwSaving] = useState(false);
   const [pwDone, setPwDone] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const { confirm, dialog } = useConfirm();
 
   useEffect(() => {
     (async () => {
@@ -170,8 +175,8 @@ export default function OnboardBoatPage() {
   async function setMemberPassword(member: Member) {
     if (!vessel) { setError('Link the boat first'); return; }
     const next = pwValue.trim();
-    if (next.length < 4) {
-      setError('Password must be at least 4 characters');
+    if (next.length < MIN_PASSWORD_LENGTH) {
+      setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`);
       return;
     }
     setPwSaving(true);
@@ -203,8 +208,8 @@ export default function OnboardBoatPage() {
   async function addMember() {
     setError(''); setOk('');
     if (!vessel) { setError('Link or create the boat first'); return; }
-    if (!firstName.trim() || !email.trim() || password.trim().length < 4) {
-      setError('First name, email, and password (4+ chars) required');
+    if (!firstName.trim() || !email.trim() || password.trim().length < MIN_PASSWORD_LENGTH) {
+      setError(`First name, email, and password (${MIN_PASSWORD_LENGTH}+ chars) required`);
       return;
     }
     setBusy(true);
@@ -224,8 +229,39 @@ export default function OnboardBoatPage() {
       if (!res.ok) { setError(json.error || 'Failed to add login'); return; }
       setMembers(m => [...m, json.member]);
       setFirstName(''); setLastName(''); setEmail(''); setPassword('');
+      setRole('cook');
       setOk(`Login created for ${json.member.display_name || json.member.email}`);
     } finally { setBusy(false); }
+  }
+
+  async function deleteMember(member: Member) {
+    if (!vessel) { setError('Link the boat first'); return; }
+    const ok = await confirm({
+      title: 'Delete this login?',
+      message: 'They will not be able to sign in. Boat order history stays.',
+      danger: true,
+      actions: [{ id: 'ok', label: 'Delete login', variant: 'danger' }],
+    });
+    if (!ok) return;
+    setDeletingId(member.id);
+    setError('');
+    setOk('');
+    try {
+      const res = await adminFetch(`/api/admin/vessels/${vessel.id}/members`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: member.user_id, member_id: member.id }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(json.error || 'Could not delete login');
+        return;
+      }
+      setMembers(list => list.filter(m => m.id !== member.id));
+      setOk(`Login removed for ${member.display_name || member.email || 'crew member'}`);
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   if (!ready) {
@@ -393,23 +429,34 @@ export default function OnboardBoatPage() {
                     <p className="font-medium text-brand-navy truncate">{m.display_name || m.email}</p>
                     <p className="text-brand-green/50 text-xs truncate capitalize">{m.role} · {m.email}</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const next = pwFor === m.id ? null : m.id;
-                      setPwFor(next);
-                      setPwValue('');
-                      setPwDone(null);
-                      setError('');
-                    }}
-                    className="text-xs font-bold uppercase tracking-wide text-brand-river hover:text-brand-navy shrink-0"
-                  >
-                    {pwDone === m.id ? (
-                      <span className="text-green-600">Password set</span>
-                    ) : (
-                      'Set password'
-                    )}
-                  </button>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = pwFor === m.id ? null : m.id;
+                        setPwFor(next);
+                        setPwValue('');
+                        setPwDone(null);
+                        setError('');
+                      }}
+                      className="text-xs font-bold uppercase tracking-wide text-brand-river hover:text-brand-navy"
+                    >
+                      {pwDone === m.id ? (
+                        <span className="text-green-600">Password set</span>
+                      ) : (
+                        'Set password'
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deleteMember(m)}
+                      disabled={deletingId === m.id}
+                      className="text-xs font-bold uppercase tracking-wide text-red-600 hover:text-red-800 disabled:opacity-50 inline-flex items-center gap-1"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      {deletingId === m.id ? 'Deleting…' : 'Delete'}
+                    </button>
+                  </div>
                 </div>
                 {pwFor === m.id && (
                   <div className="mt-3 space-y-2">
@@ -420,14 +467,14 @@ export default function OnboardBoatPage() {
                         value={pwValue}
                         onChange={e => setPwValue(e.target.value)}
                         onKeyDown={e => e.key === 'Enter' && setMemberPassword(m)}
-                        placeholder="Type new password (min 4)"
+                        placeholder={`Type new password (min ${MIN_PASSWORD_LENGTH})`}
                         className="input-base text-sm flex-1 min-w-[12rem]"
                         autoComplete="new-password"
                       />
                       <button
                         type="button"
                         onClick={() => setMemberPassword(m)}
-                        disabled={pwSaving || pwValue.trim().length < 4}
+                        disabled={pwSaving || pwValue.trim().length < MIN_PASSWORD_LENGTH}
                         className="btn-primary text-xs px-3 py-2 disabled:opacity-50 whitespace-nowrap"
                       >
                         {pwSaving ? 'Saving…' : 'Set password'}
@@ -457,13 +504,12 @@ export default function OnboardBoatPage() {
             onChange={e => setLastName(e.target.value)} disabled={!vessel} />
           <input className="input-base sm:col-span-2" placeholder="Email" type="email" value={email}
             onChange={e => setEmail(e.target.value)} disabled={!vessel} />
-          <input className="input-base" placeholder="Password (type it)" type="text" value={password}
+          <input className="input-base" placeholder={`Password (type it — min ${MIN_PASSWORD_LENGTH})`} type="text" value={password}
             onChange={e => setPassword(e.target.value)} disabled={!vessel} autoComplete="new-password" />
-          <select className="input-base" value={role} onChange={e => setRole(e.target.value as typeof role)} disabled={!vessel}>
-            <option value="cook">Cook</option>
-            <option value="captain">Captain</option>
-            <option value="other">Other</option>
-          </select>
+          <div className="sm:col-span-2">
+            <p className="label-base mb-1.5">Role</p>
+            <CrewRoleField value={role} onChange={setRole} disabled={!vessel} />
+          </div>
         </div>
         <button type="button" className="btn-primary text-sm" disabled={busy || !vessel} onClick={addMember}>
           Add login
@@ -475,6 +521,7 @@ export default function OnboardBoatPage() {
         {' · '}
         <Link href="/admin/customers?tab=logins" className="text-brand-river font-semibold hover:underline">Manage logins</Link>
       </p>
+      {dialog}
     </div>
   );
 }

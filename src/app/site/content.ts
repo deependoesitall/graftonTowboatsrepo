@@ -26,7 +26,14 @@ export const BUSINESS = {
   email: 'GraftonTowboatServices@gmail.com',
   street: '25 Dagget Hollow',
   cityStateZip: 'Grafton, IL 62037',
-  vhf: 'Monitor Channel 68 via Grafton Harbor',
+  /**
+   * Jen, Sep 21 2026 Zoom chat, verbatim Channel 13 line, plus Channel 68
+   * (pleasure craft) in the same sentence. Contact page uses the long form.
+   */
+  vhfLong:
+    'During on water deliveries, Grafton Towboat Services monitors VHF Channel 13 for vessel communication and coordination, and VHF Channel 68 for pleasure craft.',
+  /** Footer and other compact lines. */
+  vhf: 'VHF 13 (tow/barge) · VHF 68 (pleasure craft)',
   /** Corrected Sept 2026. The site said 218 / 0.7 for months. */
   mileMarkers: 'Mile Marker 219 (Mississippi River) · Mile Marker 0 (Illinois River)',
   mileMarkersShort: 'MM 219 Mississippi · MM 0 Illinois',
@@ -223,6 +230,13 @@ export const SERVICES = [
   },
 ] as const;
 
+/** Home "Our Services" tile order. Jen did not pick on the Sep 21 call; supplies first. */
+export const HOME_SERVICES = [
+  SERVICES.find(s => s.slug === 'towboat-supplies')!,
+  SERVICES.find(s => s.slug === 'grocery-delivery')!,
+  SERVICES.find(s => s.slug === 'crew-change')!,
+];
+
 export const HOME = {
   meta: {
     title: 'Grafton Towboat Services | Marine Grocery & Supply Delivery',
@@ -238,12 +252,9 @@ export const HOME = {
     //
     // TWO THINGS WERE WRONG HERE (Sept 2026) AND BOTH MATTERED.
     //
-    // "at the Grafton harbor" — GTS is at 25 Dagget Hollow, Grafton. Grafton
-    // Harbor is a DIFFERENT BUSINESS, the marina GTS relays VHF Channel 68
-    // through. Putting the company "at" it misplaced GTS and implied a
-    // relationship that isn't there, to an audience that knows the difference.
-    // The Channel 68 references elsewhere are correct and stay — "via Grafton
-    // Harbor" is a relay, not an address.
+    // The lede used to place GTS at a marina they do not own. Address is
+    // 25 Dagget Hollow, Grafton. During on-water deliveries they monitor
+    // VHF 13 (tow/barge) and VHF 68 (pleasure craft) themselves.
     //
     // "marine delivery" — nobody on the river calls it that. Captains say
     // groceries, supplies, crew change. Trade jargon in the first sentence of
@@ -275,7 +286,7 @@ export const ABOUT = {
   stats: [
     { stat: '24/7', label: 'Support' },
     { stat: 'MM 219', label: 'Mississippi River' },
-    { stat: 'Ch. 68', label: 'via Grafton Harbor' },
+    { stat: 'VHF 13 / 68', label: 'Tow · pleasure craft' },
   ],
 } as const;
 

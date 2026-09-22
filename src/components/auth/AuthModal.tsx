@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { X, Loader2, Star, History, Zap, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { createClient } from '@/lib/supabase/client';
+import { MIN_PASSWORD_LENGTH } from '@/lib/password-rules';
 
 interface AuthModalProps {
   open: boolean;
@@ -52,10 +53,10 @@ export function AuthModal({ open, onClose, defaultMode = 'signin', defaultEmail 
   if (!open || !mounted) return null;
 
   const canSubmit = screen === 'signup'
-    ? email && password.length >= 6 && firstName.trim().length > 0 && confirmPassword === password
+    ? email && password.length >= MIN_PASSWORD_LENGTH && firstName.trim().length > 0 && confirmPassword === password
     : screen === 'forgot'
     ? !!email
-    : email && password.length >= 6;
+    : email && password.length > 0;
 
   async function handleGoogleSignIn() {
     setBusy(true);
@@ -287,7 +288,7 @@ export function AuthModal({ open, onClose, defaultMode = 'signin', defaultEmail 
                     <input
                       type={showPassword ? 'text' : 'password'}
                       className="input-base pr-10"
-                      placeholder="At least 6 characters"
+                      placeholder={screen === 'signup' ? `At least ${MIN_PASSWORD_LENGTH} characters` : 'Password'}
                       value={password}
                       onChange={e => setPassword(e.target.value)}
                       onKeyDown={e => e.key === 'Enter' && submit()}

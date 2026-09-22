@@ -1432,6 +1432,9 @@ export default function AdminSettingsPage() {
               <p className="text-xs text-gray-400 mt-1">
                 Separate inboxes — same split as the admin dashboard. Customer confirmation still goes to the boat. Separate with commas.
               </p>
+              <p className="text-xs text-gray-500 mt-2">
+                Website contact form still uses the launch inbox. At go-live, point it at GraftonTowboatServices@gmail.com (optional CC).
+              </p>
             </div>
             <div className="rounded-xl border-2 border-brand-navy/15 bg-brand-navy/[0.03] p-4 space-y-3">
               <p className="text-xs font-bold uppercase tracking-wide text-brand-navy">GTS — Grafton Towboat Services</p>
