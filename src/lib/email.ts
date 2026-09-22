@@ -9,7 +9,7 @@ import {
   splitOutsidePickups, groupCodCollect, pickupPayLabel, pickupIsPriced, lineAmount,
 } from '@/lib/outside-pickup';
 import { ESTIMATED_EXPLANATION } from '@/lib/estimated-copy';
-import { accountUrl } from '@/lib/public-url';
+import { accountUrl, adminOrdersUrl, publicSiteUrl } from '@/lib/public-url';
 import { billableCharges, chargeLabel, orderServiceTotal } from '@/lib/service-charges';
 import { groceryBilledTotal, groceryHandlingFeeAmount } from '@/lib/grocery-handling-fee';
 
@@ -134,16 +134,7 @@ function applyTemplateVars(text: string, order: Order, appUrl: string): string {
 }
 
 function getAppUrl(): string {
-  if (process.env.NEXT_PUBLIC_APP_URL && !process.env.NEXT_PUBLIC_APP_URL.includes('*')) {
-    return process.env.NEXT_PUBLIC_APP_URL;
-  }
-  return 'http://localhost:3000';
-}
-
-/** Sinclair staff install/origin ? shopping mode lives here, not on apex. */
-function shopAppUrl(): string {
-  const raw = process.env.NEXT_PUBLIC_SHOP_URL || 'https://shop.graftontowboatservices.com';
-  return raw.replace(/\/$/, '');
+  return publicSiteUrl();
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -157,6 +148,10 @@ export function buildOrderEmailHtml(
     intro?: string;
     buttonText: string;
     buttonUrl: string;
+    /** Larger Gmail-safe CTA (Sinclair shop-now). */
+    prominentButton?: boolean;
+    /** Line under the button — signed-in phones, etc. */
+    buttonHint?: string;
     /** Optional second CTA (e.g. "Questions? Contact us" under View in dashboard). */
     secondButtonText?: string;
     secondButtonUrl?: string;
@@ -626,10 +621,22 @@ export function buildOrderEmailHtml(
 
     ${sinclairNote}
 
-    <div style="text-align:center;padding:14px;background:#f8f9fa;border-radius:4px;">
+    <div style="text-align:center;padding:${opts.prominentButton ? '18px 14px 16px' : '14px'};background:#f8f9fa;border-radius:4px;">
+      ${opts.prominentButton ? `
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td align="center" style="background:#1E3D1E;border-radius:8px;">
+            <a href="${opts.buttonUrl}" style="display:block;padding:18px 24px;color:#D9E84A;font-family:Arial,Helvetica,sans-serif;font-size:17px;font-weight:800;text-decoration:none;letter-spacing:0.3px;text-align:center;">
+              ${opts.buttonText}
+            </a>
+          </td>
+        </tr>
+      </table>` : `
       <a href="${opts.buttonUrl}" style="background:#1E3D1E;color:#D9E84A;padding:10px 24px;border-radius:24px;text-decoration:none;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1px;display:inline-block;">
         ${opts.buttonText} →
-      </a>
+      </a>`}
+      ${opts.buttonHint ? `<p style="margin:12px 0 0;font-size:12px;line-height:1.5;color:#4d7c5f;">${opts.buttonHint}</p>` : ''}
+      ${opts.prominentButton ? `<p style="margin:10px 0 0;font-size:11px;line-height:1.5;word-break:break-all;"><a href="${opts.buttonUrl}" style="color:#1E3D1E;">${opts.buttonUrl}</a></p>` : ''}
       ${opts.secondButtonUrl && opts.secondButtonText ? `
       <div style="margin-top:10px;">
         <a href="${opts.secondButtonUrl}" style="color:#1E3D1E;font-size:12px;font-weight:700;text-decoration:underline;">
@@ -730,23 +737,25 @@ export async function sendOrderReceivedEmail(
     throw new Error(businessResult.error.message || JSON.stringify(businessResult.error));
   }
 
-  // 2) Sinclair's ? only when there is grocery to shop. Dedicated message with
-  // a one-tap link into Shopping Mode on the shop host (their installed app).
+  // 2) Sinclair's — only when there is grocery to shop. Dedicated message with
+  // a one-tap button to the live admin Orders page (opens this order).
   if (hasShoppableItems) {
     const sinclairTo = parseCcList(
       opts.sinclairEmailRaw
       || (opts.sinclairTestMode ? '' : (process.env.SINCLAIRS_ORDER_EMAILS || DEFAULT_SINCLAIR_ORDER_EMAILS)),
     );
     if (sinclairTo.length) {
-      const shopUrl = `${shopAppUrl()}/admin/orders?order=${encodeURIComponent(order.id)}&shop=1`;
+      const shopUrl = adminOrdersUrl({ orderId: order.id, shop: true });
       const sinclairHtml = buildOrderEmailHtml(order, {
         tagline:    opts.sinclairTestMode ? 'TEST — Sinclair shopping-desk copy' : 'New order to shop',
         intro:      (opts.sinclairTestMode
           ? `<strong>TEST MODE</strong> — this is the email Sinclair&apos;s shopping desk would get. The store inboxes are not on this send.<br><br>`
           : '')
-          + `Grocery order <strong>${order.order_number}</strong> for <strong>${order.company_name}</strong> / <strong>${order.vessel_name || 'vessel'}</strong> is ready to pick. Open it in Shopping Mode — barcode scan, aisle order, weights, and substitutions.`,
-        buttonText: 'Open in Shopping Mode',
+          + `Grocery order <strong>${esc(order.order_number)}</strong> for <strong>${esc(order.company_name)}</strong> / <strong>${esc(order.vessel_name || 'vessel')}</strong> is ready to pick. Tap the button to open it in the admin panel and start shopping — barcode scan, aisle order, weights, and substitutions.`,
+        buttonText: 'Open this order',
         buttonUrl:  shopUrl,
+        prominentButton: true,
+        buttonHint: 'On a device that is already signed in, this goes straight into the order. Otherwise you will see the sign-in screen first.',
         footerText: 'Grafton Towboat Services — order alerts for Sinclair\'s Foods staff',
         showSinclairNote: false,
       });

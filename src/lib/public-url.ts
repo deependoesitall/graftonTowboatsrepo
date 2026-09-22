@@ -16,3 +16,11 @@ export function accountUrl(orderId?: string | null): string {
   const base = `${publicSiteUrl()}/account`;
   return orderId ? `${base}?order=${encodeURIComponent(orderId)}` : base;
 }
+
+/** Staff Orders list on the live site. Sinclair shop emails use this, never shop.* */
+export function adminOrdersUrl(opts?: { orderId?: string | null; shop?: boolean }): string {
+  const url = new URL('/admin/orders', publicSiteUrl());
+  if (opts?.orderId) url.searchParams.set('order', opts.orderId);
+  if (opts?.shop) url.searchParams.set('shop', '1');
+  return url.toString();
+}

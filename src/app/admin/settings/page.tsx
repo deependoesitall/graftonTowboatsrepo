@@ -1457,7 +1457,7 @@ export default function AdminSettingsPage() {
                 {settings.sinclair_email_test_mode ? ' · test mode' : ''}
               </p>
               <p className="text-[11px] text-gray-600">
-                Only when there is grocery to shop. They get &ldquo;Shop now&rdquo; with a link into Shopping Mode — not GTS delivery charges, not crew-change-only jobs.
+                Only when there is grocery to shop. They get &ldquo;Shop now&rdquo; with a button into the admin order — not GTS delivery charges, not crew-change-only jobs.
               </p>
               {settings.sinclair_email_test_mode && (
                 <div className="rounded-lg bg-amber-100 border border-amber-300 px-3 py-2 text-xs text-amber-950 font-medium">

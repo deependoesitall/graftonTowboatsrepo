@@ -86,11 +86,15 @@ function OrdersContent() {
     isOwner || (isGts && String(orderNumber).startsWith('IMP-'));
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // Auth guard — verify the session cookie with the server
+  // Auth guard — verify the session cookie with the server.
+  // Keep the email deep link (?order=&shop=1) so after sign-in they land on this order.
   useEffect(() => {
     (async () => {
       const session = await fetchAdminSession();
-      if (!session) router.push('/admin');
+      if (!session) {
+        const next = `${window.location.pathname}${window.location.search}`;
+        router.replace(`/admin?next=${encodeURIComponent(next)}`);
+      }
     })();
   }, [router]);
 

@@ -148,7 +148,9 @@ export function sessionCookieOptions(opts?: { remember?: boolean }) {
   return {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict' as const,
+    // Lax so a signed-in phone opening an order email (Gmail → this site)
+    // still sends the session. Strict dropped that cookie and showed login.
+    sameSite: 'lax' as const,
     path: '/',
     maxAge: remember ? SESSION_TTL_REMEMBER_SECONDS : SESSION_TTL_SECONDS,
   };
@@ -159,7 +161,7 @@ export function clearedCookieOptions() {
   return {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict' as const,
+    sameSite: 'lax' as const,
     path: '/',
     maxAge: 0,
   };

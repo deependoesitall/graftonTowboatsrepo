@@ -165,6 +165,26 @@ export function adminHeaders(extra?: Record<string, string>): Record<string, str
   };
 }
 
+/**
+ * Safe in-app path for post-login redirects (email deep links).
+ * Only /admin… paths; rejects protocol-relative and off-site URLs.
+ */
+export function safeAdminNext(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  let path = raw.trim();
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    try {
+      const u = new URL(path);
+      path = `${u.pathname}${u.search}`;
+    } catch {
+      return null;
+    }
+  }
+  if (!path.startsWith('/admin')) return null;
+  if (path.startsWith('//') || path.includes('://') || path.includes('\\')) return null;
+  return path;
+}
+
 /** fetch() wrapper that always sends the admin auth token. */
 export function adminFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   return fetch(input, {

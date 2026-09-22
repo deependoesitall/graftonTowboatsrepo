@@ -9,7 +9,7 @@ import {
   Mail, Send, X, FileText, AlertTriangle, Truck, Plus,
 } from 'lucide-react';
 import { formatCurrency, formatDateOnly } from '@/lib/utils';
-import { AdminRole, AdminPermission, setAdminSession, setAdminUiState, fetchAdminSession, adminFetch, isGtsRole, getAdminRole } from '@/lib/admin-auth';
+import { AdminRole, AdminPermission, setAdminSession, setAdminUiState, fetchAdminSession, adminFetch, isGtsRole, getAdminRole, safeAdminNext } from '@/lib/admin-auth';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import PushBell from '@/components/admin/PushBell';
 import { GroceryHandlingFeeField } from '@/components/admin/GroceryHandlingFeeField';
@@ -35,15 +35,22 @@ export default function AdminDashboard() {
   }>(null);
   const router = useRouter();
 
+  function destinationAfterAuth(role: AdminRole, permissions: AdminPermission[]): string {
+    const next = safeAdminNext(new URLSearchParams(window.location.search).get('next'));
+    if (next) return next;
+    const sinclair = role === 'manager' || role === 'staff' || permissions.includes('sinclair');
+    return sinclair ? '/admin/orders' : '/admin';
+  }
+
   useEffect(() => {
     (async () => {
       const session = await fetchAdminSession();
       setLoggedIn(!!session);
       if (session) {
         setAdminRole(session.role);
-        // Sinclair users skip the dashboard and go straight to orders
-        if (session.permissions?.includes('sinclair')) {
-          window.location.href = '/admin/orders';
+        const dest = destinationAfterAuth(session.role, session.permissions ?? []);
+        if (dest !== '/admin') {
+          window.location.href = dest;
           return;
         }
         fetchStats();
@@ -94,8 +101,8 @@ export default function AdminDashboard() {
       } else {
         setAdminUiState(user?.role || 'owner', user?.display_name || user?.username || 'Admin', user?.username || 'admin');
       }
-      // Sinclair users go directly to orders
-      window.location.href = permissions.includes('sinclair') ? '/admin/orders' : '/admin';
+      const role = (user?.role || 'owner') as AdminRole;
+      window.location.href = destinationAfterAuth(role, permissions);
     } catch {
       // Network failure — offline at the dock, DNS hiccup, request blocked.
       // Without this the button just stopped spinning and said nothing at all.
