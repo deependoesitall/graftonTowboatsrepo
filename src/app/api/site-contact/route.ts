@@ -42,8 +42,8 @@ const esc = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 /** Soft-gate cold SEO / sales-pitch templates. Real barge enquiries never sound like this. */
-function isSalesPitchTemplate(message: string, name: string): boolean {
-  const blob = `${name}\n${message}`.toLowerCase();
+function isSalesPitchTemplate(message: string, name: string, email: string): boolean {
+  const blob = `${name}\n${email}\n${message}`.toLowerCase();
   const needles = [
     'spotted a few things',
     'practical suggestions',
@@ -63,11 +63,39 @@ function isSalesPitchTemplate(message: string, name: string): boolean {
     'noticed your website',
     'came across your site',
     'came across your website',
+    'came across your web site',
+    'i came across your',
+    'worth looking into',
+    'could be worth looking',
+    'few quick notes',
+    'put together a few',
+    'would you like me to send',
+    'quick notes with some',
+    'some practical suggestions',
     'partnership opportunity',
     'guest post',
     'link building',
+    'improve your website',
+    'audit of your site',
+    'found a few issues on your',
   ];
-  return needles.some(n => blob.includes(n));
+  if (needles.some(n => blob.includes(n))) return true;
+
+  const marine = /\b(grocery|groceries|vessel|towboat|tow boat|barge|crew change|mile marker|grafton|sinclair|supplies|captain|cook|dock|eta|tow)\b/i.test(message);
+  if (marine) return false;
+
+  if (/digital@|\.digital@|seo@|marketing@|leads@/i.test(email)) return true;
+
+  const weak = [
+    'came across',
+    'worth looking',
+    'quick notes',
+    'send them over',
+    'practical suggestion',
+    'spotted a few',
+    'noticed a few',
+  ].filter(w => blob.includes(w));
+  return weak.length >= 2;
 }
 
 export async function POST(req: NextRequest) {
@@ -130,7 +158,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const parkedPitch = isSalesPitchTemplate(message, name);
+  const parkedPitch = isSalesPitchTemplate(message, name, email);
 
   // ── 1. Store. This is the part that must not fail silently. ──────────────
   const { data: row, error: insErr } = await supabase
