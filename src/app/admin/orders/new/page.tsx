@@ -26,9 +26,8 @@
 //
 // PASTE is for an order that arrived as a text message or an email body.
 //
-// SCAN (Sinclair's Order Form importer) is the marked paper form itself —
-// PDF or photos of the QNTY column. Ink detection + grouped marks; nothing
-// is committed until staff confirm. Separate from the register-receipt PLU tape.
+// REGISTER RECEIPT is the itemized Sinclair PLU tape PDF — a different job
+// from typing the paper form.
 //
 // ── WHY IT SUBMITS TO /api/orders AND NOT SOMEWHERE NEW ────────────────────
 //
@@ -43,11 +42,10 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Search, Loader2, Check, X, Plus, Minus, ClipboardPaste, RotateCcw,
-  Keyboard, ListOrdered, ChevronRight, ChevronDown, AlertCircle, Ship, Camera, FileUp, Mail, MapPin,
+  Keyboard, ListOrdered, ChevronRight, ChevronDown, AlertCircle, Ship, FileUp, Mail, MapPin,
 } from 'lucide-react';
 import { adminFetch, fetchAdminSession } from '@/lib/admin-auth';
 import { formatCurrency, formatArrivalTime, formatCalendarDate } from '@/lib/utils';
-import { PaperFormImport, type ApplyLine, type CustomLine } from '@/components/admin/PaperFormImport';
 import { RegisterReceiptImport } from '@/components/admin/RegisterReceiptImport';
 import { RepeatOrderPicker, MissingLinesNotice } from '@/components/admin/RepeatOrderPicker';
 import type { AdditionalServices } from '@/types';
@@ -101,7 +99,29 @@ interface VesselHeader {
   from_ledger?: boolean;
 }
 
-type Mode = 'sheet' | 'quick' | 'paste' | 'scan' | 'repeat';
+type Mode = 'sheet' | 'quick' | 'paste' | 'repeat';
+
+export interface ApplyLine {
+  productId: string;
+  qty: number;
+  paid_by?: 'vessel' | 'deck' | 'cod';
+  cod_name?: string;
+  description?: string;
+  price?: number;
+  category?: string;
+  pkg_size?: string | null;
+  uom?: string | null;
+  image_url?: string | null;
+  upc?: string | null;
+}
+
+export interface CustomLine {
+  description: string;
+  qty: number;
+  price: number;
+  paid_by?: 'vessel' | 'cod';
+  cod_name?: string;
+}
 
 /**
  * A register-tape match whose product is not on the paper form (store_only,
@@ -226,7 +246,7 @@ export default function NewOrderPage() {
    */
   const [linePay, setLinePay] = useState<Record<string, { paid_by: 'vessel' | 'deck' | 'cod'; cod_name: string }>>({});
   /**
-   * OFF-CATALOG LINES, RESOLVED FROM THE SCAN.
+   * OFF-CATALOG LINES (register write-ins, repeated custom items).
    *
    * A write-in for something Sinclair's stocks but never printed on the form
    * has no product row to hang a quantity on, so it cannot live in `qty`. It is
@@ -242,9 +262,7 @@ export default function NewOrderPage() {
   const [filter, setFilter] = useState('');
   const [step, setStep] = useState<'who' | 'what' | 'check'>('who');
   /**
-   * Register tape is not a 6th tab. Jen asked for a quicker button so she
-   * does not have to open the Order Form importer (marked QNTY photos — a different job)
-   * to upload a Sinclair PLU PDF. `showRegister` reveals the match panel
+   * Register tape is not a 5th tab. `showRegister` reveals the match panel
    * in whatever mode she is already in; the hidden file input opens the
    * picker on the same click.
    */
@@ -988,23 +1006,8 @@ export default function NewOrderPage() {
               setRegisterFile(f);
             }}
           />
-          {/* Sinclair's Order Form importer stays under the scan tab.
-              Register-receipt panel mounts here so the shortcut can show it
-              without switching tabs. */}
-          {mode === 'scan' && (
-            <PaperFormImport
-              catalog={items}
-              setLine={setLine}
-              applyLines={applyLines}
-              addCustomLines={(lines) => setCustomLines(prev => [...prev, ...lines])}
-              appendNotes={(note) => setHeader(h => ({
-                ...h,
-                notes: h.notes.trim() ? `${h.notes.trim()}\n${note}` : note,
-              }))}
-            />
-          )}
-          {(mode === 'scan' || showRegister) && (
-            <div className={mode === 'scan' ? 'mt-4 mb-4' : 'mb-4'}>
+          {showRegister && (
+            <div className="mb-4">
               <RegisterReceiptImport
                 catalog={items.map(it => ({ id: it.id, upc: it.upc, description: it.description, price: it.price }))}
                 setLine={setLine}
@@ -1109,7 +1112,6 @@ function ModeTabs({ mode, setMode, onRegisterTape }: {
   const tabs: Array<{ id: Mode; label: string; icon: typeof ListOrdered; hint: string }> = [
     { id: 'sheet', label: 'Order form', icon: ListOrdered, hint: 'Same order as the paper' },
     { id: 'repeat', label: 'Send again', icon: RotateCcw, hint: 'Start from one of this boat\u2019s past orders' },
-    { id: 'scan', label: 'Order Form importer', icon: Camera, hint: "Sinclair's marked paper form" },
     { id: 'quick', label: 'Quick add', icon: Keyboard, hint: 'Type a UPC or a name' },
     { id: 'paste', label: 'Paste a list', icon: ClipboardPaste, hint: 'From a text or email' },
   ];
@@ -1132,7 +1134,7 @@ function ModeTabs({ mode, setMode, onRegisterTape }: {
           </button>
         );
       })}
-      {/* Not a tab — dashed so it does not look like a 6th mode. Click opens
+      {/* Not a tab — dashed so it does not look like another mode. Click opens
           the PDF picker immediately; match UI appears without leaving this mode. */}
       <button
         type="button"

@@ -56,7 +56,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * by sending a string — so the boundary decides. Anything that is not a uuid
  * is not a catalog product, which is exactly what a write-in is: the line keeps
  * its description, price and quantity and is stored with a null product_id,
- * the same footing as a scanned paper-form write-in or a service line.
+ * the same footing as a register write-in or a service line.
  *
  * Silently dropping a bad id beats guessing at one. An id we cannot resolve
  * must never be allowed to point at SOME row — that bills the wrong product.
@@ -473,7 +473,7 @@ export async function POST(req: NextRequest) {
           // ⚠️ EMPTY → NULL, NOT EMPTY STRING.
           //
           // order_items.product_id is a uuid with a foreign key to products.
-          // A write-in resolved from a scanned paper form has no catalog row
+          // A write-in (no catalog row) has no product_id
           // behind it and sends an empty id; passing that straight through
           // fails as `invalid input syntax for type uuid` and takes the whole
           // order down with it. Service lines below already store null here for
