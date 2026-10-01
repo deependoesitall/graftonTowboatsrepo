@@ -3,15 +3,18 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { LayoutDashboard, ShoppingBag, Settings, LogOut, Package, BarChart3, Users, Truck, Menu, X } from 'lucide-react';
+import { LayoutDashboard, ShoppingBag, Settings, LogOut, Package, BarChart3, Users, Truck, Menu, X, Mail } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { getAdminRole, getAdminName, logoutAdmin, canAccess, AdminRole } from '@/lib/admin-auth';
+import { getAdminRole, getAdminName, logoutAdmin, canAccess, isGtsRole, AdminRole } from '@/lib/admin-auth';
 
-const NAV: Array<{ href: string; label: string; icon: any; area: 'orders' | 'products' | 'settings' | 'reports' | 'customers' | null }> = [
+const NAV: Array<{ href: string; label: string; icon: any; area: 'orders' | 'products' | 'settings' | 'reports' | 'customers' | null; gtsOnly?: boolean }> = [
   { href: '/admin',          label: 'Dashboard', icon: LayoutDashboard, area: null },
   { href: '/admin/orders',   label: 'Orders',    icon: ShoppingBag,     area: 'orders' },
   { href: '/admin/products', label: 'Products',  icon: Package,         area: 'products' },
   { href: '/admin/customers',label: 'Customers', icon: Users,           area: 'customers' },
+  // GTS only: these go out in Grafton Towboat's name, to Grafton Towboat's
+  // customers. Sinclair's staff have no business sending them.
+  { href: '/admin/emails',   label: 'Emails',    icon: Mail,            area: 'customers', gtsOnly: true },
   { href: '/admin/deliveries',label: 'Deliveries', icon: Truck,         area: 'reports' },
   { href: '/admin/reports',  label: 'Reports',   icon: BarChart3,       area: 'reports' },
   { href: '/admin/settings', label: 'Settings',  icon: Settings,        area: 'settings' },
@@ -41,7 +44,10 @@ export function AdminNav() {
     window.location.href = '/admin';
   }
 
-  const visibleNav = NAV.filter(item => item.area === null || canAccess(role, item.area));
+  const visibleNav = NAV.filter(item =>
+    (item.area === null || canAccess(role, item.area))
+    && (!item.gtsOnly || (role !== null && isGtsRole(role))),
+  );
   // Same phone chrome for GTS and Sinclair's: hamburger + labeled panels,
   // name/role stay in the bar. Desktop keeps the full pill row.
 

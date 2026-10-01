@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
-  CheckCircle2, KeyRound, Loader2, Plus, Search, Ship, Trash2, UserPlus,
+  CheckCircle2, KeyRound, Loader2, Mail, Plus, Search, Ship, Trash2, UserPlus,
 } from 'lucide-react';
 import { adminFetch } from '@/lib/admin-auth';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
@@ -43,6 +43,52 @@ export function CustomerLoginsPanel() {
   const [pwValue, setPwValue] = useState('');
   const [pwSaving, setPwSaving] = useState(false);
   const [pwDone, setPwDone] = useState<string | null>(null);
+
+  /**
+   * THE WELCOME EMAIL HAS TO BE OFFERED HERE, NOT ON A SEPARATE SCREEN.
+   *
+   * The password is only ever in plain text for the few seconds between Jen
+   * typing it and the server hashing it. Nothing can read it back afterwards,
+   * so the one moment the email can carry it is right after it is set. Send it
+   * later and she has to invent a second password and tell the crew twice.
+   */
+  const [welcome, setWelcome] = useState<
+    { memberId: string; name: string; email: string; vessel: string; password: string } | null
+  >(null);
+  const [welcomeSending, setWelcomeSending] = useState(false);
+  const [welcomeSentTo, setWelcomeSentTo] = useState('');
+
+  async function sendWelcome() {
+    if (!welcome) return;
+    setWelcomeSending(true);
+    setError('');
+    try {
+      const res = await adminFetch('/api/admin/customer-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          template: 'welcome',
+          to: [welcome.email],
+          vars: {
+            firstName: welcome.name.split(/\s+/)[0] || '',
+            vesselName: welcome.vessel,
+            loginEmail: welcome.email,
+            password: welcome.password,
+          },
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(json.error || 'Could not send the welcome email.');
+        return;
+      }
+      setWelcomeSentTo(welcome.email);
+      setWelcome(null);
+      setTimeout(() => setWelcomeSentTo(''), 7000);
+    } finally {
+      setWelcomeSending(false);
+    }
+  }
 
   // Quick-add (existing boat)
   const [showQuickAdd, setShowQuickAdd] = useState(false);
@@ -128,11 +174,18 @@ export function CustomerLoginsPanel() {
       }
       setPwDone(member.id);
       setOk(`Password set for ${member.display_name || member.email || 'crew member'}`);
-      setTimeout(() => {
-        setPwFor(null);
-        setPwValue('');
-        setPwDone(null);
-      }, 2500);
+      if (member.email) {
+        setWelcome({
+          memberId: member.id,
+          name: member.display_name || '',
+          email: member.email,
+          vessel: member.vessel_name || '',
+          password: next,
+        });
+      }
+      // Deliberately NOT auto-closing any more. The panel stays open holding
+      // the password so the welcome email can still be sent from here.
+      setPwValue('');
     } finally {
       setPwSaving(false);
     }
@@ -164,6 +217,13 @@ export function CustomerLoginsPanel() {
         return;
       }
       setOk(`Login created for ${json.member?.display_name || qaEmail}`);
+      setWelcome({
+        memberId: json.member?.id || qaEmail,
+        name: `${qaFirst.trim()} ${qaLast.trim()}`.trim(),
+        email: qaEmail.trim(),
+        vessel: allVessels.find(v => v.id === qaVesselId)?.name || '',
+        password: qaPassword,
+      });
       setQaFirst(''); setQaLast(''); setQaEmail(''); setQaPassword('');
       setQaRole('cook');
       setShowQuickAdd(false);
@@ -236,6 +296,43 @@ export function CustomerLoginsPanel() {
       {ok && (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 text-sm px-4 py-3 flex items-center gap-2">
           <CheckCircle2 className="w-4 h-4" /> {ok}
+        </div>
+      )}
+
+      {welcomeSentTo && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 text-sm px-4 py-3 flex items-center gap-2">
+          <Mail className="w-4 h-4 shrink-0" /> Welcome email sent to {welcomeSentTo}.
+        </div>
+      )}
+
+      {welcome && (
+        <div className="rounded-xl border border-brand-gold/40 bg-brand-yellow/20 px-4 py-3.5">
+          <p className="text-sm font-bold text-brand-navy">
+            Send {welcome.name.split(/\s+/)[0] || 'them'} the welcome email?
+          </p>
+          <p className="mt-1 text-[13px] leading-relaxed text-brand-navy/80">
+            It carries the sign in, the password you just set, and a walk-through of
+            how to order. Going to <b className="break-all">{welcome.email}</b>
+            {welcome.vessel ? <> for the <b>{welcome.vessel}</b></> : null}.
+          </p>
+          <p className="mt-1.5 text-xs text-brand-navy/60">
+            This is the only chance to send it with that password. Once you leave
+            this screen the password cannot be read back, and you would have to set
+            a new one.
+          </p>
+          <div className="mt-2.5 flex flex-wrap items-center gap-2">
+            <button type="button" onClick={sendWelcome} disabled={welcomeSending}
+              className="btn-primary text-xs px-3 py-2 inline-flex items-center gap-1.5 disabled:opacity-50">
+              {welcomeSending
+                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                : <Mail className="w-3.5 h-3.5" />}
+              {welcomeSending ? 'Sending…' : 'Send welcome email'}
+            </button>
+            <button type="button" onClick={() => setWelcome(null)}
+              className="text-xs font-semibold text-brand-navy/50 hover:text-brand-navy px-2">
+              Not now
+            </button>
+          </div>
         </div>
       )}
 

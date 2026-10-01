@@ -133,7 +133,7 @@ function applyTemplateVars(text: string, order: Order, appUrl: string): string {
     .replaceAll('{app_url}', appUrl);
 }
 
-function getAppUrl(): string {
+export function getAppUrl(): string {
   if (process.env.NEXT_PUBLIC_APP_URL && !process.env.NEXT_PUBLIC_APP_URL.includes('*')) {
     return process.env.NEXT_PUBLIC_APP_URL;
   }
@@ -673,7 +673,7 @@ const SIGNATURE = {
   email: 'GraftonTowboatServices@gmail.com',
 };
 
-function signatureBlock(): string {
+export function signatureBlock(): string {
   const appUrl = getAppUrl();
   return `
     <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;margin-top:26px;border-collapse:collapse;">
