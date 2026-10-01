@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import {
-  Package, Clock, CheckCircle2, TrendingUp,
+  Package, Clock, CheckCircle2,
   ShoppingBag, Lock, Eye, EyeOff, Loader2, ShoppingCart,
   Mail, Send, X, FileText, AlertTriangle, Truck, Plus,
 } from 'lucide-react';
@@ -29,8 +29,8 @@ export default function AdminDashboard() {
     total: number;
     new: number;
     in_progress: number;
+    shopped: number;
     fulfilled: number;
-    total_revenue: number;
     recent: Array<{ id: string; order_number: string; company_name: string; subtotal: number; status: string; created_at: string }>;
   }>(null);
   const router = useRouter();
@@ -253,13 +253,19 @@ export default function AdminDashboard() {
                 color="bg-yellow-50"
                 action={() => router.push('/admin/orders?status=in_progress')}
               />
-              <StatCard
-                label="Revenue"
-                value={formatCurrency(stats.total_revenue)}
-                icon={<TrendingUp className="w-5 h-5 text-green-500" />}
-                color="bg-green-50"
-                isString
-              />
+              <button
+                type="button"
+                onClick={() => router.push('/admin/orders?status=shopped')}
+                className="card-base p-4 text-left transition-shadow hover:shadow-md"
+              >
+                <div className="flex items-center gap-1.5 h-9 mb-3">
+                  <span className="w-2 h-2 rounded-full bg-purple-500" />
+                  <span className="text-xs font-semibold text-gray-500">Shopped</span>
+                </div>
+                <p className="font-display text-2xl font-bold text-brand-navy">
+                  {(stats.shopped ?? 0).toLocaleString()}
+                </p>
+              </button>
             </div>
           )}
 
@@ -364,12 +370,14 @@ function StatusBadge({ status }: { status: string }) {
   const map: Record<string, string> = {
     new: 'bg-blue-100 text-blue-700',
     in_progress: 'bg-yellow-100 text-yellow-700',
+    shopped: 'bg-purple-100 text-purple-700',
     fulfilled: 'bg-green-100 text-green-700',
     cancelled: 'bg-red-100 text-red-700',
   };
   const labels: Record<string, string> = {
     new: 'New',
     in_progress: 'In Progress',
+    shopped: 'Shopped',
     fulfilled: 'Fulfilled',
     cancelled: 'Cancelled',
   };

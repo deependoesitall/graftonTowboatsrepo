@@ -24,14 +24,6 @@ export async function GET(req: NextRequest) {
     return acc;
   }, {} as Record<string, number>);
 
-  // Total revenue
-  const { data: revenueData } = await supabase
-    .from('orders')
-    .select('subtotal')
-    .neq('status', 'cancelled');
-
-  const totalRevenue = (revenueData || []).reduce((s, r) => s + r.subtotal, 0);
-
   // Recent orders (last 10)
   const { data: recent } = await supabase
     .from('orders')
@@ -43,9 +35,9 @@ export async function GET(req: NextRequest) {
     total: total || 0,
     new: statusCounts['new'] || 0,
     in_progress: statusCounts['in_progress'] || 0,
+    shopped: statusCounts['shopped'] || 0,
     fulfilled: statusCounts['fulfilled'] || 0,
     cancelled: statusCounts['cancelled'] || 0,
-    total_revenue: totalRevenue,
     recent: recent || [],
   });
 }
