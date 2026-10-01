@@ -47,19 +47,27 @@ function StatusBadge({ status, onClick }: { status: string; onClick?: () => void
 const HANDOFF_CONFIG = {
   delivered_to_gts: {
     /** On Sinclair's button — written from THEIR side of the counter. */
-    button: 'Took to Grafton',
+    button: 'Delivered to GTS',
     /** On GTS's badge — written as the thing Jen needs to know. */
     badge: 'At Grafton',
     /** Plain sentence. Tooltip on desktop, printed under the buttons on phones. */
     help: 'We drove it down to the GTS coolers in Grafton.',
-    bg: 'bg-green-50', text: 'text-green-700', border: 'border-green-300',
+    bg: 'bg-emerald-50', text: 'text-emerald-800', border: 'border-emerald-300',
+    idle: 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100 hover:border-emerald-500 hover:shadow-sm',
+    selected: 'bg-emerald-600 text-white border-emerald-600 shadow-md shadow-emerald-600/25',
+    dim: 'bg-white text-emerald-800/70 border-emerald-200 hover:bg-emerald-50 hover:border-emerald-400',
+    toast: 'border-emerald-300 bg-emerald-50 text-emerald-800',
     Icon: Truck,
   },
   awaiting_gts_pickup: {
     button: 'Ready for Pickup',
     badge: 'Needs pickup',
     help: "It's boxed up at Sinclair's. A GTS driver needs to come get it.",
-    bg: 'bg-amber-50', text: 'text-amber-800', border: 'border-amber-300',
+    bg: 'bg-orange-50', text: 'text-orange-900', border: 'border-orange-300',
+    idle: 'bg-orange-50 text-brand-orange border-orange-300 hover:bg-orange-100 hover:border-brand-orange hover:shadow-sm',
+    selected: 'bg-brand-orange text-white border-brand-orange shadow-md shadow-orange-500/30',
+    dim: 'bg-white text-brand-orange/70 border-orange-200 hover:bg-orange-50 hover:border-orange-400',
+    toast: 'border-orange-300 bg-orange-50 text-orange-900',
     Icon: PackageCheck,
   },
 } as const;
@@ -74,7 +82,7 @@ function HandoffBadge({ handoff, at, by }: { handoff: OrderHandoff; at?: string 
   return (
     <span
       title={[c.help, when, by ? `Marked by ${by}` : ''].filter(Boolean).join(' · ')}
-      className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border ${c.bg} ${c.text} ${c.border}`}
+      className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${c.bg} ${c.text} ${c.border}`}
     >
       <c.Icon className="w-2.5 h-2.5" /> {c.badge}
     </span>
@@ -84,13 +92,27 @@ function HandoffBadge({ handoff, at, by }: { handoff: OrderHandoff; at?: string 
 /** What Sinclair's sees, on shopped orders only. Both buttons stay live so a
  *  wrong tap is corrected by pressing the other one, not by calling Jen. */
 function HandoffButtons({
-  value, busy, onSet,
-}: { value?: OrderHandoff | null; busy: boolean; onSet: (v: OrderHandoff) => void }) {
+  value, busy, busyValue, onSet, wide,
+}: {
+  value?: OrderHandoff | null;
+  busy: boolean;
+  busyValue?: OrderHandoff | null;
+  onSet: (v: OrderHandoff) => void;
+  wide?: boolean;
+}) {
   return (
-    <div className="flex items-center gap-1">
+    <div
+      role="group"
+      aria-label="Where this order went"
+      className={`items-stretch gap-1.5 p-1 rounded-xl bg-slate-50 border border-slate-200/90 ${
+        wide ? 'flex w-full' : 'inline-flex'
+      }`}
+    >
       {HANDOFF_KEYS.map(k => {
         const c = HANDOFF_CONFIG[k];
         const on = value === k;
+        const otherOn = !!value && !on;
+        const spinning = busy && busyValue === k;
         return (
           <button
             key={k}
@@ -98,15 +120,14 @@ function HandoffButtons({
             disabled={busy}
             onClick={e => { e.stopPropagation(); onSet(k); }}
             title={c.help}
-            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold border transition-colors disabled:opacity-50 whitespace-nowrap ${
-              on
-                ? `${c.bg} ${c.text} ${c.border} ring-1 ring-inset ${c.border}`
-                : 'bg-white text-gray-600 border-gray-300 hover:border-brand-gold hover:text-brand-navy'
-            }`}
+            aria-pressed={on}
+            className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold tracking-wide border transition-all duration-150 disabled:opacity-50 whitespace-nowrap ${
+              wide ? 'flex-1 min-w-0' : ''
+            } ${on ? c.selected : otherOn ? c.dim : c.idle}`}
           >
-            {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <c.Icon className="w-3 h-3" />}
+            {spinning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <c.Icon className="w-3.5 h-3.5 shrink-0" />}
             {c.button}
-            {on && <CheckCircle2 className="w-3 h-3" />}
+            {on && !spinning && <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />}
           </button>
         );
       })}
@@ -268,14 +289,14 @@ function OrdersContent() {
 
   // Sinclair's marking where a shopped order went. Separate from updatingId so
   // the pipeline button and these don't disable each other.
-  const [handoffId, setHandoffId] = useState<string | null>(null);
+  const [handoffPending, setHandoffPending] = useState<{ id: string; value: OrderHandoff } | null>(null);
   const [handoffError, setHandoffError] = useState('');
-  const [handoffOk, setHandoffOk] = useState('');
+  const [handoffOk, setHandoffOk] = useState<{ kind: OrderHandoff; text: string } | null>(null);
   async function setHandoff(order: Order, next: OrderHandoff) {
     if (order.handoff === next) return;
-    setHandoffId(order.id);
+    setHandoffPending({ id: order.id, value: next });
     setHandoffError('');
-    setHandoffOk('');
+    setHandoffOk(null);
     try {
       const res = await adminFetch(`/api/orders/${order.id}`, {
         method: 'PATCH',
@@ -291,15 +312,16 @@ function OrdersContent() {
         await fetchOrders();
         // Sinclair's gets no push and no email — this line is the only
         // confirmation they get that Grafton actually heard them.
-        setHandoffOk(
-          next === 'delivered_to_gts'
-            ? `Order ${order.order_number} marked as taken to Grafton. Grafton has been notified.`
-            : `Order ${order.order_number} marked as waiting at Sinclair's. Grafton has been notified to come get it.`,
-        );
-        window.setTimeout(() => setHandoffOk(''), 6000);
+        setHandoffOk({
+          kind: next,
+          text: next === 'delivered_to_gts'
+            ? `Order ${order.order_number} marked Delivered to GTS. Grafton has been notified.`
+            : `Order ${order.order_number} marked Ready for Pickup. Grafton has been notified to come get it.`,
+        });
+        window.setTimeout(() => setHandoffOk(null), 6000);
       }
     } finally {
-      setHandoffId(null);
+      setHandoffPending(null);
     }
   }
 
@@ -501,20 +523,30 @@ function OrdersContent() {
 
         {/* Orders table */}
         {isSinclair && (
-          <div className="mb-3 rounded-lg border border-brand-gold/40 bg-brand-yellow/20 px-3 py-2.5">
+          <div className="mb-3 rounded-xl border border-brand-gold/40 bg-white/75 px-3.5 py-3">
             <p className="text-sm font-bold text-brand-navy">After you ring an order up, tell Grafton where it went.</p>
-            <p className="mt-1 text-[13px] leading-relaxed text-brand-navy/80">
-              <span className="font-semibold">Took to Grafton</span> — you drove it down to their coolers.{' '}
-              <span className="font-semibold">Ready for Pickup</span> — it&rsquo;s boxed up at the store and a GTS driver needs to collect it.
-              Either one tells them right away. Tapped the wrong one? Just tap the other.
-            </p>
+            <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-emerald-800 flex items-center gap-1.5">
+                  <Truck className="w-3.5 h-3.5" /> Delivered to GTS
+                </p>
+                <p className="mt-0.5 text-[12px] leading-snug text-emerald-900/80">You drove it down to their coolers.</p>
+              </div>
+              <div className="rounded-lg border border-orange-300 bg-orange-50 px-3 py-2">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-brand-orange flex items-center gap-1.5">
+                  <PackageCheck className="w-3.5 h-3.5" /> Ready for Pickup
+                </p>
+                <p className="mt-0.5 text-[12px] leading-snug text-orange-900/80">Boxed up at the store — a GTS driver needs to collect it.</p>
+              </div>
+            </div>
+            <p className="mt-2 text-[12px] text-brand-navy/70">Either one tells them right away. Tapped the wrong one? Just tap the other.</p>
           </div>
         )}
 
         {handoffOk && (
-          <div className="mb-3 flex items-start gap-2 rounded-lg border border-green-300 bg-green-50 px-3 py-2 text-sm text-green-800">
+          <div className={`mb-3 flex items-start gap-2 rounded-lg border px-3 py-2 text-sm ${HANDOFF_CONFIG[handoffOk.kind].toast}`}>
             <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" />
-            <span className="flex-1">{handoffOk}</span>
+            <span className="flex-1">{handoffOk.text}</span>
           </div>
         )}
 
@@ -602,9 +634,17 @@ function OrdersContent() {
                     {isSinclair && order.status === 'shopped' && (
                       <div className="mt-2 pt-2 border-t border-gray-100" onClick={e => e.stopPropagation()}>
                         <p className="text-[11px] font-bold uppercase tracking-wide text-gray-500 mb-1.5">Where did this order go?</p>
-                        <HandoffButtons value={order.handoff} busy={handoffId === order.id} onSet={v => setHandoff(order, v)} />
+                        <HandoffButtons
+                          value={order.handoff}
+                          busy={handoffPending?.id === order.id}
+                          busyValue={handoffPending?.value}
+                          onSet={v => setHandoff(order, v)}
+                          wide
+                        />
                         {order.handoff && (
-                          <p className="mt-1.5 text-[11px] text-gray-500">{HANDOFF_CONFIG[order.handoff].help}</p>
+                          <p className={`mt-1.5 text-[11px] font-medium ${HANDOFF_CONFIG[order.handoff].text}`}>
+                            {HANDOFF_CONFIG[order.handoff].help}
+                          </p>
                         )}
                       </div>
                     )}
@@ -731,19 +771,29 @@ function OrdersContent() {
                         <td className="px-4 py-3.5 text-xs text-gray-400 whitespace-nowrap">
                           {new Date(order.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                         </td>
-                        <td className="px-4 py-3.5">
-                          <StatusBadge status={order.status} />
-                          {!isSinclair && order.handoff && (
-                            <div className="mt-1">
+                        <td className="px-4 py-3.5" onClick={e => { if (isSinclair && order.status === 'shopped') e.stopPropagation(); }}>
+                          <div className="flex flex-col items-start gap-1.5">
+                            <StatusBadge status={order.status} />
+                            {isSinclair && order.status === 'shopped' && (
+                              <>
+                                {!order.handoff && (
+                                  <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400">Where did it go?</p>
+                                )}
+                                <HandoffButtons
+                                  value={order.handoff}
+                                  busy={handoffPending?.id === order.id}
+                                  busyValue={handoffPending?.value}
+                                  onSet={v => setHandoff(order, v)}
+                                />
+                              </>
+                            )}
+                            {!isSinclair && order.handoff && (
                               <HandoffBadge handoff={order.handoff} at={order.handoff_at} by={order.handoff_by} />
-                            </div>
-                          )}
+                            )}
+                          </div>
                         </td>
                         <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
                           <div className="flex items-center gap-1.5">
-                            {isSinclair && order.status === 'shopped' && (
-                              <HandoffButtons value={order.handoff} busy={handoffId === order.id} onSet={v => setHandoff(order, v)} />
-                            )}
                             {/* Advance pipeline button — owner/manager only */}
                             {nextSt && canEditOrders && (
                               <button
