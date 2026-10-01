@@ -60,7 +60,19 @@ export async function POST(req: NextRequest) {
   const template = parseTemplate(body.template);
   if (!template) return NextResponse.json({ error: 'Unknown template' }, { status: 400 });
 
-  const recipients: string[] = Array.isArray(body.to) ? body.to : [];
+  const supabaseEarly = createServiceClient();
+  const { data: settingsEarly } = await supabaseEarly
+    .from('admin_settings').select('business_email').single();
+  const gtsInbox = settingsEarly?.business_email
+    || process.env.BUSINESS_EMAIL
+    || 'GraftonTowboatServices@gmail.com';
+
+  // "Send me one first" — the same message, to the GTS inbox, so whoever is
+  // about to mail a hundred barge lines can see it land in a real client
+  // before anyone else does.
+  const recipients: string[] = body.test === true
+    ? [gtsInbox]
+    : (Array.isArray(body.to) ? body.to : []);
   const clean = Array.from(new Set(
     recipients.map((e) => String(e).trim()).filter((e) => EMAIL_RE.test(e)),
   ));
@@ -70,7 +82,7 @@ export async function POST(req: NextRequest) {
 
   // The welcome email is addressed to one person and carries their password.
   // Sending it to a list would hand everyone on it the same login.
-  if (template === 'welcome' && clean.length > 1) {
+  if (template === 'welcome' && clean.length > 1 && body.test !== true) {
     return NextResponse.json(
       { error: 'The welcome email carries one person’s password. Send it to one address at a time.' },
       { status: 400 },
@@ -79,10 +91,7 @@ export async function POST(req: NextRequest) {
 
   const { subject, html } = render(template, body.vars || {});
 
-  const supabase = createServiceClient();
-  const { data: settings } = await supabase
-    .from('admin_settings').select('business_email').single();
-  const replyTo  = settings?.business_email || process.env.BUSINESS_EMAIL || 'GraftonTowboatServices@gmail.com';
+  const replyTo  = gtsInbox;
   const fromName = 'Grafton Towboat Services';
   const fromAddr = process.env.EMAIL_FROM || 'onboarding@resend.dev';
   const from     = fromAddr.includes('<') ? fromAddr : `${fromName} <${fromAddr}>`;
@@ -110,7 +119,7 @@ export async function POST(req: NextRequest) {
         { status: 502 },
       );
     }
-    return NextResponse.json({ ok: true, sent: clean.length, bcc: bulk, subject });
+    return NextResponse.json({ ok: true, sent: clean.length, bcc: bulk, subject, test: body.test === true, to: clean[0] });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : 'Send failed' },
