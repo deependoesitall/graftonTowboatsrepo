@@ -1603,6 +1603,39 @@ function DeliveryEditor({ delivery, companies, serviceTypes, vesselRecords = [],
 // CSV or XLSX upload. Preview adds / updates / unchanged / errors, then
 // confirm applies. Idempotent on date + vesselKey + driver + fee so Mary-Karen
 // can re-run without duplicates. Never invents invoice_sent.
+/**
+ * FIND THE HEADER ROW INSTEAD OF ASSUMING IT IS THE FIRST ONE.
+ *
+ * Mary Karen's workbook opens with a title row ("Grafton Towboat Deliveries"),
+ * then a note row about Ingram's rate, and only then the real headers. Reading
+ * row 1 as headers produced a column called "Grafton Towboat Deliveries" and a
+ * preview with every row in error, which looked like the importer was broken
+ * rather than aimed one row off.
+ *
+ * Scans the first 15 rows and takes the one that looks most like headers. Falls
+ * back to row 0, so a clean sheet that really does start with headers is
+ * unaffected.
+ */
+const HEADER_PROBES = [
+  'date', 'delivery driver', 'driver', 'vessel name', 'vessel', 'barge line',
+  'type of service', 'location delivered', 'delivery fee', 'hours worked',
+  'amount paid driver', 'bill for groceries', 'gts correspondent',
+];
+
+function findHeaderRow(matrix: unknown[][]): number {
+  const norm = (v: unknown) =>
+    String(v ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  let best = 0;
+  let bestScore = 0;
+  for (let r = 0; r < Math.min(matrix.length, 15); r++) {
+    const cells = (matrix[r] || []).map(norm).filter(Boolean);
+    const score = cells.filter(c => HEADER_PROBES.includes(c)).length;
+    if (score > bestScore) { bestScore = score; best = r; }
+  }
+  // Two hits is enough to beat a title row, which scores zero.
+  return bestScore >= 2 ? best : 0;
+}
+
 function ImportSheetModal({ companies: _companies, onClose, onApplied }: {
   companies: Company[];
   onClose: () => void;
@@ -1638,17 +1671,29 @@ function ImportSheetModal({ companies: _companies, onClose, onApplied }: {
       if (name.endsWith('.csv') || name.endsWith('.txt')) {
         const text = await file.text();
         const Papa = (await import('papaparse')).default;
-        const result = Papa.parse(text, { header: true, skipEmptyLines: true });
-        parsedHeaders = result.meta.fields || [];
-        parsedRows = (result.data as Record<string, unknown>[]).filter(r =>
-          Object.values(r).some(v => String(v ?? '').trim() !== ''),
-        );
+        const raw = Papa.parse(text, { header: false, skipEmptyLines: true });
+        const matrix = (raw.data as unknown[][]) || [];
+        const h = findHeaderRow(matrix);
+        const body = matrix.slice(h + 1);
+        parsedHeaders = (matrix[h] || []).map(v => String(v ?? ''));
+        parsedRows = body
+          .map(cells => {
+            const o: Record<string, unknown> = {};
+            parsedHeaders.forEach((key, i) => { if (key) o[key] = (cells as unknown[])[i] ?? ''; });
+            return o;
+          })
+          .filter(r => Object.values(r).some(v => String(v ?? '').trim() !== ''));
       } else if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
         const XLSX = await import('xlsx');
         const buf = await file.arrayBuffer();
         const wb = XLSX.read(buf, { type: 'array', cellDates: true });
         const sheet = wb.Sheets[wb.SheetNames[0]];
-        const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
+        const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '' });
+        const h = findHeaderRow(matrix);
+        const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+          defval: '',
+          range: h,   // headers taken from this row, data from the ones after it
+        });
         parsedRows = json.filter(r => Object.values(r).some(v => String(v ?? '').trim() !== ''));
         parsedHeaders = parsedRows.length ? Object.keys(parsedRows[0]) : [];
       } else {
