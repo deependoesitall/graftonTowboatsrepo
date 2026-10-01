@@ -189,9 +189,25 @@ export interface PushAudience {
  * must not turn a successfully placed order into a 500 for the captain. Every
  * outcome is swallowed and summarized in the return value for logging.
  */
+/**
+ * Replaces the default "new order" wording for alerts that are not about a
+ * new order. Both audiences get the same text when this is set — anything
+ * using it is already addressed to one side of the house.
+ */
+export interface PushOverride {
+  title: string;
+  body: string;
+  /** Defaults to the order detail on the apex admin. */
+  url?: string;
+  /** Defaults to order-<number>. Give a distinct tag so it does not silently
+   *  replace the new-order notification still sitting on the phone. */
+  tag?: string;
+}
+
 export async function sendOrderPush(
   order: Order,
   audience: PushAudience = { gts: true, sinclair: true },
+  override?: PushOverride,
 ): Promise<{ sent: number; failed: number; skipped?: string }> {
   if (!configured()) {
     // Not an outage — just unconfigured. Named explicitly so it shows up in
@@ -281,7 +297,14 @@ export async function sendOrderPush(
    * the list showing. A path segment has no such floor.
    */
   const payloadFor = (isSinclair: boolean) => JSON.stringify(
-    isSinclair
+    override
+    ? {
+        title: override.title,
+        body: override.body,
+        url: override.url ?? `/admin/orders?order=${order.id}`,
+        tag: override.tag ?? `order-${order.order_number}`,
+      }
+    : isSinclair
       ? {
           title: `Order to shop — ${vessel}`,
           body: line,

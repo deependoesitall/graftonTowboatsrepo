@@ -292,6 +292,21 @@ export interface Order {
   /** When the FINAL "Order Shopped" email was fired (manually, by a GTS owner). NULL = not yet sent. */
   shopped_email_sent_at?: string | null;
   shopped_email_sent_by?: string | null;
+  /**
+   * WHERE A SHOPPED ORDER PHYSICALLY IS — staff logistics only.
+   *
+   * Sinclair's finishing at the register is not Grafton Towboat having the
+   * order. Either Sinclair's runs it down to the GTS walk-in coolers in
+   * Grafton, or it is boxed at the store and a GTS driver collects it.
+   *
+   * ⚠️ Never shown to a vessel: not on the customer order view, not in the
+   * confirmation email, not in the shopped email. A boat is told its order is
+   * on the way by GTS, once.
+   */
+  handoff?: OrderHandoff | null;
+  handoff_at?: string | null;
+  /** Display name of the staff member who marked it. */
+  handoff_by?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -339,6 +354,22 @@ export interface OrderItem {
 
 /** new → in_progress → shopped (Sinclair's rang it up) → fulfilled (GTS delivered) */
 export type OrderStatus = 'new' | 'in_progress' | 'shopped' | 'fulfilled' | 'cancelled';
+
+/**
+ * Set by Sinclair's once an order is Shopped. Deliberately NOT a status.
+ *
+ * The pipeline tracks how far along the ORDER is; this tracks where the BOXES
+ * are, and the two move independently — an order can sit awaiting pickup for a
+ * day and still be Shopped, not Fulfilled. Folding it into OrderStatus would
+ * have put Sinclair's logistics on the customer-visible progress line.
+ */
+export type OrderHandoff = 'delivered_to_gts' | 'awaiting_gts_pickup';
+
+/** What each handoff means, in GTS's words. Used by the UI, push and email. */
+export const HANDOFF_LABEL: Record<OrderHandoff, string> = {
+  delivered_to_gts:    'Delivered to Grafton for GTS',
+  awaiting_gts_pickup: "Ready for pickup at Sinclair's",
+};
 
 /** A digital coupon automatically applied to an order (estimate until rung up). */
 export interface OrderDiscount {

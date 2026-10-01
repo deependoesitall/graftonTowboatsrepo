@@ -4,6 +4,11 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin, isGtsRole, isSinclairScoped } from '@/lib/admin-auth-server';
 import { hydrateOrderItemCatalog } from '@/lib/order-item-catalog';
 import { normalizeGroceryHandlingFee } from '@/lib/grocery-handling-fee';
+import { sendOrderPush } from '@/lib/push';
+import { sendHandoffEmail } from '@/lib/email';
+import type { Order, OrderHandoff } from '@/types';
+
+const HANDOFFS: readonly OrderHandoff[] = ['delivered_to_gts', 'awaiting_gts_pickup'];
 
 export async function GET(
   req: NextRequest,
@@ -81,6 +86,23 @@ export async function PATCH(
     }
   }
 
+  // ── HANDOFF: WHERE THE BOXES ARE, NOT HOW FAR ALONG THE ORDER IS ──
+  // Sinclair's tells GTS whether they ran the order down to the Grafton
+  // coolers or left it boxed at the store. Validated here rather than trusted
+  // from the client, same as every other field on this route.
+  const handoffValue: OrderHandoff | null | undefined =
+    'handoff' in body ? ((body.handoff as OrderHandoff | null) ?? null) : undefined;
+  if (
+    handoffValue !== undefined &&
+    handoffValue !== null &&
+    !HANDOFFS.includes(handoffValue)
+  ) {
+    return NextResponse.json(
+      { error: 'handoff must be delivered_to_gts or awaiting_gts_pickup' },
+      { status: 400 },
+    );
+  }
+
   const supabase = createServiceClient();
 
   // Fetch current order so we can log the status transition and trigger emails
@@ -89,6 +111,29 @@ export async function PATCH(
     .select('status, order_number, company_name, contact_name, phone, po_number')
     .eq('id', id)
     .single();
+
+  // A handoff only means anything after the register. Before 'shopped' there
+  // is nothing boxed to hand over, so the buttons don't render — and this
+  // stops a stale tab or a patched client from setting it anyway.
+  const effectiveStatus = (body.status as string | undefined) || existing?.status;
+  if (handoffValue && effectiveStatus !== 'shopped') {
+    return NextResponse.json(
+      { error: 'An order has to be Shopped before it can be handed off.' },
+      { status: 409 },
+    );
+  }
+
+  // Who and when, stamped server-side. Clearing the handoff clears both.
+  let priorHandoff: OrderHandoff | null = null;
+  if (handoffValue !== undefined) {
+    const { data: prior } = await supabase
+      .from('orders').select('handoff').eq('id', id).maybeSingle();
+    priorHandoff = (prior as { handoff?: OrderHandoff | null } | null)?.handoff ?? null;
+    body.handoff_at = handoffValue ? new Date().toISOString() : null;
+    body.handoff_by = handoffValue
+      ? (session.display_name || session.username)
+      : null;
+  }
 
   let updateBody: Record<string, unknown> = {
     ...body,
@@ -109,6 +154,17 @@ export async function PATCH(
     const retry = await supabase.from('orders').update(updateBody).eq('id', id).select().single();
     data = retry.data;
     error = retry.error;
+  }
+
+  // Unlike grocery_handling_fee above, a missing handoff column is NOT dropped
+  // and retried. The handoff is the entire point of this patch, so silently
+  // saving nothing and reporting success would tell Jen an order is waiting at
+  // Sinclair's when the system never recorded it. Fail loudly, and say why.
+  if (error && /handoff/i.test(error.message) && handoffValue !== undefined) {
+    return NextResponse.json(
+      { error: 'Handoff is not set up on this database yet — run migration 098_order_handoff.sql.' },
+      { status: 500 },
+    );
   }
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -156,6 +212,69 @@ export async function PATCH(
           .from('orders')
           .update({ subtotal: newSubtotal })
           .eq('id', id);
+      }
+    }
+  }
+
+  // ── TELL GTS ──
+  // Only when the value actually changed: Sinclair's tapping the button they
+  // already tapped must not put a second alert on Jen's phone.
+  if (handoffValue !== undefined && handoffValue !== priorHandoff) {
+    const order = data as Order;
+
+    await supabase.from('activity_logs').insert({
+      order_id: id,
+      order_number: existing?.order_number ?? order.order_number,
+      action: 'handoff',
+      from_value: priorHandoff,
+      to_value: handoffValue,
+      admin_username: session.username,
+      admin_display_name: session.display_name,
+      admin_role: session.role,
+      company_name: existing?.company_name,
+      contact_name: existing?.contact_name,
+      phone: existing?.phone,
+      po_number: existing?.po_number,
+    }).then(undefined, (e: unknown) => console.error('handoff log:', e));
+
+    if (handoffValue) {
+      const vessel  = order.vessel_name || order.company_name || 'vessel';
+      const pickup  = handoffValue === 'awaiting_gts_pickup';
+
+      // ⚠️ GTS ONLY. Sinclair's just pressed the button; telling them what
+      // they already know is the fastest way to get notifications muted.
+      //
+      // Neither send may take the PATCH down with it. Sinclair's has done
+      // their part the moment the row is written — a Resend outage must not
+      // read back to them as "that didn't save".
+      try {
+        await sendOrderPush(order, { gts: true }, {
+          title: pickup
+            ? `Ready for pickup — ${vessel}`
+            : `Delivered to Grafton — ${vessel}`,
+          body: pickup
+            ? `Boxed at Sinclair's. Order #${order.order_number} needs collecting.`
+            : `Order #${order.order_number} is in the GTS cooler, ready to load.`,
+          // Distinct from `order-<number>` so it sits alongside the new-order
+          // alert instead of quietly replacing it on the lock screen.
+          tag: `handoff-${order.order_number}`,
+        });
+      } catch (e) {
+        console.error('handoff push:', e);
+      }
+
+      try {
+        const { data: s } = await supabase
+          .from('admin_settings')
+          .select('business_email, order_email_cc')
+          .single();
+        await sendHandoffEmail(order, handoffValue, {
+          businessEmail: s?.business_email,
+          ccEmailRaw: s?.order_email_cc,
+          staffName: session.display_name || session.username,
+        });
+      } catch (e) {
+        console.error('handoff email:', e);
       }
     }
   }

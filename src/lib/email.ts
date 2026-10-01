@@ -1,6 +1,6 @@
 // src/lib/email.ts
 import { Resend } from 'resend';
-import { Order } from '@/types';
+import { Order, OrderHandoff, HANDOFF_LABEL } from '@/types';
 import { formatCurrency, formatDate, formatArrivalTime, formatCalendarDate, orderItemCount } from './utils';
 import { generateOrderPdfBuffer } from './pdf-attachment';
 import { codFeePercent, codFeeLabel, codTotalWithFee, allocateCodTotals } from '@/lib/cod-fee';
@@ -637,6 +637,8 @@ export function buildOrderEmailHtml(
         </a>
       </div>` : ''}
     </div>
+
+    ${signatureBlock()}
   </div>
 
   <div style="background:#1E3D1E;padding:14px 28px;text-align:center;">
@@ -650,6 +652,44 @@ export function buildOrderEmailHtml(
 // ─────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────
+// Email signature — modelled on Jen's own Gmail signature
+//
+// Hers reads: name in bold, phone, company, logo underneath. Every email
+// this system sends now ends the same way, so a boat that has emailed Jen
+// directly sees the same sign-off coming from the platform.
+//
+// ⚠️ The logo is HOTLINKED, never attached. An attachment shows up as a
+// paperclip on every order confirmation and buries the real PDF. It points at
+// /branding/email-lockup.png — a 420px flattened copy (~28KB), not the 1178px
+// gts-lockup.png, because the original is 422KB per open and Gmail clips a
+// message at 102KB.
+// ─────────────────────────────────────────────────────────────
+
+const SIGNATURE = {
+  name:  'Grafton Towboat Services',
+  phone: '(618) 556-0290',
+  email: 'GraftonTowboatServices@gmail.com',
+};
+
+function signatureBlock(): string {
+  const appUrl = getAppUrl();
+  return `
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;margin-top:26px;border-collapse:collapse;">
+      <tr><td style="padding-top:18px;border-top:1px solid #e5e7eb;">
+        <div style="font-size:16px;font-weight:700;color:#15181C;line-height:1.4;">${SIGNATURE.name}</div>
+        <div style="font-size:14px;color:#15181C;line-height:1.5;">
+          <a href="tel:${SIGNATURE.phone.replace(/[^0-9]/g, '')}" style="color:#15181C;text-decoration:none;">${SIGNATURE.phone}</a>
+        </div>
+        <div style="font-size:14px;color:#15181C;line-height:1.5;">
+          <a href="mailto:${SIGNATURE.email}" style="color:#15181C;text-decoration:none;">${SIGNATURE.email}</a>
+        </div>
+        <img src="${appUrl}/branding/email-lockup.png" width="190" alt="${SIGNATURE.name}"
+             style="display:block;margin-top:12px;width:190px;max-width:190px;height:auto;border:0;outline:none;text-decoration:none;" />
+      </td></tr>
+    </table>`;
+}
 
 function parseCcList(raw: string): string[] {
   const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -992,4 +1032,69 @@ export function buildOrderEmailHtmlLegacy(order: Order, templateRaw?: EmailTempl
     footerText:       applyTemplateVars(t.footer_text, order, appUrl),
     showSinclairNote: true,
   });
+}
+
+// ─────────────────────────────────────────────────────────────
+// Handoff — Sinclair's saying where a shopped order physically IS
+// Goes to: the GTS inbox (+ CC list). NEVER the vessel.
+//
+// Push lands on Jen's phone in seconds; this is the copy that survives a
+// phone on silent, and the one Mary Karen can search later. Deliberately
+// short — it carries a decision ("send a driver" / "it's in Grafton"), not
+// an order summary. No PDF: nothing here changes what is being billed.
+// ─────────────────────────────────────────────────────────────
+
+export async function sendHandoffEmail(
+  order: Order,
+  handoff: OrderHandoff,
+  opts: { businessEmail?: string; ccEmailRaw?: string; staffName?: string } = {},
+) {
+  const appUrl    = getAppUrl();
+  const fromEmail = process.env.EMAIL_FROM || 'onboarding@resend.dev';
+  const toEmail   = opts.businessEmail || process.env.BUSINESS_EMAIL || 'GraftonTowboatServices@gmail.com';
+  const ccList    = parseCcList(opts.ccEmailRaw ?? process.env.ORDER_EMAIL_CC ?? '');
+
+  const pickup  = handoff === 'awaiting_gts_pickup';
+  const vessel  = order.vessel_name || order.company_name || 'Vessel';
+  const label   = HANDOFF_LABEL[handoff];
+  const action  = pickup
+    ? "It is boxed and waiting at Sinclair's. A GTS driver needs to collect it."
+    : "Sinclair's ran it down to the Grafton storage. It is in the cooler and ready to load.";
+  const accent  = pickup ? '#B45309' : '#15803D';
+
+  const html = `<!DOCTYPE html>
+<html><body style="margin:0;padding:0;background:#f4f5f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+<div style="max-width:560px;margin:0 auto;background:#ffffff;">
+  <div style="background:#1E3D1E;padding:18px 28px;">
+    <div style="color:#D9E84A;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;">Order Handoff</div>
+  </div>
+  <div style="padding:24px 28px;">
+    <div style="display:inline-block;background:${accent};color:#ffffff;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;padding:6px 12px;border-radius:14px;">${label}</div>
+    <p style="margin:16px 0 4px;font-size:20px;font-weight:800;color:#15181C;">${vessel}</p>
+    <p style="margin:0 0 16px;font-size:13px;color:#5A5F66;font-family:ui-monospace,Menlo,monospace;">${order.order_number}</p>
+    <p style="margin:0 0 20px;font-size:15px;line-height:1.5;color:#15181C;">${action}</p>
+    ${opts.staffName ? `<p style="margin:0 0 20px;font-size:12px;color:#5A5F66;">Marked by ${opts.staffName}.</p>` : ''}
+    <div style="text-align:center;padding:14px;background:#f8f9fa;border-radius:4px;">
+      <a href="${appUrl}/admin/orders?order=${order.id}" style="background:#1E3D1E;color:#D9E84A;padding:10px 24px;border-radius:24px;text-decoration:none;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1px;display:inline-block;">Open Order →</a>
+    </div>
+    ${signatureBlock()}
+  </div>
+  <div style="background:#1E3D1E;padding:14px 28px;text-align:center;">
+    <div style="color:#a8c86a;font-size:11px;">Grafton Towboat Services · staff notice · not sent to the vessel</div>
+  </div>
+</div>
+</body></html>`;
+
+  const result = await getResend().emails.send({
+    from:    fromEmail,
+    to:      [toEmail],
+    ...(ccList.length > 0 ? { cc: ccList } : {}),
+    replyTo: toEmail,
+    subject: `${pickup ? '📦 Ready for pickup' : '✅ Delivered to Grafton'} — ${vessel} (#${order.order_number})`,
+    html,
+  });
+  if (result.error) {
+    throw new Error(result.error.message || JSON.stringify(result.error));
+  }
+  return { to: toEmail, cc: ccList };
 }
