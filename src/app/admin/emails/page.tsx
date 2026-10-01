@@ -585,7 +585,7 @@ export default function EmailsPage() {
             )}
 
             <div className="flex flex-wrap items-center gap-2 mt-3.5">
-              <button type="button" disabled={!canSend || pwMismatch} onClick={() => send('real')}>
+              <button type="button" disabled={!canSend || pwMismatch} onClick={() => send('real')}
                 className="btn-primary inline-flex items-center justify-center gap-2 disabled:opacity-40">
                 {sending === 'real' || createBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                 {sending === 'real' || createBusy
