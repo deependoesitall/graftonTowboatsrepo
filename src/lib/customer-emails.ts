@@ -136,7 +136,7 @@ export function buildWelcomeEmail(v: WelcomeVars): { subject: string; html: stri
       Meat, produce and deli go by weight, so your total is an estimate until it is rung up. The invoice shows what actually came aboard.
     </p>
     <p style="margin:0;font-size:14px;line-height:1.6;color:${SOFT};">
-      Anything at all, call <b style="color:${INK};">(618) 556-0290</b>. Day or night. On the water we monitor <b style="color:${INK};">VHF Channel 13</b>.
+      Anything at all, call <b style="color:${INK};">(618) 556-0290</b>. Day or night.
     </p>
     ${signatureBlock()}
   </div>`;
@@ -179,7 +179,6 @@ export function buildAnnouncementEmail(): { subject: string; html: string } {
 
     <div style="border-top:1px solid #E3E8DE;padding-top:18px;font-size:14px;line-height:1.9;color:${SOFT};">
       <div><b style="color:${INK};">Call</b> &nbsp;(618) 556-0290, any hour</div>
-      <div><b style="color:${INK};">On the water</b> &nbsp;VHF Channel 13 for tows, Channel 68 for pleasure craft</div>
       <div><b style="color:${INK};">Find us</b> &nbsp;Mile Marker 219 Mississippi, Mile Marker 0 Illinois</div>
     </div>
     ${signatureBlock()}
