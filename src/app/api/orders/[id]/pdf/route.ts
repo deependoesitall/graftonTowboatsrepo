@@ -26,7 +26,7 @@ export async function GET(
 
   const { searchParams } = new URL(req.url);
   // Boat dashboard and the confirmation download. Sinclair's charges only —
-  // Grafton's delivery fee stays off this file.
+  // The Grafton Towboat Services delivery fee stays off this file.
   const showGtsCharges = searchParams.get('audience') !== 'customer';
   const merged = { ...order } as typeof order;
   if (showGtsCharges && searchParams.has('delivery_fee')) merged.delivery_fee = Number(searchParams.get('delivery_fee')) || 0;

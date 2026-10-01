@@ -78,7 +78,7 @@ export function OrderDetailModal({
   const canAddGtsServices = canEdit && !isSinclairScoped;
   /** Mid-fulfill phone-add: hide once delivered or voided. */
   const canAddToOrder = canEdit && order.status !== 'fulfilled' && order.status !== 'cancelled';
-  // Part B is Grafton's extra run after Sinclair has shopped. Owner and
+  // Part B is the Grafton Towboat Services extra run after Sinclair has shopped. Owner and
   // GTS manager only — Sinclair's never sees that banner or those buttons.
   const canSeePartB = isGtsRole(getAdminRole());
   const canAddPartB = canEdit && order.status === 'shopped' && canSeePartB;
@@ -1370,7 +1370,7 @@ export function OrderDetailModal({
                       }
                       onStatusChange(next);
                     }}>
-                    {/* Sinclair's cannot select Fulfilled — that means Grafton
+                    {/* Sinclair's cannot select Fulfilled — that means Grafton Towboat Services
                         delivered AND sent the customer their final email, which
                         carries GTS's delivery fee. The server rejects it too;
                         this just avoids showing an option that would 403. The
@@ -2079,7 +2079,7 @@ export function OrderDetailModal({
                       <div className="rounded-lg border-2 border-dashed border-amber-400 bg-amber-50 px-3 py-2.5">
                         <p className="text-xs font-bold text-amber-900 uppercase tracking-wide">Part B — extra run</p>
                         <p className="text-[11px] text-amber-800/90 mt-0.5 leading-snug">
-                          Sinclair already shopped Part A. Boat called with extras Grafton will grab now — usually COD, like Jen picking up 20 cases of water on the way to deliver.
+                          Sinclair already shopped Part A. Boat called with extras Grafton Towboat Services will grab now — usually COD, like Jen picking up 20 cases of water on the way to deliver.
                         </p>
                       </div>
                     )}
@@ -2087,7 +2087,7 @@ export function OrderDetailModal({
                       <div className="rounded-lg border border-purple-200 bg-purple-50 px-3 py-2.5">
                         <p className="text-xs font-bold text-purple-900 uppercase tracking-wide">Write-ins</p>
                         <p className="text-[11px] text-purple-800/90 mt-0.5 leading-snug">
-                          Off the shelf — cigarettes, a bag of charcoal, and the like. These are COD unless the boat is paying. Not Grafton&apos;s extra run.
+                          Off the shelf — cigarettes, a bag of charcoal, and the like. These are COD unless the boat is paying. Not the Grafton Towboat Services extra run.
                         </p>
                       </div>
                     )}
@@ -2815,7 +2815,7 @@ export function OrderDetailModal({
                     <> plus <b className="text-brand-navy">{formatCurrency(parseGroceryHandlingFeeInput(handlingFee) || 0)}</b> Sinclair&apos;s handling fee</>
                   )}
                   .
-                  Shopped means Sinclair&apos;s is finished — GTS delivers next, and Grafton&apos;s
+                  Shopped means Sinclair&apos;s is finished — Grafton Towboat Services delivers next, and the Grafton Towboat Services
                   delivery charge goes out on the delivered email, not on this total. You can leave it
                   In Progress if you still have a note to key.
                 </p>

@@ -209,7 +209,7 @@ const submitSchema = z.object({
     || data.services?.other_pickup?.enabled;
   return hasItems || hasSvc;
 }, { message: 'Order must have at least one item or service' })
-// COD-only orders are blocked: Grafton delivers CODs for free as a goodwill
+// COD-only orders are blocked: Grafton Towboat Services delivers CODs for free as a goodwill
 // service alongside a real delivery (vessel-account groceries, an additional
 // service, or a crew change). There is no standalone COD-only order.
 .refine(data => {

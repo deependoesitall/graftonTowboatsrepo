@@ -138,7 +138,7 @@ function HandoffButtons({
 // Pipeline: next status after current
 // new → in_progress → shopped (Sinclair's rang it up) → fulfilled (GTS delivered)
 //
-// Sinclair's pipeline STOPS at 'shopped'. 'fulfilled' means Grafton delivered
+// Sinclair's pipeline STOPS at 'shopped'. 'fulfilled' means Grafton Towboat Services delivered
 // and sent the customer their final email — which carries GTS's delivery fee
 // and billing terms. Sinclair's never sees that email and doesn't control the
 // delivery, so the chain simply ends for them. The server rejects it too; this
@@ -307,7 +307,7 @@ function OrdersContent() {
         const j = await res.json().catch(() => ({}));
         // Surfaced, not swallowed. If this fails and the row looks unchanged,
         // Sinclair's needs to know the alert never went out.
-        setHandoffError(j.error || 'Could not save that. Grafton has NOT been told.');
+        setHandoffError(j.error || 'Could not save that. Grafton Towboat Services has NOT been told.');
       } else {
         await fetchOrders();
         // Sinclair's gets no push and no email — this line is the only
@@ -315,8 +315,8 @@ function OrdersContent() {
         setHandoffOk({
           kind: next,
           text: next === 'delivered_to_gts'
-            ? `Order ${order.order_number} marked Delivered to GTS. Grafton has been notified.`
-            : `Order ${order.order_number} marked Ready for Pickup. Grafton has been notified to come get it.`,
+            ? `Order ${order.order_number} marked Delivered to GTS. Grafton Towboat Services has been notified.`
+            : `Order ${order.order_number} marked Ready for Pickup. Grafton Towboat Services has been notified to come get it.`,
         });
         window.setTimeout(() => setHandoffOk(null), 6000);
       }
@@ -524,7 +524,7 @@ function OrdersContent() {
         {/* Orders table */}
         {isSinclair && (
           <div className="mb-3 rounded-xl border border-brand-gold/40 bg-white/75 px-3.5 py-3">
-            <p className="text-sm font-bold text-brand-navy">After you ring an order up, tell Grafton where it went.</p>
+            <p className="text-sm font-bold text-brand-navy">After you ring an order up, tell Grafton Towboat Services where it went.</p>
             <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2">
                 <p className="text-[11px] font-bold uppercase tracking-wide text-emerald-800 flex items-center gap-1.5">

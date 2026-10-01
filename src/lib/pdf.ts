@@ -15,8 +15,8 @@ import {
 } from '@/lib/outside-pickup';
 
 export function generateOrderHTML(order: Order, opts: { showGtsCharges?: boolean } = {}): string {
-  // Customer copies (boat dashboard, confirmation download) omit Grafton's
-  // delivery fee. That charge is on the delivered email GTS sends.
+  // Customer copies (boat dashboard, confirmation download) omit the
+  // Grafton Towboat Services delivery fee. That charge is on the delivered email.
   const showGtsCharges = opts.showGtsCharges !== false;
   const outOfStockMap = new Map<string, string>(
     order.items
@@ -514,7 +514,7 @@ ${groceryItems.length > 0 ? `
           <td style="padding:6px 8px;font-size:11px;color:#1E3D1E;font-weight:700;">GTS ${escHtml(chargeLabel(c))}</td>
           <td style="padding:6px 8px;text-align:right;font-size:12px;font-weight:800;color:#1E3D1E;">${formatCurrency(c.amount)}</td>
         </tr>`).join('') : `<tr>
-          <td colspan="2" style="padding:6px 8px;font-size:10px;color:#6b7280;line-height:1.45;">Grafton Towboat&apos;s delivery charge is not on this copy. It is on the delivered email Grafton sends when the order is marked delivered.</td>
+          <td colspan="2" style="padding:6px 8px;font-size:10px;color:#6b7280;line-height:1.45;">The Grafton Towboat Services delivery charge is not on this copy. It is on the delivered email Grafton Towboat Services sends when the order is marked delivered.</td>
         </tr>`}
       </table>
     </td>

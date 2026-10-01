@@ -37,7 +37,7 @@ import { readCodPayments } from '@/lib/cod-payments';
 import { useToast } from '@/hooks/use-toast';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 
-/** Sinclair's grocery charges on the boat dashboard. Never Grafton's delivery fee. */
+/** Sinclair's grocery charges on the boat dashboard. Never the Grafton Towboat Services delivery fee. */
 function SinclairCharges({ order }: { order: Order }) {
   const fee = groceryHandlingFeeAmount(order);
   const rung = order.register_total != null && Number.isFinite(Number(order.register_total));
@@ -85,8 +85,8 @@ function SinclairCharges({ order }: { order: Order }) {
       )}
       <p className="text-[10px] text-brand-green/50 mt-2 leading-snug">
         {delivered
-          ? 'Delivered. Grafton Towboat’s delivery charge was on the delivered email — it is not listed with Sinclair’s charges here.'
-          : 'Grafton Towboat’s delivery charge is not on this page. It goes out on the delivered email when Grafton marks the order delivered.'}
+          ? 'Delivered. The Grafton Towboat Services delivery charge was on the delivered email — it is not listed with Sinclair’s charges here.'
+          : 'The Grafton Towboat Services delivery charge is not on this page. It goes out on the delivered email when Grafton Towboat Services marks the order delivered.'}
       </p>
     </div>
   );
@@ -765,12 +765,12 @@ function AccountContent() {
               {([
                 {
                   title: 'In progress',
-                  hint: "Sinclair's shops it, then Grafton delivers it.",
+                  hint: "Sinclair's shops it, then Grafton Towboat Services delivers it.",
                   list: orders.filter(o => (boatLinks.length < 2 || orderMatchesActiveBoat(o, activeBoat)) && o.status !== 'fulfilled' && o.status !== 'cancelled'),
                 },
                 {
                   title: 'Earlier orders',
-                  hint: 'Delivered or cancelled. Sinclair\'s charges stay here. Grafton\'s delivery fee was on the delivered email.',
+                  hint: 'Delivered or cancelled. Sinclair\'s charges stay here. The Grafton Towboat Services delivery fee was on the delivered email.',
                   list: orders.filter(o => (boatLinks.length < 2 || orderMatchesActiveBoat(o, activeBoat)) && (o.status === 'fulfilled' || o.status === 'cancelled')),
                 },
               ]).filter(section => section.list.length > 0).map(section => (

@@ -131,7 +131,7 @@ export async function POST(
     && sinclairScoped
   ) {
     return NextResponse.json(
-      { error: 'Only Grafton Towboat staff can add Parts Pickup or Package Delivery.' },
+      { error: 'Only Grafton Towboat Services staff can add Parts Pickup or Package Delivery.' },
       { status: 403 },
     );
   }
@@ -146,7 +146,7 @@ export async function POST(
     return NextResponse.json({ error: 'Order not found' }, { status: 404 });
   }
 
-  // Part B is Grafton's extra run. Sinclair's write-ins on a shopped order
+  // Part B is the Grafton Towboat Services extra run. Sinclair's write-ins on a shopped order
   // (cigarettes, charcoal) stay ordinary lines — they are not Part B.
   const partB = isGtsRole(session.role) && (order as { status?: string }).status === 'shopped';
 

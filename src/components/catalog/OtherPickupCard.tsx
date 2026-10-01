@@ -2,7 +2,7 @@
 // src/components/catalog/OtherPickupCard.tsx
 //
 // "Other" third-party item request — lives at the bottom of the Sinclair's
-// groceries tab because Sinclair's (not Grafton) handles these pickups. The
+// groceries tab because Sinclair's (not Grafton Towboat Services) handles these pickups. The
 // category sidebar links here via the #other-pickup anchor.
 //
 // The cart-backed wrapper around OtherPickupFields. Same reasoning as

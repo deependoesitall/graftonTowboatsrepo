@@ -50,7 +50,7 @@ const ACTIONS = [
     href: '/install',
     icon: Smartphone,
     title: 'Add to Home Screen',
-    blurb: 'Install Grafton Order on your phone — stays signed in, one tap when you need groceries or supplies.',
+    blurb: 'Install Grafton Towboat Services on your phone — stays signed in, one tap when you need groceries or supplies.',
     cta: 'Install guide',
     primary: false,
   },

@@ -16,10 +16,11 @@
 // have seen the site before.
 //
 // ⚠️ NO ALCOHOL anywhere in this copy, and never a line that reads as though
-// Sinclair's delivers. Sinclair's shops it. Grafton Towboat carries it out.
+// Sinclair's delivers. Sinclair's shops it. Grafton Towboat Services carries it out.
 import { signatureBlock, getAppUrl } from './email';
+import { CUSTOMER_STATUS_WALKTHROUGH } from './customer-order-status';
 
-export type CustomerEmailKey = 'welcome' | 'announcement';
+export type CustomerEmailKey = 'welcome' | 'announcement' | 'signin';
 
 export interface WelcomeVars {
   firstName: string;
@@ -96,6 +97,17 @@ function shot(file: string, alt: string, caption: string): string {
     </div>`;
 }
 
+function signInCard(email: string, password: string): string {
+  return `<div style="border:1px solid #D7DCD4;border-radius:5px;padding:16px 18px;margin:0 0 20px;background:#F6F8F4;">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.2px;color:#5C6B5E;margin-bottom:10px;">Your sign in</div>
+      <div style="font-size:14px;line-height:1.9;color:${INK};">
+        <div><span style="display:inline-block;min-width:84px;color:#5C6B5E;">Website</span><b>graftontowboatservices.com</b></div>
+        <div><span style="display:inline-block;min-width:84px;color:#5C6B5E;">Email</span><b>${esc(email)}</b></div>
+        <div><span style="display:inline-block;min-width:84px;color:#5C6B5E;">Password</span><b>${esc(password)}</b></div>
+      </div>
+    </div>`;
+}
+
 /** Sent to ONE crew member, right after their login is created. */
 export function buildWelcomeEmail(v: WelcomeVars): { subject: string; html: string } {
   const first  = esc(v.firstName.trim()) || 'there';
@@ -113,20 +125,13 @@ export function buildWelcomeEmail(v: WelcomeVars): { subject: string; html: stri
     <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;margin-bottom:22px;">
       ${benefit('Search instead of scrolling.', 'Type what you want and it comes up, priced, ready to add.')}
       ${benefit('Reorder in one tap.', 'This list becomes your next order.')}
-      ${benefit('Track what happens next.', "Received &rarr; Sinclair's shopping &rarr; Grafton on the way &rarr; Delivered.", true)}
+      ${benefit('Track what happens next.', CUSTOMER_STATUS_WALKTHROUGH.replace(/→/g, '&rarr;'), true)}
     </table>
 
     ${shot('onsale.jpg', "Sinclair's weekly sale items on the order screen",
            "Their sale prices land on your order screen the same week they hit the shelf.")}
 
-    <div style="border:1px solid #D7DCD4;border-radius:5px;padding:16px 18px;margin:0 0 20px;background:#F6F8F4;">
-      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.2px;color:#5C6B5E;margin-bottom:10px;">Your sign in</div>
-      <div style="font-size:14px;line-height:1.9;color:${INK};">
-        <div><span style="display:inline-block;min-width:84px;color:#5C6B5E;">Website</span><b>graftontowboatservices.com</b></div>
-        <div><span style="display:inline-block;min-width:84px;color:#5C6B5E;">Email</span><b>${esc(v.loginEmail)}</b></div>
-        <div><span style="display:inline-block;min-width:84px;color:#5C6B5E;">Password</span><b>${esc(v.password)}</b></div>
-      </div>
-    </div>
+    ${signInCard(v.loginEmail, v.password)}
 
     <div style="text-align:center;padding:16px;background:#f8f9fa;border-radius:4px;margin-bottom:20px;">
       <a href="${ORDER_URL}" style="background:${GREEN};color:${YELLOW};padding:12px 28px;border-radius:24px;text-decoration:none;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:1px;display:inline-block;">Start an order &rarr;</a>
@@ -142,6 +147,34 @@ export function buildWelcomeEmail(v: WelcomeVars): { subject: string; html: stri
   </div>`;
   return {
     subject: `You're set up to order groceries — ${v.vesselName.trim() || 'Grafton Towboat Services'}`,
+    html: shell(inner, 'Grafton Towboat Services &middot; Grafton, IL 62037 &middot; Mile Marker 219 Mississippi &middot; Mile Marker 0 Illinois'),
+  };
+}
+
+/**
+ * After a password reset. Same sign-in card as the welcome email, without the
+ * "you're new here" walkthrough — they already have an account.
+ */
+export function buildSignInEmail(v: WelcomeVars): { subject: string; html: string } {
+  const first  = esc(v.firstName.trim()) || 'there';
+  const vessel = esc(v.vesselName.trim()) || 'your boat';
+  const inner = `
+  <div style="padding:26px;">
+    <h1 style="margin:0 0 12px;font-size:25px;line-height:1.2;color:${INK};">Your sign-in details.</h1>
+    <p style="margin:0 0 22px;font-size:15px;line-height:1.6;color:${INK};">
+      Hi ${first}. Here is how you sign in to order for the <b>${vessel}</b>.
+    </p>
+    ${signInCard(v.loginEmail, v.password)}
+    <div style="text-align:center;padding:16px;background:#f8f9fa;border-radius:4px;margin-bottom:20px;">
+      <a href="${ORDER_URL}" style="background:${GREEN};color:${YELLOW};padding:12px 28px;border-radius:24px;text-decoration:none;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:1px;display:inline-block;">Start an order &rarr;</a>
+    </div>
+    <p style="margin:0;font-size:14px;line-height:1.6;color:${SOFT};">
+      Anything at all, call <b style="color:${INK};">(618) 556-0290</b>. Day or night.
+    </p>
+    ${signatureBlock()}
+  </div>`;
+  return {
+    subject: `Your Grafton Towboat Services sign in — ${v.vesselName.trim() || 'Grafton Towboat Services'}`,
     html: shell(inner, 'Grafton Towboat Services &middot; Grafton, IL 62037 &middot; Mile Marker 219 Mississippi &middot; Mile Marker 0 Illinois'),
   };
 }

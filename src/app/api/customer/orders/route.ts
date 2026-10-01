@@ -184,7 +184,7 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // Grafton's delivery fee is not a customer-app figure. It goes out on the
+  // The Grafton Towboat Services delivery fee is not a customer-app figure. It goes out on the
   // delivered email when GTS marks the order delivered. Sinclair's register
   // total and handling fee stay — those are the grocery charges.
   const gtsOnly = ['delivery_fee', 'service_charges', 'delivery_service_type', 'delivery_company_id'] as const;

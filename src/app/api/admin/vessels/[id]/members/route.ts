@@ -1,9 +1,12 @@
 // src/app/api/admin/vessels/[id]/members/route.ts
 // GET    — list members for a vessel
 // POST   — create a crew login and link them to the vessel
-// PATCH  — set/reset a member's password (typed only; staff types it)
+// PATCH  — set/reset a member's password (typed only; staff types it).
+//          { check_only: true } verifies the typed password against Auth
+//          without changing it.
 // DELETE — remove the boat-login link and the auth user. Boat + orders stay.
 import { NextRequest, NextResponse } from 'next/server';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/admin-auth-server';
 import { vesselNameKey, orderMatchesVessel, normalizeCrewRole } from '@/lib/vessel-membership';
@@ -169,6 +172,21 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     );
   }
 
+  if (body.check_only === true) {
+    const email = String(member.email || '').trim();
+    if (!email) {
+      return NextResponse.json(
+        { error: 'This login has no email, so the password cannot be checked.' },
+        { status: 400 },
+      );
+    }
+    const checked = await crewPasswordMatches(email, password.trim());
+    if ('error' in checked) {
+      return NextResponse.json({ error: checked.error }, { status: checked.status });
+    }
+    return NextResponse.json({ match: checked.match });
+  }
+
   const { error: authErr } = await supabase.auth.admin.updateUserById(
     member.user_id,
     { password: password.trim() },
@@ -251,6 +269,30 @@ function mapCrewAuthError(message: string | undefined): { status: number; error:
     return { status: 409, error: 'That email already has a login. Set a new password on the existing row, or use a different email.' };
   }
   return { status: 500, error: msg };
+}
+
+/** Sign in with the anon key so we learn whether the typed password is current,
+ *  without writing a new hash. Session is local to this request. */
+async function crewPasswordMatches(email: string, password: string): Promise<
+  { match: boolean } | { error: string; status: number }
+> {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !anon) {
+    return { error: 'Auth is not configured.', status: 500 };
+  }
+  const client = createSupabaseClient(url, anon, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const { error } = await client.auth.signInWithPassword({ email, password });
+  if (!error) {
+    await client.auth.signOut({ scope: 'local' }).catch(() => undefined);
+    return { match: true };
+  }
+  if (/invalid login|invalid credentials|invalid_grant|wrong password/i.test(error.message || '')) {
+    return { match: false };
+  }
+  return { error: error.message || 'Could not check that password.', status: 502 };
 }
 
 async function findAuthUserByEmail(supabase: ServiceClient, email: string) {

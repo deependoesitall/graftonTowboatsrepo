@@ -10,6 +10,7 @@ import type { Order } from '@/types';
 import { countableUnits } from '@/lib/utils';
 import { createClient } from '@/lib/supabase/client';
 import { saveVesselInfo, getVesselInfo } from '@/lib/cart';
+import { CUSTOMER_STATUS_WALKTHROUGH } from '@/lib/customer-order-status';
 
 const dismissKey = (orderId: string) => `gts-save-order-dismissed:${orderId}`;
 const APPEAR_AFTER_MS = 900;
@@ -185,7 +186,7 @@ export function SaveOrderPrompt({ order, orderNumber, onCreateAccount }: {
             <Benefit
               icon={History}
               title="Track what happens next"
-              body="Received → Sinclair's shopping → Grafton on the way → Delivered."
+              body={CUSTOMER_STATUS_WALKTHROUGH}
             />
           </ul>
 

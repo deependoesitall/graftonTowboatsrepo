@@ -1369,7 +1369,7 @@ export default function AdminSettingsPage() {
             <div className="bg-gray-50 px-6 py-3 text-xs text-gray-400 border-t border-gray-100 space-y-1">
               {sessionRole === 'manager' ? (
                 <p>
-                  You can add Sinclair shoppers and set their passwords. GTS Owner / Jen / MK accounts stay with Grafton.
+                  You can add Sinclair shoppers and set their passwords. GTS Owner / Jen / MK accounts stay with Grafton Towboat Services.
                 </p>
               ) : (
                 <>

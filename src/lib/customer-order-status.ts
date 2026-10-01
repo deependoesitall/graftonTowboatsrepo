@@ -4,7 +4,12 @@
 // Maps the real OrderStatus values honestly. Never invents steps we cannot know.
 //
 // Pipeline (staff): new → in_progress → shopped → fulfilled (or cancelled)
-// Cooks see:        Received → Sinclair's shopping → Grafton on the way → Delivered
+// Cooks see:        Received → Shopping → On the way → Delivered
+// Van vs boat stays staff-side. Customers get one set of status labels.
+
+/** Same four tracker labels as the boat dashboard. */
+export const CUSTOMER_STATUS_WALKTHROUGH =
+  'Received → Shopping → On the way → Delivered.';
 
 export type CustomerStatusKey =
   | 'received'
@@ -24,26 +29,14 @@ export interface CustomerOrderStatus {
 
 type DeliveryHint = 'boat' | 'van' | '' | string | null | undefined;
 
-function readyLabel(delivery: DeliveryHint): string {
-  if (delivery === 'van') return 'Ready for van';
-  return 'On the way';
-}
-
-function readyNext(delivery: DeliveryHint): string {
-  if (delivery === 'van') {
-    return "Sinclair's is finished shopping. It's ready for the van when you get to Grafton.";
-  }
-  // boat (default) and unknown: Grafton brings it to the boat / landing
-  return "Sinclair's is finished shopping. Grafton is getting it to your boat.";
-}
-
 /**
- * Honest map from staff OrderStatus (+ optional delivery_method) to cook copy.
+ * Honest map from staff OrderStatus to cook copy.
  * Aligns with confirmation ("we've received it") and final email ("Delivered").
+ * deliveryMethod is unused — customers see one tracker, not van vs boat.
  */
 export function customerOrderStatus(
   status: string | null | undefined,
-  deliveryMethod?: DeliveryHint,
+  _deliveryMethod?: DeliveryHint,
 ): CustomerOrderStatus {
   const s = (status || 'new').toLowerCase();
   switch (s) {
@@ -51,7 +44,7 @@ export function customerOrderStatus(
       return {
         key: 'received',
         label: 'Received',
-        nextStep: "Grafton has your order. Sinclair's will start shopping it soon.",
+        nextStep: "Grafton Towboat Services has your order. Sinclair's will start shopping it soon.",
         chipClass: 'bg-blue-50 text-blue-700 border-blue-200',
       };
     case 'in_progress':
@@ -64,22 +57,22 @@ export function customerOrderStatus(
     case 'shopped':
       return {
         key: 'ready',
-        label: readyLabel(deliveryMethod),
-        nextStep: readyNext(deliveryMethod),
+        label: 'On the way',
+        nextStep: "Sinclair's is finished shopping. Grafton Towboat Services is on the way.",
         chipClass: 'bg-purple-50 text-purple-800 border-purple-200',
       };
     case 'fulfilled':
       return {
         key: 'done',
         label: 'Delivered',
-        nextStep: "Grafton marked this delivered. The final email has Grafton's delivery charge — Sinclair's totals stay on this page.",
+        nextStep: "Grafton Towboat Services marked this delivered. The final email has the Grafton Towboat Services delivery charge — Sinclair's totals stay on this page.",
         chipClass: 'bg-green-50 text-green-700 border-green-200',
       };
     case 'cancelled':
       return {
         key: 'cancelled',
         label: 'Cancelled',
-        nextStep: 'This order was cancelled. Call Grafton if that looks wrong.',
+        nextStep: 'This order was cancelled. Call Grafton Towboat Services if that looks wrong.',
         chipClass: 'bg-red-50 text-red-600 border-red-200',
       };
     default:
@@ -106,7 +99,7 @@ export interface TimelineStep {
  */
 export function customerOrderTimeline(
   status: string | null | undefined,
-  deliveryMethod?: DeliveryHint,
+  _deliveryMethod?: DeliveryHint,
 ): TimelineStep[] {
   const s = (status || 'new').toLowerCase();
   if (s === 'cancelled') {
@@ -128,7 +121,7 @@ export function customerOrderTimeline(
     {
       key: 'received',
       label: 'Received',
-      blurb: 'Grafton has your order.',
+      blurb: 'Grafton Towboat Services has your order.',
     },
     {
       key: 'shopping',
@@ -137,15 +130,13 @@ export function customerOrderTimeline(
     },
     {
       key: 'ready',
-      label: deliveryMethod === 'van' ? 'Ready for van' : 'On the way',
-      blurb: deliveryMethod === 'van'
-        ? "Sinclair's is done. Pick up in Grafton."
-        : "Sinclair's is done. Grafton is on the way.",
+      label: 'On the way',
+      blurb: "Sinclair's is done. Grafton Towboat Services is on the way.",
     },
     {
       key: 'done',
       label: 'Delivered',
-      blurb: 'Grafton marked it delivered.',
+      blurb: 'Grafton Towboat Services marked it delivered.',
     },
   ];
 

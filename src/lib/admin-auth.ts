@@ -17,8 +17,8 @@
 /**
  * Roles span TWO ORGANISATIONS, not one ladder.
  *
- *   owner        — Grafton Towboat. Everything.
- *   gts_manager  — Grafton Towboat. Orders, products, settings, PLUS the
+ *   owner        — Grafton Towboat Services. Everything.
+ *   gts_manager  — Grafton Towboat Services. Orders, products, settings, PLUS the
  *                  delivery rate cards, barge lines and customer billing
  *                  terms GTS negotiates with the boat companies.
  *   manager      — SINCLAIR'S Manager. Products, orders, weekly ad, coupons.
@@ -32,7 +32,7 @@
  */
 export type AdminRole = 'owner' | 'gts_manager' | 'manager' | 'staff';
 
-/** Grafton Towboat side? Gates GTS-only commercial UI (delivery terms, rates). */
+/** Grafton Towboat Services side? Gates GTS-only commercial UI (delivery terms, rates). */
 export function isGtsRole(role: AdminRole | null): boolean {
   return role === 'owner' || role === 'gts_manager';
 }

@@ -2,7 +2,7 @@
 import { AdminNav } from '@/components/admin/AdminNav';
 
 export const metadata = {
-  title: 'Admin Dashboard — Grafton Towboat',
+  title: 'Admin Dashboard — Grafton Towboat Services',
   robots: 'noindex',
   // SEPARATE MANIFEST FOR STAFF.
   //

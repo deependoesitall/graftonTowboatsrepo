@@ -1,7 +1,7 @@
 // src/lib/grocery-handling-fee.ts
 //
 // Optional flat Sinclair's grocery handling fee (Dave's usual $50).
-// Distinct from COD handling (src/lib/cod-fee.ts) and from Grafton's
+// Distinct from COD handling (src/lib/cod-fee.ts) and from Grafton Towboat Services'
 // delivery fee. register_total stays the Sinclair register ring;
 // billable grocery figures add this fee on top when present.
 

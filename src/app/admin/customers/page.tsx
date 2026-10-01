@@ -884,7 +884,7 @@ export default function CustomersPage() {
       </div>
       <h2 className="font-bold text-brand-navy text-lg mb-1">Access Restricted</h2>
       <p className="text-gray-400 text-sm max-w-xs">
-        Customer lookup is for Grafton Towboat staff and Sinclair&apos;s managers. Contact an owner if you need access.
+        Customer lookup is for Grafton Towboat Services staff and Sinclair&apos;s managers. Contact an owner if you need access.
       </p>
     </div>
   );

@@ -25,7 +25,7 @@ const CONTENT_W = PAGE_W - MARGIN * 2;
 /**
  * PDF attached to order emails.
  * includeGtsCharges is for the delivered email only. The confirmation
- * attachment stays a Sinclair's order sheet — no Grafton delivery fee.
+ * attachment stays a Sinclair's order sheet — no Grafton Towboat Services delivery fee.
  */
 export async function generateOrderPdfBuffer(
   order: Order,

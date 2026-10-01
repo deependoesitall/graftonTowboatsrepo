@@ -20,7 +20,7 @@ import type { Metadata } from 'next';
 import InstallGuide from '@/components/InstallGuide';
 
 export const metadata: Metadata = {
-  title: 'Install the Grafton Order app',
+  title: 'Install the Grafton Towboat Services app',
   description:
     'Add Grafton Towboat Services to your phone’s Home Screen and order groceries '
     + 'and supplies for your vessel in a couple of taps — no app store, no account required.',
@@ -29,11 +29,11 @@ export const metadata: Metadata = {
 export default function CustomerInstallPage() {
   return (
     <InstallGuide
-      appName="Grafton Order"
+      appName="Grafton Towboat Services"
       lockup="gts"
       eyebrow="For vessel crews"
       headline={['Your order,', 'from the wheelhouse.']}
-      blurb="Add Grafton Order to your Home Screen and your boat's details, your cart and your past orders are waiting the next time you need them. No app store, nothing to download."
+      blurb="Add Grafton Towboat Services to your Home Screen and your boat's details, your cart and your past orders are waiting the next time you need them. No app store, nothing to download."
       iconSrc="/branding/customer-icon.png"
       // ⚠️ Push is staff-only and enforced in the database — a vessel can never
       // receive one. Leaving the notifications step in would tell a captain to

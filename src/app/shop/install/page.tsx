@@ -18,7 +18,7 @@ import InstallGuide from '@/components/InstallGuide';
 // Orders", the navy admin icon, /admin.webmanifest. Without the block below
 // this page inherited all of it, so a Sinclair's employee following the
 // Sinclair's-branded instructions ended up with a Home Screen icon called
-// "GTS Orders" wearing Grafton's mark. The page said one thing and the phone
+// "GTS Orders" wearing the Grafton Towboat Services mark. The page said one thing and the phone
 // did another, and nobody would suspect the layout file.
 //
 // A child segment's `icons`/`manifest`/`appleWebApp` replace the parent's

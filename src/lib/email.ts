@@ -232,7 +232,7 @@ export function buildOrderEmailHtml(
   const billableGroceryTotal = groceryItems
     .filter(i => i.paid_by !== 'cod' && i.shopping_status !== 'out_of_stock')
     .reduce((s, i) => s + Number(i.actual_total ?? i.line_total), 0);
-  // Sinclair's handling fee rides on the grocery total, never on Grafton's
+  // Sinclair's handling fee rides on the grocery total, never on Grafton Towboat Services'
   // delivery lines. The register ring itself stays untouched.
   const handlingFee = groceryHandlingFeeAmount(order);
   const registerRing = order.register_total != null && Number.isFinite(Number(order.register_total))
@@ -259,7 +259,7 @@ export function buildOrderEmailHtml(
           <td style="padding:8px 12px;color:#333;">Sinclair&apos;s — Grocery Order${handlingFee > 0 && registerRing != null ? `<div style="font-size:10px;font-weight:500;color:#4d7c5f;margin-top:2px;">Register ${formatCurrency(registerRing)} + handling fee ${formatCurrency(handlingFee)}</div>` : ''}${order.sinclairs_receipt_url ? ` <span style="color:#4d7c5f;font-size:10px;">— itemized receipt ${isLinked(order.sinclairs_receipt_url) ? 'linked below' : 'attached'}</span>` : ''}</td>
           <td style="padding:8px 12px;text-align:right;font-weight:700;">${formatCurrency(groceryTotal)}</td>
         </tr>` : `<tr>
-          <td colspan="2" style="padding:8px 12px;color:#666;font-size:11px;font-style:italic;">No grocery charges on this GTS summary — the boat pays Sinclair&apos;s directly. Lines below are Grafton Towboat Services delivery / services only.</td>
+          <td colspan="2" style="padding:8px 12px;color:#666;font-size:11px;font-style:italic;">No grocery charges on this Grafton Towboat Services summary — the boat pays Sinclair&apos;s directly. Lines below are Grafton Towboat Services delivery / services only.</td>
         </tr>
         ${chargeRows}`}
         <tr style="background:#D9E84A;">
@@ -595,7 +595,7 @@ export function buildOrderEmailHtml(
           <td style="padding:6px 10px;text-align:right;font-size:13px;font-weight:800;color:#1E3D1E;">${formatCurrency(registerRing)}</td>
         </tr>
         <tr style="background:#fffbeb;">
-          <td colspan="5" style="padding:6px 10px;font-size:12px;font-weight:700;color:#92400e;">Sinclair&apos;s handling fee <span style="font-weight:500;color:#a16207;">— not Grafton delivery</span></td>
+          <td colspan="5" style="padding:6px 10px;font-size:12px;font-weight:700;color:#92400e;">Sinclair&apos;s handling fee <span style="font-weight:500;color:#a16207;">— not Grafton Towboat Services delivery</span></td>
           <td style="padding:6px 10px;text-align:right;font-size:13px;font-weight:800;color:#92400e;">${formatCurrency(handlingFee)}</td>
         </tr>` : ''}
         <tr style="background:#D9E84A;">
@@ -866,7 +866,7 @@ export function buildOrderShoppedEmailHtml(order: Order, docs: ShoppedEmailDocs 
   // "shopped" — use neutral fulfillment language for those.
   const hasGroceryItems = order.items.some(i => i.item_type !== 'service');
   const intro = hasGroceryItems
-    ? `Great news, ${order.contact_name}! Your order has been delivered. Please find your final delivery summary attached — including GTS delivery charges.`
+    ? `Great news, ${order.contact_name}! Your order has been delivered. Please find your final delivery summary attached — including Grafton Towboat Services delivery charges.`
     : `Good news, ${order.contact_name}! Your request has been completed and delivered. Please find your final summary attached.`;
   const hasAccount = !!order.user_id;
   return buildOrderEmailHtml(order, {

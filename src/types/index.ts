@@ -250,8 +250,8 @@ export interface Order {
   register_total?: number | null;
   /**
    * Optional Sinclair's grocery handling fee in dollars (flat, often $50).
-   * NULL or 0 = no fee. Not COD handling (cod_fee_*) and not Grafton's
-   * delivery_fee. Does not change register_total.
+   * NULL or 0 = no fee. Not COD handling (cod_fee_*) and not the
+   * Grafton Towboat Services delivery_fee. Does not change register_total.
    * Billable grocery = register_total + this fee.
    */
   grocery_handling_fee?: number | null;
@@ -295,7 +295,7 @@ export interface Order {
   /**
    * WHERE A SHOPPED ORDER PHYSICALLY IS — staff logistics only.
    *
-   * Sinclair's finishing at the register is not Grafton Towboat having the
+   * Sinclair's finishing at the register is not Grafton Towboat Services having the
    * order. Either Sinclair's runs it down to the GTS walk-in coolers in
    * Grafton, or it is boxed at the store and a GTS driver collects it.
    *

@@ -49,14 +49,14 @@ export async function PATCH(
   }
 
   // ── SINCLAIR'S PIPELINE ENDS AT 'SHOPPED' ──
-  // 'fulfilled' means Grafton delivered to the vessel AND sent the customer
+  // 'fulfilled' means Grafton Towboat Services delivered to the vessel AND sent the customer
   // their final email — which carries GTS's delivery fee and billing terms.
   // Sinclair's neither sees that email nor controls the delivery, so they must
   // not be able to declare it happened. Enforced HERE rather than by hiding a
   // button: the client can be edited, this cannot.
   if (body.status === 'fulfilled' && !isGtsRole(session.role)) {
     return NextResponse.json(
-      { error: "Only Grafton Towboat can mark an order fulfilled — that happens on delivery. Confirm the register total to mark it Shopped." },
+      { error: "Only Grafton Towboat Services can mark an order fulfilled — that happens on delivery. Confirm the register total to mark it Shopped." },
       { status: 403 },
     );
   }
@@ -67,7 +67,7 @@ export async function PATCH(
   const touchingCrew = crewKeys.some((k) => k in body && body[k] !== undefined);
   if (touchingCrew && isSinclairScoped(session)) {
     return NextResponse.json(
-      { error: 'Only Grafton Towboat staff can set crew change.' },
+      { error: 'Only Grafton Towboat Services staff can set crew change.' },
       { status: 403 },
     );
   }
@@ -310,7 +310,7 @@ export async function DELETE(
   if (isImport) {
     if (!isGtsRole(role)) {
       return NextResponse.json(
-        { error: 'Only Grafton Towboat staff can remove imported orders.' },
+        { error: 'Only Grafton Towboat Services staff can remove imported orders.' },
         { status: 403 },
       );
     }

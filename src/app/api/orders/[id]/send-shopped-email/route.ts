@@ -1,7 +1,7 @@
 // src/app/api/orders/[id]/send-shopped-email/route.ts
 // THE final customer email — fired manually, one click from the GTS dashboard.
 // Owner-only: Sinclair's finishing the shopping isn't the end of the job
-// (CODs, crew changes, pickups), so Grafton decides when the order is truly
+// (CODs, crew changes, pickups), so Grafton Towboat Services decides when the order is truly
 // done and the customer hears about it.
 
 import { NextRequest, NextResponse } from 'next/server';

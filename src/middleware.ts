@@ -72,7 +72,7 @@ function shopHostToAdmin(request: NextRequest): NextResponse | null {
     //
     // This sent Sinclair's staff to the GTS STAFF install page — navy, "GTS
     // Orders", the admin icon — which is the wrong app name and the wrong icon
-    // on a shop phone, and reads to Dave's team like they were handed Grafton's
+    // on a shop phone, and reads to Dave's team like they were handed Grafton Towboat Services'
     // internal tool. The Sinclair's page already exists at /shop/install; the
     // redirect just wasn't pointed at it.
     //

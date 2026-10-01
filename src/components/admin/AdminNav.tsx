@@ -12,7 +12,7 @@ const NAV: Array<{ href: string; label: string; icon: any; area: 'orders' | 'pro
   { href: '/admin/orders',   label: 'Orders',    icon: ShoppingBag,     area: 'orders' },
   { href: '/admin/products', label: 'Products',  icon: Package,         area: 'products' },
   { href: '/admin/customers',label: 'Customers', icon: Users,           area: 'customers' },
-  // GTS only: these go out in Grafton Towboat's name, to Grafton Towboat's
+  // GTS only: these go out in Grafton Towboat Services' name, to Grafton Towboat Services'
   // customers. Sinclair's staff have no business sending them.
   { href: '/admin/emails',   label: 'Emails',    icon: Mail,            area: 'customers', gtsOnly: true },
   { href: '/admin/deliveries',label: 'Deliveries', icon: Truck,         area: 'reports' },

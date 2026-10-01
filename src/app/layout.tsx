@@ -68,10 +68,10 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',
-    // NOT 'GTS Orders' — that is the STAFF app, and this label is what sits
-    // under the icon on the Home Screen. Two apps called the same thing on one
-    // phone is the confusion the separate origins exist to prevent.
-    title: 'Grafton Order',
+    // NOT 'GTS Orders' — that is the STAFF app. Customer short_name in
+    // public/manifest.json is 'GTS Order'. This label sits under the Home
+    // Screen icon; it must not nickname the company as "Grafton".
+    title: 'GTS Order',
   },
 };
 

@@ -57,6 +57,11 @@ export function CustomerLoginsPanel() {
   >(null);
   const [welcomeSending, setWelcomeSending] = useState(false);
   const [welcomeSentTo, setWelcomeSentTo] = useState('');
+  const [signin, setSignin] = useState<
+    { memberId: string; name: string; email: string; vessel: string; password: string } | null
+  >(null);
+  const [signinSending, setSigninSending] = useState(false);
+  const [signinSentTo, setSigninSentTo] = useState('');
 
   async function sendWelcome() {
     if (!welcome) return;
@@ -87,6 +92,38 @@ export function CustomerLoginsPanel() {
       setTimeout(() => setWelcomeSentTo(''), 7000);
     } finally {
       setWelcomeSending(false);
+    }
+  }
+
+  async function sendSignIn() {
+    if (!signin) return;
+    setSigninSending(true);
+    setError('');
+    try {
+      const res = await adminFetch('/api/admin/customer-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          template: 'signin',
+          to: [signin.email],
+          vars: {
+            firstName: signin.name.split(/\s+/)[0] || '',
+            vesselName: signin.vessel,
+            loginEmail: signin.email,
+            password: signin.password,
+          },
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(json.error || 'Could not send the sign-in email.');
+        return;
+      }
+      setSigninSentTo(signin.email);
+      setSignin(null);
+      setTimeout(() => setSigninSentTo(''), 7000);
+    } finally {
+      setSigninSending(false);
     }
   }
 
@@ -175,7 +212,7 @@ export function CustomerLoginsPanel() {
       setPwDone(member.id);
       setOk(`Password set for ${member.display_name || member.email || 'crew member'}`);
       if (member.email) {
-        setWelcome({
+        setSignin({
           memberId: member.id,
           name: member.display_name || '',
           email: member.email,
@@ -302,6 +339,11 @@ export function CustomerLoginsPanel() {
       {welcomeSentTo && (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 text-sm px-4 py-3 flex items-center gap-2">
           <Mail className="w-4 h-4 shrink-0" /> Welcome email sent to {welcomeSentTo}.
+        </div>
+      )}
+      {signinSentTo && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 text-sm px-4 py-3 flex items-center gap-2">
+          <Mail className="w-4 h-4 shrink-0" /> Sign-in email sent to {signinSentTo}.
         </div>
       )}
 
@@ -496,9 +538,32 @@ export function CustomerLoginsPanel() {
                                   </button>
                                 </div>
                                 <p className="text-[11px] text-gray-400 px-1">
-                                  Type the new password. Give it to them now. They can change it under Password later —
-                                  or use Forgot password on Sign in.
+                                  Type the new password. Give it to them now, or send it in an email.
                                 </p>
+                              </div>
+                            )}
+                            {signin && signin.memberId === m.id && (
+                              <div className="mt-3 rounded-lg border border-brand-gold/40 bg-brand-yellow/20 px-3 py-2.5">
+                                <p className="text-sm font-bold text-brand-navy">
+                                  Send {signin.name.split(/\s+/)[0] || 'them'} their sign-in?
+                                </p>
+                                <p className="mt-0.5 text-[12px] leading-snug text-brand-navy/80">
+                                  Website, their email, and this password — the same card as the welcome email.
+                                  Going to <b className="break-all">{signin.email}</b>.
+                                </p>
+                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                  <button type="button" onClick={sendSignIn} disabled={signinSending}
+                                    className="btn-primary text-xs px-3 py-1.5 inline-flex items-center gap-1.5 disabled:opacity-50">
+                                    {signinSending
+                                      ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                      : <Mail className="w-3.5 h-3.5" />}
+                                    {signinSending ? 'Sending…' : 'Send sign-in email'}
+                                  </button>
+                                  <button type="button" onClick={() => setSignin(null)}
+                                    className="text-xs font-semibold text-brand-navy/50 hover:text-brand-navy px-2">
+                                    Not now
+                                  </button>
+                                </div>
                               </div>
                             )}
                           </li>

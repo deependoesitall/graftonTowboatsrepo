@@ -3,32 +3,32 @@
 // Sends the two hand-fired customer emails. GTS only — Sinclair's staff have
 // no business mailing GTS's customers in GTS's name.
 //
-// GET  ?template=welcome|announcement  → { subject, html } for the preview.
+// GET  ?template=welcome|announcement|signin  → { subject, html } for the preview.
 // POST { template, to[], vars?, bcc? } → sends it.
 import { NextRequest, NextResponse } from 'next/server';
 import { Resend } from 'resend';
 import { requireAdmin } from '@/lib/admin-auth-server';
 import { createServiceClient } from '@/lib/supabase/server';
-import { buildWelcomeEmail, buildAnnouncementEmail, CustomerEmailKey } from '@/lib/customer-emails';
+import { buildWelcomeEmail, buildAnnouncementEmail, buildSignInEmail, CustomerEmailKey } from '@/lib/customer-emails';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** One place that decides what a template looks like, so the preview the
  *  sender approved is byte-for-byte what the customer receives. */
 function render(template: CustomerEmailKey, vars: Record<string, string>) {
-  if (template === 'welcome') {
-    return buildWelcomeEmail({
-      firstName:  vars.firstName  || '',
-      vesselName: vars.vesselName || '',
-      loginEmail: vars.loginEmail || '',
-      password:   vars.password   || '',
-    });
-  }
+  const creds = {
+    firstName:  vars.firstName  || '',
+    vesselName: vars.vesselName || '',
+    loginEmail: vars.loginEmail || '',
+    password:   vars.password   || '',
+  };
+  if (template === 'welcome') return buildWelcomeEmail(creds);
+  if (template === 'signin') return buildSignInEmail(creds);
   return buildAnnouncementEmail();
 }
 
 function parseTemplate(raw: string | null): CustomerEmailKey | null {
-  return raw === 'welcome' || raw === 'announcement' ? raw : null;
+  return raw === 'welcome' || raw === 'announcement' || raw === 'signin' ? raw : null;
 }
 
 export async function GET(req: NextRequest) {
@@ -82,9 +82,9 @@ export async function POST(req: NextRequest) {
 
   // The welcome email is addressed to one person and carries their password.
   // Sending it to a list would hand everyone on it the same login.
-  if (template === 'welcome' && clean.length > 1 && body.test !== true) {
+  if ((template === 'welcome' || template === 'signin') && clean.length > 1 && body.test !== true) {
     return NextResponse.json(
-      { error: 'The welcome email carries one person’s password. Send it to one address at a time.' },
+      { error: 'This email carries one person’s password. Send it to one address at a time.' },
       { status: 400 },
     );
   }

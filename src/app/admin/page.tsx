@@ -275,7 +275,7 @@ export default function AdminDashboard() {
               everything's truly done — with a preview step to catch errors
               (e.g. a substitution Sinclair's forgot to record). ── */}
           {/* GTS only. The final email carries delivery charges and customer
-              billing terms, so this is Grafton Towboat's step — not Sinclair's.
+              billing terms, so this is Grafton Towboat Services' step — not Sinclair's.
               Was owner-only; GTS Manager needs it too. */}
           {isGtsRole(adminRole) && <FinalEmailQueue />}
 
@@ -830,7 +830,7 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
 
           {/* GTS delivery charge — goes on this final email as a line item.
               GTS-ONLY. Delivery service types, barge lines and rate cards are
-              Grafton Towboat's commercial terms with the boat company —
+              Grafton Towboat Services' commercial terms with the boat company —
               Sinclair's has no part in setting them and must not see them.
               The Dashboard is visible to every role (area: null in AdminNav),
               so this block gates on the same permission as the Deliveries
@@ -947,7 +947,7 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
                 >
                   <span className="block text-sm font-bold text-brand-navy">Courtesy billing — GTS bills the groceries</span>
                   <span className="block text-[11px] text-gray-500 mt-0.5 leading-snug">
-                    Rare (Scott Noble / Ingram). Email + QuickBooks get <strong>two lines</strong>: (1) Grafton delivery fee (2) Sinclair&apos;s grocery order as one lump — the register plus any handling fee. Attach the register receipt.
+                    Rare (Scott Noble / Ingram). Email + QuickBooks get <strong>two lines</strong>: (1) Grafton Towboat Services delivery fee (2) Sinclair&apos;s grocery order as one lump — the register plus any handling fee. Attach the register receipt.
                   </span>
                 </button>
               </div>

@@ -37,7 +37,7 @@ export interface AdminSessionPayload {
 }
 
 /** Returns true if the session has the given permission flag. */
-/** Grafton Towboat side? Gates GTS-only commercial data. */
+/** Grafton Towboat Services side? Gates GTS-only commercial data. */
 export function isGtsRole(role: AdminRole): boolean {
   return role === 'owner' || role === 'gts_manager';
 }
@@ -46,7 +46,7 @@ export function isGtsRole(role: AdminRole): boolean {
  * Should this session only ever see orders containing grocery items?
  *
  * TRUE FOR EVERY SINCLAIR'S ROLE, BY DEFINITION — not by opt-in. Crew changes
- * and service-only jobs are Grafton Towboat work; Sinclair's has no part in
+ * and service-only jobs are Grafton Towboat Services work; Sinclair's has no part in
  * them and must never see one. Deriving this from the role rather than the
  * 'sinclair' permission flag means a forgotten checkbox can't expose them:
  * the safe behavior is the default, and the flag can only ever ADD scoping
@@ -208,7 +208,7 @@ export function requireAdmin(
   // GTS's delivery fee and invoice, which Sinclair's must never see or send.
   if (options?.gtsOnly && !isGtsRole(session.role)) {
     return NextResponse.json(
-      { error: 'Only Grafton Towboat staff can do this.' },
+      { error: 'Only Grafton Towboat Services staff can do this.' },
       { status: 403 },
     );
   }
