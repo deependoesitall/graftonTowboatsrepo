@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { getAdminSession, requireAdmin } from '@/lib/admin-auth-server';
 import { excludeHotPrepared, HOT_PREPARED_OR } from '@/lib/catalog-exclusions';
+import { planBargeReplace, type BargeDbRow, type BargeSheetRow } from '@/lib/import-rows';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -204,6 +205,80 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true });
   }
 
+  // ── BARGE ORDER FORM ──
+  // preview_barge classifies and writes nothing.
+  // replace_barge writes only when that mode is posted. The server recomputes
+  // dedupe, shared barcodes, and which rows to deactivate. Client ids are ignored.
+  // Inserts, price updates, and deactivations run in one database function so a
+  // failure rolls all of them back.
+  if (mode === 'preview_barge' || mode === 'replace_barge') {
+    const sheet = (body.products || []) as BargeSheetRow[];
+    if (!sheet.length) return NextResponse.json({ error: 'No products to import' }, { status: 400 });
+
+    let existing: BargeDbRow[] = [];
+    try {
+      existing = await loadBargeProducts(supabase);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not read the barge list';
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
+
+    const plan = planBargeReplace(sheet, existing);
+    if (mode === 'preview_barge') {
+      return NextResponse.json({
+        summary: {
+          added: plan.added.length,
+          updated: plan.updated.length,
+          removed: plan.removedIds.length,
+          dropped_duplicates: plan.droppedDuplicates,
+          kept: plan.kept.length,
+        },
+        shared_barcodes: plan.sharedBarcodes,
+        rows: plan.preview,
+      });
+    }
+
+    const payload = {
+      added: plan.added.map(row => ({
+        category: row.category || 'General',
+        sub_category: row.sub_category || row.category || 'General',
+        upc: row.upc,
+        description: row.description,
+        pkg_size: row.pkg_size,
+        uom: row.uom,
+        price: row.price,
+        form_seq: row.form_seq ?? null,
+        billed_by_weight: isWeightRow(row),
+      })),
+      updated: plan.updated.map(({ id, row }) => ({
+        id,
+        category: row.category || 'General',
+        sub_category: row.sub_category || row.category || 'General',
+        upc: row.upc,
+        description: row.description,
+        pkg_size: row.pkg_size,
+        uom: row.uom,
+        price: row.price,
+        form_seq: row.form_seq ?? null,
+      })),
+      removed_ids: plan.removedIds,
+      log: {
+        admin_username: session.username,
+        admin_display_name: session.display_name,
+        admin_role: session.role,
+      },
+    };
+
+    const { data, error } = await supabase.rpc('replace_barge_catalog', { payload });
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    const result = (data || {}) as { inserted?: number; updated?: number; deactivated?: number };
+    const inserted = Number(result.inserted ?? 0);
+    const updated = Number(result.updated ?? 0);
+    const deactivated = Number(result.deactivated ?? 0);
+    return NextResponse.json({ success: true, inserted, updated, deactivated, removed: deactivated });
+
+  }
+
   // ── COMMIT MODES ──
   const classified = await classifyImportRows(supabase, products);
 
@@ -256,6 +331,29 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json({ success: true, inserted, updated, skipped });
+}
+
+
+async function loadBargeProducts(supabase: ReturnType<typeof createServiceClient>): Promise<BargeDbRow[]> {
+  const all: BargeDbRow[] = [];
+  const pageSize = 1000;
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from('products')
+      .select('id, upc, description, pkg_size, price, is_active, store_only')
+      .eq('store_only', false)
+      .range(from, from + pageSize - 1);
+    if (error) throw new Error(error.message);
+    all.push(...((data || []) as BargeDbRow[]));
+    if (!data || data.length < pageSize) break;
+  }
+  return all;
+}
+
+function isWeightRow(row: BargeSheetRow): boolean {
+  const uom = (row.uom || '').toUpperCase();
+  const pack = (row.pkg_size || '').toUpperCase();
+  return uom === 'LB' || uom === 'PER LB' || pack === 'LB' || pack === 'PER LB';
 }
 
 // Classify each import row as: no match (new), strong match (UPC+price), or

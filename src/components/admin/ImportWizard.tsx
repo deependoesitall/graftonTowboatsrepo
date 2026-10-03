@@ -13,6 +13,8 @@ import {
 } from 'lucide-react';
 import { normalizeCategory } from '@/lib/utils';
 import { adminFetch } from '@/lib/admin-auth';
+import { isMarineOrderCsv, parseMarineOrderCsv } from '@/lib/marine-order-csv';
+import type { BargeSheetRow, SharedBarcodeGroup } from '@/lib/import-rows';
 
 // ─── Types ────────────────────────────────────────────────────
 interface ParsedProduct {
@@ -81,16 +83,60 @@ export function ImportWizard({ onComplete }: { onComplete: () => void }) {
   const [importing, setImporting] = useState(false);
   const [finished, setFinished] = useState(false);
   const [counts, setCounts] = useState({ added: 0, updated: 0, skipped: 0 });
+
+  // Sinclair order-form CSV: no column mapping. Confirm posts replace_barge.
+  const [bargeMode, setBargeMode] = useState(false);
+  const [bargeProducts, setBargeProducts] = useState<BargeSheetRow[]>([]);
+  const [bargeSummary, setBargeSummary] = useState({ added: 0, updated: 0, removed: 0, dropped: 0, skipped: 0 });
+  const [sharedBarcodes, setSharedBarcodes] = useState<SharedBarcodeGroup[]>([]);
+  const [bargeRows, setBargeRows] = useState<{ status: 'add' | 'update' | 'remove'; description: string; pkg_size: string | null; price: number; category: string }[]>([]);
   const [batchError, setBatchError] = useState('');
 
   // ─── Step 1: parse any supported file with SheetJS ──────────
   const handleFile = useCallback((file: File) => {
-    setError(''); setParsing(true); setFileName(file.name);
+    setError(''); setParsing(true); setFileName(file.name); setBargeMode(false);
+    const looksLikeCsv = /\.csv$/i.test(file.name) || file.type === 'text/csv';
+    if (looksLikeCsv) {
+      const reader = new FileReader();
+      reader.onerror = () => { setError('Could not read the file.'); setParsing(false); };
+      reader.onload = (e) => {
+        const textBody = String(e.target?.result || '');
+        if (!isMarineOrderCsv(textBody)) {
+          const bufferReader = new FileReader();
+          bufferReader.onerror = () => { setError('Could not read the file.'); setParsing(false); };
+          bufferReader.onload = (ev) => { parseSpreadsheet(ev.target?.result as ArrayBuffer); };
+          bufferReader.readAsArrayBuffer(file);
+          return;
+        }
+        try {
+          const parsed = parseMarineOrderCsv(textBody);
+          const products = parsed.products;
+          if (!products.length) {
+            setError('No priced products were found on that order form.');
+            setParsing(false);
+            return;
+          }
+          setBargeProducts(products);
+          setBargeSummary(s => ({ ...s, skipped: parsed.skippedBanners }));
+          setBargeMode(true);
+          setStep(3);
+          void previewBarge(products);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Could not read that order form.');
+          setParsing(false);
+        }
+      };
+      reader.readAsText(file);
+      return;
+    }
     const reader = new FileReader();
     reader.onerror = () => { setError('Could not read the file.'); setParsing(false); };
-    reader.onload = (e) => {
+    reader.onload = (e) => { parseSpreadsheet(e.target?.result as ArrayBuffer); };
+    reader.readAsArrayBuffer(file);
+  }, []);
+
+  function parseSpreadsheet(data: ArrayBuffer) {
       try {
-        const data = e.target?.result as ArrayBuffer;
         // SheetJS handles XLSX, XLS, CSV, and TSV from the same entry point —
         // including quoted CSV fields the old split-based parser broke on.
         const wb = XLSX.read(data, { type: 'array', raw: false });
@@ -121,9 +167,7 @@ export function ImportWizard({ onComplete }: { onComplete: () => void }) {
       } finally {
         setParsing(false);
       }
-    };
-    reader.readAsArrayBuffer(file);
-  }, []);
+  }
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault(); setIsDragging(false);
@@ -155,6 +199,62 @@ export function ImportWizard({ onComplete }: { onComplete: () => void }) {
       });
     }
     return products;
+  }
+
+  async function previewBarge(products: BargeSheetRow[]) {
+    setError(''); setAnalyzing(true);
+    try {
+      const res = await adminFetch('/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'preview_barge', products }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || 'Preview failed');
+      const data = await res.json();
+      setBargeSummary(s => ({
+        added: data.summary?.added ?? 0,
+        updated: data.summary?.updated ?? 0,
+        removed: data.summary?.removed ?? 0,
+        dropped: data.summary?.dropped_duplicates ?? 0,
+        skipped: s.skipped,
+      }));
+      setSharedBarcodes(data.shared_barcodes || []);
+      setBargeRows(data.rows || []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Preview failed');
+      setBargeMode(false);
+      setStep(1);
+    } finally {
+      setAnalyzing(false);
+      setParsing(false);
+    }
+  }
+
+  async function confirmBargeReplace() {
+    setStep(4); setImporting(true); setFinished(false); setBatchError('');
+    setProgress({ done: 0, total: bargeProducts.length });
+    try {
+      const res = await adminFetch('/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'replace_barge', products: bargeProducts }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Replace failed');
+      setCounts({ added: data.inserted || 0, updated: data.updated || 0, skipped: data.deactivated || data.removed || 0 });
+      setBargeSummary(s => ({
+        ...s,
+        added: data.inserted ?? s.added,
+        updated: data.updated ?? s.updated,
+        removed: data.deactivated ?? data.removed ?? s.removed,
+      }));
+      setProgress({ done: bargeProducts.length, total: bargeProducts.length });
+      setFinished(true);
+    } catch (err) {
+      setBatchError(err instanceof Error ? err.message : 'Replace failed');
+    } finally {
+      setImporting(false);
+    }
   }
 
   async function goPreview() {
@@ -257,6 +357,8 @@ export function ImportWizard({ onComplete }: { onComplete: () => void }) {
     setStep(1); setError(''); setFileName(''); setHeaders([]); setRows([]);
     setMapping({}); setClassified([]); setBatchError(''); setFinished(false);
     setCounts({ added: 0, updated: 0, skipped: 0 });
+    setBargeMode(false); setBargeProducts([]); setSharedBarcodes([]); setBargeRows([]);
+    setBargeSummary({ added: 0, updated: 0, removed: 0, dropped: 0, skipped: 0 });
   }
 
   // ─── Render ──────────────────────────────────────────────────
@@ -312,6 +414,7 @@ export function ImportWizard({ onComplete }: { onComplete: () => void }) {
               </h3>
               <p className="text-gray-400 text-sm mb-5">
                 Excel files (.xlsx, .xls) and text files (.csv, .tsv) all work — headers are detected automatically.
+                A Sinclair order-form CSV is recognized on its own and does not ask you to match columns.
               </p>
               <label className="btn-gold cursor-pointer inline-flex items-center gap-2 px-6 py-3 rounded-lg text-sm font-bold">
                 <Upload className="w-4 h-4" /> Browse for a File
@@ -388,7 +491,101 @@ export function ImportWizard({ onComplete }: { onComplete: () => void }) {
       )}
 
       {/* ── STEP 3: Color-coded preview ── */}
-      {step === 3 && (
+      {step === 3 && bargeMode && (
+        <div className="card-base overflow-hidden">
+          {analyzing ? (
+            <div className="flex flex-col items-center justify-center py-20 gap-3">
+              <Loader2 className="w-8 h-8 animate-spin text-brand-river" />
+              <p className="text-sm text-brand-river">Comparing the order form to the barge list...</p>
+            </div>
+          ) : (
+            <>
+              <div className="px-6 py-4 border-b border-gray-100">
+                <h2 className="font-display text-lg font-bold text-brand-navy">Review the barge list</h2>
+                <p className="text-xs text-gray-400 mt-1">
+                  <span className="font-semibold text-brand-navy">{fileName}</span> — nothing is saved until you confirm.
+                  Items taken off the list stay in the catalog but are turned off. Store-only products are not changed.
+                </p>
+                <div className="flex flex-wrap gap-2 mt-3">
+                  <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-green-100 text-green-700">
+                    {bargeSummary.added.toLocaleString()} will be added
+                  </span>
+                  <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-amber-100 text-amber-700">
+                    {bargeSummary.updated.toLocaleString()} will be updated
+                  </span>
+                  <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-gray-100 text-gray-600">
+                    {bargeSummary.removed.toLocaleString()} will be removed
+                  </span>
+                </div>
+                <p className="text-sm text-brand-navy mt-3">
+                  {bargeSummary.dropped.toLocaleString()} identical {bargeSummary.dropped === 1 ? 'row was' : 'rows were'} dropped.
+                  {' '}{bargeSummary.skipped.toLocaleString()} section {bargeSummary.skipped === 1 ? 'row was' : 'rows were'} skipped (titles, notes, and write-in lines).
+                </p>
+              </div>
+              {sharedBarcodes.length > 0 && (
+                <div className="px-6 py-4 border-b border-amber-200 bg-amber-50 space-y-2">
+                  <p className="text-xs font-bold text-amber-800 uppercase tracking-wide">Same barcode on more than one item</p>
+                  {sharedBarcodes.map(group => (
+                    <p key={group.upc} className="text-sm text-amber-900">
+                      <span className="font-bold">{group.upc}</span>
+                      {' — '}
+                      {group.items.map(item => item.description + (item.pkg_size ? ' (' + item.pkg_size + ')' : '') + ' $' + item.price.toFixed(2)).join('; ')}
+                    </p>
+                  ))}
+                  <p className="text-xs text-amber-800">These stay as separate items. They were not merged.</p>
+                </div>
+              )}
+              <div className="overflow-x-auto max-h-[28rem] overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-gray-50">
+                    <tr className="text-left">
+                      {['Status', 'Description', 'Category', 'Pack', 'Price'].map(h => (
+                        <th key={h} className="px-3 py-2 text-xs font-bold text-gray-500 uppercase tracking-wide bg-gray-50">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {bargeRows.slice(0, 200).map((row, i) => {
+                      const rowClass = row.status === 'add' ? 'bg-green-50/60' : row.status === 'update' ? 'bg-amber-50/60' : 'bg-gray-50 opacity-60';
+                      const chip = row.status === 'add'
+                        ? <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-green-100 text-green-700">New</span>
+                        : row.status === 'update'
+                        ? <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">Update</span>
+                        : <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-gray-200 text-gray-500">Remove</span>;
+                      return (
+                        <tr key={i} className={rowClass}>
+                          <td className="px-3 py-2">{chip}</td>
+                          <td className="px-3 py-2 font-medium text-brand-navy max-w-xs truncate">{row.description}</td>
+                          <td className="px-3 py-2 text-xs text-brand-river">{row.category || '—'}</td>
+                          <td className="px-3 py-2 text-xs text-gray-500">{row.pkg_size || '—'}</td>
+                          <td className="px-3 py-2 font-bold text-brand-navy whitespace-nowrap">
+                            {row.price > 0 ? '$' + row.price.toFixed(2) : '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {bargeRows.length > 200 && (
+                  <p className="text-gray-400 text-xs px-3 py-2">
+                    Showing first 200 of {bargeRows.length.toLocaleString()} rows — counts above cover the whole file.
+                  </p>
+                )}
+              </div>
+              <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between">
+                <button onClick={resetAll} className="btn-outline text-sm px-4 py-2 flex items-center gap-1.5">
+                  <X className="w-4 h-4" /> Cancel
+                </button>
+                <button onClick={confirmBargeReplace} className="btn-primary text-sm px-5 py-2.5 rounded-lg font-bold flex items-center gap-2">
+                  <Check className="w-4 h-4" /> Replace the barge list
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {step === 3 && !bargeMode && (
         <div className="card-base overflow-hidden">
           {analyzing ? (
             <div className="flex flex-col items-center justify-center py-20 gap-3">
@@ -530,7 +727,39 @@ export function ImportWizard({ onComplete }: { onComplete: () => void }) {
             </div>
           )}
 
-          {finished && (
+          {finished && bargeMode && (
+            <div className="max-w-md mx-auto text-center">
+              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <CheckCircle2 className="w-9 h-9 text-green-500" />
+              </div>
+              <h2 className="font-display text-xl font-bold text-brand-navy mb-1">Barge list replaced</h2>
+              <p className="text-sm text-gray-400 mb-5">
+                <span className="font-semibold text-brand-navy">{fileName}</span>
+              </p>
+              <div className="grid grid-cols-3 gap-3 mb-6">
+                <div className="bg-green-50 rounded-lg p-4">
+                  <p className="text-2xl font-bold text-green-600">{counts.added.toLocaleString()}</p>
+                  <p className="text-xs text-green-700 mt-1">Added</p>
+                </div>
+                <div className="bg-amber-50 rounded-lg p-4">
+                  <p className="text-2xl font-bold text-amber-600">{counts.updated.toLocaleString()}</p>
+                  <p className="text-xs text-amber-700 mt-1">Updated</p>
+                </div>
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <p className="text-2xl font-bold text-gray-500">{counts.skipped.toLocaleString()}</p>
+                  <p className="text-xs text-gray-500 mt-1">Removed</p>
+                </div>
+              </div>
+              <div className="flex justify-center gap-2">
+                <button onClick={resetAll} className="btn-outline text-sm px-4 py-2">Import another file</button>
+                <button onClick={onComplete} className="btn-primary text-sm px-4 py-2 flex items-center gap-1.5">
+                  <Check className="w-4 h-4" /> View Catalog
+                </button>
+              </div>
+            </div>
+          )}
+
+          {finished && !bargeMode && (
             <div className="max-w-md mx-auto text-center">
               <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <CheckCircle2 className="w-9 h-9 text-green-500" />
