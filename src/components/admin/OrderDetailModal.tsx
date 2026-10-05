@@ -8,6 +8,7 @@ import {
   Ship, Users, Package, Wrench, CheckCircle2, Eye,
   Pencil, Plus, Search, Check, Receipt, FileSignature,
   Scale, Replace, CornerDownRight, PackageX, AlertTriangle, Mail,
+  Store, Truck,
 } from 'lucide-react';
 import { Order, OrderItem, OrderStatus, Product } from '@/types';
 import { formatCurrency, formatDate, formatArrivalTime, formatQty, isWeighedLine, orderItemCount, ORDER_STATUSES } from '@/lib/utils';
@@ -1020,6 +1021,18 @@ export function OrderDetailModal({
             <div className="min-w-0">
               <p className="text-brand-sky text-xs uppercase tracking-wide">Order Details</p>
               <h2 className="text-white font-display text-lg sm:text-xl font-bold truncate">{order.order_number}</h2>
+              {!isSinclairScoped && order.handoff === 'awaiting_gts_pickup' && (
+                <span className="mt-1.5 flex w-fit items-center gap-1.5 text-[11px] font-semibold leading-none tracking-tight px-2.5 py-[5px] rounded-full bg-brand-orange text-white">
+                  <Store className="w-3 h-3 shrink-0" strokeWidth={2.25} />
+                  Pickup at Sinclair&apos;s
+                </span>
+              )}
+              {!isSinclairScoped && order.handoff === 'delivered_to_gts' && (
+                <span className="mt-1.5 flex w-fit items-center gap-1.5 text-[11px] font-semibold leading-none tracking-tight px-2.5 py-[5px] rounded-full bg-emerald-600 text-white">
+                  <Truck className="w-3 h-3 shrink-0" strokeWidth={2.25} />
+                  At Grafton
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
               <button onClick={handlePrintPickSheet}

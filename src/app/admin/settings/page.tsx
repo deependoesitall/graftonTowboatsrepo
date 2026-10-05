@@ -893,7 +893,7 @@ export default function AdminSettingsPage() {
             {([
               ['show_sale_rail', "What's on sale", 'Genuine shelf discounts from Sinclair’s own sale set. Comes down on its own when they are not running one.'],
               ['show_best_sellers_rail', 'Best sellers', 'The same items in the same order as Sinclair’s own storefront — their popularity ranking, refreshed nightly.'],
-              ['show_boats_ordering_rail', 'See What Boats Are Buying', 'Our own frequency from grocery orders and matched register receipts. Off until it has enough boats — Best sellers stays. Catalog still hides the row under 8 items.'],
+              ['show_boats_ordering_rail', 'See What Boats Are Buying', 'Boat-order frequency on the catalog and “Boats buying this also buy” on a product. Off means both stay hidden; Best sellers and Sinclair “people who bought this” stay. Turn on when you have enough boats — the catalog still needs 8 items.'],
             ] as const).map(([key, label, hint]) => (
               <div key={key} className="flex items-start justify-between gap-4 border-t border-gray-100 pt-4 first:border-0 first:pt-0">
                 <div>
@@ -1722,7 +1722,7 @@ function BoatsOrderingPreview() {
             {s.grocery_orders} grocery order{s.grocery_orders === 1 ? '' : 's'} · {s.distinct_boats} boat{s.distinct_boats === 1 ? '' : 's'} · {s.matched_lines} catalog-matched line{s.matched_lines === 1 ? '' : 's'} · {s.distinct_skus} SKUs.
             Suggested live bar: {data.thresholds.grocery_orders} orders, {data.thresholds.distinct_boats} boats, {data.thresholds.cards} cards.
             {s.ready ? ' Ready to turn on.' : ' Still collecting — leave the toggle off.'}
-            {' '}Product-page “boats buying this also buy” uses these same baskets, then fills with Sinclair popularity if a pair is thin.
+            {' '}The toggle is the switch for both the catalog row and the product-page boats row. Collection keeps running either way.
           </p>
           {data.items.length > 0 && (
             <ol className="text-xs text-brand-navy space-y-0.5">

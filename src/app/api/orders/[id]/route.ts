@@ -253,7 +253,7 @@ export async function PATCH(
             ? `Ready for pickup — ${vessel}`
             : `Delivered to Grafton — ${vessel}`,
           body: pickup
-            ? `Boxed at Sinclair's. Order #${order.order_number} needs collecting.`
+            ? `Boxed and ready at Sinclair's. Pickup Order #${order.order_number} at Sinclair's Foods`
             : `Order #${order.order_number} is in the GTS cooler, ready to load.`,
           // Distinct from `order-<number>` so it sits alongside the new-order
           // alert instead of quietly replacing it on the lock screen.

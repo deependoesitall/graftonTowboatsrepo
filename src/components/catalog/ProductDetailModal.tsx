@@ -206,10 +206,10 @@ export function ProductDetailModal({ product, variants, onClose, onSelectProduct
   );
 }
 
-// ─── "People who bought this also bought" ─────────────────────
-// Mirrors the row on Sinclair's own product pages. Driven by the Freshop
-// popularity rank we sync nightly (same signal their storefront sorts by),
-// weighted to the current item's category first.
+// ─── Related items on the product modal ─────────────────────
+// Sinclair popularity is the default row ("People who bought this also bought").
+// Boat co-occurrence ("Boats buying this also buy") only when Settings has
+// See What Boats Are Buying on — same kill switch as the catalog rail.
 function AlsoBought({ productId, onSelect }: {
   productId: string; onSelect: (p: Product) => void;
 }) {

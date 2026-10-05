@@ -1,11 +1,16 @@
 // src/app/api/products/[id]/also-bought/route.ts
 //
-// Product-modal row: "Boats buying this also buy" when we have
-// basket co-occurrence; otherwise Sinclair's popularity rank (same as their
-// own product pages) so the row is never empty on day one.
+// Product-modal related row. Two sources, one kill switch:
 //
-// Boat pairs = DISTINCT grocery orders in 90 days that contained both SKUs.
-// Sinclair fill is the old behaviour and stays until co-occurrence is rich.
+//   show_boats_ordering_rail ON  — boat basket co-occurrence first
+//                                  ("Boats buying this also buy"), then
+//                                  Sinclair popularity to fill the row.
+//   show_boats_ordering_rail OFF — Sinclair popularity only
+//                                  ("People who bought this also bought").
+//
+// The catalog rail already respected the toggle. This route did not, so the
+// product modal kept showing boat copy while Settings said the feature was off.
+// Collection still runs either way; this only decides what crews see.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
@@ -13,6 +18,8 @@ import { Product } from '@/types';
 import { applyEffectiveCatalogPricing } from '@/lib/catalog-price';
 import { excludeHotPrepared } from '@/lib/catalog-exclusions';
 import { fetchBoatsAlsoBought } from '@/lib/boats-ordering';
+
+export const dynamic = 'force-dynamic';
 
 const LIMIT = 8;
 
@@ -37,10 +44,16 @@ export async function GET(
 
   if (!seed) return NextResponse.json({ products: [], source: 'sinclair' });
 
+  const { data: settings } = await supabase
+    .from('admin_settings')
+    .select('show_boats_ordering_rail')
+    .maybeSingle();
+  const showBoats = settings?.show_boats_ordering_rail === true;
+
   const picked = new Map<string, Product>();
   let boatCount = 0;
 
-  const neighbours = await fetchBoatsAlsoBought(supabase, id, LIMIT);
+  const neighbours = showBoats ? await fetchBoatsAlsoBought(supabase, id, LIMIT) : [];
   if (neighbours.length) {
     const { data: boatRows } = await excludeHotPrepared(
       supabase
@@ -106,5 +119,7 @@ export async function GET(
     ? 'sinclair'
     : boatCount >= products.length ? 'boats' : 'mixed';
 
-  return NextResponse.json({ products, source });
+  return NextResponse.json({ products, source }, {
+    headers: { 'Cache-Control': 'private, no-store' },
+  });
 }
