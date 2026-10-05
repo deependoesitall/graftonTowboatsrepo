@@ -35,7 +35,7 @@ const ACTIONS = [
     icon: ShoppingCart,
     title: 'Browse & order',
     blurb: "Open the full catalog — groceries from Sinclair's Foods, supplies, and write-ins for your vessel.",
-    cta: 'Start ordering',
+    cta: 'Order online',
     primary: true,
   },
   {
@@ -84,7 +84,7 @@ export default function OrderOnlinePage() {
               className="inline-flex items-center gap-2.5 bg-brand-green text-white font-bold text-base uppercase tracking-widest px-8 py-4 rounded-full hover:bg-brand-gmed transition-colors shadow-lg group"
             >
               <ShoppingCart className="w-5 h-5" />
-              Start ordering
+              Order online
               <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
             </Link>
             <a
@@ -101,7 +101,7 @@ export default function OrderOnlinePage() {
             rel="noopener noreferrer"
             className="mt-3 inline-block font-body text-sm text-brand-green/70 underline underline-offset-4 decoration-brand-green/30 hover:text-brand-orange hover:decoration-brand-orange"
           >
-            Use the old way.
+            USE THE OLD WAY (Print the order form)
           </a>
         </div>
       </section>
