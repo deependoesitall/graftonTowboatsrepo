@@ -6,6 +6,8 @@ import { Save, RefreshCw, Eye, EyeOff, Plus, Trash2, UserPlus, ShieldCheck, User
 import { fetchAdminSession, getAdminRole, canAccess, adminFetch, AdminRole } from '@/lib/admin-auth';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import PushDevices from '@/components/admin/PushDevices';
+import OnboardLinkDialog, { OnboardLinksCard, OnboardTarget, copyText } from '@/components/admin/OnboardLinkDialog';
+import { ONBOARD_LINKS } from '@/lib/onboard-links';
 import { formatDate, formatDateOnly, formatTimeOnly, formatCalendarDate } from '@/lib/utils';
 import { DEFAULT_ZONE_ORDER, AISLES_TOKEN } from '@/lib/store-layout';
 
@@ -229,6 +231,10 @@ export default function AdminSettingsPage() {
   const [pwResetDone, setPwResetDone] = useState<string | null>(null);
   const [pwResetError, setPwResetError] = useState('');
   const [pwResetCopied, setPwResetCopied] = useState(false);
+  // Onboarding: per-row "Copy onboard link", plus a send step right after a
+  // login is created (password held in component state only, never saved).
+  const [onboardTarget, setOnboardTarget] = useState<OnboardTarget | null>(null);
+  const [onboardCopiedId, setOnboardCopiedId] = useState<string | null>(null);
 
   // Activity logs
   const [logs, setLogs] = useState<ActivityLog[]>([]);
@@ -514,6 +520,18 @@ export default function AdminSettingsPage() {
     if (res.ok) {
       const u = await res.json();
       setUsers(us => [...us, u]);
+      const created = {
+        role: (u?.role ?? payload.role) as string,
+        permissions: (u?.permissions ?? payload.permissions ?? []) as string[],
+      };
+      setOnboardTarget({
+        // A Sinclair's manager can only ever create Sinclair's staff.
+        kind: sessionRole === 'manager' || isSinclairStaff(created) ? 'sinclair' : 'gts',
+        username: u?.username || payload.username,
+        name: u?.display_name || payload.display_name,
+        password: payload.password,
+        isNew: true,
+      });
       setNewUser({
         username: '', password: '', role: 'staff', display_name: '',
         permissions: sessionRole === 'manager' ? ['sinclair'] : [],
@@ -604,6 +622,15 @@ export default function AdminSettingsPage() {
     } finally {
       setPwResetSaving(false);
     }
+  }
+
+  // Each row copies only its own site's link: Sinclair's staff → Sinclair's
+  // app, everyone else (GTS) → GTS app. Managers only ever see Sinclair rows.
+  async function copyOnboardLink(u: AdminUser) {
+    const ok = await copyText(ONBOARD_LINKS[isSinclairStaff(u) ? 'sinclair' : 'gts'].url);
+    if (!ok) return;
+    setOnboardCopiedId(u.id);
+    setTimeout(() => setOnboardCopiedId(c => (c === u.id ? null : c)), 2000);
   }
 
   async function deleteUser(id: string) {
@@ -1264,6 +1291,7 @@ export default function AdminSettingsPage() {
                         {group.title}
                       </h3>
                       <p className="text-[11px] text-gray-400 mt-0.5">{group.hint}</p>
+                      <OnboardLinksCard kind={group.key} />
                     </div>
                     {group.list.length === 0 ? (
                       <p className="px-6 py-4 text-xs text-gray-400">Nobody in this group yet.</p>
@@ -1309,6 +1337,15 @@ export default function AdminSettingsPage() {
                           }}
                           className="text-xs font-bold uppercase tracking-wide text-brand-river hover:text-brand-navy transition-colors">
                           {pwResetDone === u.id ? <span className="text-green-600 font-semibold">✓ Password set</span> : 'Set password'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => copyOnboardLink(u)}
+                          title="Copy the onboarding link for this person"
+                          className="min-h-[40px] px-3 rounded-full border border-brand-river/30 text-xs font-bold uppercase tracking-wide text-brand-river hover:text-brand-navy hover:border-brand-navy transition-colors">
+                          {onboardCopiedId === u.id
+                            ? <span className="text-green-600">✓ Copied</span>
+                            : isSinclairStaff(u) ? "Onboard with Sinclair's admin app" : 'Onboard with GTS admin app'}
                         </button>
                         <button onClick={() => toggleUser(u)}
                           className="text-xs text-gray-400 hover:text-brand-river transition-colors">
@@ -1384,6 +1421,12 @@ export default function AdminSettingsPage() {
               )}
             </div>
           </div>
+          {onboardTarget && (
+            <OnboardLinkDialog
+              target={onboardTarget}
+              onClose={() => setOnboardTarget(null)}
+            />
+          )}
         </div>
       )}
 
