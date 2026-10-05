@@ -95,6 +95,14 @@ export default function OrderOnlinePage() {
               {BUSINESS.phone}
             </a>
           </div>
+          <a
+            href="/sinclair-order-form.pdf"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-3 inline-block font-body text-sm text-brand-green/70 underline underline-offset-4 decoration-brand-green/30 hover:text-brand-orange hover:decoration-brand-orange"
+          >
+            Use the old way.
+          </a>
         </div>
       </section>
 
