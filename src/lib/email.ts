@@ -1058,8 +1058,8 @@ export async function sendHandoffEmail(
   const vessel  = order.vessel_name || order.company_name || 'Vessel';
   const label   = HANDOFF_LABEL[handoff];
   const action  = pickup
-    ? "It is boxed and waiting at Sinclair's. A GTS driver needs to collect it."
-    : "Sinclair's ran it down to the Grafton storage. It is in the cooler and ready to load.";
+    ? `Boxed and ready at Sinclair's. Pickup Order #${order.order_number} at Sinclair's Foods.`
+    : `Order #${order.order_number} is in the GTS cooler, ready to load.`;
   const accent  = pickup ? '#B45309' : '#15803D';
 
   const html = `<!DOCTYPE html>
