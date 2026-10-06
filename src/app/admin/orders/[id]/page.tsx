@@ -22,8 +22,9 @@ import { redirect } from 'next/navigation';
 export const metadata = { title: 'Order', robots: 'noindex' };
 
 export default async function AdminOrderRedirect(
-  { params }: { params: Promise<{ id: string }> },
+  { params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ focus?: string }> },
 ) {
   const { id } = await params;
-  redirect(`/admin/orders?order=${encodeURIComponent(id)}`);
+  const { focus } = await searchParams;
+  redirect(`/admin/orders?order=${encodeURIComponent(id)}${focus ? `&focus=${encodeURIComponent(focus)}` : ''}`);
 }

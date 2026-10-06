@@ -31,8 +31,8 @@ export const ONBOARD_HELP_PHONE = '(618) 556-0290';
 
 export function onboardSubject(kind: OnboardKind): string {
   return kind === 'sinclair'
-    ? "Your Sinclair's ordering app login"
-    : 'Your Grafton Towboat Services app login';
+    ? "Your Sinclair's app login"
+    : 'Your GTS app login';
 }
 
 export function onboardBody(opts: {
@@ -43,21 +43,16 @@ export function onboardBody(opts: {
 }): string {
   const { kind, name, username, password } = opts;
   const first = (name || '').trim().split(/\s+/)[0];
-  const appName = kind === 'sinclair' ? "the Sinclair's ordering app" : 'the Grafton Towboat Services staff app';
   return [
     first ? `Hi ${first},` : 'Hi,',
     '',
-    `Here is your login for ${appName}.`,
-    '',
-    `1. Open this link on your phone: ${ONBOARD_LINKS[kind].url}`,
-    '2. Follow the steps to add it to your Home Screen, then open it and sign in.',
+    `On your phone, open ${ONBOARD_LINKS[kind].url} and follow the steps to add the app to your Home Screen. Then open it and sign in:`,
     '',
     `Username: ${username}`,
     `Password: ${password ? password : '(sent separately)'}`,
     '',
-    `Call ${ONBOARD_HELP_PHONE} if you have trouble.`,
+    `Trouble? Call ${ONBOARD_HELP_PHONE}.`,
     '',
-    'Thanks,',
     'Grafton Towboat Services',
   ].join('\n');
 }

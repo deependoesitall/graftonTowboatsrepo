@@ -1,11 +1,10 @@
 'use client';
 // src/components/admin/OnboardLinkDialog.tsx
 //
-// "Send onboard link" — builds a ready-to-send login message for a staff
-// account (GTS or Sinclair's) and hands it to the mail app via mailto:, or
-// copies it. Nothing is sent from the server and the password is never stored:
-// it lives only in this component's state (prefilled when it was just set in
-// this browser tab) and disappears when the dialog closes.
+// Login message for a staff account (GTS or Sinclair's): copy it, or hand it
+// to the mail app via mailto:. Nothing is sent from the server and the
+// password is never stored: it lives only in this component's state
+// (prefilled when it was just set in this tab) and is gone on close.
 
 import { useEffect, useState } from 'react';
 import { Check, Copy, ExternalLink, Mail, X } from 'lucide-react';
@@ -50,21 +49,20 @@ function useCopied() {
   return { copied, copy };
 }
 
-/** One site's onboarding link with Copy / Open buttons (never both). */
+/** Compact one-line link for a group header: only that site's link, never both. */
 export function OnboardLinksCard({ kind }: { kind: OnboardKind }) {
   const { copied, copy } = useCopied();
-  const { label, url } = ONBOARD_LINKS[kind];
+  const { url } = ONBOARD_LINKS[kind];
   return (
-    <div className="mt-2 flex flex-wrap items-center gap-2 bg-white border border-gray-200 rounded-lg px-3 py-2">
-      <span className="text-xs font-semibold text-brand-navy shrink-0">{label} link</span>
-      <span className="text-xs text-gray-500 flex-1 min-w-[10rem] truncate">{url}</span>
+    <div className="mt-1 flex items-center gap-3 text-[11px] text-gray-500 min-w-0">
+      <span className="truncate">{url.replace(/^https?:\/\//, '')}</span>
       <button type="button" onClick={() => copy(kind, url)}
-        className="min-h-[36px] flex items-center gap-1 text-xs font-bold uppercase tracking-wide text-brand-river hover:text-brand-navy">
-        {copied === kind ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+        className="min-h-[32px] shrink-0 flex items-center gap-1 font-semibold text-brand-river hover:text-brand-navy">
+        {copied === kind ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5" />}
         {copied === kind ? 'Copied' : 'Copy'}
       </button>
       <a href={url} target="_blank" rel="noopener noreferrer"
-        className="min-h-[36px] flex items-center gap-1 text-xs font-bold uppercase tracking-wide text-brand-river hover:text-brand-navy">
+        className="min-h-[32px] shrink-0 flex items-center gap-1 font-semibold text-brand-river hover:text-brand-navy">
         <ExternalLink className="w-3.5 h-3.5" /> Open
       </a>
     </div>
@@ -106,39 +104,23 @@ export default function OnboardLinkDialog({
   const link = ONBOARD_LINKS[kind].url;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}
-        role="dialog" aria-modal="true" aria-label="Send onboard link">
-        <div className="bg-brand-navy px-5 py-3 flex items-center justify-between rounded-t-xl">
-          <div>
-            <h3 className="text-white font-bold text-sm">
-              {target.isNew ? 'Login created — send onboard link' : 'Send onboard link'}
-            </h3>
-            <p className="text-white/60 text-xs">{target.name || target.username} · @{target.username}</p>
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 sm:p-4" onClick={onClose}>
+      <div className="bg-white rounded-t-2xl sm:rounded-xl shadow-xl w-full sm:max-w-md max-h-[90vh] overflow-y-auto pb-[env(safe-area-inset-bottom)]"
+        onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Send login">
+        <div className="flex items-start justify-between gap-3 px-5 pt-4">
+          <div className="min-w-0">
+            <h3 className="font-bold text-brand-navy">{target.isNew ? 'Login created' : 'Send login'}</h3>
+            <p className="text-xs text-gray-500 truncate">{target.name || target.username} · {ONBOARD_LINKS[kind].label}</p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close" className="text-white/70 hover:text-white">
+          <button type="button" onClick={onClose} aria-label="Close" className="p-1 -m-1 text-gray-400 hover:text-gray-600">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="p-5 space-y-4">
-          <div>
-            <label className="label-base">{ONBOARD_LINKS[kind].label} link</label>
-            <div className="flex flex-wrap items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
-              <span className="text-xs text-gray-600 flex-1 min-w-[10rem] break-all">{link}</span>
-              <button type="button" onClick={() => copy('link', link)}
-                className="flex items-center gap-1 text-xs font-bold uppercase tracking-wide text-brand-river hover:text-brand-navy">
-                {copied === 'link' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                {copied === 'link' ? 'Copied' : 'Copy link'}
-              </button>
-              <a href={link} target="_blank" rel="noopener noreferrer"
-                className="flex items-center gap-1 text-xs font-bold uppercase tracking-wide text-brand-river hover:text-brand-navy">
-                <ExternalLink className="w-3.5 h-3.5" /> Open
-              </a>
-            </div>
-          </div>
+        <div className="p-5 space-y-3">
+          <p className="text-xs text-gray-600 break-all bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">{link}</p>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label-base">Username</label>
               <input className="input-base bg-gray-50" value={target.username} readOnly />
@@ -146,41 +128,41 @@ export default function OnboardLinkDialog({
             <div>
               <label className="label-base">Password</label>
               <input type="text" className="input-base" value={password} autoComplete="off"
-                placeholder="Type their password"
-                onChange={e => setPassword(e.target.value)} />
+                placeholder="The one you set" onChange={e => setPassword(e.target.value)} />
             </div>
           </div>
-          {!target.password && (
-            <p className="text-[11px] text-gray-400 -mt-2">
-              Passwords can&apos;t be looked up later. Type the one you gave them.
-            </p>
-          )}
 
           <div>
-            <label className="label-base">Send to (email)</label>
-            <input type="email" className="input-base" value={to} placeholder="Optional — you can fill it in your mail app"
+            <label className="label-base">To (optional)</label>
+            <input type="email" className="input-base" value={to} placeholder="name@example.com"
               onChange={e => setTo(e.target.value)} />
           </div>
 
-          <div>
-            <label className="label-base">Message preview</label>
-            <div className="border border-gray-200 rounded-lg bg-gray-50 p-3 text-xs text-gray-700">
-              <p className="font-semibold text-brand-navy mb-2">Subject: {subject}</p>
+          <details className="text-xs text-gray-600">
+            <summary className="cursor-pointer text-gray-400 hover:text-gray-600">Preview message</summary>
+            <div className="mt-2 border border-gray-200 rounded-lg bg-gray-50 p-3">
+              <p className="font-semibold text-brand-navy mb-2">{subject}</p>
               <pre className="whitespace-pre-wrap font-sans">{body}</pre>
             </div>
-          </div>
+          </details>
 
-          <div className="flex flex-wrap gap-2 pt-1">
-            <a href={onboardMailto(to, subject, body)}
-              className="btn-primary text-sm flex items-center gap-2">
-              <Mail className="w-4 h-4" /> Open email
-            </a>
+          <div className="space-y-2 pt-1">
             <button type="button" onClick={() => copy('msg', `Subject: ${subject}\n\n${body}`)}
-              className="btn-outline text-sm flex items-center gap-2">
+              className="btn-primary w-full text-sm flex items-center justify-center gap-2 min-h-[44px]">
               {copied === 'msg' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
               {copied === 'msg' ? 'Copied' : 'Copy message'}
             </button>
-            <button type="button" onClick={onClose} className="text-sm text-gray-400 hover:text-gray-600 px-2">Done</button>
+            <div className="grid grid-cols-2 gap-2">
+              <a href={onboardMailto(to, subject, body)}
+                className="btn-outline text-sm flex items-center justify-center gap-2 min-h-[44px]">
+                <Mail className="w-4 h-4" /> Open email
+              </a>
+              <button type="button" onClick={() => copy('link', link)}
+                className="btn-outline text-sm flex items-center justify-center gap-2 min-h-[44px]">
+                {copied === 'link' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                {copied === 'link' ? 'Copied' : 'Copy link'}
+              </button>
+            </div>
           </div>
         </div>
       </div>
