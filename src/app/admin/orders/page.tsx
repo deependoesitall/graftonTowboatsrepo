@@ -8,6 +8,7 @@ import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { formatCurrency, formatDate, orderItemCount, ORDER_STATUSES } from '@/lib/utils';
 import { Order, OrderStatus, OrderHandoff } from '@/types';
 import { OrderDetailModal } from '@/components/admin/OrderDetailModal';
+import { OrderFocusCard, isOrderFocus } from '@/components/admin/OrderFocusCard';
 import { ShoppingModeModal } from '@/components/admin/ShoppingModeModal';
 import { fetchAdminSession, getAdminRole, canEdit, adminFetch, hasAdminPermission, isGtsRole } from '@/lib/admin-auth';
 import PushBell from '@/components/admin/PushBell';
@@ -164,6 +165,8 @@ function OrdersContent() {
   }, []);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [deepLinkShop, setDeepLinkShop] = useState(false);
+  // GTS notification landings add &focus=new|handoff: a compact card first, full order one tap away.
+  const [deepLinkFocus, setDeepLinkFocus] = useState<{ id: string; focus: 'new' | 'handoff' } | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
   // Role-gated UI is resolved AFTER mount — reading localStorage during render
@@ -236,6 +239,7 @@ function OrdersContent() {
     const params = new URLSearchParams(window.location.search);
     const wanted = params.get('order');
     const wantShop = params.get('shop') === '1';
+    const focus = params.get('focus');
     const placed = params.get('placed') === '1';
     const emailFlag = params.get('email') || '';
     if (!wanted) { setDeepLinkDone(true); return; }
@@ -244,6 +248,7 @@ function OrdersContent() {
     if (match) {
       setSelectedOrder(match);
       if (wantShop) setDeepLinkShop(true);
+      if (isOrderFocus(focus)) setDeepLinkFocus({ id: match.id, focus });
       if (placed) setPlacedNote({ number: match.order_number, email: emailFlag });
       setDeepLinkDone(true);
       window.history.replaceState({}, '', '/admin/orders');
@@ -259,6 +264,7 @@ function OrdersContent() {
         const o = await res.json();
         setSelectedOrder(o);
         if (wantShop) setDeepLinkShop(true);
+        if (isOrderFocus(focus) && o?.id) setDeepLinkFocus({ id: o.id, focus });
         if (placed) setPlacedNote({ number: o.order_number, email: emailFlag });
       }
       setDeepLinkDone(true);
@@ -842,7 +848,15 @@ function OrdersContent() {
             onComplete={() => { setSelectedOrder(null); setDeepLinkShop(false); fetchOrders(); }}
           />
         )}
-        {selectedOrder && !deepLinkShop && (
+        {selectedOrder && !deepLinkShop && deepLinkFocus?.id === selectedOrder.id && (
+          <OrderFocusCard
+            order={selectedOrder}
+            focus={deepLinkFocus.focus}
+            onOpen={() => setDeepLinkFocus(null)}
+            onClose={() => { setSelectedOrder(null); setDeepLinkFocus(null); }}
+          />
+        )}
+        {selectedOrder && !deepLinkShop && deepLinkFocus?.id !== selectedOrder.id && (
           <OrderDetailModal
             order={selectedOrder}
             onClose={() => { setSelectedOrder(null); setDeepLinkShop(false); }}
