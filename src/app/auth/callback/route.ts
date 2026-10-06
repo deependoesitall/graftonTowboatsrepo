@@ -1,15 +1,16 @@
 // src/app/auth/callback/route.ts
 // Handles two flows:
-//   1. Google OAuth redirect — exchanges ?code for a session, sends user to /account
+//   1. Google OAuth redirect — exchanges ?code for a session, sends user to `next` (same page they were on, else /account)
 //   2. Password reset link — exchanges ?code for a session, sends user to /auth/reset-password
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
+import { safeAuthNext } from '@/lib/auth-next';
 
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get('code');
   const type = searchParams.get('type'); // 'recovery' for password reset
-  const next = searchParams.get('next') ?? '/account';
+  const next = safeAuthNext(searchParams.get('next'));
 
   if (!code) {
     return NextResponse.redirect(`${origin}/`);

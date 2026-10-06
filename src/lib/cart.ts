@@ -3,6 +3,7 @@
 import { CartItem, VesselInfo, AdditionalServices } from '@/types';
 
 const CART_KEY     = 'grafton_cart';
+const GUEST_CART_KEY = 'grafton_guest_cart_backup';
 const VESSEL_KEY   = 'grafton_vessel_info';
 const SERVICES_KEY = 'grafton_additional_services';
 const CODPAY_KEY   = 'grafton_cod_payments';
@@ -27,6 +28,51 @@ export function saveCart(items: CartItem[]) {
   if (typeof window === 'undefined') return;
   localStorage.setItem(CART_KEY, JSON.stringify(items));
   window.dispatchEvent(new CustomEvent('cart-updated'));
+}
+
+function cartLineKey(item: CartItem): string {
+  const id = String(item.product_id || '').trim();
+  if (id) return `id:${id}`;
+  return `desc:${(item.description || '').trim().toLowerCase()}|${item.paid_by || 'vessel'}|${item.cod_name || ''}`;
+}
+
+/** Union two carts. `preferred` wins on the same product. Write-ins without an id are kept from both. */
+export function mergeCartItems(base: CartItem[], preferred: CartItem[]): CartItem[] {
+  const byKey = new Map<string, CartItem>();
+  for (const it of base) {
+    byKey.set(cartLineKey({ paid_by: 'vessel', cod_name: '', ...it }), { paid_by: 'vessel', cod_name: '', ...it });
+  }
+  for (const it of preferred) {
+    byKey.set(cartLineKey({ paid_by: 'vessel', cod_name: '', ...it }), { paid_by: 'vessel', cod_name: '', ...it });
+  }
+  return Array.from(byKey.values());
+}
+
+/** Copy the in-progress guest list so sign-in / create-account cannot drop it. */
+export function snapshotGuestCart() {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(GUEST_CART_KEY, JSON.stringify(getCart()));
+  } catch { /* quota / private window */ }
+}
+
+/** Fold the guest snapshot into the live cart. Returns the merged list. */
+export function consumeGuestCartBackup(): CartItem[] {
+  if (typeof window === 'undefined') return getCart();
+  let backup: CartItem[] = [];
+  try {
+    const raw = localStorage.getItem(GUEST_CART_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      backup = Array.isArray(parsed) ? parsed : [];
+    }
+  } catch { backup = []; }
+  try { localStorage.removeItem(GUEST_CART_KEY); } catch { /* fine */ }
+  const merged = mergeCartItems(backup, getCart());
+  if (JSON.stringify(merged) !== JSON.stringify(getCart())) {
+    saveCart(merged);
+  }
+  return merged;
 }
 
 export function addToCart(item: CartItem) {
@@ -61,6 +107,7 @@ export function updateCartItemFields(product_id: string, patch: Partial<CartItem
 export function clearCart() {
   if (typeof window === 'undefined') return;
   localStorage.removeItem(CART_KEY);
+  try { localStorage.removeItem(GUEST_CART_KEY); } catch { /* fine */ }
   window.dispatchEvent(new CustomEvent('cart-updated'));
   window.dispatchEvent(new CustomEvent('boat-cart-clear'));
 }

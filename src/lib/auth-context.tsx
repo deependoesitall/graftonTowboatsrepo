@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState, ReactNode } from 'react
 import { User } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/client';
 import { startBoatCartSync, stopBoatCartSync } from '@/lib/boat-cart-sync';
+import { snapshotGuestCart } from '@/lib/cart';
 
 export interface CustomerProfile {
   first_name: string | null;
@@ -80,6 +81,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   async function signUp(email: string, password: string, details: SignUpDetails) {
+    snapshotGuestCart();
     try {
       const { data, error } = await supabase.auth.signUp({ email, password });
       if (error) return { error: error.message };
@@ -107,6 +109,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function signIn(email: string, password: string) {
+    snapshotGuestCart();
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) return { error: error.message };

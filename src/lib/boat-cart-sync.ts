@@ -6,7 +6,7 @@
 
 'use client';
 
-import { getCart, saveCart, getVesselInfo, saveVesselInfo } from '@/lib/cart';
+import { getCart, saveCart, getVesselInfo, saveVesselInfo, mergeCartItems, consumeGuestCartBackup } from '@/lib/cart';
 import { createClient } from '@/lib/supabase/client';
 import type { CartItem } from '@/types';
 
@@ -45,16 +45,19 @@ async function api(method: 'GET' | 'PUT', body?: unknown) {
 }
 
 function mergeItems(server: CartItem[], local: CartItem[]): CartItem[] {
-  const byId = new Map<string, CartItem>();
-  for (const it of server) {
+  const kept = server.filter(it => {
     const id = String(it.product_id || '');
-    if (id && !removedIds.has(id)) byId.set(id, { paid_by: 'vessel', cod_name: '', ...it });
-  }
-  for (const it of local) {
-    const id = String(it.product_id || '');
-    if (id) byId.set(id, it);
-  }
-  return Array.from(byId.values());
+    return !id || !removedIds.has(id);
+  });
+  return mergeCartItems(kept, local);
+}
+
+/** Restore the guest list, fold in the boat cart, then upload so the boat has it. */
+async function hydrate() {
+  consumeGuestCartBackup();
+  await pull();
+  // Skip an empty replace when we never loaded a boat cart (failed GET / unlinked login).
+  if (getCart().length > 0) await push(true);
 }
 
 async function pull() {
@@ -118,13 +121,16 @@ function onBoatClear() {
 }
 
 export function startBoatCartSync() {
-  if (typeof window === 'undefined' || started) return;
-  started = true;
-  window.addEventListener('cart-updated', onCartUpdated);
-  window.addEventListener('cart-item-removed', onItemRemoved);
-  window.addEventListener('boat-cart-clear', onBoatClear);
-  void pull();
-  pollTimer = setInterval(() => { void pull(); }, 8000);
+  if (typeof window === 'undefined') return;
+  consumeGuestCartBackup();
+  if (!started) {
+    started = true;
+    window.addEventListener('cart-updated', onCartUpdated);
+    window.addEventListener('cart-item-removed', onItemRemoved);
+    window.addEventListener('boat-cart-clear', onBoatClear);
+    pollTimer = setInterval(() => { void pull(); }, 8000);
+  }
+  void hydrate();
 }
 
 export function stopBoatCartSync() {

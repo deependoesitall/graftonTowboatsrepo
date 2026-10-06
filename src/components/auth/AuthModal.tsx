@@ -6,6 +6,8 @@ import { X, Loader2, Star, History, Zap, CheckCircle2, Eye, EyeOff } from 'lucid
 import { useAuth } from '@/lib/auth-context';
 import { createClient } from '@/lib/supabase/client';
 import { MIN_PASSWORD_LENGTH } from '@/lib/password-rules';
+import { snapshotGuestCart } from '@/lib/cart';
+import { currentAuthNext } from '@/lib/auth-next';
 
 interface AuthModalProps {
   open: boolean;
@@ -37,6 +39,7 @@ export function AuthModal({ open, onClose, defaultMode = 'signin', defaultEmail 
 
   useEffect(() => {
     if (open) {
+      snapshotGuestCart();
       setError('');
       setPassword('');
       setConfirmPassword('');
@@ -60,10 +63,12 @@ export function AuthModal({ open, onClose, defaultMode = 'signin', defaultEmail 
 
   async function handleGoogleSignIn() {
     setBusy(true);
+    snapshotGuestCart();
+    const next = currentAuthNext();
     const supabase = createClient();
     await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: `${window.location.origin}/auth/callback` },
+      options: { redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}` },
     });
     // Page will redirect — no need to setBusy(false)
   }
@@ -71,6 +76,7 @@ export function AuthModal({ open, onClose, defaultMode = 'signin', defaultEmail 
   async function submit() {
     if (!canSubmit) return;
     setError(''); setBusy(true);
+    snapshotGuestCart();
     try {
       if (screen === 'signup') {
         const { error: err, needsConfirmation: confirm } = await signUp(email.trim(), password, {
