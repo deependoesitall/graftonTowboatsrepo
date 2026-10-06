@@ -255,6 +255,8 @@ export async function PATCH(
           body: pickup
             ? `Boxed and ready at Sinclair's. Pickup Order #${order.order_number} at Sinclair's Foods`
             : `Order #${order.order_number} is in the GTS cooler, ready to load.`,
+          // Lands on a compact handoff card; full order one tap away.
+          url: `/admin/orders?order=${order.id}&focus=handoff`,
           // Distinct from `order-<number>` so it sits alongside the new-order
           // alert instead of quietly replacing it on the lock screen.
           tag: `handoff-${order.order_number}`,

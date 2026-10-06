@@ -315,7 +315,8 @@ export async function sendOrderPush(
       : {
           title: `New order — ${vessel}`,
           body: line,
-          url: `/admin/orders?order=${order.id}`,
+          // focus=new lands on a compact summary card; full order one tap away.
+          url: `/admin/orders?order=${order.id}&focus=new`,
           tag: `order-${order.order_number}`,
         },
   );
