@@ -31,7 +31,7 @@ export const BUSINESS = {
    * (pleasure craft) in the same sentence. Contact page uses the long form.
    */
   vhfLong:
-    'During on water deliveries, Grafton Towboat Services monitors VHF Channel 13 for vessel communication and coordination, and VHF Channel 68 for pleasure craft.',
+    'During on-water deliveries, Grafton Towboat Services monitors VHF Channel 13 for vessel communication and coordination, and VHF Channel 68 for pleasure craft.',
   /** Footer and other compact lines. */
   vhf: 'VHF 13 (tow/barge) · VHF 68 (pleasure craft)',
   /** Corrected Sept 2026. The site said 218 / 0.7 for months. */
