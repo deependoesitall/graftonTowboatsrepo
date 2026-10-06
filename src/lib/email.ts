@@ -113,7 +113,7 @@ const DEFAULT_TEMPLATE: Required<EmailTemplateConfig> = {
   intro_message: '',
   footer_text: 'Grafton Towboat Services · Grafton, IL 62037 · (618) 556-0290',
   button_text: 'Order Dashboard',
-  button_url: '/admin/orders',
+  button_url: '/admin/orders?order={order_id}&focus=new',
 };
 
 function applyTemplateVars(text: string, order: Order, appUrl: string): string {
@@ -731,7 +731,7 @@ export async function sendOrderReceivedEmail(
     buttonUrl:       (() => {
                        const raw = opts.template?.button_url
                          ? applyTemplateVars(opts.template.button_url, order, appUrl)
-                         : `${appUrl}/admin/orders`;
+                         : `${appUrl}/admin/orders?order=${encodeURIComponent(order.id)}&focus=new`;
                        return raw.startsWith('http') ? raw : `${appUrl}${raw.startsWith('/') ? '' : '/'}${raw}`;
                      })(),
     footerText:      opts.template?.footer_text
@@ -901,7 +901,7 @@ export async function sendOrderShoppedEmail(
     { filename: `order-${order.order_number}-fulfilled.pdf`, content: pdfBuffer2 },
   ];
 
-  // ── Supporting documents ──────────────────────────────────────────
+  // ── Supporting documents ────────────────────────────────────────────
   //
   // Some barge lines will not pay against an invoice on its own. Ingram's
   // Receipt Acknowledgement says it in red on the form itself:
@@ -919,7 +919,7 @@ export async function sendOrderShoppedEmail(
   // ever rode the email; the signed slip was captured and then forgotten,
   // which meant the one document the customer's AP department actually
   // requires was the one we didn't send.
-  // ── SIZE BUDGET ───────────────────────────────────────────────────
+  // ── SIZE BUDGET ─────────────────────────────────────────────────────
   //
   // THE FAILURE THIS PREVENTS: Resend rejects an over-sized message, and a
   // rejection fails the WHOLE send — not just the offending attachment. The
@@ -1075,7 +1075,7 @@ export async function sendHandoffEmail(
     <p style="margin:0 0 20px;font-size:15px;line-height:1.5;color:#15181C;">${action}</p>
     ${opts.staffName ? `<p style="margin:0 0 20px;font-size:12px;color:#5A5F66;">Marked by ${opts.staffName}.</p>` : ''}
     <div style="text-align:center;padding:14px;background:#f8f9fa;border-radius:4px;">
-      <a href="${appUrl}/admin/orders?order=${order.id}" style="background:#1E3D1E;color:#D9E84A;padding:10px 24px;border-radius:24px;text-decoration:none;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1px;display:inline-block;">Open Order →</a>
+      <a href="${appUrl}/admin/orders?order=${order.id}&focus=handoff" style="background:#1E3D1E;color:#D9E84A;padding:10px 24px;border-radius:24px;text-decoration:none;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1px;display:inline-block;">Open Order →</a>
     </div>
     ${signatureBlock()}
   </div>
