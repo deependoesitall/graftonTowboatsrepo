@@ -1606,12 +1606,14 @@ export function OrderDetailModal({
                         </button>
                       </div>
                     </label>
+                    {isSinclairScoped && (
                     <GroceryHandlingFeeField
                       compact
                       value={handlingFee}
                       disabled={registerTotalSaving}
                       onChange={next => { setHandlingFee(next); setRegisterSaved(false); }}
                     />
+                    )}
                     {deckItems.length > 0 && (
                       <label className="block text-xs font-bold text-teal-700 uppercase">
                         Deck register
@@ -1938,11 +1940,13 @@ export function OrderDetailModal({
                       </tr>
                       <tr className="bg-white">
                         <td colSpan={canEdit ? 8 : 7} className="px-3 py-2">
+                          {isSinclairScoped && (
                           <GroceryHandlingFeeField
                             value={handlingFee}
                             disabled={registerTotalSaving}
                             onChange={next => { setHandlingFee(next); setRegisterSaved(false); }}
                           />
+                          )}
                         </td>
                       </tr>
 
@@ -2778,12 +2782,14 @@ export function OrderDetailModal({
                     />
                   </div>
                 </label>
+                {isSinclairScoped && (
                 <GroceryHandlingFeeField
                   compact
                   value={handlingFee}
                   disabled={fillingAll}
                   onChange={next => { setHandlingFee(next); setRegisterSaved(false); }}
                 />
+                )}
                 {deckItems.length > 0 && (
                   <label className="block text-xs font-bold text-teal-700 uppercase tracking-wide">
                     Deck register total

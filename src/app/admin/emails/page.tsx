@@ -12,11 +12,12 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import {
   Mail, Send, Loader2, CheckCircle2, AlertTriangle, UserPlus, Megaphone,
-  Monitor, Smartphone, X, FlaskConical, Search, Ship,
+  Monitor, Smartphone, X, FlaskConical, Search, Ship, Copy, Check,
 } from 'lucide-react';
 import { adminFetch } from '@/lib/admin-auth';
 import { CrewRoleField } from '@/components/admin/CrewRoleField';
 import { MIN_PASSWORD_LENGTH } from '@/lib/password-rules';
+import { boatSignInText, boatInviteText } from '@/lib/boat-invite';
 
 type TemplateKey = 'welcome' | 'announcement';
 
@@ -96,6 +97,7 @@ export default function EmailsPage() {
   const [qaPassword, setQaPassword] = useState('');
   const [qaRole, setQaRole] = useState('cook');
   const [pwMismatch, setPwMismatch] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const loadPreview = useCallback(async () => {
     setLoadingPreview(true);
@@ -585,6 +587,29 @@ export default function EmailsPage() {
             )}
 
             <div className="flex flex-wrap items-center gap-2 mt-3.5">
+              <button
+                type="button"
+                onClick={async () => {
+                  const msg = template === 'welcome' && vars.loginEmail && vars.password
+                    ? boatSignInText({
+                        vesselName: vars.vesselName,
+                        email: vars.loginEmail,
+                        password: vars.password,
+                      })
+                    : boatInviteText({ vesselName: vars.vesselName });
+                  try {
+                    await navigator.clipboard.writeText(msg);
+                    setCopied(true);
+                    window.setTimeout(() => setCopied(false), 2500);
+                  } catch {
+                    setError('Could not copy. Select the preview and copy it yourself.');
+                  }
+                }}
+                className="btn-outline text-sm inline-flex items-center gap-1.5"
+              >
+                {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                {copied ? 'Copied' : 'Copy text message'}
+              </button>
               <button type="button" disabled={!canSend || pwMismatch} onClick={() => send('real')}
                 className="btn-primary inline-flex items-center justify-center gap-2 disabled:opacity-40">
                 {sending === 'real' || createBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}

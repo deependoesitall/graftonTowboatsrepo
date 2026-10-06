@@ -7,7 +7,8 @@
 // (prefilled when it was just set in this tab) and is gone on close.
 
 import { useEffect, useState } from 'react';
-import { Check, Copy, ExternalLink, Mail, X } from 'lucide-react';
+import { Check, Copy, ExternalLink, Loader2, Mail, Send, X } from 'lucide-react';
+import { adminFetch } from '@/lib/admin-auth';
 import {
   ONBOARD_LINKS,
   OnboardKind,
@@ -91,6 +92,9 @@ export default function OnboardLinkDialog({
   const kind = target.kind;
   const [to, setTo] = useState(target.email && target.email.includes('@') ? target.email : '');
   const [password, setPassword] = useState(target.password || '');
+  const [sending, setSending] = useState(false);
+  const [sentTo, setSentTo] = useState('');
+  const [sendError, setSendError] = useState('');
   const { copied, copy } = useCopied();
 
   useEffect(() => {
@@ -152,6 +156,37 @@ export default function OnboardLinkDialog({
               {copied === 'msg' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
               {copied === 'msg' ? 'Copied' : 'Copy message'}
             </button>
+            <button type="button"
+              disabled={sending || !to.trim() || !password.trim()}
+              onClick={async () => {
+                setSending(true);
+                setSendError('');
+                setSentTo('');
+                try {
+                  const res = await adminFetch('/api/admin/staff-invite', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      to: to.trim(),
+                      username: target.username,
+                      password: password.trim(),
+                      display_name: target.name || target.username,
+                      kind,
+                    }),
+                  });
+                  const j = await res.json().catch(() => ({}));
+                  if (!res.ok) { setSendError(j.error || 'Send failed.'); return; }
+                  setSentTo(to.trim());
+                } finally {
+                  setSending(false);
+                }
+              }}
+              className="btn-outline w-full text-sm flex items-center justify-center gap-2 min-h-[44px] disabled:opacity-40">
+              {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+              {sending ? 'Sending…' : 'Send login email'}
+            </button>
+            {sentTo && <p className="text-sm text-emerald-800">Sent to {sentTo}.</p>}
+            {sendError && <p className="text-sm text-red-700">{sendError}</p>}
             <div className="grid grid-cols-2 gap-2">
               <a href={onboardMailto(to, subject, body)}
                 className="btn-outline text-sm flex items-center justify-center gap-2 min-h-[44px]">

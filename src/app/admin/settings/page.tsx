@@ -2,7 +2,7 @@
 // src/app/admin/settings/page.tsx
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Save, RefreshCw, Eye, EyeOff, Plus, Trash2, UserPlus, ShieldCheck, User, Lock, ScrollText, Search, ArrowRight, ChevronLeft, ChevronRight, MessageSquarePlus, Check, X, Loader2, Send, Wrench, FlaskConical, RotateCcw } from 'lucide-react';
+import { Save, RefreshCw, Eye, EyeOff, Plus, Trash2, UserPlus, ShieldCheck, User, Lock, ScrollText, Search, ArrowRight, ChevronLeft, ChevronRight, MessageSquarePlus, Check, X, Loader2, Send, Wrench, FlaskConical, RotateCcw, Copy } from 'lucide-react';
 import { fetchAdminSession, getAdminRole, canAccess, adminFetch, AdminRole } from '@/lib/admin-auth';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import PushDevices from '@/components/admin/PushDevices';

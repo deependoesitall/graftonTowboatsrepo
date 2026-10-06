@@ -4,6 +4,7 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { getAdminSession, requireAdmin } from '@/lib/admin-auth-server';
 import { excludeHotPrepared, HOT_PREPARED_OR } from '@/lib/catalog-exclusions';
 import { planBargeReplace, type BargeDbRow, type BargeSheetRow } from '@/lib/import-rows';
+import { rebuildVariantGroups } from '@/lib/variant-groups';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -275,7 +276,8 @@ export async function POST(req: NextRequest) {
     const inserted = Number(result.inserted ?? 0);
     const updated = Number(result.updated ?? 0);
     const deactivated = Number(result.deactivated ?? 0);
-    return NextResponse.json({ success: true, inserted, updated, deactivated, removed: deactivated });
+    const variants_labelled = await rebuildVariantGroups(supabase);
+    return NextResponse.json({ success: true, inserted, updated, deactivated, removed: deactivated, variants_labelled });
 
   }
 
@@ -330,7 +332,10 @@ export async function POST(req: NextRequest) {
     updated++;
   }
 
-  return NextResponse.json({ success: true, inserted, updated, skipped });
+  const variants_labelled = (inserted || updated)
+    ? await rebuildVariantGroups(supabase)
+    : 0;
+  return NextResponse.json({ success: true, inserted, updated, skipped, variants_labelled });
 }
 
 

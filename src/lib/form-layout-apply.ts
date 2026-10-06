@@ -11,6 +11,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import layout from '@/data/order-form-layout.json';
+import { rebuildVariantGroups } from '@/lib/variant-groups';
 
 export interface FormLayoutItem {
   seq: number;
@@ -29,6 +30,7 @@ export interface FormLayoutResult {
   matched_by: { upc: number; desc_pkg: number; desc: number };
   unmatched_count: number;
   unmatched: Array<{ seq: number; description: string; pkg_size: string | null; upc: string | null }>;
+  variants_labelled?: number;
 }
 
 const normUpc = (u: string | null | undefined) =>
@@ -115,10 +117,16 @@ export async function applyFormLayout(supabase: SupabaseClient): Promise<FormLay
   });
   if (rpcErr) throw new Error(rpcErr.message);
 
+  // Size choosers (pork steaks 2/4/8 pk, ground chuck 3#/5#, …) are labels on
+  // product rows. A barge replace or layout stamp leaves them NULL until this
+  // runs — the Oct 5 meeting still had three pork-steak tiles.
+  const variants_labelled = await rebuildVariantGroups(supabase);
+
   return {
     form_rows: items.length,
     matched: matched.length,
     updated: Number(updatedCount) || 0,
+    variants_labelled,
     matched_by: {
       upc: matched.filter(m => m.how === 'upc').length,
       desc_pkg: matched.filter(m => m.how === 'desc+pkg').length,

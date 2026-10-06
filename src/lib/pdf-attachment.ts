@@ -345,6 +345,11 @@ export async function generateOrderPdfBuffer(
       y += 4;
     }
     if (opts.includeGtsCharges) {
+      if (y > 700) { doc.addPage(); y = MARGIN; }
+      doc.fillColor('#9a3412').fontSize(8).font('Helvetica-Bold')
+         .text('NOT AN INVOICE — do not pay from this summary. QuickBooks sends the invoice.',
+           MARGIN, y, { width: CONTENT_W });
+      y += 16;
       for (const c of billableCharges(order)) {
         if (y > 700) { doc.addPage(); y = MARGIN; }
         doc.fillColor(DARK_GREEN).fontSize(9).font('Helvetica-Bold')

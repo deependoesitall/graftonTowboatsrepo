@@ -172,7 +172,7 @@ export function buildPack(d: PackDelivery): QbPack {
         description: "Sinclair's courtesy",
         amount: money(total),
         taxable: false,
-        note: 'Sales tax already included in the Sinclair’s register total.',
+        note: 'Sales tax already included in the Sinclair’s register total. Do not add Illinois sales tax on this pass-through.',
       });
     } else {
       // Hard error: the courtesy line is usually the largest number on the

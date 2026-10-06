@@ -965,6 +965,7 @@ function DeliveryEditor({ delivery, companies, serviceTypes, vesselRecords = [],
   const [saveError, setSaveError] = useState('');
   const [rateHint, setRateHint] = useState<string>('');
   const [cardRate, setCardRate] = useState<number | null>(null);
+  const [companyRateOffer, setCompanyRateOffer] = useState<number | null>(null);
   const [groceryAutofillNote, setGroceryAutofillNote] = useState<string>('');
   const [orderRegisterTotal, setOrderRegisterTotal] = useState<number | null>(null);
   const [orderSubtotal, setOrderSubtotal] = useState<number | null>(null);
@@ -1040,23 +1041,37 @@ function DeliveryEditor({ delivery, companies, serviceTypes, vesselRecords = [],
   // instead of just wrong-looking.
   const svcId = serviceTypes.find(s => s.name === f.service_type)?.id;
   useEffect(() => {
-    if (!f.company_id || !svcId) { setRateHint(''); return; }
+    if (!f.company_id || !svcId) {
+      setRateHint('');
+      setCompanyRateOffer(null);
+      return;
+    }
     let cancelled = false;
     const params = new URLSearchParams({ company_id: f.company_id, service_type_id: svcId });
     if (f.vessel_name?.trim()) params.set('vessel', f.vessel_name.trim());
     adminFetch(`/api/admin/service-rates?${params}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => {
-        if (cancelled || !d || d.rate == null) return;
+        if (cancelled) return;
+        if (!d || d.rate == null) {
+          setCompanyRateOffer(null);
+          setRateHint('');
+          return;
+        }
         const label =
           d.source === 'vessel' ? `${d.vessel_label || f.vessel_name}’s rate`
           : d.source === 'company' ? "this company’s rate"
           : 'default rate';
-        setRateHint(`${label}: ${formatCurrency(d.rate)}`);
+        setRateHint(`${label}: ${formatCurrency(d.rate)}${d.source === 'company' ? ' — not every boat' : ''}`);
+        // Company rates are a note to approve (Ingram $225 is only some boats).
+        // Auto-fill the boat's own rate or the shared default.
+        if (d.source === 'company') {
+          setCompanyRateOffer(Number(d.rate));
+          setCardRate(null);
+          return;
+        }
+        setCompanyRateOffer(null);
         setCardRate(Number(d.rate));
-        // Only prefill when the fee is still empty (don't clobber an edit).
-        // Stored as a 2dp STRING so it matches everything else the field holds
-        // — a raw number here made the override check below fire spuriously.
         setF(p => (p.delivery_fee === '' || p.delivery_fee == null)
           ? { ...p, delivery_fee: Number(d.rate).toFixed(2) }
           : p);
@@ -1330,6 +1345,13 @@ function DeliveryEditor({ delivery, companies, serviceTypes, vesselRecords = [],
                   feeIsOverride ? 'border-amber-300 bg-amber-50' : 'border-gray-200'
                 }`} />
             </div>
+            {companyRateOffer != null && (
+              <button type="button"
+                onClick={() => set('delivery_fee', companyRateOffer.toFixed(2))}
+                className="mt-1 text-[11px] font-semibold text-brand-green underline underline-offset-2">
+                Use {formatCurrency(companyRateOffer)} for this boat
+              </button>
+            )}
             {feeIsOverride && (
               <span className="block mt-1 text-[11px] font-semibold text-amber-700">
                 Override — differs from the rate card ({formatCurrency(cardRate!)}).
@@ -1361,7 +1383,7 @@ function DeliveryEditor({ delivery, companies, serviceTypes, vesselRecords = [],
             </select>
             <span className="block mt-1 text-[11px] text-gray-400 leading-snug">
               {f.grocery_mode === 'sinclair_courtesy'
-                ? "Sinclair's tax is already in the register total, so QuickBooks must not tax this line again."
+                ? "Sinclair's register total already includes Sinclair's sales tax. Grafton Towboat Services passes that grocery amount through and does not add Illinois sales tax on this line — QuickBooks must not tax it again."
                 : f.grocery_mode === 'gts_purchased'
                   ? 'Bought on the GTS exemption, so QuickBooks should charge tax. Itemise the items below.'
                   : 'No grocery line on the invoice.'}

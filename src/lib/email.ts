@@ -275,8 +275,8 @@ export function buildOrderEmailHtml(
            think he'd been billed, or worse, to pay twice. It's a summary; the
            bill follows from the office. */''}
       <div style="padding:9px 12px;background:#f7f9f1;border-top:1px solid #e4e8da;font-size:11px;color:#4d7c5f;line-height:1.6;">
-        This is your delivery summary, not an invoice &mdash; nothing to pay from this email.
-        Your company will receive an invoice from QuickBooks for our services. If your company&apos;s arrangements require billing from GTS, your invoice will include a line item for the delivery charge and a line item for the grocery total. Otherwise, your invoice will include a line item for our services only and a separate invoice will arrive from Sinclair&apos;s for your grocery items.
+        This is a delivery summary, not an invoice &mdash; nothing to pay from this email.
+        Your company will receive an invoice from QuickBooks for our services. If your company&apos;s arrangements require billing from GTS, your invoice will include a line item for the delivery charge and a line item for the grocery total. Sinclair&apos;s register total already includes Sinclair&apos;s sales tax; Grafton Towboat Services does not add Illinois sales tax on that grocery pass-through. If the boat pays Sinclair&apos;s directly, your invoice will include a line item for our services only and a separate invoice will arrive from Sinclair&apos;s for your grocery items.
       </div>
       ${/* Spell out the paperwork. Barge-line accounts payable departments hold
            invoices that arrive without their supporting documents — Ingram's
@@ -435,6 +435,13 @@ export function buildOrderEmailHtml(
 
   <div style="padding:24px 28px;">
 
+    ${opts.showDelivery ? `
+    <div style="background:#fff8e8;border:2px solid #E8640A;padding:12px 14px;border-radius:4px;margin-bottom:18px;">
+      <div style="font-size:12px;font-weight:900;color:#9a3412;text-transform:uppercase;letter-spacing:0.8px;">Not an invoice — do not pay from this email</div>
+      <div style="font-size:13px;color:#1E3D1E;line-height:1.55;margin-top:4px;">
+        This is a delivery summary. Your company will receive a separate invoice from QuickBooks for Grafton Towboat Services.
+      </div>
+    </div>` : ''}
     ${opts.intro ? `<div style="font-size:13px;color:#333;line-height:1.6;margin-bottom:18px;">${opts.intro}</div>` : ''}
     ${opts.staffNote ? `
     <div style="background:#fff8e8;border:1px solid #e8c96a;border-left:4px solid #E8640A;padding:12px 14px;border-radius:4px;margin-bottom:18px;">
@@ -866,8 +873,8 @@ export function buildOrderShoppedEmailHtml(order: Order, docs: ShoppedEmailDocs 
   // "shopped" — use neutral fulfillment language for those.
   const hasGroceryItems = order.items.some(i => i.item_type !== 'service');
   const intro = hasGroceryItems
-    ? `Great news, ${order.contact_name}! Your order has been delivered. Please find your final delivery summary attached — including Grafton Towboat Services delivery charges.`
-    : `Good news, ${order.contact_name}! Your request has been completed and delivered. Please find your final summary attached.`;
+    ? `Great news, ${order.contact_name}! Your order has been delivered. This email is a delivery summary — not an invoice. Nothing is payable from this message. Please find the attached summary, including Grafton Towboat Services delivery charges.`
+    : `Good news, ${order.contact_name}! Your request has been completed and delivered. This email is a delivery summary — not an invoice. Nothing is payable from this message.`;
   const hasAccount = !!order.user_id;
   return buildOrderEmailHtml(order, {
     tagline:    'Delivered',
@@ -1001,8 +1008,8 @@ export async function sendOrderShoppedEmail(
     // public one — same reasoning as the confirmation email above.
     replyTo:     publicContactEmail(),
     subject:     hasGroceryItems
-                   ? `Delivered — ${order.order_number} — Grafton Towboat Services`
-                   : `Completed — ${order.order_number} — Grafton Towboat Services`,
+                   ? `Delivery summary (not an invoice) — ${order.order_number} — Grafton Towboat Services`
+                   : `Completed summary (not an invoice) — ${order.order_number} — Grafton Towboat Services`,
     html:        shoppedHtml,
     attachments,
   });

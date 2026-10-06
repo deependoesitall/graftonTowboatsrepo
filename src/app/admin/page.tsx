@@ -12,8 +12,6 @@ import { formatCurrency, formatDateOnly } from '@/lib/utils';
 import { AdminRole, AdminPermission, setAdminSession, setAdminUiState, fetchAdminSession, adminFetch, isGtsRole, getAdminRole } from '@/lib/admin-auth';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import PushBell from '@/components/admin/PushBell';
-import { GroceryHandlingFeeField } from '@/components/admin/GroceryHandlingFeeField';
-import { parseGroceryHandlingFeeInput } from '@/lib/grocery-handling-fee';
 
 export default function AdminDashboard() {
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
@@ -554,6 +552,7 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
     [{ service_type: '', amount: '', note: '' }],
   );
   const [rateHints, setRateHints] = useState<Record<number, string>>({});
+  const [rateOffers, setRateOffers] = useState<Record<number, { rate: number; source: string }>>({});
 
   const patchCharge = (i: number, p: Partial<{ service_type: string; amount: string; note: string }>) =>
     setCharges(cs => cs.map((c, n) => (n === i ? { ...c, ...p } : c)));
@@ -576,30 +575,16 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
   const serviceType = charges[0]?.service_type || '';
   const [billGroceries, setBillGroceries] = useState(order.bill_for_groceries === true); // default OFF unless ledger/order says courtesy
   const [courtesyHint, setCourtesyHint] = useState('');
-  const [rateHint, setRateHint] = useState('');
   // Delivery terms are GTS's business, not Sinclair's. Same gate as the
   // Deliveries page ('reports'), which staff don't have. Read after mount so
   // the server and client first render agree (localStorage isn't available
   // during SSR — reading it in useState caused hydration errors before).
   const [isGts, setIsGts] = useState(false);
-  // The receipt-bypass below is genuinely owner-only, not just labeled that
-  // way. GTS Managers can now run the whole billing chain — which is the point,
-  // Mary does the invoicing — but skipping Sinclair's receipt means billing a
-  // customer off an estimate, and that stays an owner's call. Read after mount
-  // for the same hydration reason as isGts.
-  const [isOwner, setIsOwner] = useState(false);
   useEffect(() => {
     setIsGts(isGtsRole(getAdminRole()));
-    setIsOwner(getAdminRole() === 'owner');
   }, []);
   // Grocery billing: Sinclair's actual receipt total + the receipt PDF itself.
   const [groceryTotal, setGroceryTotal] = useState(order.register_total != null ? String(order.register_total) : '');
-  const [handlingFee, setHandlingFee] = useState(
-    order.grocery_handling_fee != null && Number(order.grocery_handling_fee) > 0
-      ? String(order.grocery_handling_fee)
-      : '',
-  );
-  const handlingAmt = parseGroceryHandlingFeeInput(handlingFee) ?? 0;
   const [receiptUrl, setReceiptUrl] = useState<string | null>(order.sinclairs_receipt_url);
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
   // The signed delivery log / receipt acknowledgement — the clipboard the
@@ -696,25 +681,34 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
   const rateFor = useCallback((name: string) => {
     const id = serviceTypes.find(s => s.name === name)?.id;
     if (!companyId || !id) return null;
-    return adminFetch(`/api/admin/service-rates?company_id=${companyId}&service_type_id=${id}`)
+    const params = new URLSearchParams({ company_id: companyId, service_type_id: id });
+    if (order.vessel_name?.trim()) params.set('vessel', order.vessel_name.trim());
+    return adminFetch(`/api/admin/service-rates?${params}`)
       .then(r => (r.ok ? r.json() : null))
       .catch(() => null);
-  }, [companyId, serviceTypes]);
+  }, [companyId, serviceTypes, order.vessel_name]);
 
   const chooseServiceType = useCallback((i: number, name: string) => {
     patchCharge(i, { service_type: name });
     setRateHints(h => ({ ...h, [i]: '' }));
+    setRateOffers(o => { const next = { ...o }; delete next[i]; return next; });
     if (!name) return;
-    rateFor(name)?.then((d: { rate?: number; is_override?: boolean } | null) => {
+    rateFor(name)?.then((d: { rate?: number; source?: string; vessel_label?: string | null } | null) => {
       if (!d || d.rate == null) return;
-      setRateHints(h => ({
-        ...h,
-        [i]: `${d.is_override ? "this company's rate" : 'default rate'}: $${Number(d.rate).toFixed(2)}`,
-      }));
+      const source = d.source || ((d as { is_override?: boolean }).is_override ? 'company' : 'default');
+      const label =
+        source === 'vessel' ? `${d.vessel_label || order.vessel_name || 'this boat'}'s rate`
+        : source === 'company' ? "this company's rate — not every boat"
+        : 'default rate';
+      setRateHints(h => ({ ...h, [i]: `${label}: $${Number(d.rate).toFixed(2)}` }));
+      setRateOffers(o => ({ ...o, [i]: { rate: Number(d.rate), source } }));
+      // Company rates (Ingram $225) are a note to approve or deny — Mary Karen,
+      // Oct 5. Auto-fill only the boat's own rate or the shared card default.
+      if (source === 'company') return;
       setCharges(cs => cs.map((c, n) => (n === i && c.amount === '' ? { ...c, amount: String(d.rate) } : c)));
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rateFor]);
+  }, [rateFor, order.vessel_name]);
 
   // Changing the barge line re-prices every row that is still untouched.
   useEffect(() => {
@@ -733,16 +727,10 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
   if (filledCharges.length) previewQuery.set('service_charges', JSON.stringify(filledCharges));
   previewQuery.set('bill_for_groceries', String(billGroceries));
   if (billGroceries && groceryTotal !== '') previewQuery.set('register_total', groceryTotal);
-  previewQuery.set('grocery_handling_fee', String(handlingAmt));
   if (staffNote.trim()) previewQuery.set('staff_note', staffNote.trim());
   const emailPreviewSrc = `/api/orders/${order.id}/email-preview?${previewQuery.toString()}`;
 
-  // Grocery-billed orders can't go out on an estimate — they need Sinclair's
-  // actual receipt total AND the receipt PDF to ride along.
-  const [overrideReceipt, setOverrideReceipt] = useState(false);
-  const [showOverride, setShowOverride] = useState(false);
   const missingGroceryDocs = billGroceries && (groceryTotal === '' || !receiptUrl);
-  const needsGroceryDocs = missingGroceryDocs && !overrideReceipt;
 
   async function send() {
     const feeNum = feeTotal;
@@ -777,7 +765,6 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
           delivery_company_id: companyId || null,
           bill_for_groceries: billGroceries,
           register_total: billGroceries && groceryTotal !== '' ? Number(groceryTotal) : undefined,
-          grocery_handling_fee: parseGroceryHandlingFeeInput(handlingFee),
           staff_note: staffNote.trim() || undefined,
         }),
       });
@@ -887,6 +874,7 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
                           onClick={() => {
                             setCharges(cs => cs.filter((_, n) => n !== i));
                             setRateHints({});
+                            setRateOffers({});
                           }}
                           className="mt-5 text-gray-300 hover:text-red-500 shrink-0"
                           aria-label={`Remove service ${i + 1}`}>
@@ -895,7 +883,16 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
                       )}
                     </div>
                     {rateHints[i] && (
-                      <p className="text-[11px] text-brand-green mt-1">{rateHints[i]}</p>
+                      <p className="text-[11px] text-brand-green mt-1">
+                        {rateHints[i]}
+                        {rateOffers[i]?.source === 'company' && (
+                          <button type="button"
+                            onClick={() => patchCharge(i, { amount: String(rateOffers[i].rate) })}
+                            className="ml-1.5 underline underline-offset-2 font-semibold">
+                            Use ${rateOffers[i].rate.toFixed(2)}
+                          </button>
+                        )}
+                      </p>
                     )}
                     <input type="text" value={c.note}
                       onChange={e => patchCharge(i, { note: e.target.value })}
@@ -947,21 +944,14 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
                 >
                   <span className="block text-sm font-bold text-brand-navy">Courtesy billing — GTS bills the groceries</span>
                   <span className="block text-[11px] text-gray-500 mt-0.5 leading-snug">
-                    Rare (Scott Noble / Ingram). Email + QuickBooks get <strong>two lines</strong>: (1) Grafton Towboat Services delivery fee (2) Sinclair&apos;s grocery order as one lump — the register plus any handling fee. Attach the register receipt.
+                    Rare (Scott Noble / Ingram). Email + QuickBooks get <strong>two lines</strong>: (1) Grafton Towboat Services delivery fee (2) Sinclair&apos;s grocery order as one lump. Sinclair&apos;s register total already includes Sinclair&apos;s sales tax — QuickBooks must not tax this line again. Attach the register receipt when you have it.
                   </span>
                 </button>
               </div>
 
-              <div className="mt-3">
-                <GroceryHandlingFeeField
-                  compact
-                  value={handlingFee}
-                  onChange={setHandlingFee}
-                />
-              </div>
-
-              {/* Grocery-billed orders REQUIRE Sinclair's actual receipt total
-                  + the receipt PDF — the email can't go out on an estimate. */}
+              {/* Grocery-billed orders: Sinclair's actual receipt total + PDF.
+                  Receipt can wait — Sinclair's is often a day behind (MK, Oct 5).
+                  Send stays available so Laura can finish from her phone. */}
               {billGroceries && (
                 <div className="mt-3 pt-3 border-t border-gray-100 space-y-2.5">
                   <label className="block">
@@ -994,22 +984,7 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
                   </div>
                   {missingGroceryDocs && (
                     <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
-                      Enter the grocery total and attach Sinclair&apos;s receipt before sending, or switch to &ldquo;Boat pays Sinclair&apos;s directly.&rdquo;
-                      {/* Deliberate owner-only override — small on purpose, and it
-                          takes an explicit tick so it can't happen by accident. */}
-                      {!isOwner ? null : !showOverride ? (
-                        <button type="button" onClick={() => setShowOverride(true)}
-                          className="block mt-1 text-[10px] text-gray-400 underline underline-offset-2 hover:text-gray-600">
-                          Owner: send without the receipt
-                        </button>
-                      ) : (
-                        <label className="flex items-start gap-1.5 mt-1.5 text-[10px] text-red-700 cursor-pointer">
-                          <input type="checkbox" checked={overrideReceipt}
-                            onChange={e => setOverrideReceipt(e.target.checked)}
-                            className="w-3 h-3 accent-red-600 mt-0.5" />
-                          <span>I&apos;m sending this grocery bill <strong>without</strong> Sinclair&apos;s receipt attached, on purpose.</span>
-                        </label>
-                      )}
+                      Sinclair&apos;s receipt is often a day behind. You can send now, or leave this sitting until the tape is in. Grocery total on the invoice should match the register.
                     </div>
                   )}
                 </div>
@@ -1081,11 +1056,8 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
                       <span className="font-bold tabular-nums">${c.amount.toFixed(2)}</span>
                     </div>
                   ))}
-                  <div className="flex justify-between gap-3"><span>{Math.max(filledCharges.length, 1) + 1}. Sinclair&apos;s — Grocery Order</span><span className="font-bold tabular-nums">${groceryTotal === '' ? '—' : (Number(groceryTotal) + handlingAmt).toFixed(2)}</span></div>
-                  {handlingAmt > 0 && groceryTotal !== '' && (
-                    <p className="text-[10px] text-amber-800">Includes ${handlingAmt.toFixed(2)} Sinclair&apos;s handling fee on top of the register.</p>
-                  )}
-                  <div className="flex justify-between gap-3 border-t border-brand-navy/10 pt-1 mt-1 font-bold"><span>Total (same as the QuickBooks invoice)</span><span className="tabular-nums">${(Number(fee || 0) + (groceryTotal === '' ? 0 : Number(groceryTotal) + handlingAmt)).toFixed(2)}</span></div>
+                  <div className="flex justify-between gap-3"><span>{Math.max(filledCharges.length, 1) + 1}. Sinclair&apos;s — Grocery Order</span><span className="font-bold tabular-nums">${groceryTotal === '' ? '—' : Number(groceryTotal).toFixed(2)}</span></div>
+                  <div className="flex justify-between gap-3 border-t border-brand-navy/10 pt-1 mt-1 font-bold"><span>Total (same as the QuickBooks invoice)</span><span className="tabular-nums">${(Number(fee || 0) + (groceryTotal === '' ? 0 : Number(groceryTotal))).toFixed(2)}</span></div>
                   <p className="text-[10px] text-gray-500 pt-1 leading-snug">Courtesy path — email + QuickBooks both carry delivery + one grocery lump.</p>
                 </div>
               ) : (
@@ -1096,10 +1068,7 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
                       <span className="font-bold tabular-nums">${c.amount.toFixed(2)}</span>
                     </div>
                   ))}
-                  <p className="text-[10px] text-gray-500 pt-1 leading-snug">Boat pays Sinclair&apos;s directly — no grocery dollar on this GTS bill. Sinclair&apos;s register and handling fee still show in the grocery section of the email.</p>
-                  {handlingAmt > 0 && (
-                    <p className="text-[10px] text-amber-800">Sinclair&apos;s handling fee ${handlingAmt.toFixed(2)} is on that grocery section, not on this delivery charge.</p>
-                  )}
+                  <p className="text-[10px] text-gray-500 pt-1 leading-snug">Boat pays Sinclair&apos;s directly — no grocery dollar on this GTS bill.</p>
                 </div>
               )}
               {filledCharges.length === 0 && (
@@ -1145,11 +1114,11 @@ function SendFinalEmailDialog({ order, onClose, onSent }: {
             className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50">
             Cancel
           </button>
-          <button onClick={send} disabled={sending || !sendTo || needsGroceryDocs}
+          <button onClick={send} disabled={sending || !sendTo}
             className="flex-1 py-2.5 rounded-xl bg-brand-green text-white text-sm font-bold flex items-center justify-center gap-1.5 hover:bg-brand-gmed transition-colors disabled:opacity-50">
             {sending
               ? <><Loader2 className="w-4 h-4 animate-spin" /> Sending…</>
-              : <><Send className="w-4 h-4" /> {!sendTo ? 'No Email on Order' : needsGroceryDocs ? 'Receipt Needed' : 'Send Final Email'}</>}
+              : <><Send className="w-4 h-4" /> {!sendTo ? 'No Email on Order' : 'Send Final Email'}</>}
           </button>
         </div>
       </div>

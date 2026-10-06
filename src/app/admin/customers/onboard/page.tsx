@@ -3,12 +3,13 @@
 // Company → boat → crew logins. Pick boats from the deliveries ledger when they already exist.
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Loader2, Plus, Ship, Trash2, UserPlus, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, Loader2, Plus, Ship, Trash2, UserPlus, CheckCircle2, Copy, Check, Send } from 'lucide-react';
 import { adminFetch, fetchAdminSession, canAccess } from '@/lib/admin-auth';
 import { useRouter } from 'next/navigation';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { CrewRoleField } from '@/components/admin/CrewRoleField';
 import { MIN_PASSWORD_LENGTH } from '@/lib/password-rules';
+import { boatSignInText } from '@/lib/boat-invite';
 
 interface Company { id: string; name: string; is_active?: boolean }
 interface Vessel {
@@ -59,6 +60,9 @@ export default function OnboardBoatPage() {
   const [pwDone, setPwDone] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const { confirm, dialog } = useConfirm();
+  const [invite, setInvite] = useState<{ email: string; password: string; vessel: string; firstName: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [inviteSending, setInviteSending] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -228,9 +232,15 @@ export default function OnboardBoatPage() {
       const json = await res.json();
       if (!res.ok) { setError(json.error || 'Failed to add login'); return; }
       setMembers(m => [...m, json.member]);
+      setInvite({
+        email: email.trim(),
+        password,
+        vessel: vessel.name,
+        firstName: firstName.trim(),
+      });
       setFirstName(''); setLastName(''); setEmail(''); setPassword('');
       setRole('cook');
-      setOk(`Login created for ${json.member.display_name || json.member.email}`);
+      setOk(`Login created for ${json.member.display_name || json.member.email}. Copy the text below and send it to them.`);
     } finally { setBusy(false); }
   }
 
@@ -313,6 +323,58 @@ export default function OnboardBoatPage() {
       {ok && (
         <div className="rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 text-sm px-4 py-3 flex items-center gap-2">
           <CheckCircle2 className="w-4 h-4" /> {ok}
+        </div>
+      )}
+
+      {invite && (
+        <div className="rounded-2xl border border-brand-gold/40 bg-brand-sand/30 p-4 space-y-3">
+          <p className="text-sm font-bold text-brand-navy">Text this to them</p>
+          <textarea readOnly rows={8} className="input-base font-mono text-[13px] bg-white"
+            value={boatSignInText(invite)} />
+          <div className="flex flex-wrap gap-2">
+          <button type="button"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(boatSignInText(invite));
+                setCopied(true);
+                window.setTimeout(() => setCopied(false), 2500);
+              } catch { setError('Could not copy.'); }
+            }}
+            className="btn-primary text-sm inline-flex items-center gap-1.5">
+            {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+            {copied ? 'Copied' : 'Copy message'}
+          </button>
+          <button type="button" disabled={inviteSending}
+            onClick={async () => {
+              setInviteSending(true);
+              setError('');
+              try {
+                const res = await adminFetch('/api/admin/customer-email', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    template: 'welcome',
+                    to: [invite.email],
+                    vars: {
+                      firstName: invite.firstName,
+                      vesselName: invite.vessel,
+                      loginEmail: invite.email,
+                      password: invite.password,
+                    },
+                  }),
+                });
+                const j = await res.json().catch(() => ({}));
+                if (!res.ok) { setError(j.error || 'Send failed.'); return; }
+                setOk(`Welcome email sent to ${invite.email}.`);
+              } finally {
+                setInviteSending(false);
+              }
+            }}
+            className="btn-outline text-sm inline-flex items-center gap-1.5 disabled:opacity-40">
+            {inviteSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+            {inviteSending ? 'Sending…' : 'Send welcome email'}
+          </button>
+          </div>
         </div>
       )}
 

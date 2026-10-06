@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import {
   Lock, RefreshCw, FileText, ChevronDown, ChevronRight, RotateCcw,
   Search, Calendar, X, CheckCircle, AlertCircle, Loader2, Printer,
-  Ship, KeyRound, Users, Trash2, Pencil, Plus, Minus, Wrench,
+  Ship, KeyRound, Users, Trash2, Pencil, Plus, Minus, Wrench, UserPlus,
 } from 'lucide-react';
 import Link from 'next/link';
 import { vesselReportHtml } from '@/lib/vessel-report';
@@ -14,6 +14,7 @@ import { fetchAdminSession, canAccess, adminFetch, isGtsRole } from '@/lib/admin
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { formatCurrency, formatDate, formatDateOnly } from '@/lib/utils';
 import { CustomerLoginsPanel } from '@/components/admin/CustomerLoginsPanel';
+import { InviteCustomerPanel } from '@/components/admin/InviteCustomerPanel';
 
 interface VesselOrderItem {
   product_id: string | null;
@@ -737,6 +738,7 @@ export default function CustomersPage() {
   const [successOrderNumber, setSuccessOrderNumber] = useState<string | null>(null);
 
   const [panel, setPanel] = useState<'history' | 'logins'>('history');
+  const [showInvite, setShowInvite] = useState(false);
 
   useEffect(() => {
     try {
@@ -927,10 +929,10 @@ export default function CustomersPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {isGts && (
-          <Link href="/admin/customers/onboard"
+          <button type="button" onClick={() => setShowInvite(s => !s)}
             className="btn-primary text-sm px-4 py-2.5 flex items-center gap-2 shadow-sm">
-            <Ship className="w-4 h-4" /> Add customer / boat
-          </Link>
+            <UserPlus className="w-4 h-4" /> Add customer
+          </button>
           )}
           {panel === 'history' && (
             <button onClick={fetchReport} className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5">
@@ -939,6 +941,10 @@ export default function CustomersPage() {
           )}
         </div>
       </div>
+
+      {isGts && showInvite && (
+        <InviteCustomerPanel onClose={() => setShowInvite(false)} />
+      )}
 
       {isGts && (
       <div className="inline-flex rounded-full bg-gray-100 p-1 gap-0.5">

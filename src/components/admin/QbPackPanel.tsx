@@ -103,7 +103,7 @@ export default function QbPackPanel({ delivery, onClose, onMarked }: {
             <ShieldAlert className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
             <p className="text-[13px] text-amber-900 leading-relaxed">
               <strong>Do not let Plus add sales tax to Sinclair&apos;s courtesy.</strong>{' '}
-              That tax is already in the register total.
+              Sinclair&apos;s register total already includes Sinclair&apos;s sales tax. Grafton Towboat Services passes that amount through and does not collect Illinois sales tax on this line.
             </p>
           </div>
 
