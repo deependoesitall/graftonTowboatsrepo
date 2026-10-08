@@ -16,6 +16,9 @@
     },
     "src/app/api/cron/catalog-rails/route.ts": {
       "maxDuration": 60
+    },
+    "src/app/api/cron/delivery-ledger-sync/route.ts": {
+      "maxDuration": 60
     }
   },
   "crons": [
@@ -62,6 +65,10 @@
     {
       "path": "/api/cron/catalog-rails",
       "schedule": "0 10 * * *"
+    },
+    {
+      "path": "/api/cron/delivery-ledger-sync",
+      "schedule": "*/15 * * * *"
     }
   ]
 }

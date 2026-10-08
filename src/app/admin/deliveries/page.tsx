@@ -5,7 +5,7 @@
 // rate card, and an editable rate-card manager. No more Google Drive.
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Truck, Plus, Pencil, Trash2, X, Loader2, DollarSign, Check, SlidersHorizontal, FileText, Search, Download, Receipt, Upload, Eye, EyeOff } from 'lucide-react';
+import { Truck, Plus, Pencil, Trash2, X, Loader2, DollarSign, Check, SlidersHorizontal, FileText, Search, Download, Receipt, Upload, Eye, EyeOff, RefreshCw } from 'lucide-react';
 import QbPackPanel from '@/components/admin/QbPackPanel';
 import { formatCurrency } from '@/lib/utils';
 import { adminFetch } from '@/lib/admin-auth';
@@ -89,6 +89,13 @@ export default function DeliveriesPage() {
   const [showRates, setShowRates] = useState(false);
   const [showQb, setShowQb] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [googleSyncing, setGoogleSyncing] = useState(false);
+  const [googleStatus, setGoogleStatus] = useState<{
+    configured: boolean;
+    synced_at: string | null;
+    ok: boolean | null;
+    note: string | null;
+  } | null>(null);
   const [ledgerYear, setLedgerYear] = useState<number>(DEFAULT_LEDGER_YEAR);
   const [hideTestBoats, setHideTestBoats] = useState(true);
   const [search, setSearch] = useState('');
@@ -103,6 +110,13 @@ export default function DeliveriesPage() {
     setPendingQbCount(ds.filter(d => Number(d.delivery_fee) > 0 || d.bill_for_groceries).length);
   }, []);
   useEffect(() => { loadPendingCount(); }, [loadPendingCount]);
+
+  const loadGoogleStatus = useCallback(async () => {
+    const res = await adminFetch('/api/cron/delivery-ledger-sync?status=1');
+    if (!res.ok) return;
+    setGoogleStatus(await res.json());
+  }, []);
+  useEffect(() => { loadGoogleStatus(); }, [loadGoogleStatus]);
 
   // "Which delivery was that?" — vessel first, since a company can run 15+
   // boats and the boat is how everyone actually refers to a delivery.
@@ -172,6 +186,33 @@ export default function DeliveriesPage() {
   useEffect(() => { load(); }, [load]);
   useEffect(() => { loadMeta(); }, [loadMeta]);
 
+  async function syncGoogleNow() {
+    setGoogleSyncing(true);
+    try {
+      const res = await adminFetch('/api/cron/delivery-ledger-sync', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok || data.skipped || data.configured === false) {
+        setGoogleStatus({
+          configured: false,
+          synced_at: new Date().toISOString(),
+          ok: false,
+          note: data.error || 'Google Sheets is not connected yet',
+        });
+        return;
+      }
+      setGoogleStatus({
+        configured: true,
+        synced_at: new Date().toISOString(),
+        ok: !!data.ok,
+        note: data.note || null,
+      });
+      load();
+      loadMeta();
+    } finally {
+      setGoogleSyncing(false);
+    }
+  }
+
   async function remove(d: Delivery) {
     if (!(await confirm({ title: `Delete this delivery?`, message: `${d.delivery_date || ''} · ${d.vessel_name || ''} — this can't be undone.`, danger: true }))) return;
     await adminFetch('/api/admin/deliveries', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: d.id }) });
@@ -202,7 +243,15 @@ export default function DeliveriesPage() {
           <h1 className="font-display text-2xl font-bold text-brand-navy flex items-center gap-2">
             <Truck className="w-6 h-6 text-brand-green" /> Delivery Ledger
           </h1>
-          <p className="text-gray-400 text-sm">Your deliveries spreadsheet — logged and billed here, no Google Drive.</p>
+          <p className="text-gray-400 text-sm">
+            Phone jobs from the Google sheet land here. Website orders stay here.
+            {googleStatus?.synced_at && (
+              <span className={`block text-xs mt-0.5 ${googleStatus.ok === false ? 'text-red-600' : 'text-gray-400'}`}>
+                Last Google sync {new Date(googleStatus.synced_at).toLocaleString()}
+                {googleStatus.note ? ` — ${googleStatus.note}` : ''}
+              </span>
+            )}
+          </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <div className="relative">
@@ -229,6 +278,15 @@ export default function DeliveriesPage() {
           </label>
           <button onClick={() => setShowImport(true)} className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5">
             <Upload className="w-4 h-4" /> Import sheet
+          </button>
+          <button
+            onClick={syncGoogleNow}
+            disabled={googleSyncing}
+            title={googleStatus?.configured === false ? 'Add Google Sheets env vars on Vercel to connect' : 'Pull the Google spreadsheet into this ledger'}
+            className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5"
+          >
+            {googleSyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+            Sync Google
           </button>
           <button onClick={() => setShowRates(true)} className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5">
             <SlidersHorizontal className="w-4 h-4" /> Rate Cards
