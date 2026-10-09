@@ -164,6 +164,8 @@ export function buildOrderEmailHtml(
     showSinclairNote?: boolean;
     /** Final email only — renders the GTS delivery charge + grand total. */
     showDelivery?: boolean;
+    /** Final email only — "Order summary / This is not a bill." above everything else. */
+    notABill?: boolean;
     /** Optional note from GTS on this send (courtesy delivery, verbal agreement). */
     staffNote?: string;
     /** Documents too large to attach, offered as links instead. Passed down
@@ -416,7 +418,12 @@ export function buildOrderEmailHtml(
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="margin:0;padding:0;background:#f4f4f4;font-family:Arial,Helvetica,sans-serif;">
 <div style="max-width:600px;margin:24px auto;background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1);">
-
+${opts.notABill ? `
+  <div style="padding:16px 28px 14px;font-size:16px;line-height:1.4;color:#1E3D1E;">
+    Order summary<br>
+    <strong style="color:#E8640A;">This is not a bill.</strong>
+  </div>
+` : ''}
   <!-- Header -->
   <div style="background:#1E3D1E;padding:24px 28px;">
     <div style="font-size:20px;font-weight:900;color:#D9E84A;text-transform:uppercase;letter-spacing:-0.5px;">
@@ -887,6 +894,7 @@ export function buildOrderShoppedEmailHtml(order: Order, docs: ShoppedEmailDocs 
     } : {}),
     footerText: 'Grafton Towboat Services · Grafton, IL 62037 · (618) 556-0290 · GraftonTowboatServices@gmail.com',
     showDelivery: true,
+    notABill: true,
     linkedDocs: docs.linked,
     staffNote: (staffNote || '').trim() || undefined,
   });
