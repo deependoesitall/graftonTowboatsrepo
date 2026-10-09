@@ -61,25 +61,34 @@ export async function generateOrderPdfBuffer(
 
     const itemCount = orderItemCount(visibleItems);
 
+    // Delivered summary only: say up front that this is not a bill.
+    const top = opts.includeGtsCharges ? MARGIN + 30 : MARGIN;
+    if (opts.includeGtsCharges) {
+      doc.fillColor(DARK_GREEN).fontSize(11).font('Helvetica')
+         .text('Order summary', MARGIN, MARGIN);
+      doc.fillColor(ORANGE).fontSize(11).font('Helvetica-Bold')
+         .text('This is not a bill.', MARGIN, MARGIN + 14);
+    }
+
     // ── HEADER ────────────────────────────────────────────────
-    doc.rect(MARGIN, MARGIN, CONTENT_W, 56).fill(DARK_GREEN);
+    doc.rect(MARGIN, top, CONTENT_W, 56).fill(DARK_GREEN);
     doc.fillColor(LIME)
        .fontSize(16).font('Helvetica-Bold')
-       .text('GRAFTON TOWBOAT SERVICES', MARGIN + 10, MARGIN + 10, { width: CONTENT_W - 20 });
+       .text('GRAFTON TOWBOAT SERVICES', MARGIN + 10, top + 10, { width: CONTENT_W - 20 });
     doc.fillColor(ORANGE).fontSize(8).font('Helvetica-Bold')
-       .text('GROCERIES, SUPPLIES & CREW CHANGE', MARGIN + 10, MARGIN + 30);
+       .text('GROCERIES, SUPPLIES & CREW CHANGE', MARGIN + 10, top + 30);
     doc.fillColor('#a8c86a').fontSize(7).font('Helvetica')
        .text('25 Dagget Hollow · Grafton, IL 62037 · Mile Marker 219 Mississippi River / Mile Marker 0 Illinois River · (618) 556-0290 · GraftonTowboatServices@gmail.com',
-         MARGIN + 10, MARGIN + 42);
+         MARGIN + 10, top + 42);
 
     // Order number top-right
     doc.fillColor(ORANGE).fontSize(14).font('Helvetica-Bold')
-       .text(order.order_number, MARGIN, MARGIN + 10, { align: 'right', width: CONTENT_W });
+       .text(order.order_number, MARGIN, top + 10, { align: 'right', width: CONTENT_W });
     doc.fillColor('#cccccc').fontSize(7).font('Helvetica')
        .text(`Date: ${formatDate(order.created_at)}  ·  Status: ${order.status.replace('_', ' ').toUpperCase()}  ·  Items: ${itemCount}`,
-         MARGIN, MARGIN + 28, { align: 'right', width: CONTENT_W });
+         MARGIN, top + 28, { align: 'right', width: CONTENT_W });
 
-    let y = MARGIN + 68;
+    let y = top + 68;
 
     // ── VESSEL INFO BOX ───────────────────────────────────────
     doc.rect(MARGIN, y, CONTENT_W, 52).fill('#f0f7a0');
