@@ -60,6 +60,45 @@ function shell(inner: string, footer: string): string {
 </body></html>`;
 }
 
+/**
+ * The welcome and announcement emails: the GTS badge beside the name in the
+ * green bar, a lime rule under it, and a green footer with the address,
+ * phone and website. The badge shows here and in the signature lockup, and
+ * nowhere else, so the footer carries text only.
+ */
+function brandedShell(inner: string): string {
+  const badge = `${getAppUrl()}/branding/gts-badge.png`;
+  return `<!DOCTYPE html>
+<html><body style="margin:0;padding:0;background:#f4f5f6;">
+<div style="max-width:600px;margin:0 auto;background:#ffffff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${GREEN}" style="background:${GREEN};border-collapse:collapse;">
+    <tr><td style="padding:14px 22px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>
+        <td style="width:56px;vertical-align:middle;"><img src="${badge}" width="56" height="56" alt="Grafton Towboat Services" style="display:block;width:56px;height:56px;border:0;" /></td>
+        <td style="padding-left:14px;vertical-align:middle;">
+          <div style="color:#ffffff;font-size:16px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;line-height:1.15;">Grafton Towboat Services</div>
+          <div style="color:${YELLOW};font-size:10.5px;font-weight:700;letter-spacing:1.3px;text-transform:uppercase;margin-top:4px;">Groceries &middot; Supplies &middot; Crew change</div>
+        </td>
+      </tr></table>
+    </td></tr>
+    <tr><td height="4" bgcolor="${YELLOW}" style="height:4px;line-height:4px;font-size:0;background:${YELLOW};">&nbsp;</td></tr>
+  </table>
+  ${inner}
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${GREEN}" style="background:${GREEN};border-collapse:collapse;">
+    <tr><td height="3" bgcolor="${ORANGE}" style="height:3px;line-height:3px;font-size:0;background:${ORANGE};">&nbsp;</td></tr>
+    <tr><td align="center" style="padding:20px 26px 22px;text-align:center;">
+      <div style="color:#ffffff;font-size:12.5px;font-weight:800;letter-spacing:1.3px;text-transform:uppercase;">Grafton Towboat Services</div>
+      <div style="color:#a8c86a;font-size:12px;line-height:1.7;margin-top:6px;">
+        Grafton, IL 62037 &middot; Mile Marker 219 Mississippi &middot; Mile Marker 0 Illinois<br>
+        <a href="tel:6185560290" style="color:${YELLOW};text-decoration:none;font-weight:700;">(618) 556-0290</a> &nbsp;&middot;&nbsp;
+        <a href="https://graftontowboatservices.com" style="color:${YELLOW};text-decoration:none;font-weight:700;">graftontowboatservices.com</a>
+      </div>
+    </td></tr>
+  </table>
+</div>
+</body></html>`;
+}
+
 function step(n: number, lead: string, rest: string, last = false): string {
   const pad = last ? '0' : '0 0 16px';
   return `<tr>
@@ -149,7 +188,7 @@ export function buildWelcomeEmail(v: WelcomeVars): { subject: string; html: stri
   </div>`;
   return {
     subject: `You're set up to order groceries — ${v.vesselName.trim() || 'Grafton Towboat Services'}`,
-    html: shell(inner, 'Grafton Towboat Services &middot; Grafton, IL 62037 &middot; Mile Marker 219 Mississippi &middot; Mile Marker 0 Illinois'),
+    html: brandedShell(inner),
   };
 }
 
@@ -220,6 +259,6 @@ export function buildAnnouncementEmail(): { subject: string; html: string } {
   </div>`;
   return {
     subject: 'You can order groceries online now, Grafton Towboat Services',
-    html: shell(inner, 'Grafton Towboat Services &middot; Grafton, IL 62037 &middot; Mile Marker 219 Mississippi &middot; Mile Marker 0 Illinois'),
+    html: brandedShell(inner),
   };
 }
