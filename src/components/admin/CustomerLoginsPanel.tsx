@@ -12,6 +12,7 @@ import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { CrewRoleField } from '@/components/admin/CrewRoleField';
 import { MIN_PASSWORD_LENGTH } from '@/lib/password-rules';
 import { OnboardSendCard, type OnboardCardData } from '@/components/admin/OnboardSendCard';
+import { NewSignupsPanel, ctDay } from '@/components/admin/NewSignupsPanel';
 
 type Member = {
   id: string;
@@ -19,6 +20,8 @@ type Member = {
   email: string | null;
   display_name: string | null;
   role: string;
+  signed_up_at?: string | null;
+  last_sign_in_at?: string | null;
   vessel_id: string | null;
   vessel_name: string | null;
   company_id: string | null;
@@ -302,6 +305,8 @@ export function CustomerLoginsPanel() {
         </div>
       )}
 
+      <NewSignupsPanel onLinked={() => load(search)} />
+
       {card?.at === 'top' && <OnboardSendCard data={card} onClose={() => setCard(null)} />}
 
       {showQuickAdd && (
@@ -421,6 +426,11 @@ export function CustomerLoginsPanel() {
                                 <p className="text-xs text-gray-400 truncate">
                                   {m.email} · <span className="capitalize">{m.role}</span>
                                 </p>
+                                {m.signed_up_at && (
+                                  <p className="text-[11px] text-gray-400">
+                                    Signed up {ctDay(m.signed_up_at)} · {m.last_sign_in_at ? `Last sign-in ${ctDay(m.last_sign_in_at)}` : 'Never signed in'}
+                                  </p>
+                                )}
                               </div>
                               <div className="flex items-center gap-3 shrink-0">
                                 <button
