@@ -3,6 +3,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/admin-auth-server';
+import { listAuthUsers } from '@/lib/auth-user-dates';
 
 export async function GET(req: NextRequest) {
   const session = requireAdmin(req, { gtsOnly: true });
@@ -29,6 +30,14 @@ export async function GET(req: NextRequest) {
     .order('created_at', { ascending: false });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // Signed-up and last-sign-in dates live on the Auth user, not the row.
+  const authDates = new Map<string, { created_at: string | null; last_sign_in_at: string | null }>();
+  try {
+    for (const u of await listAuthUsers(supabase)) authDates.set(u.id, u);
+  } catch {
+    // Dates are extra; the list still works without them.
+  }
 
   type Row = {
     id: string;
@@ -59,6 +68,8 @@ export async function GET(req: NextRequest) {
       display_name: row.display_name,
       role: row.role,
       created_at: row.created_at,
+      signed_up_at: authDates.get(row.user_id)?.created_at ?? null,
+      last_sign_in_at: authDates.get(row.user_id)?.last_sign_in_at ?? null,
       vessel_id: vesselRel?.id || null,
       vessel_name: vesselRel?.name || null,
       company_id: company?.id || null,
@@ -109,7 +120,9 @@ export async function GET(req: NextRequest) {
         .map((v) => ({
           id: v.id,
           name: v.name,
-          members: v.members,
+          // Newest account first.
+          members: [...v.members].sort((x, y) =>
+            Date.parse(y.signed_up_at || y.created_at || '0') - Date.parse(x.signed_up_at || x.created_at || '0')),
         })),
     }));
 
