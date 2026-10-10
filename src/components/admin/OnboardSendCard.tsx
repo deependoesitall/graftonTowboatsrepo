@@ -1,9 +1,9 @@
 'use client';
 // src/components/admin/OnboardSendCard.tsx
-// Shown right after a crew password is set: send the welcome email, or copy /
-// open it yourself. The password only exists here until the card is closed.
+// Shown right after a crew password is set: send the welcome email, or copy
+// the message to send it yourself. The password only exists here until the card is closed.
 import { useState } from 'react';
-import { Check, Copy, FlaskConical, Link2, Loader2, Mail, Send, X } from 'lucide-react';
+import { Check, Copy, FlaskConical, Link2, Loader2, Send, X } from 'lucide-react';
 import { adminFetch } from '@/lib/admin-auth';
 import { boatSignInText, ORDER_SITE_URL } from '@/lib/boat-invite';
 
@@ -37,8 +37,8 @@ export function OnboardSendCard({ data, onClose }: { data: OnboardCardData; onCl
   const [sent, setSent] = useState('');
   const [error, setError] = useState('');
   const [copied, setCopied] = useState<'' | 'message' | 'link'>('');
+  const [to, setTo] = useState(data.email);
   const message = boatSignInText({ vesselName: data.vessel, email: data.email, password: data.password });
-  const mailto = `mailto:${data.email}?subject=${encodeURIComponent('Your Grafton Towboat Services login')}&body=${encodeURIComponent(message)}`;
 
   async function send(test: boolean) {
     setSending(test ? 'test' : 'real');
@@ -49,14 +49,14 @@ export function OnboardSendCard({ data, onClose }: { data: OnboardCardData; onCl
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           template: 'welcome',
-          to: [data.email],
+          to: [to.trim()],
           vars: { firstName: first, vesselName: data.vessel, loginEmail: data.email, password: data.password },
           ...(test ? { test: true } : {}),
         }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) { setError(j.error || 'Could not send the welcome email.'); return; }
-      setSent(test ? `Test sent to ${j.to || 'the GTS inbox'}.` : `Welcome email sent to ${data.email}.`);
+      setSent(test ? `Test sent to ${j.to || 'the GTS inbox'}.` : `Welcome email sent to ${to.trim()}.`);
     } finally {
       setSending('');
     }
@@ -71,7 +71,7 @@ export function OnboardSendCard({ data, onClose }: { data: OnboardCardData; onCl
     }
   }
 
-  const small = 'btn-outline min-h-[44px] px-2 text-xs inline-flex flex-col sm:flex-row items-center justify-center gap-1';
+  const small = 'btn-outline min-h-[44px] px-2 text-xs inline-flex items-center justify-center gap-1.5';
 
   return (
     <div className="rounded-2xl border border-brand-gold/40 bg-brand-yellow/20 p-4">
@@ -108,26 +108,25 @@ export function OnboardSendCard({ data, onClose }: { data: OnboardCardData; onCl
       )}
       {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
 
-      <button type="button" onClick={() => send(false)} disabled={!data.email || !!sending}
-        className="btn-primary mt-3 w-full min-h-[44px] inline-flex items-center justify-center gap-2 disabled:opacity-50">
+      <label className="mt-3 block text-xs font-semibold text-brand-navy/70" htmlFor="onboard-send-to">Send to</label>
+      <input id="onboard-send-to" type="email" className="input-base mt-1" value={to} placeholder="name@example.com"
+        autoComplete="off" onChange={e => setTo(e.target.value)} />
+      <button type="button" onClick={() => send(false)} disabled={!to.trim().includes('@') || !!sending}
+        className="btn-primary mt-2 w-full min-h-[44px] inline-flex items-center justify-center gap-2 disabled:opacity-50">
         {sending === 'real' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
         {sending === 'real' ? 'Sending…' : 'Send welcome email'}
       </button>
-      <div className="mt-2 grid grid-cols-3 gap-2">
+      <div className="mt-2 grid grid-cols-2 gap-2">
         <button type="button" onClick={() => copy('message', message)} className={small}>
           {copied === 'message' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
           {copied === 'message' ? 'Copied' : 'Copy message'}
         </button>
-        <a href={data.email ? mailto : undefined} aria-disabled={!data.email}
-          className={`${small} ${data.email ? '' : 'pointer-events-none opacity-50'}`}>
-          <Mail className="w-4 h-4" /> Open email
-        </a>
         <button type="button" onClick={() => copy('link', ORDER_SITE_URL)} className={small}>
           {copied === 'link' ? <Check className="w-4 h-4" /> : <Link2 className="w-4 h-4" />}
           {copied === 'link' ? 'Copied' : 'Copy link'}
         </button>
       </div>
-      <button type="button" onClick={() => send(true)} disabled={!data.email || !!sending}
+      <button type="button" onClick={() => send(true)} disabled={!!sending}
         className="mt-2.5 text-xs font-semibold text-brand-navy/60 hover:text-brand-navy inline-flex items-center gap-1.5 disabled:opacity-50">
         {sending === 'test' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FlaskConical className="w-3.5 h-3.5" />}
         Send me one first

@@ -1,19 +1,17 @@
 'use client';
 // src/components/admin/OnboardLinkDialog.tsx
 //
-// Login message for a staff account (GTS or Sinclair's): copy it, or hand it
-// to the mail app via mailto:. Nothing is sent from the server and the
-// password is never stored: it lives only in this component's state
+// Login message for a staff account (GTS or Sinclair's): send it, or copy it
+// to send yourself. The password is never stored: it lives only in this component's state
 // (prefilled when it was just set in this tab) and is gone on close.
 
 import { useEffect, useState } from 'react';
-import { Check, Copy, ExternalLink, Loader2, Mail, Send, X } from 'lucide-react';
+import { Check, Copy, ExternalLink, Loader2, Send, X } from 'lucide-react';
 import { adminFetch } from '@/lib/admin-auth';
 import {
   ONBOARD_LINKS,
   OnboardKind,
   onboardBody,
-  onboardMailto,
   onboardSubject,
 } from '@/lib/onboard-links';
 
@@ -137,7 +135,7 @@ export default function OnboardLinkDialog({
           </div>
 
           <div>
-            <label className="label-base">To (optional)</label>
+            <label className="label-base">Send to</label>
             <input type="email" className="input-base" value={to} placeholder="name@example.com"
               onChange={e => setTo(e.target.value)} />
           </div>
@@ -151,11 +149,6 @@ export default function OnboardLinkDialog({
           </details>
 
           <div className="space-y-2 pt-1">
-            <button type="button" onClick={() => copy('msg', `Subject: ${subject}\n\n${body}`)}
-              className="btn-primary w-full text-sm flex items-center justify-center gap-2 min-h-[44px]">
-              {copied === 'msg' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-              {copied === 'msg' ? 'Copied' : 'Copy message'}
-            </button>
             <button type="button"
               disabled={sending || !to.trim() || !password.trim()}
               onClick={async () => {
@@ -181,17 +174,18 @@ export default function OnboardLinkDialog({
                   setSending(false);
                 }
               }}
-              className="btn-outline w-full text-sm flex items-center justify-center gap-2 min-h-[44px] disabled:opacity-40">
+              className="btn-primary w-full text-sm flex items-center justify-center gap-2 min-h-[44px] disabled:opacity-40">
               {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
               {sending ? 'Sending…' : 'Send login email'}
             </button>
             {sentTo && <p className="text-sm text-emerald-800">Sent to {sentTo}.</p>}
             {sendError && <p className="text-sm text-red-700">{sendError}</p>}
             <div className="grid grid-cols-2 gap-2">
-              <a href={onboardMailto(to, subject, body)}
+              <button type="button" onClick={() => copy('msg', `Subject: ${subject}\n\n${body}`)}
                 className="btn-outline text-sm flex items-center justify-center gap-2 min-h-[44px]">
-                <Mail className="w-4 h-4" /> Open email
-              </a>
+                {copied === 'msg' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                {copied === 'msg' ? 'Copied' : 'Copy message'}
+              </button>
               <button type="button" onClick={() => copy('link', link)}
                 className="btn-outline text-sm flex items-center justify-center gap-2 min-h-[44px]">
                 {copied === 'link' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
