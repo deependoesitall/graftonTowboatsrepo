@@ -1,15 +1,17 @@
 'use client';
 // src/components/admin/CustomerLoginsPanel.tsx
-// Boat crew login manager - set password (typed), quick-add, search.
+// Boat crew logins: create company / boat / login in one go, then send the
+// welcome email (or copy it). Any row can set a new password and resend.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
-  CheckCircle2, KeyRound, Loader2, Mail, Plus, Search, Ship, Trash2, UserPlus,
+  CheckCircle2, KeyRound, Loader2, Plus, Search, Ship, Trash2, UserPlus,
 } from 'lucide-react';
 import { adminFetch } from '@/lib/admin-auth';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { CrewRoleField } from '@/components/admin/CrewRoleField';
 import { MIN_PASSWORD_LENGTH } from '@/lib/password-rules';
+import { OnboardSendCard, type OnboardCardData } from '@/components/admin/OnboardSendCard';
 
 type Member = {
   id: string;
@@ -32,6 +34,9 @@ type CompanyGroup = {
 type Company = { id: string; name: string };
 type Vessel = { id: string; name: string; company_id: string };
 
+/** Select value for "+ New company…" / "+ New boat…". */
+const NEW = '__new__';
+
 export function CustomerLoginsPanel() {
   const [loading, setLoading] = useState(true);
   const [companies, setCompanies] = useState<CompanyGroup[]>([]);
@@ -42,97 +47,21 @@ export function CustomerLoginsPanel() {
   const [pwFor, setPwFor] = useState<string | null>(null);
   const [pwValue, setPwValue] = useState('');
   const [pwSaving, setPwSaving] = useState(false);
-  const [pwDone, setPwDone] = useState<string | null>(null);
-
   /**
-   * THE WELCOME EMAIL HAS TO BE OFFERED HERE, NOT ON A SEPARATE SCREEN.
-   *
-   * The password is only ever in plain text for the few seconds between Jen
-   * typing it and the server hashing it. Nothing can read it back afterwards,
-   * so the one moment the email can carry it is right after it is set. Send it
-   * later and she has to invent a second password and tell the crew twice.
+   * The send card. The password is only ever in plain text between Jen typing
+   * it and closing this card, so it opens right after a login is created
+   * ('top') or a row's password is set (that member's id).
    */
-  const [welcome, setWelcome] = useState<
-    { memberId: string; name: string; email: string; vessel: string; password: string } | null
-  >(null);
-  const [welcomeSending, setWelcomeSending] = useState(false);
-  const [welcomeSentTo, setWelcomeSentTo] = useState('');
-  const [signin, setSignin] = useState<
-    { memberId: string; name: string; email: string; vessel: string; password: string } | null
-  >(null);
-  const [signinSending, setSigninSending] = useState(false);
-  const [signinSentTo, setSigninSentTo] = useState('');
+  const [card, setCard] = useState<(OnboardCardData & { at: string }) | null>(null);
 
-  async function sendWelcome() {
-    if (!welcome) return;
-    setWelcomeSending(true);
-    setError('');
-    try {
-      const res = await adminFetch('/api/admin/customer-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          template: 'welcome',
-          to: [welcome.email],
-          vars: {
-            firstName: welcome.name.split(/\s+/)[0] || '',
-            vesselName: welcome.vessel,
-            loginEmail: welcome.email,
-            password: welcome.password,
-          },
-        }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(json.error || 'Could not send the welcome email.');
-        return;
-      }
-      setWelcomeSentTo(welcome.email);
-      setWelcome(null);
-      setTimeout(() => setWelcomeSentTo(''), 7000);
-    } finally {
-      setWelcomeSending(false);
-    }
-  }
-
-  async function sendSignIn() {
-    if (!signin) return;
-    setSigninSending(true);
-    setError('');
-    try {
-      const res = await adminFetch('/api/admin/customer-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          template: 'signin',
-          to: [signin.email],
-          vars: {
-            firstName: signin.name.split(/\s+/)[0] || '',
-            vesselName: signin.vessel,
-            loginEmail: signin.email,
-            password: signin.password,
-          },
-        }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(json.error || 'Could not send the sign-in email.');
-        return;
-      }
-      setSigninSentTo(signin.email);
-      setSignin(null);
-      setTimeout(() => setSigninSentTo(''), 7000);
-    } finally {
-      setSigninSending(false);
-    }
-  }
-
-  // Quick-add (existing boat)
+  // New login (company and boat can be created inline)
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [allCompanies, setAllCompanies] = useState<Company[]>([]);
   const [allVessels, setAllVessels] = useState<Vessel[]>([]);
   const [qaCompanyId, setQaCompanyId] = useState('');
   const [qaVesselId, setQaVesselId] = useState('');
+  const [qaNewCompany, setQaNewCompany] = useState('');
+  const [qaNewBoat, setQaNewBoat] = useState('');
   const [qaFirst, setQaFirst] = useState('');
   const [qaLast, setQaLast] = useState('');
   const [qaEmail, setQaEmail] = useState('');
@@ -168,6 +97,8 @@ export function CustomerLoginsPanel() {
     () => allVessels.filter(v => !qaCompanyId || v.company_id === qaCompanyId),
     [allVessels, qaCompanyId],
   );
+  const qaCompanyIsNew = qaCompanyId === NEW;
+  const qaBoatIsNew = qaCompanyIsNew || qaVesselId === NEW || (!!qaCompanyId && vesselOptions.length === 0);
 
   async function openQuickAdd() {
     setShowQuickAdd(true);
@@ -209,19 +140,15 @@ export function CustomerLoginsPanel() {
         setError(json.error || 'Could not set password');
         return;
       }
-      setPwDone(member.id);
-      setOk(`Password set for ${member.display_name || member.email || 'crew member'}`);
-      if (member.email) {
-        setSignin({
-          memberId: member.id,
-          name: member.display_name || '',
-          email: member.email,
-          vessel: member.vessel_name || '',
-          password: next,
-        });
-      }
-      // Deliberately NOT auto-closing any more. The panel stays open holding
-      // the password so the welcome email can still be sent from here.
+      setOk('');
+      setCard({
+        at: member.id,
+        name: member.display_name || '',
+        email: member.email || '',
+        vessel: member.vessel_name || '',
+        password: next,
+      });
+      setPwFor(null);
       setPwValue('');
     } finally {
       setPwSaving(false);
@@ -230,14 +157,54 @@ export function CustomerLoginsPanel() {
 
   async function quickAddMember() {
     setError(''); setOk('');
-    if (!qaVesselId) { setError('Pick a boat'); return; }
     if (!qaFirst.trim() || !qaEmail.trim() || qaPassword.trim().length < MIN_PASSWORD_LENGTH) {
       setError(`First name, email, and password (${MIN_PASSWORD_LENGTH}+ chars) required`);
       return;
     }
+    if (qaCompanyIsNew && !qaNewCompany.trim()) { setError('Type the company name'); return; }
+    if (qaBoatIsNew && !qaCompanyId) { setError('Pick a company'); return; }
+    if (qaBoatIsNew && !qaNewBoat.trim()) { setError('Type the boat name'); return; }
+    if (!qaBoatIsNew && !qaVesselId) { setError('Pick a boat'); return; }
     setQaBusy(true);
     try {
-      const res = await adminFetch(`/api/admin/vessels/${qaVesselId}/members`, {
+      // Each step keeps what it created selected, so a retry after a failed
+      // login (say, an email already in use) never makes a second company or boat.
+      let companyId = qaCompanyId;
+      if (qaCompanyIsNew) {
+        const res = await adminFetch('/api/admin/companies', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: qaNewCompany.trim() }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || !json.company?.id) { setError(json.error || 'Could not add the company'); return; }
+        companyId = json.company.id;
+        setAllCompanies(list => [...list, { id: json.company.id, name: json.company.name }]
+          .sort((x, y) => x.name.localeCompare(y.name)));
+        setQaCompanyId(companyId);
+        setQaNewCompany('');
+      }
+
+      let vesselId = qaVesselId;
+      let vesselName = allVessels.find(v => v.id === qaVesselId)?.name || '';
+      if (qaBoatIsNew) {
+        const res = await adminFetch('/api/admin/vessels', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ company_id: companyId, name: qaNewBoat.trim(), backfill_orders: true }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || !json.vessel?.id) { setError(json.error || 'Could not add the boat'); return; }
+        vesselId = json.vessel.id;
+        vesselName = json.vessel.name;
+        setAllVessels(list => list.some(v => v.id === vesselId)
+          ? list
+          : [...list, { id: vesselId, name: vesselName, company_id: companyId }]);
+        setQaVesselId(vesselId);
+        setQaNewBoat('');
+      }
+
+      const res = await adminFetch(`/api/admin/vessels/${vesselId}/members`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -253,12 +220,11 @@ export function CustomerLoginsPanel() {
         setError(json.error || 'Failed to add login');
         return;
       }
-      setOk(`Login created for ${json.member?.display_name || qaEmail}`);
-      setWelcome({
-        memberId: json.member?.id || qaEmail,
+      setCard({
+        at: 'top',
         name: `${qaFirst.trim()} ${qaLast.trim()}`.trim(),
         email: qaEmail.trim(),
-        vessel: allVessels.find(v => v.id === qaVesselId)?.name || '',
+        vessel: vesselName,
         password: qaPassword,
       });
       setQaFirst(''); setQaLast(''); setQaEmail(''); setQaPassword('');
@@ -311,14 +277,14 @@ export function CustomerLoginsPanel() {
             <KeyRound className="w-5 h-5 text-brand-gold" /> Boat crew logins
           </h2>
           <p className="text-sm text-gray-500 mt-1 max-w-xl">
-            Type a new password and read it to them on the phone. Crew can also reset themselves from
-            Sign in → Forgot password.
+            Create a login, then email it or read it to them on the phone. Crew can also reset
+            themselves from Sign in → Forgot password.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={openQuickAdd}
             className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5">
-            <UserPlus className="w-4 h-4" /> Add login to boat
+            <UserPlus className="w-4 h-4" /> New login
           </button>
           <Link href="/admin/customers/onboard"
             className="btn-primary text-sm px-3 py-2 flex items-center gap-1.5">
@@ -336,52 +302,12 @@ export function CustomerLoginsPanel() {
         </div>
       )}
 
-      {welcomeSentTo && (
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 text-sm px-4 py-3 flex items-center gap-2">
-          <Mail className="w-4 h-4 shrink-0" /> Welcome email sent to {welcomeSentTo}.
-        </div>
-      )}
-      {signinSentTo && (
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 text-sm px-4 py-3 flex items-center gap-2">
-          <Mail className="w-4 h-4 shrink-0" /> Sign-in email sent to {signinSentTo}.
-        </div>
-      )}
-
-      {welcome && (
-        <div className="rounded-xl border border-brand-gold/40 bg-brand-yellow/20 px-4 py-3.5">
-          <p className="text-sm font-bold text-brand-navy">
-            Send {welcome.name.split(/\s+/)[0] || 'them'} the welcome email?
-          </p>
-          <p className="mt-1 text-[13px] leading-relaxed text-brand-navy/80">
-            It carries the sign in, the password you just set, and a walk-through of
-            how to order. Going to <b className="break-all">{welcome.email}</b>
-            {welcome.vessel ? <> for the <b>{welcome.vessel}</b></> : null}.
-          </p>
-          <p className="mt-1.5 text-xs text-brand-navy/60">
-            This is the only chance to send it with that password. Once you leave
-            this screen the password cannot be read back, and you would have to set
-            a new one.
-          </p>
-          <div className="mt-2.5 flex flex-wrap items-center gap-2">
-            <button type="button" onClick={sendWelcome} disabled={welcomeSending}
-              className="btn-primary text-xs px-3 py-2 inline-flex items-center gap-1.5 disabled:opacity-50">
-              {welcomeSending
-                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                : <Mail className="w-3.5 h-3.5" />}
-              {welcomeSending ? 'Sending…' : 'Send welcome email'}
-            </button>
-            <button type="button" onClick={() => setWelcome(null)}
-              className="text-xs font-semibold text-brand-navy/50 hover:text-brand-navy px-2">
-              Not now
-            </button>
-          </div>
-        </div>
-      )}
+      {card?.at === 'top' && <OnboardSendCard data={card} onClose={() => setCard(null)} />}
 
       {showQuickAdd && (
         <div className="card-base p-5 space-y-4 border border-brand-river/20">
           <div className="flex items-center justify-between gap-2">
-            <h3 className="font-bold text-brand-navy text-sm">Quick-add login (boat already exists)</h3>
+            <h3 className="font-bold text-brand-navy text-sm">New login</h3>
             <button type="button" className="text-xs text-gray-400 hover:text-gray-600"
               onClick={() => setShowQuickAdd(false)}>Close</button>
           </div>
@@ -394,17 +320,29 @@ export function CustomerLoginsPanel() {
                 {allCompanies.map(c => (
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
+                <option value={NEW}>+ New company…</option>
               </select>
+              {qaCompanyIsNew && (
+                <input className="input-base mt-2" placeholder="Company name" value={qaNewCompany} autoFocus
+                  onChange={e => setQaNewCompany(e.target.value)} autoComplete="off" />
+              )}
             </div>
             <div>
               <label className="label-base">Boat</label>
-              <select className="input-base" value={qaVesselId}
-                onChange={e => setQaVesselId(e.target.value)} disabled={!qaCompanyId && vesselOptions.length === 0}>
-                <option value="">Select boat…</option>
-                {vesselOptions.map(v => (
-                  <option key={v.id} value={v.id}>{v.name}</option>
-                ))}
-              </select>
+              {!qaCompanyIsNew && !(qaCompanyId && vesselOptions.length === 0) && (
+                <select className="input-base" value={qaVesselId}
+                  onChange={e => setQaVesselId(e.target.value)}>
+                  <option value="">Select boat…</option>
+                  {vesselOptions.map(v => (
+                    <option key={v.id} value={v.id}>{v.name}</option>
+                  ))}
+                  {qaCompanyId && <option value={NEW}>+ New boat…</option>}
+                </select>
+              )}
+              {qaBoatIsNew && (
+                <input className={`input-base ${qaVesselId === NEW ? 'mt-2' : ''}`} placeholder="Boat name" value={qaNewBoat}
+                  onChange={e => setQaNewBoat(e.target.value)} autoComplete="off" />
+              )}
             </div>
             <input className="input-base" placeholder="First name" value={qaFirst}
               onChange={e => setQaFirst(e.target.value)} autoComplete="off" />
@@ -421,12 +359,12 @@ export function CustomerLoginsPanel() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2 items-center">
-            <button type="button" className="btn-primary text-sm" disabled={qaBusy || !qaVesselId || !qaFirst.trim() || !qaEmail.trim() || qaPassword.trim().length < MIN_PASSWORD_LENGTH} onClick={quickAddMember}>
+            <button type="button" className="btn-primary text-sm min-h-[44px]" disabled={qaBusy || !qaFirst.trim() || !qaEmail.trim() || qaPassword.trim().length < MIN_PASSWORD_LENGTH} onClick={quickAddMember}>
               {qaBusy ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : <Plus className="w-4 h-4 inline mr-1" />}
-              Add login
+              Create login
             </button>
             <Link href="/admin/customers/onboard" className="text-sm text-brand-river hover:underline">
-              Need a new boat? Open onboard wizard →
+              Pick the boat from the deliveries ledger →
             </Link>
           </div>
         </div>
@@ -491,16 +429,11 @@ export function CustomerLoginsPanel() {
                                     const next = pwFor === m.id ? null : m.id;
                                     setPwFor(next);
                                     setPwValue('');
-                                    setPwDone(null);
                                     setError('');
                                   }}
                                   className="text-xs font-bold uppercase tracking-wide text-brand-river hover:text-brand-navy"
                                 >
-                                  {pwDone === m.id ? (
-                                    <span className="text-green-600">✓ Password set</span>
-                                  ) : (
-                                    'Set password'
-                                  )}
+                                  Send onboarding
                                 </button>
                                 <button
                                   type="button"
@@ -529,7 +462,7 @@ export function CustomerLoginsPanel() {
                                   <button type="button" onClick={() => setMemberPassword(m)}
                                     disabled={pwSaving || pwValue.trim().length < MIN_PASSWORD_LENGTH}
                                     className="btn-primary text-xs px-3 py-2 disabled:opacity-50 whitespace-nowrap">
-                                    {pwSaving ? 'Saving…' : 'Set password'}
+                                    {pwSaving ? 'Saving…' : 'Set & continue'}
                                   </button>
                                   <button type="button"
                                     onClick={() => { setPwFor(null); setPwValue(''); }}
@@ -538,32 +471,13 @@ export function CustomerLoginsPanel() {
                                   </button>
                                 </div>
                                 <p className="text-[11px] text-gray-400 px-1">
-                                  Type the new password. Give it to them now, or send it in an email.
+                                  Type a new password. Their old one stops working. Next you can email it, copy it, or read it to them.
                                 </p>
                               </div>
                             )}
-                            {signin && signin.memberId === m.id && (
-                              <div className="mt-3 rounded-lg border border-brand-gold/40 bg-brand-yellow/20 px-3 py-2.5">
-                                <p className="text-sm font-bold text-brand-navy">
-                                  Send {signin.name.split(/\s+/)[0] || 'them'} their sign-in?
-                                </p>
-                                <p className="mt-0.5 text-[12px] leading-snug text-brand-navy/80">
-                                  Website, their email, and this password — the same card as the welcome email.
-                                  Going to <b className="break-all">{signin.email}</b>.
-                                </p>
-                                <div className="mt-2 flex flex-wrap items-center gap-2">
-                                  <button type="button" onClick={sendSignIn} disabled={signinSending}
-                                    className="btn-primary text-xs px-3 py-1.5 inline-flex items-center gap-1.5 disabled:opacity-50">
-                                    {signinSending
-                                      ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                      : <Mail className="w-3.5 h-3.5" />}
-                                    {signinSending ? 'Sending…' : 'Send sign-in email'}
-                                  </button>
-                                  <button type="button" onClick={() => setSignin(null)}
-                                    className="text-xs font-semibold text-brand-navy/50 hover:text-brand-navy px-2">
-                                    Not now
-                                  </button>
-                                </div>
+                            {card?.at === m.id && (
+                              <div className="mt-3">
+                                <OnboardSendCard data={card} onClose={() => setCard(null)} />
                               </div>
                             )}
                           </li>
