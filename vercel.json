@@ -68,7 +68,7 @@
     },
     {
       "path": "/api/cron/delivery-ledger-sync",
-      "schedule": "*/15 * * * *"
+      "schedule": "0 11 * * *"
     }
   ]
 }
