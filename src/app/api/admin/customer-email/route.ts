@@ -13,6 +13,12 @@ import { buildWelcomeEmail, buildAnnouncementEmail, buildSignInEmail, CustomerEm
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/** Most addresses one announcement send takes. */
+const MAX_ANNOUNCEMENT = 100;
+/** BCC per email. Resend allows about 50 recipients per email and every
+ *  email also carries the GTS inbox in To, so 49 + 1 stays inside it. */
+const BCC_PER_EMAIL = 49;
+
 /** One place that decides what a template looks like, so the preview the
  *  sender approved is byte-for-byte what the customer receives. */
 function render(template: CustomerEmailKey, vars: Record<string, string>) {
@@ -89,6 +95,13 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  if (template === 'announcement' && body.test !== true && clean.length > MAX_ANNOUNCEMENT) {
+    return NextResponse.json(
+      { error: `Up to ${MAX_ANNOUNCEMENT} at a time. Remove ${clean.length - MAX_ANNOUNCEMENT}.` },
+      { status: 400 },
+    );
+  }
+
   const { subject, html } = render(template, body.vars || {});
 
   const replyTo  = gtsInbox;
@@ -99,18 +112,25 @@ export async function POST(req: NextRequest) {
   const resend = new Resend(apiKey);
 
   /**
-   * ANNOUNCEMENTS GO OUT BCC, ONE MESSAGE PER SEND.
+   * ANNOUNCEMENTS GO OUT BCC.
    *
    * Jen asked for "BCC and then, or even individually". Putting a hundred
    * barge-line contacts in `to` would show every competitor who else GTS
    * mails. Addressing it to the GTS inbox and BCC'ing the list keeps the
    * recipient list private and still reads as a normal email.
+   *
+   * Resend caps how many recipients one email can carry, so the list is cut
+   * into groups of BCC_PER_EMAIL and every group goes out in a single batch
+   * call. Resend requires a To on each email, so the GTS inbox gets one copy
+   * per group.
    */
   const bulk = template === 'announcement' && (clean.length > 1 || body.bcc);
 
   try {
+    const groups: string[][] = [];
+    for (let i = 0; i < clean.length; i += BCC_PER_EMAIL) groups.push(clean.slice(i, i + BCC_PER_EMAIL));
     const result = bulk
-      ? await resend.emails.send({ from, to: [replyTo], bcc: clean, replyTo, subject, html })
+      ? await resend.batch.send(groups.map((bcc) => ({ from, to: [replyTo], bcc, replyTo, subject, html })))
       : await resend.emails.send({ from, to: clean, replyTo, subject, html });
 
     if (result.error) {

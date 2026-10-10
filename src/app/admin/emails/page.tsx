@@ -18,6 +18,7 @@ import { adminFetch } from '@/lib/admin-auth';
 import { boatInviteText } from '@/lib/boat-invite';
 
 type TemplateKey = 'welcome' | 'announcement';
+const MAX_ANNOUNCEMENT = 100;
 
 const TEMPLATES: Record<TemplateKey, {
   title: string; who: string; carries: string; Icon: typeof Mail;
@@ -93,7 +94,9 @@ export default function EmailsPage() {
   const addresses = to.split(/[,\s;]+/).map(s => s.trim()).filter(Boolean);
   const valid = Array.from(new Set(addresses.filter(a => EMAIL_RE.test(a))));
   const invalid = addresses.filter(a => !EMAIL_RE.test(a));
-  const canSend = valid.length > 0 && !invalid.length && !sending;
+  // The server takes up to 100 at a time, sent as one batch of BCC groups.
+  const overCap = Math.max(0, valid.length - MAX_ANNOUNCEMENT);
+  const canSend = valid.length > 0 && !invalid.length && !overCap && !sending;
 
   async function send(mode: 'real' | 'test') {
     setSending(mode); setOk(''); setError('');
@@ -203,6 +206,9 @@ export default function EmailsPage() {
                   </span>
                 ))}
               </div>
+            )}
+            {overCap > 0 && (
+              <p className="text-sm text-red-600 mt-2">Up to {MAX_ANNOUNCEMENT} at a time. Remove {overCap}.</p>
             )}
 
             <div className="flex flex-wrap items-center gap-2 mt-3.5">
