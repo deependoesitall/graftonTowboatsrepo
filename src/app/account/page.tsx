@@ -101,6 +101,9 @@ function AccountContent() {
   // profile when incomplete (unless ?order= deep-link — that always wins).
   const [tab, setTab] = useState<'orders' | 'favorites' | 'profile'>('orders');
   const [authOpen, setAuthOpen] = useState(false);
+  // /account?signup=1 (the announcement email's button) opens straight to
+  // the create-account form.
+  const [signupLink, setSignupLink] = useState(false);
   const [profileHydrated, setProfileHydrated] = useState(false);
   const [defaultTabApplied, setDefaultTabApplied] = useState(false);
 
@@ -129,6 +132,14 @@ function AccountContent() {
   // Boats this login is a member of (company · boat) — read-only membership.
   // Preferred company/vessel for checkout autofill live in profile fields above.
   const [boatLinks, setBoatLinks] = useState<Array<{ company: string; boat: string; role: string; vesselId?: string }>>([]);
+
+  useEffect(() => {
+    if (loading || user) return;
+    if (new URLSearchParams(window.location.search).get('signup') === '1') {
+      setSignupLink(true);
+      setAuthOpen(true);
+    }
+  }, [loading, user]);
 
   // Only trigger data loading once we're sure user is logged in
   useEffect(() => {
@@ -611,7 +622,7 @@ function AccountContent() {
           </Link>
         </p>
       </div>
-      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
+      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} defaultMode={signupLink ? 'signup' : 'signin'} />
     </div>
   );
 

@@ -1,19 +1,22 @@
 // src/lib/boat-invite.ts
 //
 // The text Jen / Mary Karen / Laura paste into a text message when a boat
-// calls out of the blue. Short, phone-sized, no jargon. Same URL the
-// welcome email uses.
+// calls out of the blue. Short, phone-sized, no jargon. Same links the
+// emails use.
 export const ORDER_SITE_URL = 'https://graftontowboatservices.com/catalog';
 export const GTS_PHONE = '(618) 556-0290';
+/** Opens the create-account form on /account. */
+export const SIGNUP_URL = 'https://graftontowboatservices.com/account?signup=1';
 
+/** Text version of the announcement email: same invite, same create-account link. */
 export function boatInviteText(opts?: { vesselName?: string }): string {
   const boat = (opts?.vesselName || '').trim();
   return [
-    `Grafton Towboat Services grocery ordering is online${boat ? ` for the ${boat}` : ''}.`,
+    `Grafton Towboat Services now takes grocery and supply orders online${boat ? ` for the ${boat}` : ''}.`,
     '',
-    'Tap the link, create a free account, and your cart stays with you.',
+    "Create your boat's free account here, and every order saves so the next one is quicker:",
     '',
-    ORDER_SITE_URL,
+    SIGNUP_URL,
     '',
     `Questions? Call ${GTS_PHONE}`,
   ].join('\n');
