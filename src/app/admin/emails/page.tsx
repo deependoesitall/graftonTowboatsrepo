@@ -197,7 +197,7 @@ export default function EmailsPage() {
         <h1 className="font-display text-2xl font-bold text-brand-navy">Emails</h1>
       </div>
       <p className="text-sm text-gray-500 mt-1 mb-6 max-w-2xl">
-        What you see on the right is exactly what lands in their inbox. Nothing sends until you press the button.
+        What you see in the preview is exactly what lands in their inbox. Nothing sends until you press the button.
       </p>
 
       <div className="grid gap-6 lg:gap-8 lg:grid-cols-[minmax(0,400px)_minmax(0,1fr)]">
