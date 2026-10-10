@@ -10,14 +10,20 @@ import { Resend } from 'resend';
 import { requireAdmin } from '@/lib/admin-auth-server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { buildWelcomeEmail, buildAnnouncementEmail, buildSignInEmail, CustomerEmailKey } from '@/lib/customer-emails';
+import { BCC_PER_EMAIL, addressesThatFit, announcementCost, quotaRoom } from '@/lib/email-quota';
+import { getEmailQuota } from '@/lib/email-quota-server';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-/** Most addresses one announcement send takes. */
-const MAX_ANNOUNCEMENT = 100;
-/** BCC per email. Resend allows about 50 recipients per email and every
- *  email also carries the GTS inbox in To, so 49 + 1 stays inside it. */
-const BCC_PER_EMAIL = 49;
+/** Resend's batch endpoint takes up to 100 emails per call. */
+const EMAILS_PER_BATCH = 100;
+
+function ctTime(iso: string | null): string {
+  if (!iso) return 'the reset';
+  return new Date(iso).toLocaleString('en-US', {
+    timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', month: 'short', day: 'numeric',
+  }) + ' CT';
+}
 
 /** One place that decides what a template looks like, so the preview the
  *  sender approved is byte-for-byte what the customer receives. */
@@ -95,11 +101,20 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (template === 'announcement' && body.test !== true && clean.length > MAX_ANNOUNCEMENT) {
-    return NextResponse.json(
-      { error: `Up to ${MAX_ANNOUNCEMENT} at a time. Remove ${clean.length - MAX_ANNOUNCEMENT}.` },
-      { status: 400 },
-    );
+  // Check what Resend says is left before sending, so a list that won't fit
+  // fails here with a plain answer instead of halfway through. If the usage
+  // read fails, Resend still refuses anything over quota on its own.
+  const bulk = template === 'announcement' && (clean.length > 1 || body.bcc === true);
+  if (bulk && body.test !== true) {
+    const quota = await getEmailQuota(apiKey).catch(() => null);
+    const room = quota ? quotaRoom(quota) : null;
+    if (room && announcementCost(clean.length) > room.left) {
+      const fit = addressesThatFit(room.left);
+      return NextResponse.json(
+        { error: `You can send to ${fit} more ${room.per}. Remove ${clean.length - fit} or send the rest after ${ctTime(room.resetsAt)}.` },
+        { status: 429 },
+      );
+    }
   }
 
   const { subject, html } = render(template, body.vars || {});
@@ -120,26 +135,36 @@ export async function POST(req: NextRequest) {
    * recipient list private and still reads as a normal email.
    *
    * Resend caps how many recipients one email can carry, so the list is cut
-   * into groups of BCC_PER_EMAIL and every group goes out in a single batch
-   * call. Resend requires a To on each email, so the GTS inbox gets one copy
-   * per group.
+   * into groups of BCC_PER_EMAIL. Groups go out EMAILS_PER_BATCH at a time
+   * through the batch endpoint, one call after another with a pause, well
+   * under Resend's 10 requests a second. Resend requires a To on each email,
+   * so the GTS inbox gets one copy per group.
    */
-  const bulk = template === 'announcement' && (clean.length > 1 || body.bcc);
-
   try {
+    if (!bulk) {
+      const result = await resend.emails.send({ from, to: clean, replyTo, subject, html });
+      if (result.error) {
+        return NextResponse.json({ error: result.error.message || JSON.stringify(result.error) }, { status: 502 });
+      }
+      return NextResponse.json({ ok: true, sent: clean.length, bcc: false, subject, test: body.test === true, to: clean[0] });
+    }
+
     const groups: string[][] = [];
     for (let i = 0; i < clean.length; i += BCC_PER_EMAIL) groups.push(clean.slice(i, i + BCC_PER_EMAIL));
-    const result = bulk
-      ? await resend.batch.send(groups.map((bcc) => ({ from, to: [replyTo], bcc, replyTo, subject, html })))
-      : await resend.emails.send({ from, to: clean, replyTo, subject, html });
-
-    if (result.error) {
-      return NextResponse.json(
-        { error: result.error.message || JSON.stringify(result.error) },
-        { status: 502 },
-      );
+    let sent = 0;
+    for (let i = 0; i < groups.length; i += EMAILS_PER_BATCH) {
+      if (i > 0) await new Promise((r) => setTimeout(r, 250));
+      const chunk = groups.slice(i, i + EMAILS_PER_BATCH);
+      const result = await resend.batch.send(chunk.map((bcc) => ({ from, to: [replyTo], bcc, replyTo, subject, html })));
+      if (result.error) {
+        return NextResponse.json(
+          { error: result.error.message || JSON.stringify(result.error), sent },
+          { status: 502 },
+        );
+      }
+      sent += chunk.reduce((n, g) => n + g.length, 0);
     }
-    return NextResponse.json({ ok: true, sent: clean.length, bcc: bulk, subject, test: body.test === true, to: clean[0] });
+    return NextResponse.json({ ok: true, sent, bcc: true, subject, test: body.test === true, to: clean[0] });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : 'Send failed' },
