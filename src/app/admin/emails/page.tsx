@@ -16,9 +16,23 @@ import {
 } from 'lucide-react';
 import { adminFetch } from '@/lib/admin-auth';
 import { boatInviteText } from '@/lib/boat-invite';
+import { EmailQuota, addressesThatFit, announcementCost, quotaRoom } from '@/lib/email-quota';
 
 type TemplateKey = 'welcome' | 'announcement';
-const MAX_ANNOUNCEMENT = 100;
+/** Addresses per request, a multiple of the 49-address BCC group, so a big
+ *  list shows progress and a failure part way keeps the rest in the box. */
+const SEND_CHUNK = 490;
+
+function ctTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit' }) + ' CT';
+}
+function ctDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric' });
+}
+function untilLabel(iso: string, now: number): string {
+  const mins = Math.max(0, Math.ceil((Date.parse(iso) - now) / 60000));
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+}
 
 const TEMPLATES: Record<TemplateKey, {
   title: string; who: string; carries: string; Icon: typeof Mail;
@@ -69,6 +83,31 @@ export default function EmailsPage() {
   const [error, setError] = useState('');
 
   const [copied, setCopied] = useState(false);
+  const [quota, setQuota] = useState<EmailQuota | null>(null);
+  const [quotaError, setQuotaError] = useState('');
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+
+  const loadQuota = useCallback(async () => {
+    try {
+      const res = await adminFetch('/api/admin/email-quota');
+      const j = await res.json().catch(() => ({}));
+      if (res.ok) { setQuota(j); setQuotaError(''); }
+      else setQuotaError(j.error || 'Could not read the email quota from Resend.');
+    } catch {
+      setQuotaError('Could not read the email quota from Resend.');
+    }
+  }, []);
+
+  useEffect(() => { loadQuota(); }, [loadQuota]);
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(Date.now()), 30000);
+    return () => window.clearInterval(t);
+  }, []);
+  // Past the daily reset, ask Resend again rather than show yesterday's count.
+  useEffect(() => {
+    if (quota?.resetsAt && now >= Date.parse(quota.resetsAt)) loadQuota();
+  }, [now, quota, loadQuota]);
 
   const loadPreview = useCallback(async () => {
     setLoadingPreview(true);
@@ -94,32 +133,58 @@ export default function EmailsPage() {
   const addresses = to.split(/[,\s;]+/).map(s => s.trim()).filter(Boolean);
   const valid = Array.from(new Set(addresses.filter(a => EMAIL_RE.test(a))));
   const invalid = addresses.filter(a => !EMAIL_RE.test(a));
-  // The server takes up to 100 at a time, sent as one batch of BCC groups.
-  const overCap = Math.max(0, valid.length - MAX_ANNOUNCEMENT);
-  const canSend = valid.length > 0 && !invalid.length && !overCap && !sending;
+  // What Resend says is left decides how many can go: each address counts,
+  // plus the GTS copy on every 49-address BCC group.
+  const cost = announcementCost(valid.length);
+  const room = quota ? quotaRoom(quota) : null;
+  const fit = room ? addressesThatFit(room.left) : null;
+  const overQuota = !!room && cost > room.left;
+  const canSend = valid.length > 0 && !invalid.length && !overQuota && !sending;
 
   async function send(mode: 'real' | 'test') {
     setSending(mode); setOk(''); setError('');
     try {
-      const res = await adminFetch('/api/admin/customer-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          template, to: valid, vars, ...(mode === 'test' ? { test: true } : {}),
-        }),
-      });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) { setError(j.error || 'Send failed.'); return; }
-      if (j.test) {
+      if (mode === 'test') {
+        const res = await adminFetch('/api/admin/customer-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ template, to: valid, vars, test: true }),
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) { setError(j.error || 'Send failed.'); return; }
         setOk(`Test sent to ${j.to}. Open it, then come back and send it for real.`);
-      } else {
-        setOk(j.bcc
-          ? `Sent to ${j.sent} ${j.sent === 1 ? 'address' : 'addresses'}, BCC. Nobody can see who else got it.`
-          : `Sent to ${valid.join(', ')}.`);
-        setTo('');
+        return;
       }
+
+      const list = valid;
+      let done = 0;
+      setProgress({ done, total: list.length });
+      for (let i = 0; i < list.length; i += SEND_CHUNK) {
+        if (i > 0) await new Promise(r => window.setTimeout(r, 300));
+        const part = list.slice(i, i + SEND_CHUNK);
+        const res = await adminFetch('/api/admin/customer-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ template, to: part, vars, bcc: true }),
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          // Keep only what didn't go out, so trying again can't double-send.
+          const left = list.slice(i + (typeof j.sent === 'number' ? j.sent : 0));
+          done += typeof j.sent === 'number' ? j.sent : 0;
+          setTo(left.join('\n'));
+          setError(`${done ? `Sent to ${done} of ${list.length}. ` : ''}${j.error || 'Send failed.'} The ${left.length} not sent are still in the box.`);
+          return;
+        }
+        done += j.sent || part.length;
+        setProgress({ done, total: list.length });
+      }
+      setOk(`Sent to ${done} ${done === 1 ? 'address' : 'addresses'}, BCC. Nobody can see who else got it.`);
+      setTo('');
     } finally {
       setSending('');
+      setProgress(null);
+      loadQuota();
     }
   }
 
@@ -207,8 +272,11 @@ export default function EmailsPage() {
                 ))}
               </div>
             )}
-            {overCap > 0 && (
-              <p className="text-sm text-red-600 mt-2">Up to {MAX_ANNOUNCEMENT} at a time. Remove {overCap}.</p>
+            {overQuota && room && fit != null && (
+              <p className="text-sm text-red-600 mt-2">
+                You can send to {fit} more {room.per}. Remove {valid.length - fit} or send the rest after{' '}
+                {room.resetsAt ? (room.per === 'today' ? ctTime(room.resetsAt) : ctDate(room.resetsAt)) : 'the reset'}.
+              </p>
             )}
 
             <div className="flex flex-wrap items-center gap-2 mt-3.5">
@@ -231,7 +299,9 @@ export default function EmailsPage() {
               <button type="button" disabled={!canSend} onClick={() => send('real')}
                 className="btn-primary inline-flex items-center justify-center gap-2 disabled:opacity-40">
                 {sending === 'real' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                {sending === 'real' ? 'Sending…' : `Send to ${valid.length || 0}`}
+                {sending === 'real'
+                  ? (progress && progress.total > SEND_CHUNK ? `Sending ${progress.done} of ${progress.total}…` : 'Sending…')
+                  : `Send to ${valid.length || 0}`}
               </button>
               <button type="button" disabled={!!sending} onClick={() => send('test')}
                 className="btn-outline text-sm inline-flex items-center gap-1.5 disabled:opacity-40">
@@ -239,6 +309,27 @@ export default function EmailsPage() {
                 Send me one first
               </button>
             </div>
+            <p className="text-xs text-gray-600 mt-2.5">
+              {quota ? (
+                quota.dailyRemaining != null ? (
+                  <>
+                    <span className="font-semibold text-brand-navy">{quota.dailyRemaining.toLocaleString()} emails left today.</span>
+                    {quota.resetsAt && <> Resets at {ctTime(quota.resetsAt)} (in {untilLabel(quota.resetsAt, now)}).</>}
+                  </>
+                ) : quota.monthlyRemaining != null ? (
+                  <span className="font-semibold text-brand-navy">{quota.monthlyRemaining.toLocaleString()} emails left this month.</span>
+                ) : (
+                  <span className="font-semibold text-brand-navy">No email limit on this plan.</span>
+                )
+              ) : quotaError ? <span className="text-amber-700">{quotaError}</span> : 'Checking how many emails are left…'}
+              {valid.length > 0 && <> This send uses {cost.toLocaleString()}.</>}
+            </p>
+            {quota && quota.monthlyLimit != null && (
+              <p className="text-[11px] text-gray-400 mt-0.5">
+                {(quota.monthlyRemaining ?? 0).toLocaleString()} of {quota.monthlyLimit.toLocaleString()} left this month
+                {quota.monthlyResetsAt ? `, resets ${ctDate(quota.monthlyResetsAt)}` : ''}.
+              </p>
+            )}
             <p className="text-xs text-gray-400 mt-2">
               The test goes to the GTS inbox so you can see it land in a real inbox.
             </p>
