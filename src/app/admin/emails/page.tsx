@@ -9,14 +9,14 @@
 // Asked for on the Sep 21 call, so she stops rebuilding the same Gmail draft
 // and attaching Sinclair's 25 page spreadsheet.
 import { useState, useEffect, useCallback } from 'react';
-import Link from 'next/link';
 import {
   Mail, Send, Loader2, CheckCircle2, AlertTriangle, UserPlus, Megaphone,
-  Monitor, Smartphone, X, FlaskConical, Copy, Check, ArrowRight,
+  Monitor, Smartphone, X, FlaskConical, Copy, Check,
 } from 'lucide-react';
 import { adminFetch } from '@/lib/admin-auth';
 import { boatInviteText } from '@/lib/boat-invite';
 import { EmailQuota, addressesThatFit, announcementCost, quotaRoom } from '@/lib/email-quota';
+import { NewCustomerSend } from '@/components/admin/NewCustomerSend';
 
 type TemplateKey = 'welcome' | 'announcement';
 /** Addresses per request, a multiple of the 49-address BCC group, so a big
@@ -72,7 +72,8 @@ function Step({ n, title, hint, children }: {
 
 export default function EmailsPage() {
   const [template, setTemplate] = useState<TemplateKey>('welcome');
-  const [vars] = useState({ firstName: '', vesselName: '', loginEmail: '', password: '' });
+  // Typed into the New customer form, so the preview shows the real boat.
+  const [vars, setVars] = useState({ firstName: '', vesselName: '', loginEmail: '', password: '' });
   const [to, setTo] = useState('');
   const [html, setHtml] = useState('');
   const [subject, setSubject] = useState('');
@@ -111,7 +112,7 @@ export default function EmailsPage() {
 
   const loadPreview = useCallback(async () => {
     setLoadingPreview(true);
-    const qs = new URLSearchParams({ template, ...vars });
+    const qs = new URLSearchParams(template === 'welcome' ? { template, ...vars } : { template });
     try {
       const res = await adminFetch(`/api/admin/customer-email?${qs.toString()}`);
       const j = await res.json();
@@ -190,6 +191,32 @@ export default function EmailsPage() {
 
   const t = TEMPLATES[template];
 
+  const quotaNote = (extra?: React.ReactNode) => (
+    <>
+      <p className="text-xs text-gray-600 mt-2.5">
+        {quota ? (
+          quota.dailyRemaining != null ? (
+            <>
+              <span className="font-semibold text-brand-navy">{quota.dailyRemaining.toLocaleString()} emails left today.</span>
+              {quota.resetsAt && <> Resets at {ctTime(quota.resetsAt)} (in {untilLabel(quota.resetsAt, now)}).</>}
+            </>
+          ) : quota.monthlyRemaining != null ? (
+            <span className="font-semibold text-brand-navy">{quota.monthlyRemaining.toLocaleString()} emails left this month.</span>
+          ) : (
+            <span className="font-semibold text-brand-navy">No email limit on this plan.</span>
+          )
+        ) : quotaError ? <span className="text-amber-700">{quotaError}</span> : 'Checking how many emails are left…'}
+        {extra}
+      </p>
+      {quota && quota.monthlyLimit != null && (
+        <p className="text-[11px] text-gray-400 mt-0.5">
+          {(quota.monthlyRemaining ?? 0).toLocaleString()} of {quota.monthlyLimit.toLocaleString()} left this month
+          {quota.monthlyResetsAt ? `, resets ${ctDate(quota.monthlyResetsAt)}` : ''}.
+        </p>
+      )}
+    </>
+  );
+
   return (
     <div className="p-4 sm:p-6 max-w-[1400px] mx-auto">
       <div className="flex items-center gap-2.5">
@@ -237,12 +264,14 @@ export default function EmailsPage() {
           </Step>
 
           {template === 'welcome' ? (
-            <Step n={2} title="Send it from Customers → Logins"
-              hint="This email carries their password, so it goes out where the login is made. Pick or create the company, boat and login there, then send it in one tap.">
-              <Link href="/admin/customers?tab=logins"
-                className="btn-primary inline-flex items-center justify-center gap-2 min-h-[44px]">
-                <UserPlus className="w-4 h-4" /> Open Customers → Logins <ArrowRight className="w-4 h-4" />
-              </Link>
+            <Step n={2} title="Their boat and login"
+              hint="Pick a company or boat that's already set up, or type a new one. Create & send makes the login and emails it.">
+              <NewCustomerSend
+                onVars={setVars}
+                onSent={loadQuota}
+                outOfEmails={!!room && room.left < 1}
+                quotaNote={quotaNote(<> Each send uses 1.</>)}
+              />
             </Step>
           ) : (
           <Step
@@ -284,7 +313,7 @@ export default function EmailsPage() {
                 type="button"
                 onClick={async () => {
                   try {
-                    await navigator.clipboard.writeText(boatInviteText({ vesselName: vars.vesselName }));
+                    await navigator.clipboard.writeText(boatInviteText());
                     setCopied(true);
                     window.setTimeout(() => setCopied(false), 2500);
                   } catch {
@@ -309,27 +338,7 @@ export default function EmailsPage() {
                 Send me one first
               </button>
             </div>
-            <p className="text-xs text-gray-600 mt-2.5">
-              {quota ? (
-                quota.dailyRemaining != null ? (
-                  <>
-                    <span className="font-semibold text-brand-navy">{quota.dailyRemaining.toLocaleString()} emails left today.</span>
-                    {quota.resetsAt && <> Resets at {ctTime(quota.resetsAt)} (in {untilLabel(quota.resetsAt, now)}).</>}
-                  </>
-                ) : quota.monthlyRemaining != null ? (
-                  <span className="font-semibold text-brand-navy">{quota.monthlyRemaining.toLocaleString()} emails left this month.</span>
-                ) : (
-                  <span className="font-semibold text-brand-navy">No email limit on this plan.</span>
-                )
-              ) : quotaError ? <span className="text-amber-700">{quotaError}</span> : 'Checking how many emails are left…'}
-              {valid.length > 0 && <> This send uses {cost.toLocaleString()}.</>}
-            </p>
-            {quota && quota.monthlyLimit != null && (
-              <p className="text-[11px] text-gray-400 mt-0.5">
-                {(quota.monthlyRemaining ?? 0).toLocaleString()} of {quota.monthlyLimit.toLocaleString()} left this month
-                {quota.monthlyResetsAt ? `, resets ${ctDate(quota.monthlyResetsAt)}` : ''}.
-              </p>
-            )}
+            {quotaNote(valid.length > 0 && <> This send uses {cost.toLocaleString()}.</>)}
             <p className="text-xs text-gray-400 mt-2">
               The test goes to the GTS inbox so you can see it land in a real inbox.
             </p>
