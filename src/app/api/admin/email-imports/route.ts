@@ -133,7 +133,8 @@ export async function PATCH(req: NextRequest) {
   if (session instanceof NextResponse) return session;
 
   const body = await req.json().catch(() => ({}));
-  const sendTime = typeof body.sendTime === 'string' ? body.sendTime.trim() : '';
+  // Some browsers send seconds (08:00:00); the minute is what counts.
+  const sendTime = typeof body.sendTime === 'string' ? body.sendTime.trim().slice(0, 5) : '';
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(sendTime)) {
     return NextResponse.json({ error: 'Pick a time, like 08:00.' }, { status: 400 });
   }

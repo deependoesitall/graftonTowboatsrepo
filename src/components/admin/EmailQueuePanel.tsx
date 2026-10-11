@@ -22,6 +22,10 @@ function ct(iso: string, withDay = true): string {
     hour: 'numeric', minute: '2-digit',
   }) + ' CT';
 }
+/** Every quarter hour, so picking a time is one tap and never half-typed. */
+const TIMES = Array.from({ length: 96 }, (_, i) =>
+  `${String(Math.floor(i / 4)).padStart(2, '0')}:${String((i % 4) * 15).padStart(2, '0')}`);
+
 function label12(hm: string): string {
   const [h, m] = hm.split(':').map(Number);
   return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'} CT`;
@@ -185,10 +189,12 @@ export function EmailQueuePanel({ reloadKey }: { reloadKey?: number }) {
       const res = await adminFetch('/api/admin/email-imports', {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sendTime: draft }),
       });
-      const j = await res.json();
-      if (!res.ok) { setError(j.error || 'Could not save the time.'); return; }
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j.message) { setError(`Not saved: ${j.error || `the server answered ${res.status}`}. Try again.`); return; }
       setSaved(j.message);
       load();
+    } catch {
+      setError('Not saved: could not reach the server. Try again.');
     } finally {
       setSaving(false);
     }
@@ -236,8 +242,12 @@ export function EmailQueuePanel({ reloadKey }: { reloadKey?: number }) {
       <div className="mt-3 flex flex-wrap items-end gap-2">
         <label className="text-[13px] text-gray-600">
           <span className="block mb-1 font-semibold text-brand-navy">Send daily at (CT)</span>
-          <input type="time" step={900} className="input-base w-36" value={draft}
-            onChange={e => { setDraft(e.target.value); setSaved(''); }} />
+          <select className="input-base w-40" value={draft}
+            onChange={e => { setDraft(e.target.value); setSaved(''); setError(''); }}>
+            <option value="">Pick a time</option>
+            {sendTime && !TIMES.includes(sendTime) && <option value={sendTime}>{label12(sendTime)}</option>}
+            {TIMES.map(t => <option key={t} value={t}>{label12(t)}</option>)}
+          </select>
         </label>
         <button type="button" disabled={!draft || saving || draft === sendTime} onClick={saveTime}
           className="btn-primary text-sm inline-flex items-center gap-1.5 disabled:opacity-40">
@@ -245,7 +255,12 @@ export function EmailQueuePanel({ reloadKey }: { reloadKey?: number }) {
           {sendTime ? 'Change time' : 'Set send time'}
         </button>
       </div>
-      {sendTime && !saved && (
+      {!!draft && draft !== sendTime && !saving && (
+        <p className="text-xs font-semibold text-amber-700 mt-2">
+          Not saved yet. Tap {sendTime ? 'Change time' : 'Set send time'} to save {label12(draft)}.
+        </p>
+      )}
+      {sendTime && !saved && draft === sendTime && (
         <p className="text-xs text-gray-500 mt-2">
           Sends every day at {label12(sendTime)}, as many as Resend allows that day.
           {nextRunAt && waiting > 0 && <> Next: {ct(nextRunAt)}.</>}
