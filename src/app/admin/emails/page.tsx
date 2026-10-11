@@ -17,11 +17,10 @@ import { adminFetch } from '@/lib/admin-auth';
 import { boatInviteText } from '@/lib/boat-invite';
 import { EmailQuota, addressesThatFit, announcementCost, quotaRoom } from '@/lib/email-quota';
 import { NewCustomerSend } from '@/components/admin/NewCustomerSend';
+import { EmailQueuePanel } from '@/components/admin/EmailQueuePanel';
+import { parseEmailList } from '@/lib/email-address';
 
 type TemplateKey = 'welcome' | 'announcement';
-/** Addresses per request, a multiple of the 49-address BCC group, so a big
- *  list shows progress and a failure part way keeps the rest in the box. */
-const SEND_CHUNK = 490;
 
 function ctTime(iso: string): string {
   return new Date(iso).toLocaleTimeString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit' }) + ' CT';
@@ -50,8 +49,6 @@ const TEMPLATES: Record<TemplateKey, {
     Icon: Megaphone,
   },
 };
-
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function Step({ n, title, hint, children }: {
   n: number; title: string; hint?: string; children: React.ReactNode;
@@ -86,7 +83,7 @@ export default function EmailsPage() {
   const [copied, setCopied] = useState(false);
   const [quota, setQuota] = useState<EmailQuota | null>(null);
   const [quotaError, setQuotaError] = useState('');
-  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [queueKey, setQueueKey] = useState(0);
   const [now, setNow] = useState(() => Date.now());
 
   const loadQuota = useCallback(async () => {
@@ -131,16 +128,15 @@ export default function EmailsPage() {
     return () => window.clearTimeout(t);
   }, [loadPreview]);
 
-  const addresses = to.split(/[,\s;]+/).map(s => s.trim()).filter(Boolean);
-  const valid = Array.from(new Set(addresses.filter(a => EMAIL_RE.test(a))));
-  const invalid = addresses.filter(a => !EMAIL_RE.test(a));
-  // What Resend says is left decides how many can go: each address counts,
-  // plus the GTS copy on every 49-address BCC group.
-  const cost = announcementCost(valid.length);
+  const { valid, invalid } = parseEmailList(to);
+  // What Resend says is left decides how many go now: each address counts,
+  // plus the GTS copy on every 49-address BCC group. The rest are queued.
   const room = quota ? quotaRoom(quota) : null;
   const fit = room ? addressesThatFit(room.left) : null;
-  const overQuota = !!room && cost > room.left;
-  const canSend = valid.length > 0 && !invalid.length && !overQuota && !sending;
+  const overQuota = !!room && fit != null && valid.length > fit;
+  const goNow = overQuota && fit != null ? fit : valid.length;
+  const cost = announcementCost(goNow);
+  const canSend = valid.length > 0 && !invalid.length && !sending;
 
   async function send(mode: 'real' | 'test') {
     setSending(mode); setOk(''); setError('');
@@ -157,34 +153,24 @@ export default function EmailsPage() {
         return;
       }
 
-      const list = valid;
-      let done = 0;
-      setProgress({ done, total: list.length });
-      for (let i = 0; i < list.length; i += SEND_CHUNK) {
-        if (i > 0) await new Promise(r => window.setTimeout(r, 300));
-        const part = list.slice(i, i + SEND_CHUNK);
-        const res = await adminFetch('/api/admin/customer-email', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ template, to: part, vars, bcc: true }),
-        });
-        const j = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          // Keep only what didn't go out, so trying again can't double-send.
-          const left = list.slice(i + (typeof j.sent === 'number' ? j.sent : 0));
-          done += typeof j.sent === 'number' ? j.sent : 0;
-          setTo(left.join('\n'));
-          setError(`${done ? `Sent to ${done} of ${list.length}. ` : ''}${j.error || 'Send failed.'} The ${left.length} not sent are still in the box.`);
-          return;
-        }
-        done += j.sent || part.length;
-        setProgress({ done, total: list.length });
-      }
-      setOk(`Sent to ${done} ${done === 1 ? 'address' : 'addresses'}, BCC. Nobody can see who else got it.`);
+      // The list goes into the queue: what today's quota allows goes out
+      // now, the rest at the daily send time.
+      const res = await adminFetch('/api/admin/email-imports', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emails: valid, sendNow: true }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(j.error || 'Send failed.'); return; }
+      const parts = [`Sent to ${j.sentNow} now, BCC.`];
+      if (j.queued > 0) parts.push(`${j.queued} queued for the daily send.`);
+      if (j.skipped > 0) parts.push(`${j.skipped} skipped (already have an account or already got it).`);
+      if (j.note) parts.push(j.note);
+      setOk(parts.join(' '));
       setTo('');
+      setQueueKey(k => k + 1);
     } finally {
       setSending('');
-      setProgress(null);
       loadQuota();
     }
   }
@@ -302,9 +288,9 @@ export default function EmailsPage() {
               </div>
             )}
             {overQuota && room && fit != null && (
-              <p className="text-sm text-red-600 mt-2">
-                You can send to {fit} more {room.per}. Remove {valid.length - fit} or send the rest after{' '}
-                {room.resetsAt ? (room.per === 'today' ? ctTime(room.resetsAt) : ctDate(room.resetsAt)) : 'the reset'}.
+              <p className="text-sm text-brand-navy mt-2">
+                {fit} can go {room.per === 'today' ? 'today' : 'this month'}. The other {valid.length - fit} wait in the queue
+                and go out at the daily send time, as many as Resend allows each day.
               </p>
             )}
 
@@ -328,9 +314,7 @@ export default function EmailsPage() {
               <button type="button" disabled={!canSend} onClick={() => send('real')}
                 className="btn-primary inline-flex items-center justify-center gap-2 disabled:opacity-40">
                 {sending === 'real' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                {sending === 'real'
-                  ? (progress && progress.total > SEND_CHUNK ? `Sending ${progress.done} of ${progress.total}…` : 'Sending…')
-                  : `Send to ${valid.length || 0}`}
+                {sending === 'real' ? 'Sending…' : `Send to ${valid.length || 0}`}
               </button>
               <button type="button" disabled={!!sending} onClick={() => send('test')}
                 className="btn-outline text-sm inline-flex items-center gap-1.5 disabled:opacity-40">
@@ -338,10 +322,13 @@ export default function EmailsPage() {
                 Send me one first
               </button>
             </div>
-            {quotaNote(valid.length > 0 && <> This send uses {cost.toLocaleString()}.</>)}
+            {quotaNote(valid.length > 0 && <> Sending now uses {cost.toLocaleString()}.</>)}
             <p className="text-xs text-gray-400 mt-2">
               The test goes to the GTS inbox so you can see it land in a real inbox.
             </p>
+            <div className="mt-5">
+              <EmailQueuePanel reloadKey={queueKey} />
+            </div>
           </Step>
           )}
 
