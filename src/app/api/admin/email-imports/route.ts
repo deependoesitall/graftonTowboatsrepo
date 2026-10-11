@@ -3,6 +3,8 @@
 // The announcement queue behind the Emails tab. GTS only.
 //
 // GET   → { settings: { sendTime, nextRunAt }, imports: [...] }
+// GET ?progress=1 → every queued address with its status, and the account
+//       it has made since, if any (matched on email, any case).
 // POST  { emails, sendNow? } → load a list; with sendNow, what today's Resend
 //       quota allows goes out now and the rest waits for the daily send.
 // PATCH { sendTime: 'HH:MM' } → the daily send time (America/Chicago). Until
@@ -12,6 +14,7 @@ import { requireAdmin } from '@/lib/admin-auth-server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { getEmailQuota } from '@/lib/email-quota-server';
 import { quotaRoom } from '@/lib/email-quota';
+import { listAuthUsers } from '@/lib/auth-user-dates';
 import {
   createImport, ctDay, ctTimeLabel, importNextRunAt, loadQueueSettings, nextRunAt, sendFromImports, slotAt,
 } from '@/lib/email-queue';
@@ -26,6 +29,7 @@ export async function GET(req: NextRequest) {
   if (session instanceof NextResponse) return session;
 
   const supabase = createServiceClient();
+  if (new URL(req.url).searchParams.get('progress')) return progress(supabase);
   const settings = await loadQueueSettings(supabase);
   const { data: imports, error } = await supabase.from('email_imports')
     .select('id, created_by_name, created_at, subject, total, sent_count, invalid, status, last_run_at, last_error')
@@ -57,6 +61,27 @@ export async function GET(req: NextRequest) {
           ? importNextRunAt(settings, i.created_at)?.toISOString() ?? null
           : null,
       };
+    }),
+  });
+}
+
+async function progress(supabase: ReturnType<typeof createServiceClient>) {
+  const rows: { email: string; status: string; sent_at: string | null; error: string | null; import_id: string }[] = [];
+  for (let from = 0; from < 50000; from += 1000) {
+    const { data, error } = await supabase.from('email_import_recipients')
+      .select('email, status, sent_at, error, import_id').order('id').range(from, from + 999);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    rows.push(...(data || []));
+    if (!data || data.length < 1000) break;
+  }
+  const accounts = new Map<string, string | null>();
+  try {
+    for (const u of await listAuthUsers(supabase)) if (u.email) accounts.set(u.email.toLowerCase(), u.created_at);
+  } catch { /* show the list without accounts rather than nothing */ }
+  return NextResponse.json({
+    recipients: rows.map((r) => {
+      const key = r.email.toLowerCase();
+      return { ...r, has_account: accounts.has(key), signed_up_at: accounts.get(key) ?? null };
     }),
   });
 }

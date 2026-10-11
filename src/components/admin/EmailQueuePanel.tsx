@@ -5,7 +5,7 @@
 // list that has been loaded with what went, what is waiting and what was left
 // out. Nothing in the queue goes out on its own until a send time is saved.
 import { useState, useEffect, useCallback } from 'react';
-import { Clock, Loader2, Pause, Play, X, ChevronDown, ChevronRight, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Clock, Loader2, Pause, Play, X, ChevronDown, ChevronRight, AlertTriangle, CheckCircle2, ListChecks } from 'lucide-react';
 import { adminFetch } from '@/lib/admin-auth';
 
 export type QueueImport = {
@@ -56,6 +56,99 @@ function LeftOut({ id }: { id: string }) {
   );
 }
 
+type Recipient = {
+  email: string; status: string; sent_at: string | null; error: string | null;
+  has_account: boolean; signed_up_at: string | null;
+};
+type Filter = 'all' | 'notsent' | 'noaccount' | 'account' | 'failed';
+const FILTERS: [Filter, string, (r: Recipient) => boolean][] = [
+  ['all', 'All', () => true],
+  ['notsent', 'Not sent', r => r.status === 'pending'],
+  ['noaccount', 'Sent but no account', r => r.status === 'sent' && !r.has_account],
+  ['account', 'Created account', r => r.has_account],
+  ['failed', 'Failed or bad address', r => r.status === 'failed' || r.status === 'invalid'],
+];
+
+/** Every queued address: sent when, still waiting, or failed, and whether
+ *  that address has made an account since. */
+function QueueProgress({ reloadKey }: { reloadKey?: number }) {
+  const [rows, setRows] = useState<Recipient[] | null>(null);
+  const [error, setError] = useState('');
+  const [filter, setFilter] = useState<Filter>('all');
+  useEffect(() => {
+    adminFetch('/api/admin/email-imports?progress=1').then(r => r.json())
+      .then(j => { if (j.recipients) setRows(j.recipients); else setError(j.error || 'Could not load progress.'); })
+      .catch(() => setError('Could not load progress.'));
+  }, [reloadKey]);
+  if (error) return <p className="text-sm text-red-600 mt-3">{error}</p>;
+  if (!rows) return <Loader2 className="w-4 h-4 animate-spin text-gray-300 mt-3" />;
+
+  // One line per address, the most useful status if it is in two lists.
+  const rank: Record<string, number> = { sent: 5, pending: 4, failed: 3, skipped: 2, invalid: 1 };
+  const byEmail = new Map<string, Recipient>();
+  for (const r of rows) {
+    const k = r.email.toLowerCase();
+    const cur = byEmail.get(k);
+    if (!cur || (rank[r.status] || 0) > (rank[cur.status] || 0)) byEmail.set(k, r);
+  }
+  const all = Array.from(byEmail.values());
+  const count = (f: (r: Recipient) => boolean) => all.filter(f).length;
+  const shown = all.filter(FILTERS.find(f => f[0] === filter)![2]);
+  const stat = (n: number, label: string, tone: string) => (
+    <div className={`rounded-lg px-3 py-2 ${tone}`}>
+      <div className="text-lg font-bold leading-none">{n}</div>
+      <div className="text-[11px] font-semibold uppercase tracking-wide mt-1 opacity-75">{label}</div>
+    </div>
+  );
+  const statusText = (r: Recipient) =>
+    r.status === 'sent' ? `Sent ${r.sent_at ? ct(r.sent_at) : ''}`
+    : r.status === 'pending' ? 'Not sent yet'
+    : r.status === 'invalid' ? 'Bad address'
+    : r.status === 'failed' ? `Failed${r.error ? `: ${r.error}` : ''}`
+    : `Skipped${r.error ? `: ${r.error}` : ''}`;
+
+  return (
+    <div className="mt-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        {stat(count(r => r.status === 'sent'), 'Sent', 'bg-emerald-50 text-emerald-800')}
+        {stat(count(r => r.status === 'pending'), 'Waiting', 'bg-brand-sand text-brand-navy')}
+        {stat(count(r => r.status === 'failed' || r.status === 'invalid'), 'Failed', 'bg-red-50 text-red-700')}
+        {stat(count(r => r.has_account), 'Accounts created', 'bg-blue-50 text-blue-800')}
+      </div>
+      <div className="flex flex-wrap gap-1.5 mt-3">
+        {FILTERS.map(([k, label, f]) => (
+          <button key={k} type="button" onClick={() => setFilter(k)}
+            className={`rounded-full px-2.5 py-1 text-xs font-semibold border ${
+              filter === k ? 'bg-brand-navy text-white border-brand-navy' : 'bg-white text-gray-600 border-gray-200 hover:border-brand-gold'
+            }`}>
+            {label} <span className="opacity-60">{count(f)}</span>
+          </button>
+        ))}
+      </div>
+      <ul className="mt-2 max-h-96 overflow-auto rounded-lg border border-gray-100 divide-y divide-gray-100 text-xs">
+        {!shown.length && <li className="px-2.5 py-2 text-gray-400">No addresses here.</li>}
+        {shown.map(r => (
+          <li key={r.email} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 px-2.5 py-1.5">
+            <span className="font-mono truncate min-w-0">{r.email}</span>
+            <span className="flex items-center gap-2 shrink-0">
+              <span className={r.status === 'sent' ? 'text-emerald-700' : r.status === 'pending' ? 'text-gray-500'
+                : r.status === 'skipped' ? 'text-gray-400' : 'text-red-600'}>{statusText(r)}</span>
+              {r.has_account && (
+                <span className="rounded-full bg-blue-50 text-blue-800 px-2 py-0.5 font-semibold">
+                  Account{r.signed_up_at ? ` · signed up ${new Date(r.signed_up_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric', year: 'numeric' })}` : ''}
+                </span>
+              )}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="text-[11px] text-gray-400 mt-1.5">
+        Failed means Resend refused the send. Bounces after delivery show in Resend, not here.
+      </p>
+    </div>
+  );
+}
+
 export function EmailQueuePanel({ reloadKey }: { reloadKey?: number }) {
   const [sendTime, setSendTime] = useState<string | null>(null);
   const [nextRunAt, setNextRunAt] = useState<string | null>(null);
@@ -67,6 +160,7 @@ export function EmailQueuePanel({ reloadKey }: { reloadKey?: number }) {
   const [error, setError] = useState('');
   const [open, setOpen] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [showProgress, setShowProgress] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -122,7 +216,12 @@ export function EmailQueuePanel({ reloadKey }: { reloadKey?: number }) {
       <div className="flex items-center gap-2">
         <Clock className="w-4 h-4 text-brand-gold" />
         <h2 className="text-sm font-bold text-brand-navy">Announcement queue</h2>
+        <button type="button" onClick={() => setShowProgress(v => !v)}
+          className="ml-auto btn-outline text-xs inline-flex items-center gap-1 py-1">
+          <ListChecks className="w-3.5 h-3.5" /> {showProgress ? 'Hide progress' : 'See progress'}
+        </button>
       </div>
+      {showProgress && <QueueProgress reloadKey={reloadKey} />}
 
       {loaded && !sendTime && (
         <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-[13px] text-amber-900">
