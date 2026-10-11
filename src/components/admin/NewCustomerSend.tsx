@@ -10,6 +10,7 @@ import { CheckCircle2, FlaskConical, Loader2, Send } from 'lucide-react';
 import { adminFetch } from '@/lib/admin-auth';
 import { CrewRoleField } from '@/components/admin/CrewRoleField';
 import { MIN_PASSWORD_LENGTH } from '@/lib/password-rules';
+import { addBoat, addCompany } from '@/lib/crew-setup';
 
 export type WelcomeFormVars = { firstName: string; vesselName: string; loginEmail: string; password: string };
 
@@ -136,32 +137,20 @@ export function NewCustomerSend({
         let companyId = pickedCompany?.id || '';
         let companyName = pickedCompany?.name || company.trim();
         if (!companyId) {
-          const res = await adminFetch('/api/admin/companies', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: company.trim() }),
-          });
-          const j = await res.json().catch(() => ({}));
-          if (!res.ok || !j.company?.id) { setError(j.error || 'Could not add the company.'); return; }
-          companyId = j.company.id;
-          companyName = j.company.name;
-          setCompanies(list => [...list, { id: companyId, name: companyName }]);
+          const c = await addCompany(company);
+          companyId = c.id;
+          companyName = c.name;
+          setCompanies(list => [...list, c]);
           setCompany(companyName);
         }
 
         let vesselId = pickedBoat?.id || '';
         let vesselName = pickedBoat?.name || boat.trim();
         if (!vesselId) {
-          const res = await adminFetch('/api/admin/vessels', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ company_id: companyId, name: boat.trim(), backfill_orders: true }),
-          });
-          const j = await res.json().catch(() => ({}));
-          if (!res.ok || !j.vessel?.id) { setError(j.error || 'Could not add the boat.'); return; }
-          vesselId = j.vessel.id;
-          vesselName = j.vessel.name;
-          setVessels(list => list.some(v => v.id === vesselId) ? list : [...list, { id: vesselId, name: vesselName, company_id: companyId }]);
+          const v = await addBoat(companyId, boat);
+          vesselId = v.id;
+          vesselName = v.name;
+          setVessels(list => list.some(x => x.id === vesselId) ? list : [...list, { id: vesselId, name: vesselName, company_id: companyId }]);
           setBoat(vesselName);
         }
 
@@ -193,6 +182,8 @@ export function NewCustomerSend({
       setOk(`Sent to ${addr}, ${doneBoat}, ${doneCompany}`);
       setMade(null);
       setBoat(''); setEmail(''); setPassword(''); setFirst(''); setLast('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Something went wrong.');
     } finally {
       setBusy('');
       onSent();

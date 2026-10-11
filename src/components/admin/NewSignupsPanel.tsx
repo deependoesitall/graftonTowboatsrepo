@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link2, Loader2, UserCheck } from 'lucide-react';
 import { adminFetch } from '@/lib/admin-auth';
 import { CrewRoleField } from '@/components/admin/CrewRoleField';
+import { addBoat, addCompany, linkAccountToBoat } from '@/lib/crew-setup';
 
 type Signup = {
   user_id: string;
@@ -76,39 +77,26 @@ export function NewSignupsPanel({ onLinked }: { onLinked: () => void }) {
       let companyId = pickedCompany?.id || '';
       let companyName = pickedCompany?.name || company.trim();
       if (!companyId) {
-        const res = await adminFetch('/api/admin/companies', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: company.trim() }),
-        });
-        const j = await res.json().catch(() => ({}));
-        if (!res.ok || !j.company?.id) { setError(j.error || 'Could not add the company.'); return; }
-        companyId = j.company.id; companyName = j.company.name;
-        setCompanies(list => [...list, { id: companyId, name: companyName }]);
+        const c = await addCompany(company);
+        companyId = c.id; companyName = c.name;
+        setCompanies(list => [...list, c]);
         setCompany(companyName);
       }
       let vesselId = pickedBoat?.id || '';
       let vesselName = pickedBoat?.name || boat.trim();
       if (!vesselId) {
-        const res = await adminFetch('/api/admin/vessels', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ company_id: companyId, name: boat.trim(), backfill_orders: true }),
-        });
-        const j = await res.json().catch(() => ({}));
-        if (!res.ok || !j.vessel?.id) { setError(j.error || 'Could not add the boat.'); return; }
-        vesselId = j.vessel.id; vesselName = j.vessel.name;
-        setVessels(list => list.some(v => v.id === vesselId) ? list : [...list, { id: vesselId, name: vesselName, company_id: companyId }]);
+        const v = await addBoat(companyId, boat);
+        vesselId = v.id; vesselName = v.name;
+        setVessels(list => list.some(x => x.id === vesselId) ? list : [...list, { id: vesselId, name: vesselName, company_id: companyId }]);
         setBoat(vesselName);
       }
-      const res = await adminFetch('/api/admin/signups', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: s.user_id, vessel_id: vesselId, role }),
-      });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) { setError(j.error || 'Could not link the account.'); return; }
+      await linkAccountToBoat({ user_id: s.user_id }, vesselId, role);
       setOk(`${s.email} is now on ${vesselName}, ${companyName}.`);
       setOpen(null);
       await load();
       onLinked();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not link the account.');
     } finally {
       setBusy(false);
     }

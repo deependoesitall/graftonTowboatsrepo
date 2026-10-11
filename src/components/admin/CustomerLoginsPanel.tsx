@@ -1,15 +1,16 @@
 'use client';
 // src/components/admin/CustomerLoginsPanel.tsx
-// Boat crew logins: create company / boat / login in one go, then send the
-// welcome email (or copy it). Any row can set a new password and resend.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+// Boat crew logins. "+" by a boat adds a login, "+" by a company adds a boat,
+// New company adds all three; each can send the welcome email in the same
+// step. Any row can set a new password and resend.
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
-  CheckCircle2, KeyRound, Loader2, Plus, Search, Ship, Trash2, UserPlus,
+  Building2, CheckCircle2, KeyRound, Loader2, Plus, Search, Ship, Trash2,
 } from 'lucide-react';
 import { adminFetch } from '@/lib/admin-auth';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
-import { CrewRoleField } from '@/components/admin/CrewRoleField';
+import { AddCrewForm, type AddCrewDone } from '@/components/admin/AddCrewForm';
 import { MIN_PASSWORD_LENGTH } from '@/lib/password-rules';
 import { OnboardSendCard, type OnboardCardData } from '@/components/admin/OnboardSendCard';
 import { NewSignupsPanel, ctDay } from '@/components/admin/NewSignupsPanel';
@@ -34,12 +35,6 @@ type CompanyGroup = {
   vessels: { id: string; name: string; members: Member[] }[];
 };
 
-type Company = { id: string; name: string };
-type Vessel = { id: string; name: string; company_id: string };
-
-/** Select value for "+ New company…" / "+ New boat…". */
-const NEW = '__new__';
-
 export function CustomerLoginsPanel() {
   const [loading, setLoading] = useState(true);
   const [companies, setCompanies] = useState<CompanyGroup[]>([]);
@@ -57,21 +52,10 @@ export function CustomerLoginsPanel() {
    */
   const [card, setCard] = useState<(OnboardCardData & { at: string }) | null>(null);
 
-  // New login (company and boat can be created inline)
-  const [showQuickAdd, setShowQuickAdd] = useState(false);
-  const [allCompanies, setAllCompanies] = useState<Company[]>([]);
-  const [allVessels, setAllVessels] = useState<Vessel[]>([]);
-  const [qaCompanyId, setQaCompanyId] = useState('');
-  const [qaVesselId, setQaVesselId] = useState('');
-  const [qaNewCompany, setQaNewCompany] = useState('');
-  const [qaNewBoat, setQaNewBoat] = useState('');
-  const [qaFirst, setQaFirst] = useState('');
-  const [qaLast, setQaLast] = useState('');
-  const [qaEmail, setQaEmail] = useState('');
-  const [qaPassword, setQaPassword] = useState('');
-  const [qaRole, setQaRole] = useState('cook');
-  const [qaBusy, setQaBusy] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  /** Which "+" form is open: 'company', 'boat:<company id>' or 'login:<boat id>'. */
+  const [adding, setAdding] = useState<string | null>(null);
+  const [signupsKey, setSignupsKey] = useState(0);
   const { confirm, dialog } = useConfirm();
 
   const load = useCallback(async (q?: string) => {
@@ -95,30 +79,6 @@ export function CustomerLoginsPanel() {
     const t = setTimeout(() => load(search), search ? 250 : 0);
     return () => clearTimeout(t);
   }, [search, load]);
-
-  const vesselOptions = useMemo(
-    () => allVessels.filter(v => !qaCompanyId || v.company_id === qaCompanyId),
-    [allVessels, qaCompanyId],
-  );
-  const qaCompanyIsNew = qaCompanyId === NEW;
-  const qaBoatIsNew = qaCompanyIsNew || qaVesselId === NEW || (!!qaCompanyId && vesselOptions.length === 0);
-
-  async function openQuickAdd() {
-    setShowQuickAdd(true);
-    setError(''); setOk('');
-    const [cRes, vRes] = await Promise.all([
-      adminFetch('/api/admin/companies'),
-      adminFetch('/api/admin/vessels'),
-    ]);
-    const cJson = await cRes.json().catch(() => ({}));
-    const vJson = await vRes.json().catch(() => ({}));
-    if (cRes.ok) setAllCompanies(cJson.companies || []);
-    if (vRes.ok) {
-      setAllVessels((vJson.vessels || []).map((v: { id: string; name: string; company_id: string }) => ({
-        id: v.id, name: v.name, company_id: v.company_id,
-      })));
-    }
-  }
 
   async function setMemberPassword(member: Member) {
     if (!member.vessel_id) {
@@ -158,85 +118,18 @@ export function CustomerLoginsPanel() {
     }
   }
 
-  async function quickAddMember() {
+  function openAdd(key: string) {
+    setAdding(a => (a === key ? null : key));
     setError(''); setOk('');
-    if (!qaFirst.trim() || !qaEmail.trim() || qaPassword.trim().length < MIN_PASSWORD_LENGTH) {
-      setError(`First name, email, and password (${MIN_PASSWORD_LENGTH}+ chars) required`);
-      return;
-    }
-    if (qaCompanyIsNew && !qaNewCompany.trim()) { setError('Type the company name'); return; }
-    if (qaBoatIsNew && !qaCompanyId) { setError('Pick a company'); return; }
-    if (qaBoatIsNew && !qaNewBoat.trim()) { setError('Type the boat name'); return; }
-    if (!qaBoatIsNew && !qaVesselId) { setError('Pick a boat'); return; }
-    setQaBusy(true);
-    try {
-      // Each step keeps what it created selected, so a retry after a failed
-      // login (say, an email already in use) never makes a second company or boat.
-      let companyId = qaCompanyId;
-      if (qaCompanyIsNew) {
-        const res = await adminFetch('/api/admin/companies', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: qaNewCompany.trim() }),
-        });
-        const json = await res.json().catch(() => ({}));
-        if (!res.ok || !json.company?.id) { setError(json.error || 'Could not add the company'); return; }
-        companyId = json.company.id;
-        setAllCompanies(list => [...list, { id: json.company.id, name: json.company.name }]
-          .sort((x, y) => x.name.localeCompare(y.name)));
-        setQaCompanyId(companyId);
-        setQaNewCompany('');
-      }
+  }
 
-      let vesselId = qaVesselId;
-      let vesselName = allVessels.find(v => v.id === qaVesselId)?.name || '';
-      if (qaBoatIsNew) {
-        const res = await adminFetch('/api/admin/vessels', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ company_id: companyId, name: qaNewBoat.trim(), backfill_orders: true }),
-        });
-        const json = await res.json().catch(() => ({}));
-        if (!res.ok || !json.vessel?.id) { setError(json.error || 'Could not add the boat'); return; }
-        vesselId = json.vessel.id;
-        vesselName = json.vessel.name;
-        setAllVessels(list => list.some(v => v.id === vesselId)
-          ? list
-          : [...list, { id: vesselId, name: vesselName, company_id: companyId }]);
-        setQaVesselId(vesselId);
-        setQaNewBoat('');
-      }
-
-      const res = await adminFetch(`/api/admin/vessels/${vesselId}/members`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          first_name: qaFirst.trim(),
-          last_name: qaLast.trim(),
-          email: qaEmail.trim(),
-          password: qaPassword,
-          role: qaRole,
-        }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(json.error || 'Failed to add login');
-        return;
-      }
-      setCard({
-        at: 'top',
-        name: `${qaFirst.trim()} ${qaLast.trim()}`.trim(),
-        email: qaEmail.trim(),
-        vessel: vesselName,
-        password: qaPassword,
-      });
-      setQaFirst(''); setQaLast(''); setQaEmail(''); setQaPassword('');
-      setQaRole('cook');
-      setShowQuickAdd(false);
-      await load(search);
-    } finally {
-      setQaBusy(false);
-    }
+  async function added(r: AddCrewDone) {
+    setAdding(null);
+    setOk(r.message);
+    setError(r.error || '');
+    if (r.card && r.boatId) setCard({ ...r.card, at: `boat:${r.boatId}` });
+    setSignupsKey(k => k + 1);
+    await load(search);
   }
 
   async function deleteMember(member: Member) {
@@ -280,18 +173,18 @@ export function CustomerLoginsPanel() {
             <KeyRound className="w-5 h-5 text-brand-gold" /> Boat crew logins
           </h2>
           <p className="text-sm text-gray-500 mt-1 max-w-xl">
-            Create a login, then email it or read it to them on the phone. Crew can also reset
-            themselves from Sign in → Forgot password.
+            Tap + by a boat to add a login, or + by a company to add a boat. Crew can also reset
+            their own password from Sign in → Forgot password.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={openQuickAdd}
-            className="btn-outline text-sm px-3 py-2 flex items-center gap-1.5">
-            <UserPlus className="w-4 h-4" /> New login
+          <button type="button" onClick={() => openAdd('company')}
+            className="btn-primary text-sm px-3 py-2 min-h-[44px] flex items-center gap-1.5">
+            <Building2 className="w-4 h-4" /> New company
           </button>
           <Link href="/admin/customers/onboard"
-            className="btn-primary text-sm px-3 py-2 flex items-center gap-1.5">
-            <Ship className="w-4 h-4" /> New boat
+            className="btn-outline text-sm px-3 py-2 min-h-[44px] flex items-center gap-1.5">
+            <Ship className="w-4 h-4" /> From the deliveries ledger
           </Link>
         </div>
       </div>
@@ -305,74 +198,10 @@ export function CustomerLoginsPanel() {
         </div>
       )}
 
-      <NewSignupsPanel onLinked={() => load(search)} />
+      <NewSignupsPanel key={signupsKey} onLinked={() => load(search)} />
 
-      {card?.at === 'top' && <OnboardSendCard data={card} onClose={() => setCard(null)} />}
-
-      {showQuickAdd && (
-        <div className="card-base p-5 space-y-4 border border-brand-river/20">
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="font-bold text-brand-navy text-sm">New login</h3>
-            <button type="button" className="text-xs text-gray-400 hover:text-gray-600"
-              onClick={() => setShowQuickAdd(false)}>Close</button>
-          </div>
-          <div className="grid sm:grid-cols-2 gap-3">
-            <div>
-              <label className="label-base">Company</label>
-              <select className="input-base" value={qaCompanyId}
-                onChange={e => { setQaCompanyId(e.target.value); setQaVesselId(''); }}>
-                <option value="">Select company…</option>
-                {allCompanies.map(c => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-                <option value={NEW}>+ New company…</option>
-              </select>
-              {qaCompanyIsNew && (
-                <input className="input-base mt-2" placeholder="Company name" value={qaNewCompany} autoFocus
-                  onChange={e => setQaNewCompany(e.target.value)} autoComplete="off" />
-              )}
-            </div>
-            <div>
-              <label className="label-base">Boat</label>
-              {!qaCompanyIsNew && !(qaCompanyId && vesselOptions.length === 0) && (
-                <select className="input-base" value={qaVesselId}
-                  onChange={e => setQaVesselId(e.target.value)}>
-                  <option value="">Select boat…</option>
-                  {vesselOptions.map(v => (
-                    <option key={v.id} value={v.id}>{v.name}</option>
-                  ))}
-                  {qaCompanyId && <option value={NEW}>+ New boat…</option>}
-                </select>
-              )}
-              {qaBoatIsNew && (
-                <input className={`input-base ${qaVesselId === NEW ? 'mt-2' : ''}`} placeholder="Boat name" value={qaNewBoat}
-                  onChange={e => setQaNewBoat(e.target.value)} autoComplete="off" />
-              )}
-            </div>
-            <input className="input-base" placeholder="First name" value={qaFirst}
-              onChange={e => setQaFirst(e.target.value)} autoComplete="off" />
-            <input className="input-base" placeholder="Last name" value={qaLast}
-              onChange={e => setQaLast(e.target.value)} autoComplete="off" />
-            <input className="input-base sm:col-span-2" placeholder="Email" type="email" value={qaEmail}
-              onChange={e => setQaEmail(e.target.value)} autoComplete="off" />
-            <input className="input-base" placeholder={`Password (type it — min ${MIN_PASSWORD_LENGTH})`} type="text"
-              value={qaPassword} onChange={e => setQaPassword(e.target.value)}
-              autoComplete="off" minLength={MIN_PASSWORD_LENGTH} />
-            <div className="sm:col-span-2">
-              <p className="label-base mb-1.5">Role</p>
-              <CrewRoleField value={qaRole} onChange={setQaRole} />
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2 items-center">
-            <button type="button" className="btn-primary text-sm min-h-[44px]" disabled={qaBusy || !qaFirst.trim() || !qaEmail.trim() || qaPassword.trim().length < MIN_PASSWORD_LENGTH} onClick={quickAddMember}>
-              {qaBusy ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : <Plus className="w-4 h-4 inline mr-1" />}
-              Create login
-            </button>
-            <Link href="/admin/customers/onboard" className="text-sm text-brand-river hover:underline">
-              Pick the boat from the deliveries ledger →
-            </Link>
-          </div>
-        </div>
+      {adding === 'company' && (
+        <AddCrewForm mode={{ kind: 'company' }} onDone={added} onCancel={() => setAdding(null)} />
       )}
 
       <div className="card-base overflow-hidden">
@@ -393,28 +222,54 @@ export function CustomerLoginsPanel() {
           </div>
         ) : companies.length === 0 ? (
           <div className="p-10 text-center space-y-3">
-            <p className="text-sm text-gray-400">No crew logins yet.</p>
-            <Link href="/admin/customers/onboard" className="btn-primary text-sm inline-flex items-center gap-1.5">
-              <Ship className="w-4 h-4" /> Add customer / boat
-            </Link>
+            <p className="text-sm text-gray-400">No boats or logins yet. Start with New company.</p>
           </div>
         ) : (
           <div className="divide-y divide-gray-100">
             {companies.map(company => (
               <div key={company.id} className="px-5 py-4">
-                <h3 className="text-xs font-bold uppercase tracking-widest text-brand-gold mb-3">
-                  {company.name}
-                </h3>
+                <div className="flex items-center gap-1 mb-3">
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-brand-gold">{company.name}</h3>
+                  {company.id !== '_none' && (
+                    <button type="button" onClick={() => openAdd(`boat:${company.id}`)}
+                      aria-label={`Add a boat to ${company.name}`} title={`Add a boat to ${company.name}`}
+                      className="p-1.5 -my-1 rounded-full text-brand-gold hover:bg-brand-sand">
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
                 <div className="space-y-4">
+                  {adding === `boat:${company.id}` && (
+                    <AddCrewForm mode={{ kind: 'boat', company: { id: company.id, name: company.name } }}
+                      onDone={added} onCancel={() => setAdding(null)} />
+                  )}
                   {company.vessels.map(vessel => (
                     <div key={vessel.id} className="rounded-xl border border-gray-100 bg-gray-50/60 overflow-hidden">
                       <div className="px-4 py-2.5 bg-white border-b border-gray-100 flex items-center gap-2">
                         <Ship className="w-4 h-4 text-brand-river" />
                         <span className="font-semibold text-brand-navy text-sm">{vessel.name}</span>
+                        {vessel.id !== '_none' && (
+                          <button type="button" onClick={() => openAdd(`login:${vessel.id}`)}
+                            aria-label={`Add a login to ${vessel.name}`} title={`Add a login to ${vessel.name}`}
+                            className="p-1.5 -my-1 rounded-full text-brand-river hover:bg-gray-100">
+                            <Plus className="w-4 h-4" />
+                          </button>
+                        )}
                         <span className="text-xs text-gray-400 ml-auto">
                           {vessel.members.length} login{vessel.members.length === 1 ? '' : 's'}
                         </span>
                       </div>
+                      {adding === `login:${vessel.id}` && (
+                        <div className="p-3">
+                          <AddCrewForm mode={{ kind: 'login', boat: { id: vessel.id, name: vessel.name } }}
+                            onDone={added} onCancel={() => setAdding(null)} />
+                        </div>
+                      )}
+                      {card?.at === `boat:${vessel.id}` && (
+                        <div className="p-3">
+                          <OnboardSendCard data={card} onClose={() => setCard(null)} />
+                        </div>
+                      )}
                       <ul className="divide-y divide-gray-100">
                         {vessel.members.map(m => (
                           <li key={m.id} className="px-4 py-3 bg-white">
