@@ -61,7 +61,7 @@ function LeftOut({ id }: { id: string }) {
 }
 
 type Recipient = {
-  email: string; status: string; sent_at: string | null; error: string | null;
+  email: string; status: string; sent_at: string | null; failed_at?: string | null; error: string | null;
   has_account: boolean; signed_up_at: string | null;
 };
 type Filter = 'all' | 'notsent' | 'noaccount' | 'account' | 'failed';
@@ -88,7 +88,7 @@ function QueueProgress({ reloadKey }: { reloadKey?: number }) {
   if (!rows) return <Loader2 className="w-4 h-4 animate-spin text-gray-300 mt-3" />;
 
   // One line per address, the most useful status if it is in two lists.
-  const rank: Record<string, number> = { sent: 5, pending: 4, failed: 3, skipped: 2, invalid: 1 };
+  const rank: Record<string, number> = { failed: 6, sent: 5, pending: 4, skipped: 2, invalid: 1 };
   const byEmail = new Map<string, Recipient>();
   for (const r of rows) {
     const k = r.email.toLowerCase();
@@ -108,7 +108,7 @@ function QueueProgress({ reloadKey }: { reloadKey?: number }) {
     r.status === 'sent' ? `Sent ${r.sent_at ? ct(r.sent_at) : ''}`
     : r.status === 'pending' ? 'Not sent yet'
     : r.status === 'invalid' ? 'Bad address'
-    : r.status === 'failed' ? `Failed${r.error ? `: ${r.error}` : ''}`
+    : r.status === 'failed' ? `${r.error || 'Failed'}${r.failed_at ? ` · ${ct(r.failed_at)}` : ''}`
     : `Skipped${r.error ? `: ${r.error}` : ''}`;
 
   return (
@@ -147,7 +147,7 @@ function QueueProgress({ reloadKey }: { reloadKey?: number }) {
         ))}
       </ul>
       <p className="text-[11px] text-gray-400 mt-1.5">
-        Failed means Resend refused the send. Bounces after delivery show in Resend, not here.
+        Failed includes addresses that bounced or marked it as spam, as Resend reports them, usually within minutes of the send. They are never sent it again.
       </p>
     </div>
   );

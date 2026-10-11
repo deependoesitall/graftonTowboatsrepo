@@ -66,10 +66,10 @@ export async function GET(req: NextRequest) {
 }
 
 async function progress(supabase: ReturnType<typeof createServiceClient>) {
-  const rows: { email: string; status: string; sent_at: string | null; error: string | null; import_id: string }[] = [];
+  const rows: { email: string; status: string; sent_at: string | null; failed_at: string | null; error: string | null; import_id: string }[] = [];
   for (let from = 0; from < 50000; from += 1000) {
     const { data, error } = await supabase.from('email_import_recipients')
-      .select('email, status, sent_at, error, import_id').order('id').range(from, from + 999);
+      .select('email, status, sent_at, failed_at, error, import_id').order('id').range(from, from + 999);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     rows.push(...(data || []));
     if (!data || data.length < 1000) break;
