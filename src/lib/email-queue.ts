@@ -96,14 +96,23 @@ export function importNextRunAt(s: QueueSettings, createdAt: string, now = new D
 
 // ── Creating an import ──────────────────────────────────────────────────
 
-async function sentBefore(supabase: Supa, emails: string[]): Promise<Set<string>> {
-  const out = new Set<string>();
+/** Addresses that must not get the announcement again, with why: already
+ *  sent it, it bounced or was marked spam, or Resend suppresses it. */
+async function sentBefore(supabase: Supa, emails: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
   for (let i = 0; i < emails.length; i += 200) {
-    const { data, error } = await supabase
-      .from('email_import_recipients').select('email')
-      .eq('status', 'sent').in('email', emails.slice(i, i + 200));
-    if (error) throw new Error(error.message);
-    for (const r of data || []) out.add(String(r.email).toLowerCase());
+    const part = emails.slice(i, i + 200);
+    const [{ data, error }, { data: sup, error: sErr }] = await Promise.all([
+      supabase.from('email_import_recipients').select('email, status').in('status', ['sent', 'failed']).in('email', part),
+      supabase.from('email_suppressions').select('email, origin').in('email', part),
+    ]);
+    if (error || sErr) throw new Error((error || sErr)!.message);
+    for (const r of sup || []) out.set(String(r.email).toLowerCase(), `Suppressed in Resend (${r.origin})`);
+    for (const r of data || []) {
+      const e = String(r.email).toLowerCase();
+      if (r.status === 'failed') out.set(e, 'Bounced or marked as spam before');
+      else if (!out.has(e)) out.set(e, 'Already sent the announcement');
+    }
   }
   return out;
 }
@@ -141,7 +150,7 @@ export async function createImport(supabase: Supa, opts: {
   const rows = [
     ...valid.map((email) => (
       accounts.has(email) ? { import_id: imp.id, email, status: 'skipped', error: 'Already has an account' }
-      : already.has(email) ? { import_id: imp.id, email, status: 'skipped', error: 'Already sent the announcement' }
+      : already.has(email) ? { import_id: imp.id, email, status: 'skipped', error: already.get(email)! }
       : { import_id: imp.id, email, status: 'pending', error: null }
     )),
     ...invalid.map((email) => ({ import_id: imp.id, email, status: 'invalid', error: 'Not an email address' })),
@@ -237,7 +246,7 @@ export async function sendFromImports(supabase: Supa, opts: {
         for (const r of skip) {
           await supabase.from('email_import_recipients').update({
             status: 'skipped',
-            error: accounts!.has(r.email) ? 'Already has an account' : 'Already sent the announcement',
+            error: accounts!.has(r.email) ? 'Already has an account' : already.get(r.email)!,
           }).eq('id', r.id).eq('status', 'pending');
         }
         res.skipped += skip.length;
