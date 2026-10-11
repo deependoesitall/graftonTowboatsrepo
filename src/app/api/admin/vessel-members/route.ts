@@ -110,6 +110,18 @@ export async function GET(req: NextRequest) {
     company.vessels.get(vKey)!.members.push(m);
   }
 
+  // Boats with no logins yet still show, so a login can be added to them.
+  const { data: allBoats } = await supabase.from('vessels').select('id, name, company:companies(id, name)');
+  type BoatRow = { id: string; name: string; company?: { id?: string; name?: string } | { id?: string; name?: string }[] | null };
+  for (const b of (allBoats || []) as BoatRow[]) {
+    const c = Array.isArray(b.company) ? b.company[0] : b.company;
+    if (!c?.id) continue;
+    if (q && ![b.name, c.name].join(' ').toLowerCase().includes(q)) continue;
+    if (!companiesMap.has(c.id)) companiesMap.set(c.id, { id: c.id, name: c.name || '', vessels: new Map() });
+    const company = companiesMap.get(c.id)!;
+    if (!company.vessels.has(b.id)) company.vessels.set(b.id, { id: b.id, name: b.name, members: [] });
+  }
+
   const companies = [...companiesMap.values()]
     .sort((a, b) => a.name.localeCompare(b.name))
     .map((c) => ({

@@ -2,8 +2,9 @@
 //
 // Accounts people made themselves on the site that aren't on a boat yet.
 // GET  → newest first, with the company / boat they typed in their profile.
-// POST { user_id, vessel_id, role? } → put that account on the boat, same
-//      as a login made from Customers → Logins, minus touching its password.
+// POST { user_id | email, vessel_id, role? } → put that account on the boat,
+//      same as a login made from Customers → Logins, minus touching its
+//      password. Any account works, not only the ones listed here.
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/admin-auth-server';
@@ -58,12 +59,21 @@ export async function POST(req: NextRequest) {
   if (session instanceof NextResponse) return session;
 
   const body = await req.json().catch(() => ({}));
-  const userId = String(body.user_id || '').trim();
+  let userId = String(body.user_id || '').trim();
+  const byEmail = String(body.email || '').trim().toLowerCase();
   const vesselId = String(body.vessel_id || '').trim();
   const role = normalizeCrewRole(body.role);
-  if (!userId || !vesselId) return NextResponse.json({ error: 'user_id and vessel_id required' }, { status: 400 });
+  if ((!userId && !byEmail) || !vesselId) return NextResponse.json({ error: 'user_id or email, and vessel_id, required' }, { status: 400 });
 
   const supabase = createServiceClient();
+  if (!userId) {
+    try {
+      userId = (await listAuthUsers(supabase)).find(u => (u.email || '').toLowerCase() === byEmail)?.id || '';
+    } catch (e) {
+      return NextResponse.json({ error: e instanceof Error ? e.message : 'Could not list accounts' }, { status: 500 });
+    }
+    if (!userId) return NextResponse.json({ error: 'Account not found' }, { status: 404 });
+  }
   const { data: got, error: uErr } = await supabase.auth.admin.getUserById(userId);
   if (uErr || !got?.user) return NextResponse.json({ error: 'Account not found' }, { status: 404 });
 
