@@ -62,6 +62,19 @@ async function markFailed(supabase: Supa, emails: string[], error: string, at: s
   return touched.size;
 }
 
+/** The contact list mirrors bounces and suppressions; an unsubscribe stays. */
+async function markContacts(supabase: Supa, emails: string[], status: 'bounced' | 'suppressed', reason: string, at: string) {
+  for (const email of emails) {
+    const { data } = await supabase.from('email_contacts')
+      .update({ status, status_reason: reason, status_at: at })
+      .eq('email', email).neq('status', 'unsubscribed').select('email');
+    if (!data?.length) {
+      await supabase.from('email_contacts')
+        .upsert({ email, source: 'imported', status, status_reason: reason, status_at: at }, { onConflict: 'email', ignoreDuplicates: true });
+    }
+  }
+}
+
 const lower = (v: unknown) => String(v || '').trim().toLowerCase();
 
 export async function POST(req: NextRequest) {
@@ -88,6 +101,7 @@ export async function POST(req: NextRequest) {
       for (const r of byId || []) if (!to.includes(lower(r.email))) to.push(lower(r.email));
     }
     const lists = await markFailed(supabase, to, error.slice(0, 500), at);
+    await markContacts(supabase, to, evt.type === 'email.complained' ? 'suppressed' : 'bounced', error.slice(0, 500), at);
     return NextResponse.json({ ok: true, type: evt.type, addresses: to.length, lists });
   }
 
@@ -100,6 +114,7 @@ export async function POST(req: NextRequest) {
         { email, origin, reason: `Suppressed in Resend (${origin})`, created_at: String(data.created_at || at) },
         { onConflict: 'email' },
       );
+      await markContacts(supabase, [email], 'suppressed', `Suppressed in Resend (${origin})`, String(data.created_at || at));
       if (origin !== 'manual') {
         await markFailed(supabase, [email], origin === 'complaint' ? 'Marked as spam' : 'Bounced (hard bounce)', String(data.created_at || at), true);
       }
