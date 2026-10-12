@@ -361,7 +361,9 @@ export async function importDeliveryRows(opts: {
       'id, order_id, grocery_mode, delivery_date, delivery_driver, hours_worked, amount_paid_driver, vessel_name, company_id, service_type, location_delivered, delivery_fee, bill_for_groceries, sinclairs_grocery_total, phone_number_used, issues_comments, gts_correspondent, invoice_sent',
     )
     .gte('delivery_date', start)
-    .lt('delivery_date', endExclusive);
+    .lt('delivery_date', endExclusive)
+    // Stable order so a duplicate ledger row always maps to the same id.
+    .order('id', { ascending: false });
   if (exErr) return { error: exErr.message, status: 500 };
 
   const byKey = new Map<string, Record<string, unknown>>();
@@ -534,6 +536,8 @@ export async function importDeliveryRows(opts: {
     } else if (d.kind === 'update' && d.existingId && fillOnly) {
       const patch: Record<string, unknown> = {};
       for (const c of d.changes || []) patch[FIELD_OF[c]] = payload[FIELD_OF[c]];
+      // bill_for_groceries is derived from grocery_mode by a trigger.
+      if (patch.bill_for_groceries) patch.grocery_mode = d.row.grocery_mode;
       const { error } = await supabase
         .from('deliveries')
         .update({ ...patch, updated_at: new Date().toISOString() })
