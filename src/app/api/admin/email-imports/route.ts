@@ -15,6 +15,7 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { getEmailQuota } from '@/lib/email-quota-server';
 import { quotaRoom } from '@/lib/email-quota';
 import { listAuthUsers } from '@/lib/auth-user-dates';
+import { cleanAudience, resolveAudience } from '@/lib/contacts';
 import {
   createImport, ctDay, ctTimeLabel, importNextRunAt, loadQueueSettings, nextRunAt, sendFromImports, slotAt,
 } from '@/lib/email-queue';
@@ -32,7 +33,7 @@ export async function GET(req: NextRequest) {
   if (new URL(req.url).searchParams.get('progress')) return progress(supabase);
   const settings = await loadQueueSettings(supabase);
   const { data: imports, error } = await supabase.from('email_imports')
-    .select('id, created_by_name, created_at, subject, total, sent_count, invalid, status, last_run_at, last_error')
+    .select('id, created_by_name, created_at, subject, total, sent_count, invalid, status, last_run_at, last_error, newsletter_key')
     .order('created_at', { ascending: false }).limit(25);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
@@ -91,18 +92,28 @@ export async function POST(req: NextRequest) {
   if (session instanceof NextResponse) return session;
 
   const body = await req.json().catch(() => ({}));
-  const emails = body.emails;
+  const supabase = createServiceClient();
+  // A newsletter (or one announcement copy) goes to `audience`: the contact
+  // list or part of it, an earlier send's list, or pasted addresses. A bare
+  // pasted list is the announcement, in whichever copy is picked.
+  const n = String(body.newsletter ?? '');
+  const newsletterKey = UUID.test(n) || n === 'branded' || n === 'plain' ? n : 'announcement';
+  let emails = body.emails;
+  if (body.audience && typeof body.audience === 'object') {
+    emails = await resolveAudience(supabase, cleanAudience(body.audience));
+    if (!emails.length) return NextResponse.json({ error: 'Nobody matches that.' }, { status: 400 });
+  }
   if (!(typeof emails === 'string' || Array.isArray(emails))) {
     return NextResponse.json({ error: 'No email addresses.' }, { status: 400 });
   }
 
-  const supabase = createServiceClient();
   let created;
   try {
     created = await createImport(supabase, {
       emails,
       createdBy: UUID.test(session.sub) ? session.sub : null,
       createdByName: session.display_name || session.username,
+      newsletterKey,
     });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : 'Could not load the list' }, { status: 400 });

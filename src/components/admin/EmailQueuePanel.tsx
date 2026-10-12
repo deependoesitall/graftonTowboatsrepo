@@ -9,7 +9,7 @@ import { Clock, Loader2, Pause, Play, X, ChevronDown, ChevronRight, AlertTriangl
 import { adminFetch } from '@/lib/admin-auth';
 
 export type QueueImport = {
-  id: string; created_by_name: string | null; created_at: string; total: number;
+  id: string; created_by_name: string | null; created_at: string; total: number; subject?: string | null;
   sent: number; pending: number; skipped: number; failed: number; invalid_count: number;
   status: 'queued' | 'sending' | 'paused' | 'done' | 'cancelled';
   last_run_at: string | null; last_error: string | null; next_send_at: string | null;
@@ -287,6 +287,7 @@ export function EmailQueuePanel({ reloadKey }: { reloadKey?: number }) {
                   <span className="text-xs text-gray-400">{ct(i.created_at)}</span>
                   <span className={`ml-auto text-[11px] font-bold uppercase tracking-wide rounded-full px-2 py-0.5 ${STATUS[i.status]}`}>{i.status}</span>
                 </div>
+                {i.subject && <p className="text-xs text-brand-navy mt-1 truncate">{i.subject}</p>}
                 <p className="text-xs text-gray-600 mt-1">
                   {i.total} total · <b>{i.sent}</b> sent · <b>{i.pending}</b> remaining · {i.skipped} skipped · {i.invalid_count} invalid
                   {i.failed ? <> · <span className="text-red-600">{i.failed} failed</span></> : null}

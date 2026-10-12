@@ -176,6 +176,9 @@ export function CustomerLoginsPanel() {
             Tap + by a boat to add a login, or + by a company to add a boat. Crew can also reset
             their own password from Sign in → Forgot password.
           </p>
+          <Link href="/admin/emails?tab=contacts&view=accounts" className="text-sm font-semibold text-brand-navy underline mt-1 inline-block">
+            See every login in one list, and add them to the email list
+          </Link>
         </div>
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={() => openAdd('company')}

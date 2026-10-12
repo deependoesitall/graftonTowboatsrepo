@@ -15,9 +15,12 @@ import {
 } from 'lucide-react';
 import { adminFetch } from '@/lib/admin-auth';
 import { boatInviteText } from '@/lib/boat-invite';
-import { EmailQuota, addressesThatFit, announcementCost, quotaRoom } from '@/lib/email-quota';
+import { EmailQuota, quotaRoom } from '@/lib/email-quota';
+import { AnnouncementVersions, type AnnouncementPreview } from '@/components/admin/AnnouncementVersions';
 import { NewCustomerSend } from '@/components/admin/NewCustomerSend';
 import { EmailQueuePanel } from '@/components/admin/EmailQueuePanel';
+import { NewslettersPanel } from '@/components/admin/NewslettersPanel';
+import { ContactsPanel } from '@/components/admin/ContactsPanel';
 import { parseEmailList } from '@/lib/email-address';
 
 type TemplateKey = 'welcome' | 'announcement';
@@ -68,6 +71,11 @@ function Step({ n, title, hint, children }: {
 }
 
 export default function EmailsPage() {
+  const [tab, setTab] = useState<'send' | 'newsletters' | 'contacts'>('send');
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get('tab');
+    if (t === 'contacts' || t === 'newsletters') setTab(t);
+  }, []);
   const [template, setTemplate] = useState<TemplateKey>('welcome');
   // Typed into the New customer form, so the preview shows the real boat.
   const [vars, setVars] = useState({ firstName: '', vesselName: '', loginEmail: '', password: '' });
@@ -84,6 +92,10 @@ export default function EmailsPage() {
   const [quota, setQuota] = useState<EmailQuota | null>(null);
   const [quotaError, setQuotaError] = useState('');
   const [queueKey, setQueueKey] = useState(0);
+  const [versionKey, setVersionKey] = useState('');
+  const showAnnouncement = useCallback((p: AnnouncementPreview) => {
+    setHtml(p.html); setSubject(p.subject); setLoadingPreview(false);
+  }, []);
   const [now, setNow] = useState(() => Date.now());
 
   const loadQuota = useCallback(async () => {
@@ -108,6 +120,7 @@ export default function EmailsPage() {
   }, [now, quota, loadQuota]);
 
   const loadPreview = useCallback(async () => {
+    if (template === 'announcement') return; // AnnouncementVersions drives this preview
     setLoadingPreview(true);
     const qs = new URLSearchParams(template === 'welcome' ? { template, ...vars } : { template });
     try {
@@ -129,13 +142,13 @@ export default function EmailsPage() {
   }, [loadPreview]);
 
   const { valid, invalid } = parseEmailList(to);
-  // What Resend says is left decides how many go now: each address counts,
-  // plus the GTS copy on every 49-address BCC group. The rest are queued.
+  // What Resend says is left decides how many go now: one email per
+  // address. The rest are queued.
   const room = quota ? quotaRoom(quota) : null;
-  const fit = room ? addressesThatFit(room.left) : null;
+  const fit = room ? Math.max(0, room.left) : null;
   const overQuota = !!room && fit != null && valid.length > fit;
   const goNow = overQuota && fit != null ? fit : valid.length;
-  const cost = announcementCost(goNow);
+  const cost = goNow;
   const canSend = valid.length > 0 && !invalid.length && !sending;
 
   async function send(mode: 'real' | 'test') {
@@ -145,7 +158,7 @@ export default function EmailsPage() {
         const res = await adminFetch('/api/admin/customer-email', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ template, to: valid, vars, test: true }),
+          body: JSON.stringify({ template, to: valid, vars: template === 'announcement' ? { version: versionKey } : vars, test: true }),
         });
         const j = await res.json().catch(() => ({}));
         if (!res.ok) { setError(j.error || 'Send failed.'); return; }
@@ -162,7 +175,7 @@ export default function EmailsPage() {
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) { setError(j.error || 'Send failed.'); return; }
-      const parts = [`Sent to ${j.sentNow} now, BCC.`];
+      const parts = [`Sent to ${j.sentNow} now, one email each.`];
       if (j.queued > 0) parts.push(`${j.queued} queued for the daily send.`);
       if (j.skipped > 0) parts.push(`${j.skipped} skipped (already have an account or already got it).`);
       if (j.note) parts.push(j.note);
@@ -212,7 +225,19 @@ export default function EmailsPage() {
       <p className="text-sm text-gray-500 mt-1 mb-6 max-w-2xl">
         What you see in the preview is exactly what lands in their inbox. Nothing sends until you press the button.
       </p>
+      <div className="flex gap-1 border-b border-gray-200 mb-6 -mt-2 overflow-x-auto">
+        {([['send', 'Send'], ['newsletters', 'Newsletters'], ['contacts', 'Email list']] as const).map(([k, label]) => (
+          <button key={k} type="button" onClick={() => setTab(k)}
+            className={`px-4 py-2 text-sm font-semibold border-b-2 -mb-px whitespace-nowrap ${
+              tab === k ? 'border-brand-navy text-brand-navy' : 'border-transparent text-gray-500 hover:text-brand-navy'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {tab === 'newsletters' && <NewslettersPanel />}
+      {tab === 'contacts' && <ContactsPanel />}
 
+      {tab === 'send' && (
       <div className="grid gap-6 lg:gap-8 lg:grid-cols-[minmax(0,400px)_minmax(0,1fr)]">
         {/* ── steps ── */}
         <div className="flex flex-col gap-6 min-w-0">
@@ -260,10 +285,14 @@ export default function EmailsPage() {
               />
             </Step>
           ) : (
+          <>
+          <Step n={2} title="Which version?" hint="Tap one to preview it.">
+            <AnnouncementVersions onPreview={showAnnouncement} onShowing={setVersionKey} />
+          </Step>
           <Step
-            n={2}
+            n={3}
             title="Send it to"
-            hint="One per line, or separated by commas. Everyone goes BCC."
+            hint="One per line, or separated by commas. Each address gets its own email."
           >
             <textarea
               id="em-to"
@@ -316,7 +345,7 @@ export default function EmailsPage() {
                 {sending === 'real' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                 {sending === 'real' ? 'Sending…' : `Send to ${valid.length || 0}`}
               </button>
-              <button type="button" disabled={!!sending} onClick={() => send('test')}
+              <button type="button" disabled={!!sending || (template === 'announcement' && !versionKey)} onClick={() => send('test')}
                 className="btn-outline text-sm inline-flex items-center gap-1.5 disabled:opacity-40">
                 {sending === 'test' ? <Loader2 className="w-4 h-4 animate-spin" /> : <FlaskConical className="w-4 h-4" />}
                 Send me one first
@@ -330,6 +359,7 @@ export default function EmailsPage() {
               <EmailQueuePanel reloadKey={queueKey} />
             </div>
           </Step>
+          </>
           )}
 
           {ok && (
@@ -384,6 +414,7 @@ export default function EmailsPage() {
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }
