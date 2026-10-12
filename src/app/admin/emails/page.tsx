@@ -72,6 +72,10 @@ function Step({ n, title, hint, children }: {
 
 export default function EmailsPage() {
   const [tab, setTab] = useState<'send' | 'newsletters' | 'contacts'>('send');
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get('tab');
+    if (t === 'contacts' || t === 'newsletters') setTab(t);
+  }, []);
   const [template, setTemplate] = useState<TemplateKey>('welcome');
   // Typed into the New customer form, so the preview shows the real boat.
   const [vars, setVars] = useState({ firstName: '', vesselName: '', loginEmail: '', password: '' });
