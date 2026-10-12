@@ -681,7 +681,7 @@ ${opts.notABill ? `
 // message at 102KB.
 // ─────────────────────────────────────────────────────────────
 
-const SIGNATURE = {
+export const SIGNATURE = {
   name:  'Grafton Towboat Services',
   phone: '(618) 556-0290',
   email: 'GraftonTowboatServices@gmail.com',
