@@ -103,6 +103,34 @@ async function customersByEmail(supabase: Supa, emails: string[]) {
   return out;
 }
 
+export type AccountHolder = {
+  email: string; name: string | null; company: string | null; vessel: string | null;
+  signed_up_at: string | null; last_sign_in_at: string | null;
+  /** The address's email-list status, or null if it isn't on the list. */
+  list_status: Contact['status'] | null;
+};
+
+/** Every customer login, live from auth, with whether it's on the email list. */
+export async function accountHolders(supabase: Supa): Promise<AccountHolder[]> {
+  const users = (await listAuthUsers(supabase)).filter((u) => u.email);
+  const emails = users.map((u) => u.email!.toLowerCase());
+  const info = await customersByEmail(supabase, emails);
+  const listed = new Map<string, Contact['status']>();
+  for (let i = 0; i < emails.length; i += 500) {
+    const { data, error } = await supabase.from('email_contacts').select('email, status').in('email', emails.slice(i, i + 500));
+    if (error) throw new Error(error.message);
+    for (const r of data || []) listed.set(String(r.email).toLowerCase(), r.status as Contact['status']);
+  }
+  return users.map((u) => {
+    const e = u.email!.toLowerCase();
+    const c = info.get(e);
+    return {
+      email: e, name: c?.name ?? null, company: c?.company ?? null, vessel: c?.vessel ?? null,
+      signed_up_at: u.created_at, last_sign_in_at: u.last_sign_in_at, list_status: listed.get(e) ?? null,
+    };
+  }).sort((a, b) => (b.signed_up_at || '').localeCompare(a.signed_up_at || ''));
+}
+
 /** Add contacts. Existing addresses are left as they are; new ones are linked
  *  to a customer login with the same address and fill name/boat from it. */
 export async function addContacts(supabase: Supa, rows: ContactRow[], source: Contact['source']) {

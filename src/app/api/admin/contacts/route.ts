@@ -3,13 +3,14 @@
 // The email list. GTS only.
 //
 // GET                         → { contacts, companies }
+// GET ?accounts=1             → { accounts }: every customer login, on the list or not
 // POST { rows: [{ email, name?, company?, vessel? }] } → add (dedupe, validate)
 // PATCH { email, name?, company?, vessel?, status? }  → edit one contact
 // DELETE ?email=              → remove one contact
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/admin-auth-server';
 import { createServiceClient } from '@/lib/supabase/server';
-import { addContacts, allContacts } from '@/lib/contacts';
+import { accountHolders, addContacts, allContacts } from '@/lib/contacts';
 import { normalizeEmail } from '@/lib/email-address';
 
 export const dynamic = 'force-dynamic';
@@ -21,6 +22,7 @@ export async function GET(req: NextRequest) {
   const session = requireAdmin(req, { gtsOnly: true });
   if (session instanceof NextResponse) return session;
   try {
+    if (new URL(req.url).searchParams.get('accounts')) return NextResponse.json({ accounts: await accountHolders(createServiceClient()) });
     const contacts = await allContacts(createServiceClient());
     const companies = [...new Set(contacts.map((c) => c.company).filter(Boolean) as string[])].sort();
     return NextResponse.json({ contacts, companies });

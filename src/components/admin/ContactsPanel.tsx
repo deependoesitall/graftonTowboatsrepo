@@ -4,7 +4,8 @@
 // hand or paste/CSV, edit, change status, remove. Addresses that look like
 // a scan misread ("m/" in front) are flagged before they're added.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Loader2, Pencil, Plus, Search, Trash2, Upload, X } from 'lucide-react';
+import Link from 'next/link';
+import { AlertTriangle, Loader2, Pencil, Plus, Search, Trash2, Upload, UserCheck, X } from 'lucide-react';
 import { adminFetch } from '@/lib/admin-auth';
 import { looksMisread, parseContactText, type ContactRow } from '@/lib/email-address';
 
@@ -21,6 +22,12 @@ const STATUS_TONE: Record<Contact['status'], string> = {
   subscribed: 'bg-emerald-50 text-emerald-700', unsubscribed: 'bg-gray-100 text-gray-600',
   bounced: 'bg-red-50 text-red-700', suppressed: 'bg-amber-50 text-amber-800',
 };
+type Account = {
+  email: string; name: string | null; company: string | null; vessel: string | null;
+  signed_up_at: string | null; last_sign_in_at: string | null; list_status: Contact['status'] | null;
+};
+const day = (iso: string | null) => iso ? new Date(iso).toLocaleDateString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric', year: 'numeric' }) : 'never';
+
 const SOURCE_LABEL: Record<Contact['source'], string> = { imported: 'Imported', 'sign-up': 'Signed up', manual: 'Added by hand' };
 
 export function ContactsPanel() {
@@ -30,6 +37,8 @@ export function ContactsPanel() {
   const [status, setStatus] = useState('');
   const [source, setSource] = useState('');
   const [account, setAccount] = useState('');
+  const [view, setView] = useState<'list' | 'accounts'>('list');
+  const [accounts, setAccounts] = useState<Account[] | null>(null);
   const [adding, setAdding] = useState(false);
   const [text, setText] = useState('');
   const [editing, setEditing] = useState<string | null>(null);
@@ -46,6 +55,19 @@ export function ContactsPanel() {
     setContacts(j.contacts);
   }, []);
   useEffect(() => { load(); }, [load]);
+  const loadAccounts = useCallback(async () => {
+    const j = await adminFetch('/api/admin/contacts?accounts=1').then((r) => r.json()).catch(() => ({}));
+    setAccounts(j.accounts || []);
+  }, []);
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('view') === 'accounts') setView('accounts');
+    loadAccounts();
+  }, [loadAccounts]);
+  const accountsShown = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    return (accounts || []).filter((a) => !s || [a.email, a.name, a.company, a.vessel].some((v) => (v || '').toLowerCase().includes(s)));
+  }, [accounts, q]);
+  const missing = (accounts || []).filter((a) => !a.list_status);
 
   const shown = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -77,7 +99,7 @@ export function ContactsPanel() {
     setBusy(false);
     if (!res.ok) { setErr(j.error || 'Could not add.'); return; }
     setMsg(`Added ${j.added}.${j.existing ? ` ${j.existing} were already on the list.` : ''}`);
-    setText(''); setAdding(false); load();
+    setText(''); setAdding(false); load(); loadAccounts();
   }
 
   async function patch(email: string, body: Record<string, unknown>) {
@@ -95,6 +117,58 @@ export function ContactsPanel() {
 
   return (
     <div className="flex flex-col gap-4 max-w-5xl">
+      <div className="inline-flex rounded-full bg-gray-100 p-1 gap-0.5 w-fit">
+        {([['list', `Email list (${contacts.length})`], ['accounts', `Has an account (${accounts?.length ?? '…'})`]] as const).map(([k, label]) => (
+          <button key={k} type="button" onClick={() => setView(k)}
+            className={`px-4 py-2 rounded-full text-xs font-bold uppercase tracking-wide ${view === k ? 'bg-brand-navy text-white shadow-sm' : 'text-gray-500 hover:text-brand-navy'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {view === 'accounts' ? (
+        <>
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="text-gray-600">Everyone with a customer login, on the email list or not.</span>
+            <Link href="/admin/customers?tab=logins" className="font-semibold text-brand-navy underline">Manage logins in Customers → Logins</Link>
+            {missing.length > 0 && (
+              <button type="button" disabled={busy} onClick={() => add(missing.map((a) => ({ email: a.email })))}
+                className="btn-primary text-sm inline-flex items-center gap-1.5 ml-auto disabled:opacity-40">
+                <Plus className="w-4 h-4" /> Add {missing.length} missing to the email list
+              </button>
+            )}
+          </div>
+          <div className="relative">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input className="input-base pl-9" placeholder="Search name, address, company, boat" value={q} onChange={(e) => setQ(e.target.value)} />
+          </div>
+          {msg && <p className="text-sm text-emerald-700">{msg}</p>}
+          {err && <p className="text-sm text-red-700">{err}</p>}
+          {!accounts ? <Loader2 className="w-5 h-5 animate-spin text-gray-300" /> : (
+            <ul className="flex flex-col divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white">
+              {accountsShown.map((a) => (
+                <li key={a.email} className="px-3.5 py-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                  <div className="flex-1 min-w-[200px]">
+                    <p className="text-sm font-semibold text-brand-navy break-all">{a.name ? `${a.name} · ` : ''}{a.email}</p>
+                    <p className="text-xs text-gray-500">
+                      {[a.company, a.vessel].filter(Boolean).join(' · ') || 'No boat yet'} · signed up {day(a.signed_up_at)} · last signed in {day(a.last_sign_in_at)}
+                    </p>
+                  </div>
+                  {a.list_status ? (
+                    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_TONE[a.list_status]}`}>
+                      <UserCheck className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />On list · {STATUS_LABEL[a.list_status].toLowerCase()}
+                    </span>
+                  ) : (
+                    <button type="button" disabled={busy} onClick={() => add([{ email: a.email }])} className="btn-outline text-xs inline-flex items-center gap-1">
+                      <Plus className="w-3.5 h-3.5" /> Add to email list
+                    </button>
+                  )}
+                </li>
+              ))}
+              {!accountsShown.length && <li className="px-3.5 py-6 text-sm text-gray-500">Nobody matches.</li>}
+            </ul>
+          )}
+        </>
+      ) : (<>
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <span className="font-bold text-brand-navy">{contacts.length} on the list</span>
         {(['subscribed', 'unsubscribed', 'bounced', 'suppressed'] as const).map((s) => counts[s] ? (
@@ -208,6 +282,7 @@ export function ContactsPanel() {
         </ul>
       )}
       {shown.length > 500 && <p className="text-xs text-gray-500">Showing the first 500. Search to narrow it down.</p>}
+      </>)}
     </div>
   );
 }
