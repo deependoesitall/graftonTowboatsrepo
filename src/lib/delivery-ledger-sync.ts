@@ -1,4 +1,6 @@
-// One-way Google Sheet → admin ledger. Sheet wins on overlapping columns.
+// One-way Google Sheet → admin ledger. New sheet rows are added; for rows the
+// ledger already has, the sheet only fills EMPTY fields, so manual edits and
+// grocery auto-fill are never replaced. Differences are counted as conflicts.
 // Website orders, QuickBooks, receipts, and GTS-purchased grocery mode stay in admin.
 
 import { createServiceClient } from '@/lib/supabase/server';
@@ -22,7 +24,9 @@ export type LedgerSyncRun = {
   ok: boolean;
   note: string;
   tabs: string[];
-  summary: { adds: number; updates: number; unchanged: number; errors: number };
+  summary: { adds: number; updates: number; unchanged: number; errors: number; conflicts: number };
+  /** Rows a person should look at: skipped rows and sheet/ledger differences. */
+  needsReview: string[];
   applied: { inserted: number; updated: number; createdCompanies: number; applyErrors: string[] };
   tabErrors: string[];
 };
@@ -61,7 +65,7 @@ async function saveStatus(ok: boolean, note: string) {
     .eq('id', data.id);
 }
 
-export async function syncDeliveryLedgerFromGoogle(): Promise<LedgerSyncRun> {
+export async function syncDeliveryLedgerFromGoogle(opts: { dryRun?: boolean } = {}): Promise<LedgerSyncRun> {
   if (!googleSheetsConfigured()) {
     throw new Error('Google Sheets is not configured (email, private key, sheet id).');
   }
@@ -71,7 +75,8 @@ export async function syncDeliveryLedgerFromGoogle(): Promise<LedgerSyncRun> {
   const tabs = pickLedgerTabs(titles, process.env.DELIVERY_LEDGER_TAB);
   if (!tabs.length) throw new Error('No delivery tabs found on the spreadsheet.');
 
-  const summary = { adds: 0, updates: 0, unchanged: 0, errors: 0 };
+  const summary = { adds: 0, updates: 0, unchanged: 0, errors: 0, conflicts: 0 };
+  const needsReview: string[] = [];
   const applied = { inserted: 0, updated: 0, createdCompanies: 0, applyErrors: [] as string[] };
   const tabErrors: string[] = [];
 
@@ -81,11 +86,22 @@ export async function syncDeliveryLedgerFromGoogle(): Promise<LedgerSyncRun> {
       const { headers, rows } = matrixToRecords(matrix);
       if (!rows.length) continue;
       const result: ImportResult = await importDeliveryRows({
-        mode: 'apply',
+        mode: opts.dryRun ? 'preview' : 'apply',
         headers,
         rows,
         createMissingCompanies: false,
+        fillOnly: true,
       });
+      for (const d of result.diffs || []) {
+        const what = `${d.row.delivery_date || '?'} ${d.row.vessel_name || '?'}`;
+        if (d.conflicts?.length) {
+          summary.conflicts += 1;
+          needsReview.push(`${tab}: ${what}: sheet differs on ${d.conflicts.join(', ')}`);
+        }
+        if (d.kind === 'error' && !/no date and no vessel/.test(d.error || '')) {
+          needsReview.push(`${tab}: ${what}: ${d.error}`);
+        }
+      }
       if (result.error) {
         tabErrors.push(`${tab}: ${result.error}`);
         continue;
@@ -108,14 +124,18 @@ export async function syncDeliveryLedgerFromGoogle(): Promise<LedgerSyncRun> {
   }
 
   const ok = tabErrors.length === 0 && applied.applyErrors.length === 0;
+  if (opts.dryRun) {
+    return { ok, note: 'dry run', tabs, summary, needsReview, applied, tabErrors };
+  }
   const note = [
     tabs.join(', '),
     `+${applied.inserted} ~${applied.updated}`,
     summary.errors ? `${summary.errors} skipped` : '',
+    summary.conflicts ? `${summary.conflicts} differ from the sheet` : '',
     tabErrors[0] || applied.applyErrors[0] || '',
   ].filter(Boolean).join(' · ');
 
   try { await saveStatus(ok, note); } catch { /* columns may not exist until migration 101 */ }
 
-  return { ok, note, tabs, summary, applied, tabErrors };
+  return { ok, note, tabs, summary, needsReview, applied, tabErrors };
 }

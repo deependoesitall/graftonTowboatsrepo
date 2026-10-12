@@ -1,10 +1,13 @@
-// Read-only Google Sheets via a service account. No googleapis package —
-// jsonwebtoken is already in the repo. Scope is spreadsheets.readonly.
+// Read-only Google Sheets. Two ways in:
+//   - Service account (no googleapis package; jsonwebtoken is already in the
+//     repo; scope spreadsheets.readonly) when its email + key are set.
+//   - Otherwise the sheet's public CSV export, which works when the sheet is
+//     shared "Anyone with the link: Viewer". Tabs are found by their gid.
 //
 // Env:
-//   GOOGLE_SHEETS_CLIENT_EMAIL
-//   GOOGLE_SHEETS_PRIVATE_KEY     (PEM; literal \n in Vercel is fine)
-//   DELIVERY_LEDGER_SHEET_ID      (id or full docs.google.com URL)
+//   DELIVERY_LEDGER_SHEET_ID      (id or full docs.google.com URL) — required
+//   GOOGLE_SHEETS_CLIENT_EMAIL    (optional, service account)
+//   GOOGLE_SHEETS_PRIVATE_KEY     (optional, PEM; literal \n in Vercel is fine)
 //   DELIVERY_LEDGER_TAB           (optional, comma-separated tab names)
 
 import jwt from 'jsonwebtoken';
@@ -20,12 +23,67 @@ export function parseSpreadsheetId(raw: string): string {
   return String(raw || '').trim();
 }
 
+function serviceAccount(): boolean {
+  return !!(process.env.GOOGLE_SHEETS_CLIENT_EMAIL && process.env.GOOGLE_SHEETS_PRIVATE_KEY);
+}
+
 export function googleSheetsConfigured(): boolean {
-  return !!(
-    process.env.GOOGLE_SHEETS_CLIENT_EMAIL
-    && process.env.GOOGLE_SHEETS_PRIVATE_KEY
-    && process.env.DELIVERY_LEDGER_SHEET_ID
-  );
+  return !!process.env.DELIVERY_LEDGER_SHEET_ID;
+}
+
+// ── Public link (no credentials) ──
+
+const tabGids = new Map<string, string>();
+
+async function publicGet(url: string): Promise<string> {
+  const res = await fetch(url, { cache: 'no-store', redirect: 'follow' });
+  const text = await res.text();
+  if (!res.ok || /^\s*<!DOCTYPE html/i.test(text) && url.includes('/export')) {
+    throw new Error(res.status === 401 || res.status === 403
+      ? 'The sheet is not shared as "Anyone with the link: Viewer"'
+      : `Google Sheets ${res.status}`);
+  }
+  return text;
+}
+
+async function publicTabs(spreadsheetId: string): Promise<string[]> {
+  const html = await publicGet(`https://docs.google.com/spreadsheets/d/${encodeURIComponent(spreadsheetId)}/htmlview`);
+  const titles: string[] = [];
+  for (const m of html.matchAll(/\{name: "((?:[^"\\]|\\.)*)", pageUrl: [^}]*?gid: "(\d+)"/g)) {
+    const name = JSON.parse(`"${m[1]}"`) as string;
+    tabGids.set(name, m[2]);
+    titles.push(name);
+  }
+  if (!titles.length) throw new Error('Could not read the tab list from the shared sheet');
+  return titles;
+}
+
+/** RFC 4180 CSV → rows. */
+export function parseCsv(text: string): string[][] {
+  const out: string[][] = [];
+  let row: string[] = [];
+  let f = '';
+  let q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += c;
+    } else if (c === '"') q = true;
+    else if (c === ',') { row.push(f); f = ''; }
+    else if (c === '\n') { row.push(f.replace(/\r$/, '')); out.push(row); row = []; f = ''; }
+    else f += c;
+  }
+  if (f || row.length) { row.push(f); out.push(row); }
+  return out;
+}
+
+async function publicValues(spreadsheetId: string, tab: string): Promise<unknown[][]> {
+  if (!tabGids.has(tab)) await publicTabs(spreadsheetId);
+  const gid = tabGids.get(tab);
+  if (gid == null) throw new Error(`Tab "${tab}" not found on the sheet`);
+  return parseCsv(await publicGet(
+    `https://docs.google.com/spreadsheets/d/${encodeURIComponent(spreadsheetId)}/export?format=csv&gid=${gid}`,
+  ));
 }
 
 function privateKey(): string {
@@ -87,6 +145,7 @@ async function sheetsGet<T>(path: string): Promise<T> {
 }
 
 export async function listSheetTitles(spreadsheetId: string): Promise<string[]> {
+  if (!serviceAccount()) return publicTabs(spreadsheetId);
   const data = await sheetsGet<{
     sheets?: Array<{ properties?: { title?: string; hidden?: boolean } }>;
   }>(`spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets.properties.title,sheets.properties.hidden`);
@@ -107,6 +166,7 @@ export function pickLedgerTabs(titles: string[], envTabs?: string): string[] {
 }
 
 export async function fetchSheetValues(spreadsheetId: string, tab: string): Promise<unknown[][]> {
+  if (!serviceAccount()) return publicValues(spreadsheetId, tab);
   const range = `'${tab.replace(/'/g, "''")}'!A:ZZ`;
   const data = await sheetsGet<{ values?: unknown[][] }>(
     `spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING`,

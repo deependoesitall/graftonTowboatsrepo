@@ -31,6 +31,8 @@ export type DiffKind = 'add' | 'update' | 'unchanged' | 'error';
 
 export type DiffItem = {
   kind: DiffKind;
+  /** fillOnly: sheet values that differ from what the ledger already has. */
+  conflicts?: string[];
   key: string;
   row: MappedRow;
   existingId?: string;
@@ -65,6 +67,7 @@ const HEADER_ALIASES: Record<string, string[]> = {
     "sinclair's grocery total",
     'grocery total',
     'grocery total (mk)',
+    'sinclairs grocery total mk',
     'sinclairs_grocery_total',
     'grocery',
   ],
@@ -116,7 +119,7 @@ function resolveHeaderMap(headers: string[]): Record<string, string> {
   const out: Record<string, string> = {};
   const norms = headers.map(h => ({ raw: h, n: normHeader(h) }));
   for (const [field, aliases] of Object.entries(HEADER_ALIASES)) {
-    const hit = norms.find(h => aliases.includes(h.n));
+    const hit = norms.find(h => aliases.some(a => normHeader(a) === h.n));
     if (hit) out[field] = hit.raw;
   }
   return out;
@@ -220,7 +223,9 @@ function mapSheetRow(raw: SheetRow, headerMap: Record<string, string>): MappedRo
   if (vessel_name && /^(totals?|grand total|subtotal)$/i.test(vessel_name)) {
     return { error: 'Totals/summary row skipped' };
   }
-  if (!delivery_date) return { error: 'Missing or unparseable date' };
+  if (!delivery_date || !/^20[2-9]\d-\d{2}-\d{2}$/.test(delivery_date)) {
+    return { error: 'Missing or unparseable date' };
+  }
   if (!vessel_name) return { error: 'Missing vessel name' };
 
   const bill = parseBoolYesNo(get('bill_for_groceries'));
@@ -278,12 +283,26 @@ function rowEqualish(a: MappedRow, existing: Record<string, unknown>): string[] 
   return changes;
 }
 
+/** rowEqualish label → column. */
+const FIELD_OF: Record<string, string> = {
+  hours: 'hours_worked', 'driver pay': 'amount_paid_driver', service: 'service_type',
+  location: 'location_delivered', fee: 'delivery_fee', 'bill groceries': 'bill_for_groceries',
+  'grocery total': 'sinclairs_grocery_total', phone: 'phone_number_used',
+  comments: 'issues_comments', correspondent: 'gts_correspondent',
+  'invoice sent': 'invoice_sent', company: 'company_id',
+};
+
 export async function importDeliveryRows(opts: {
   mode: 'preview' | 'apply';
   headers: string[];
   rows: SheetRow[];
   createMissingCompanies?: boolean;
+  /** Live Google sync: add new rows and fill empty ledger fields only. A
+   *  filled ledger field (manual edit, grocery auto-fill) is never replaced;
+   *  differences are listed as conflicts for a person to settle. */
+  fillOnly?: boolean;
 }): Promise<ImportResult> {
+  const fillOnly = !!opts.fillOnly;
   const { mode, createMissingCompanies } = opts;
   const rawRows = opts.rows;
   const headers = opts.headers.length
@@ -358,6 +377,21 @@ export async function importDeliveryRows(opts: {
     );
   }
 
+  // Same date + boat, but the fee or driver was corrected on one side: when
+  // there is exactly one such row on each side, it's the same delivery.
+  const dayBoat = (d: unknown, v: unknown) => `${d}|${vesselKey(v as string | null)}`;
+  const existingByDayBoat = new Map<string, Record<string, unknown>[]>();
+  for (const e of existing || []) {
+    const k = dayBoat(e.delivery_date, e.vessel_name);
+    existingByDayBoat.set(k, [...(existingByDayBoat.get(k) || []), e as Record<string, unknown>]);
+  }
+  const sheetByDayBoat = new Map<string, number>();
+  for (const r of mapped) {
+    const k = dayBoat(r.delivery_date, r.vessel_name);
+    sheetByDayBoat.set(k, (sheetByDayBoat.get(k) || 0) + 1);
+  }
+  const exactKeys = new Set(mapped.map(r => idemKey(r)));
+
   const diffs: DiffItem[] = [...earlyErrors];
 
   for (const row of mapped) {
@@ -369,7 +403,20 @@ export async function importDeliveryRows(opts: {
       else unmatchedCompany = true;
     }
 
-    const hit = byKey.get(key);
+    let hit = byKey.get(key);
+    if (!hit) {
+      const k = dayBoat(row.delivery_date, row.vessel_name);
+      const cands = existingByDayBoat.get(k) || [];
+      if (cands.length === 1 && sheetByDayBoat.get(k) === 1) {
+        const c = cands[0];
+        const cKey = idemKey({
+          delivery_date: c.delivery_date as string, vessel_name: c.vessel_name as string,
+          delivery_driver: c.delivery_driver as string,
+          delivery_fee: c.delivery_fee == null ? null : Number(c.delivery_fee),
+        });
+        if (!exactKeys.has(cKey)) { hit = c; byKey.set(key, c); }
+      }
+    }
     if (!hit) {
       diffs.push({
         kind: unmatchedCompany && !createMissingCompanies ? 'error' : 'add',
@@ -390,13 +437,23 @@ export async function importDeliveryRows(opts: {
       continue;
     }
 
-    const changes = rowEqualish(row, hit);
+    let changes = rowEqualish(row, hit);
     if (unmatchedCompany && !row.company_id) {
       const i = changes.indexOf('company');
       if (i >= 0) changes.splice(i, 1);
     }
+    let conflicts: string[] | undefined;
+    if (fillOnly) {
+      const blank = (f: string) => {
+        const v = hit![f];
+        return v == null || v === '' || (f === 'bill_for_groceries' && v === false);
+      };
+      const filled = changes.filter(c => !blank(FIELD_OF[c]));
+      conflicts = filled.length ? filled : undefined;
+      changes = changes.filter(c => blank(FIELD_OF[c]) && (row as Record<string, unknown>)[FIELD_OF[c]] != null);
+    }
     if (!changes.length) {
-      diffs.push({ kind: 'unchanged', key, row, existingId: String(hit.id) });
+      diffs.push({ kind: 'unchanged', key, row, existingId: String(hit.id), conflicts });
     } else {
       diffs.push({
         kind: 'update',
@@ -404,6 +461,7 @@ export async function importDeliveryRows(opts: {
         row,
         existingId: String(hit.id),
         changes,
+        conflicts,
         unmatchedCompany,
       });
     }
@@ -473,6 +531,15 @@ export async function importDeliveryRows(opts: {
       const { error } = await supabase.from('deliveries').insert(payload);
       if (error) applyErrors.push(`Add ${d.key}: ${error.message}`);
       else inserted += 1;
+    } else if (d.kind === 'update' && d.existingId && fillOnly) {
+      const patch: Record<string, unknown> = {};
+      for (const c of d.changes || []) patch[FIELD_OF[c]] = payload[FIELD_OF[c]];
+      const { error } = await supabase
+        .from('deliveries')
+        .update({ ...patch, updated_at: new Date().toISOString() })
+        .eq('id', d.existingId);
+      if (error) applyErrors.push(`Update ${d.key}: ${error.message}`);
+      else updated += 1;
     } else if (d.kind === 'update' && d.existingId) {
       const hit = byKey.get(d.key);
       // Keep GTS-purchased grocery billing; the sheet only has a yes/no groceries column.
