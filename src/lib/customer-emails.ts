@@ -66,7 +66,7 @@ function shell(inner: string, footer: string): string {
  * phone and website. The badge shows here and in the signature lockup, and
  * nowhere else, so the footer carries text only.
  */
-function brandedShell(inner: string): string {
+export function brandedShell(inner: string): string {
   const badge = `${getAppUrl()}/branding/gts-badge.png`;
   return `<!DOCTYPE html>
 <html><body style="margin:0;padding:0;background:#f4f5f6;">

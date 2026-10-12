@@ -11,7 +11,9 @@
 // Server only (service role).
 import { Resend } from 'resend';
 import { createServiceClient } from '@/lib/supabase/server';
-import { loadAnnouncement } from '@/lib/announcement-versions-server';
+import { loadAnnouncement, selectedVersionKey } from '@/lib/announcement-versions-server';
+import { withUnsubscribe } from '@/lib/announcement-versions';
+import { unsubscribeHeaders, unsubscribeUrl } from '@/lib/unsubscribe';
 import { listAuthUsers } from '@/lib/auth-user-dates';
 import { parseEmailList } from '@/lib/email-address';
 
@@ -95,22 +97,35 @@ export function importNextRunAt(s: QueueSettings, createdAt: string, now = new D
 
 // ── Creating an import ──────────────────────────────────────────────────
 
-/** Addresses that must not get the announcement again, with why: already
- *  sent it, it bounced or was marked spam, or Resend suppresses it. */
-async function sentBefore(supabase: Supa, emails: string[]): Promise<Map<string, string>> {
+export const isAnnouncementKey = (k: string) => k === 'branded' || k === 'plain' || k === 'announcement';
+
+/** Addresses that must not get this email (`key`: 'announcement' or a
+ *  newsletter id), with why: already sent it, it bounced or was marked spam,
+ *  Resend suppresses it, or the contact unsubscribed. */
+async function sentBefore(supabase: Supa, emails: string[], key: string): Promise<Map<string, string>> {
   const out = new Map<string, string>();
+  const { data: imps, error: iErr } = await supabase.from('email_imports').select('id').eq('newsletter_key', key);
+  if (iErr) throw new Error(iErr.message);
+  const sameEmail = new Set((imps || []).map((i) => i.id as string));
   for (let i = 0; i < emails.length; i += 200) {
     const part = emails.slice(i, i + 200);
-    const [{ data, error }, { data: sup, error: sErr }] = await Promise.all([
-      supabase.from('email_import_recipients').select('email, status').in('status', ['sent', 'failed']).in('email', part),
+    const [{ data, error }, { data: sup, error: sErr }, { data: con, error: cErr }] = await Promise.all([
+      supabase.from('email_import_recipients').select('email, status, import_id').in('status', ['sent', 'failed']).in('email', part),
       supabase.from('email_suppressions').select('email, origin').in('email', part),
+      supabase.from('email_contacts').select('email, status').neq('status', 'subscribed').in('email', part),
     ]);
-    if (error || sErr) throw new Error((error || sErr)!.message);
+    if (error || sErr || cErr) throw new Error((error || sErr || cErr)!.message);
     for (const r of sup || []) out.set(String(r.email).toLowerCase(), `Suppressed in Resend (${r.origin})`);
+    for (const r of con || []) {
+      const e = String(r.email).toLowerCase();
+      if (r.status === 'unsubscribed') out.set(e, 'Unsubscribed');
+      else if (!out.has(e)) out.set(e, r.status === 'bounced' ? 'Bounced or marked as spam before' : 'Suppressed');
+    }
     for (const r of data || []) {
       const e = String(r.email).toLowerCase();
+      if (out.has(e)) continue;
       if (r.status === 'failed') out.set(e, 'Bounced or marked as spam before');
-      else if (!out.has(e)) out.set(e, 'Already sent the announcement');
+      else if (sameEmail.has(r.import_id)) out.set(e, isAnnouncementKey(key) ? 'Already sent the announcement' : 'Already sent this newsletter');
     }
   }
   return out;
@@ -127,18 +142,31 @@ export type CreatedImport = {
 
 export async function createImport(supabase: Supa, opts: {
   emails: string | string[]; createdBy: string | null; createdByName: string;
+  /** 'branded', 'plain', a newsletter id, or 'announcement' (the copy picked now). */
+  newsletterKey?: string;
 }): Promise<CreatedImport> {
+  // Each send is pinned to one copy when it's made, so a later pick never
+  // changes what a waiting send gets.
+  const key = !opts.newsletterKey || opts.newsletterKey === 'announcement'
+    ? await selectedVersionKey(supabase) : opts.newsletterKey;
+  // The announcement invites boats to make an account, so it skips anyone who
+  // has one. A newsletter goes to everyone subscribed.
+  const isAnnouncement = isAnnouncementKey(key);
   const raw = Array.isArray(opts.emails) ? opts.emails.join('\n') : opts.emails;
   const { valid, invalid } = parseEmailList(raw);
   if (!valid.length) throw new Error('No valid email addresses.');
 
-  const [already, accounts] = await Promise.all([sentBefore(supabase, valid), accountEmails(supabase)]);
-  const { subject } = await loadAnnouncement(supabase);
+  const [already, accounts] = await Promise.all([
+    sentBefore(supabase, valid, key),
+    isAnnouncement ? accountEmails(supabase) : Promise.resolve(new Set<string>()),
+  ]);
+  const { subject } = await loadAnnouncement(supabase, key);
 
   const { data: imp, error } = await supabase.from('email_imports').insert({
     created_by: opts.createdBy,
     created_by_name: opts.createdByName,
-    template: 'announcement',
+    template: isAnnouncement ? 'announcement' : 'newsletter',
+    newsletter_key: key,
     subject,
     total: valid.length,
     invalid,
@@ -160,6 +188,13 @@ export async function createImport(supabase: Supa, opts: {
       await supabase.from('email_imports').delete().eq('id', imp.id);
       throw new Error(e.message);
     }
+  }
+  // Every address loaded joins the contact list (existing contacts unchanged).
+  for (let i = 0; i < valid.length; i += 500) {
+    await supabase.from('email_contacts').upsert(
+      valid.slice(i, i + 500).map((email) => ({ email, source: 'imported' })),
+      { onConflict: 'email', ignoreDuplicates: true },
+    );
   }
   const pending = rows.filter((r) => r.status === 'pending').length;
   if (!pending) await supabase.from('email_imports').update({ status: 'done' }).eq('id', imp.id);
@@ -210,8 +245,6 @@ export async function sendFromImports(supabase: Supa, opts: {
   if (!opts.importIds.length || left < 1) return res;
 
   const resend = new Resend(opts.apiKey);
-  // The version selected on the Emails tab, read at send time.
-  const { subject, html, text } = await loadAnnouncement(supabase);
   const { from, replyTo } = senderFor(await gtsInboxFor(supabase));
   let accounts: Set<string> | null = null;
 
@@ -223,12 +256,15 @@ export async function sendFromImports(supabase: Supa, opts: {
       .update({ status: 'sending', last_run_at: nowIso })
       .eq('id', id)
       .or(`status.eq.queued,and(status.eq.sending,last_run_at.lt."${stale}")`)
-      .select('id');
+      .select('id, newsletter_key');
     if (!locked?.length) continue;
+    const key = (locked[0].newsletter_key as string | null) || 'branded';
+    const isAnnouncement = isAnnouncementKey(key);
 
     let sentHere = 0;
     let importError: string | null = null;
     try {
+      const email = await loadAnnouncement(supabase, key);
       // Up to three passes, so addresses skipped at send time free their room.
       for (let pass = 0; pass < 3 && !importError; pass++) {
         const want = left;
@@ -241,8 +277,8 @@ export async function sendFromImports(supabase: Supa, opts: {
 
         // Someone may have made an account, or been sent it from another
         // import, since this list was loaded.
-        accounts = accounts || await accountEmails(supabase);
-        const already = await sentBefore(supabase, rows.map((r) => r.email));
+        accounts = isAnnouncement ? accounts || await accountEmails(supabase) : new Set<string>();
+        const already = await sentBefore(supabase, rows.map((r) => r.email), key);
         const skip = rows.filter((r) => accounts!.has(r.email) || already.has(r.email));
         for (const r of skip) {
           await supabase.from('email_import_recipients').update({
@@ -259,7 +295,11 @@ export async function sendFromImports(supabase: Supa, opts: {
           if (i > 0) await new Promise((r) => setTimeout(r, 250));
           const chunk = go.slice(i, i + EMAILS_PER_BATCH);
           const r = await resend.batch.send(
-            chunk.map((x) => ({ from, to: [x.email], replyTo, subject, html, text })),
+            chunk.map((x) => {
+              const url = unsubscribeUrl(x.email);
+              const { subject, html, text } = withUnsubscribe(email, url);
+              return { from, to: [x.email], replyTo, subject, html, text, headers: unsubscribeHeaders(url) };
+            }),
             { idempotencyKey: `gts-import-${id}-${chunk[0].id}-${chunk.length}` },
           );
           if (r.error) { importError = r.error.message || JSON.stringify(r.error); break; }
