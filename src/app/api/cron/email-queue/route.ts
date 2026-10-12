@@ -11,12 +11,16 @@
 // Then it claims today with one conditional UPDATE, so a second ping that
 // lands at the same moment finds the day taken and stops, reads what Resend
 // says is left, sends exactly that much (oldest import first), and stops.
+//
+// Before that, any newsletter schedule that is due becomes a send and goes
+// out within what Resend has left today; the rest waits for the daily batch.
 import { timingSafeEqual } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { getEmailQuota } from '@/lib/email-quota-server';
 import { quotaRoom } from '@/lib/email-quota';
 import { ctDay, loadQueueSettings, sendFromImports, slotAt } from '@/lib/email-queue';
+import { runDueSchedules, type RunResult } from '@/lib/newsletter-schedules';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -30,13 +34,27 @@ function authorised(req: NextRequest): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-const skip = (reason: string, extra: Record<string, unknown> = {}) =>
-  NextResponse.json({ ok: true, ran: false, reason, ...extra });
+async function runSchedules(supabase: ReturnType<typeof createServiceClient>): Promise<RunResult[]> {
+  const { count } = await supabase.from('newsletter_schedules').select('id', { count: 'exact', head: true })
+    .eq('paused', false).lte('next_at', new Date().toISOString());
+  if (!count) return [];
+  const apiKey = process.env.RESEND_API_KEY;
+  let budget: number | null = 0;
+  if (apiKey) {
+    try { const room = quotaRoom(await getEmailQuota(apiKey)); budget = room ? room.left : null; } catch { budget = 0; }
+  }
+  try { return await runDueSchedules(supabase, { apiKey, budget }); }
+  catch (e) { return [{ id: '', error: e instanceof Error ? e.message : 'Schedules failed' }]; }
+}
 
 export async function POST(req: NextRequest) {
   if (!authorised(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const supabase = createServiceClient();
+  const scheduled = await runSchedules(supabase);
+  const skip = (reason: string, extra: Record<string, unknown> = {}) =>
+    NextResponse.json({ ok: true, ran: false, reason, ...extra, ...(scheduled.length ? { scheduled } : {}) });
+
   const settings = await loadQueueSettings(supabase);
   if (!settings.sendTime) return skip('No daily send time set yet');
 
@@ -75,5 +93,5 @@ export async function POST(req: NextRequest) {
   }
 
   const result = await sendFromImports(supabase, { apiKey, importIds: imports.map((i) => i.id), budget });
-  return NextResponse.json({ ok: !result.error, ran: true, day: today, budget, ...result });
+  return NextResponse.json({ ok: !result.error, ran: true, day: today, budget, ...result, scheduled });
 }
