@@ -9,7 +9,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Resend } from 'resend';
 import { requireAdmin } from '@/lib/admin-auth-server';
 import { createServiceClient } from '@/lib/supabase/server';
-import { buildWelcomeEmail, buildAnnouncementEmail, buildSignInEmail, CustomerEmailKey } from '@/lib/customer-emails';
+import { buildWelcomeEmail, buildSignInEmail, CustomerEmailKey } from '@/lib/customer-emails';
+import { loadAnnouncement } from '@/lib/announcement-versions-server';
 import { BCC_PER_EMAIL, addressesThatFit, announcementCost, quotaRoom } from '@/lib/email-quota';
 import { getEmailQuota } from '@/lib/email-quota-server';
 
@@ -27,7 +28,7 @@ function ctTime(iso: string | null): string {
 
 /** One place that decides what a template looks like, so the preview the
  *  sender approved is byte-for-byte what the customer receives. */
-function render(template: CustomerEmailKey, vars: Record<string, string>) {
+async function render(template: CustomerEmailKey, vars: Record<string, string>): Promise<{ subject: string; html: string; text?: string }> {
   const creds = {
     firstName:  vars.firstName  || '',
     vesselName: vars.vesselName || '',
@@ -36,7 +37,7 @@ function render(template: CustomerEmailKey, vars: Record<string, string>) {
   };
   if (template === 'welcome') return buildWelcomeEmail(creds);
   if (template === 'signin') return buildSignInEmail(creds);
-  return buildAnnouncementEmail();
+  return loadAnnouncement(createServiceClient(), vars.version || null);
 }
 
 function parseTemplate(raw: string | null): CustomerEmailKey | null {
@@ -53,7 +54,7 @@ export async function GET(req: NextRequest) {
 
   const vars: Record<string, string> = {};
   url.searchParams.forEach((v, k) => { if (k !== 'template') vars[k] = v; });
-  return NextResponse.json(render(template, vars));
+  return NextResponse.json(await render(template, vars));
 }
 
 export async function POST(req: NextRequest) {
@@ -117,7 +118,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const { subject, html } = render(template, body.vars || {});
+  const { subject, html, text } = await render(template, body.vars || {});
 
   const replyTo  = gtsInbox;
   const fromName = 'Grafton Towboat Services';
@@ -142,7 +143,7 @@ export async function POST(req: NextRequest) {
    */
   try {
     if (!bulk) {
-      const result = await resend.emails.send({ from, to: clean, replyTo, subject, html });
+      const result = await resend.emails.send({ from, to: clean, replyTo, subject, html, ...(text ? { text } : {}) });
       if (result.error) {
         return NextResponse.json({ error: result.error.message || JSON.stringify(result.error) }, { status: 502 });
       }
@@ -155,7 +156,7 @@ export async function POST(req: NextRequest) {
     for (let i = 0; i < groups.length; i += EMAILS_PER_BATCH) {
       if (i > 0) await new Promise((r) => setTimeout(r, 250));
       const chunk = groups.slice(i, i + EMAILS_PER_BATCH);
-      const result = await resend.batch.send(chunk.map((bcc) => ({ from, to: [replyTo], bcc, replyTo, subject, html })));
+      const result = await resend.batch.send(chunk.map((bcc) => ({ from, to: [replyTo], bcc, replyTo, subject, html, ...(text ? { text } : {}) })));
       if (result.error) {
         return NextResponse.json(
           { error: result.error.message || JSON.stringify(result.error), sent },

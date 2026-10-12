@@ -78,7 +78,16 @@ export async function POST(req: NextRequest) {
     const error = evt.type === 'email.complained'
       ? 'Marked as spam'
       : `Bounced${bounce.type ? ` (${bounce.type}${bounce.subType ? `, ${bounce.subType}` : ''})` : ''}${bounce.message ? `: ${bounce.message}` : ''}`;
-    const lists = await markFailed(createServiceClient(), to, error.slice(0, 500), at);
+    const supabase = createServiceClient();
+    // Per-recipient sends store Resend's email id on the row: match on it
+    // first, then on the address for older BCC sends.
+    const emailId = typeof data.email_id === 'string' ? data.email_id : '';
+    if (emailId) {
+      const { data: byId } = await supabase.from('email_import_recipients')
+        .select('email').eq('resend_email_id', emailId);
+      for (const r of byId || []) if (!to.includes(lower(r.email))) to.push(lower(r.email));
+    }
+    const lists = await markFailed(supabase, to, error.slice(0, 500), at);
     return NextResponse.json({ ok: true, type: evt.type, addresses: to.length, lists });
   }
 

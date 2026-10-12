@@ -11,8 +11,7 @@
 // Server only (service role).
 import { Resend } from 'resend';
 import { createServiceClient } from '@/lib/supabase/server';
-import { buildAnnouncementEmail } from '@/lib/customer-emails';
-import { BCC_PER_EMAIL, addressesThatFit, announcementCost } from '@/lib/email-quota';
+import { loadAnnouncement } from '@/lib/announcement-versions-server';
 import { listAuthUsers } from '@/lib/auth-user-dates';
 import { parseEmailList } from '@/lib/email-address';
 
@@ -134,7 +133,7 @@ export async function createImport(supabase: Supa, opts: {
   if (!valid.length) throw new Error('No valid email addresses.');
 
   const [already, accounts] = await Promise.all([sentBefore(supabase, valid), accountEmails(supabase)]);
-  const { subject } = buildAnnouncementEmail();
+  const { subject } = await loadAnnouncement(supabase);
 
   const { data: imp, error } = await supabase.from('email_imports').insert({
     created_by: opts.createdBy,
@@ -206,16 +205,18 @@ export async function sendFromImports(supabase: Supa, opts: {
   apiKey: string; importIds: string[]; budget: number | null;
 }): Promise<SendResult> {
   const res: SendResult = { sent: 0, cost: 0, skipped: 0, error: null, perImport: {} };
-  let left = opts.budget == null ? announcementCost(UNLIMITED_RUN_CAP) : opts.budget;
-  if (!opts.importIds.length || addressesThatFit(left) < 1) return res;
+  // One email per recipient, so each address costs exactly 1 against the quota.
+  let left = opts.budget == null ? UNLIMITED_RUN_CAP : Math.max(0, opts.budget);
+  if (!opts.importIds.length || left < 1) return res;
 
   const resend = new Resend(opts.apiKey);
-  const { subject, html } = buildAnnouncementEmail();
+  // The version selected on the Emails tab, read at send time.
+  const { subject, html, text } = await loadAnnouncement(supabase);
   const { from, replyTo } = senderFor(await gtsInboxFor(supabase));
   let accounts: Set<string> | null = null;
 
   for (const id of opts.importIds) {
-    if (addressesThatFit(left) < 1 || res.error) break;
+    if (left < 1 || res.error) break;
     const nowIso = new Date().toISOString();
     const stale = new Date(Date.now() - STALE_LOCK_MS).toISOString();
     const { data: locked } = await supabase.from('email_imports')
@@ -230,7 +231,7 @@ export async function sendFromImports(supabase: Supa, opts: {
     try {
       // Up to three passes, so addresses skipped at send time free their room.
       for (let pass = 0; pass < 3 && !importError; pass++) {
-        const want = addressesThatFit(left);
+        const want = left;
         if (want < 1) break;
         const { data: rows, error } = await supabase.from('email_import_recipients')
           .select('id, email').eq('import_id', id).eq('status', 'pending')
@@ -253,25 +254,33 @@ export async function sendFromImports(supabase: Supa, opts: {
         const go = rows.filter((r) => !skip.includes(r));
         if (!go.length) continue;
 
-        const groups: { id: number; email: string }[][] = [];
-        for (let i = 0; i < go.length; i += BCC_PER_EMAIL) groups.push(go.slice(i, i + BCC_PER_EMAIL));
-        for (let i = 0; i < groups.length; i += EMAILS_PER_BATCH) {
+        // One email per recipient (To: just them), up to 100 per batch call.
+        for (let i = 0; i < go.length; i += EMAILS_PER_BATCH) {
           if (i > 0) await new Promise((r) => setTimeout(r, 250));
-          const chunk = groups.slice(i, i + EMAILS_PER_BATCH);
+          const chunk = go.slice(i, i + EMAILS_PER_BATCH);
           const r = await resend.batch.send(
-            chunk.map((g) => ({ from, to: [replyTo], bcc: g.map((x) => x.email), replyTo, subject, html })),
-            { idempotencyKey: `gts-import-${id}-${chunk[0][0].id}-${chunk.flat().length}` },
+            chunk.map((x) => ({ from, to: [x.email], replyTo, subject, html, text })),
+            { idempotencyKey: `gts-import-${id}-${chunk[0].id}-${chunk.length}` },
           );
           if (r.error) { importError = r.error.message || JSON.stringify(r.error); break; }
-          const ids = chunk.flat().map((x) => x.id);
+          // Resend returns one id per email, in the order sent; the webhook
+          // matches bounces on it.
+          const sentIds = (r.data?.data || []).map((d) => d.id);
           const at = new Date().toISOString();
-          for (let j = 0; j < ids.length; j += 200) {
-            await supabase.from('email_import_recipients')
-              .update({ status: 'sent', sent_at: at, error: null }).in('id', ids.slice(j, j + 200));
+          if (sentIds.length === chunk.length) {
+            for (let j = 0; j < chunk.length; j++) {
+              await supabase.from('email_import_recipients')
+                .update({ status: 'sent', sent_at: at, error: null, resend_email_id: sentIds[j] }).eq('id', chunk[j].id);
+            }
+          } else {
+            const ids = chunk.map((x) => x.id);
+            for (let j = 0; j < ids.length; j += 200) {
+              await supabase.from('email_import_recipients')
+                .update({ status: 'sent', sent_at: at, error: null }).in('id', ids.slice(j, j + 200));
+            }
           }
-          const n = ids.length;
-          const cost = announcementCost(n);
-          left -= cost; res.cost += cost; res.sent += n; sentHere += n;
+          const n = chunk.length;
+          left -= n; res.cost += n; res.sent += n; sentHere += n;
         }
       }
     } catch (e) {
