@@ -10,9 +10,11 @@ export type Contact = {
   user_id: string | null; source: 'imported' | 'sign-up' | 'manual';
   status: 'subscribed' | 'unsubscribed' | 'bounced' | 'suppressed';
   status_reason: string | null; status_at: string | null; added_at: string;
+  /** Live: a customer login uses this address (any case). */
+  has_account?: boolean;
 };
 
-export type Audience = { company?: string; source?: string; q?: string };
+export type Audience = { company?: string; source?: string; q?: string; account?: 'yes' | 'no' };
 
 export async function allContacts(supabase: Supa): Promise<Contact[]> {
   const out: Contact[] = [];
@@ -22,12 +24,16 @@ export async function allContacts(supabase: Supa): Promise<Contact[]> {
     out.push(...((data || []) as Contact[]));
     if (!data || data.length < 1000) break;
   }
+  // Checked against logins on every read, so it is never stale.
+  const logins = new Set((await listAuthUsers(supabase)).map((u) => (u.email || '').toLowerCase()).filter(Boolean));
+  for (const c of out) c.has_account = logins.has(c.email.toLowerCase());
   return out;
 }
 
 export function matches(c: Contact, a: Audience): boolean {
   if (a.company && (c.company || '').toLowerCase() !== a.company.toLowerCase()) return false;
   if (a.source && c.source !== a.source) return false;
+  if (a.account && !!c.has_account !== (a.account === 'yes')) return false;
   if (a.q) {
     const q = a.q.toLowerCase();
     if (![c.email, c.name, c.company, c.vessel].some((v) => (v || '').toLowerCase().includes(q))) return false;
@@ -51,6 +57,7 @@ export function cleanAudience(x: unknown): SendAudience {
   const fromImport = str(a.fromImport);
   return {
     company: str(a.company), source: str(a.source), q: str(a.q),
+    account: a.account === 'yes' || a.account === 'no' ? a.account : undefined,
     fromImport: fromImport && /^[0-9a-f-]{36}$/i.test(fromImport) ? fromImport : undefined,
     emails: str(a.emails)?.slice(0, 200_000),
   };

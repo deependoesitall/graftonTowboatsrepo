@@ -7,14 +7,15 @@ import { useCallback, useEffect, useState } from 'react';
 import { CalendarClock, Loader2, Pause, Play, Send, Trash2 } from 'lucide-react';
 import { adminFetch } from '@/lib/admin-auth';
 
-type ContactLite = { email: string; company: string | null; source: string; status: string };
+type ContactLite = { email: string; company: string | null; source: string; status: string; has_account?: boolean };
 type PastSend = { id: string; subject: string | null; created_at: string; total: number };
 type Schedule = {
   id: string; newsletter_key: string; kind: 'once' | 'weekly' | 'biweekly'; next_at: string | null;
   paused: boolean; last_sent_at: string | null; last_error: string | null;
   audience: { fromImport?: string; emails?: string; company?: string; source?: string };
 };
-type Who = 'all' | 'past' | 'paste';
+type Who = 'all' | 'yes' | 'no' | 'past' | 'paste';
+const LIST: Who[] = ['all', 'yes', 'no'];
 type When = 'now' | 'once' | 'weekly' | 'biweekly';
 
 const WHEN: { v: When; label: string }[] = [
@@ -63,10 +64,12 @@ export function NewsletterSendBox({ newsletterKey, subject, onSent }: {
   const companies = [...new Set(subscribed.map((c) => c.company).filter(Boolean) as string[])].sort();
   const pastSend = past.find((p) => p.id === pastId);
   const pastedCount = pasted.split(/[\s,;]+/).filter((x) => x.includes('@')).length;
-  const count = who === 'all'
-    ? subscribed.filter((c) => (!company || c.company === company) && (!source || c.source === source)).length
+  const filtered = subscribed.filter((c) => (!company || c.company === company) && (!source || c.source === source));
+  const listCount = (w: Who) => w === 'all' ? filtered.length : filtered.filter((c) => !!c.has_account === (w === 'yes')).length;
+  const count = LIST.includes(who) ? listCount(who)
     : who === 'past' ? (pastSend?.total ?? 0) : pastedCount;
-  const audience = who === 'all' ? { company: company || undefined, source: source || undefined }
+  const audience = LIST.includes(who)
+    ? { company: company || undefined, source: source || undefined, account: who === 'all' ? undefined : who }
     : who === 'past' ? { fromImport: pastId } : { emails: pasted };
   const mine = schedules.filter((s) => s.newsletter_key === newsletterKey);
 
@@ -123,13 +126,15 @@ export function NewsletterSendBox({ newsletterKey, subject, onSent }: {
       <p className="text-sm font-bold text-brand-navy">Send it</p>
 
       <div>
-        <p className="text-xs font-semibold text-gray-600 mb-1.5">Who gets it</p>
+        <p className="text-xs font-semibold text-gray-600 mb-1.5">Who gets it <span className="font-normal text-gray-400">(subscribed only)</span></p>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-          <button type="button" className={chip(who === 'all')} onClick={() => setWho('all')}>Everyone subscribed</button>
+          <button type="button" className={chip(who === 'all')} onClick={() => setWho('all')}>Everyone ({listCount('all')})</button>
+          <button type="button" className={chip(who === 'yes')} onClick={() => setWho('yes')}>Has an account ({listCount('yes')})</button>
+          <button type="button" className={chip(who === 'no')} onClick={() => setWho('no')}>No account yet ({listCount('no')})</button>
           <button type="button" className={chip(who === 'past')} onClick={() => setWho('past')}>People from an earlier send</button>
           <button type="button" className={chip(who === 'paste')} onClick={() => setWho('paste')}>Paste addresses</button>
         </div>
-        {who === 'all' && (
+        {LIST.includes(who) && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
             <select className="input-base" value={company} onChange={(e) => setCompany(e.target.value)}>
               <option value="">Every company</option>

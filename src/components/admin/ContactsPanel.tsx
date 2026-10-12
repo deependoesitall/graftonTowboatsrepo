@@ -11,7 +11,7 @@ import { looksMisread, parseContactText, type ContactRow } from '@/lib/email-add
 type Contact = {
   email: string; name: string | null; company: string | null; vessel: string | null;
   user_id: string | null; source: 'imported' | 'sign-up' | 'manual';
-  status: 'subscribed' | 'unsubscribed' | 'bounced' | 'suppressed'; added_at: string;
+  status: 'subscribed' | 'unsubscribed' | 'bounced' | 'suppressed'; added_at: string; has_account?: boolean;
 };
 
 const STATUS_LABEL: Record<Contact['status'], string> = {
@@ -29,6 +29,7 @@ export function ContactsPanel() {
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
   const [source, setSource] = useState('');
+  const [account, setAccount] = useState('');
   const [adding, setAdding] = useState(false);
   const [text, setText] = useState('');
   const [editing, setEditing] = useState<string | null>(null);
@@ -49,8 +50,9 @@ export function ContactsPanel() {
   const shown = useMemo(() => {
     const s = q.trim().toLowerCase();
     return contacts.filter((c) => (!status || c.status === status) && (!source || c.source === source)
+      && (!account || !!c.has_account === (account === 'yes'))
       && (!s || [c.email, c.name, c.company, c.vessel].some((v) => (v || '').toLowerCase().includes(s))));
-  }, [contacts, q, status, source]);
+  }, [contacts, q, status, source, account]);
   const counts = useMemo(() => {
     const m: Record<string, number> = {};
     for (const c of contacts) m[c.status] = (m[c.status] || 0) + 1;
@@ -139,7 +141,7 @@ export function ContactsPanel() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-2">
+      <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto_auto] gap-2">
         <div className="relative">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input className="input-base pl-9" placeholder="Search name, address, company, boat" value={q} onChange={(e) => setQ(e.target.value)} />
@@ -151,6 +153,11 @@ export function ContactsPanel() {
         <select className="input-base" value={source} onChange={(e) => setSource(e.target.value)}>
           <option value="">However they joined</option>
           {Object.entries(SOURCE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+        </select>
+        <select className="input-base" value={account} onChange={(e) => setAccount(e.target.value)}>
+          <option value="">Account or not</option>
+          <option value="yes">Has an account</option>
+          <option value="no">No account yet</option>
         </select>
       </div>
       {msg && <p className="text-sm text-emerald-700">{msg}</p>}
@@ -178,7 +185,7 @@ export function ContactsPanel() {
                   </p>
                   <p className="text-xs text-gray-500">
                     {[c.name, c.company, c.vessel].filter(Boolean).join(' · ') || '—'}
-                    {c.user_id ? ' · has a login' : ''} · {SOURCE_LABEL[c.source]} · added {new Date(c.added_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric', year: 'numeric' })}
+                    {c.has_account ? ' · has an account' : ' · no account yet'} · {SOURCE_LABEL[c.source]} · added {new Date(c.added_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric', year: 'numeric' })}
                   </p>
                 </div>
               )}
