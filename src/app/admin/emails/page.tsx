@@ -19,6 +19,8 @@ import { EmailQuota, quotaRoom } from '@/lib/email-quota';
 import { AnnouncementVersions, type AnnouncementPreview } from '@/components/admin/AnnouncementVersions';
 import { NewCustomerSend } from '@/components/admin/NewCustomerSend';
 import { EmailQueuePanel } from '@/components/admin/EmailQueuePanel';
+import { NewslettersPanel } from '@/components/admin/NewslettersPanel';
+import { ContactsPanel } from '@/components/admin/ContactsPanel';
 import { parseEmailList } from '@/lib/email-address';
 
 type TemplateKey = 'welcome' | 'announcement';
@@ -69,6 +71,7 @@ function Step({ n, title, hint, children }: {
 }
 
 export default function EmailsPage() {
+  const [tab, setTab] = useState<'send' | 'newsletters' | 'contacts'>('send');
   const [template, setTemplate] = useState<TemplateKey>('welcome');
   // Typed into the New customer form, so the preview shows the real boat.
   const [vars, setVars] = useState({ firstName: '', vesselName: '', loginEmail: '', password: '' });
@@ -218,7 +221,19 @@ export default function EmailsPage() {
       <p className="text-sm text-gray-500 mt-1 mb-6 max-w-2xl">
         What you see in the preview is exactly what lands in their inbox. Nothing sends until you press the button.
       </p>
+      <div className="flex gap-1 border-b border-gray-200 mb-6 -mt-2 overflow-x-auto">
+        {([['send', 'Send'], ['newsletters', 'Newsletters'], ['contacts', 'Email list']] as const).map(([k, label]) => (
+          <button key={k} type="button" onClick={() => setTab(k)}
+            className={`px-4 py-2 text-sm font-semibold border-b-2 -mb-px whitespace-nowrap ${
+              tab === k ? 'border-brand-navy text-brand-navy' : 'border-transparent text-gray-500 hover:text-brand-navy'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {tab === 'newsletters' && <NewslettersPanel />}
+      {tab === 'contacts' && <ContactsPanel />}
 
+      {tab === 'send' && (
       <div className="grid gap-6 lg:gap-8 lg:grid-cols-[minmax(0,400px)_minmax(0,1fr)]">
         {/* ── steps ── */}
         <div className="flex flex-col gap-6 min-w-0">
@@ -395,6 +410,7 @@ export default function EmailsPage() {
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }
