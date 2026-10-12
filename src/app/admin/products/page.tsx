@@ -1111,7 +1111,7 @@ const STATUS_FILTERS: { key: string; label: string }[] = [
   { key: 'available', label: 'In Stock' },
   { key: 'unavailable', label: 'Out of Stock' },
   { key: 'no_image', label: 'Missing Image' },
-  { key: 'name_matched', label: 'Auto-matched Photos (review)' },
+  { key: 'name_matched', label: 'Auto-matched Photos' },
 ];
 
 interface EditState {

@@ -132,7 +132,7 @@ function isSubsequence(short: string, long: string): boolean {
   return i === short.length;
 }
 
-function tokenMatch(ours: string, theirs: string): number {
+export function tokenMatch(ours: string, theirs: string): number {
   if (ours === theirs) return 1;
   // Prefix match only when the shorter token is long enough — otherwise
   // FUNYUNS≈FUN (Lunchables Fun Pack) and SALTED≈S (Reese's) score as hits.

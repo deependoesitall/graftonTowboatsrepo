@@ -20,6 +20,7 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { getAdminSession } from '@/lib/admin-auth-server';
 import { applyFormLayout } from '@/lib/form-layout-apply';
 import { findMatchFor } from '@/lib/image-backfill';
+import { decidePhoto } from '@/lib/photo-match-rules';
 import {
   fetchFreshopPages, fetchFreshopTotal, freshopKeys, ourKeys, computeFields,
   buildStoreProduct, isSellableStatus, isExcludedFromVesselCatalog, norm,
@@ -813,9 +814,11 @@ async function saveState(
 }
 
 /**
- * Photo/name backfill: name-match a batch of barge items the barcode pass
- * can't reach, queue every match into the Photo Review tab (never auto-apply —
- * a high score can still be the wrong flavor). Returns whether MORE items
+ * Photo backfill: name-match a batch of barge items the barcode pass can't
+ * reach and use the photo only when decidePhoto() finds every word of our
+ * catalog line in the match (no human review step). Anything less is left on
+ * its placeholder and retried in 14 days. The catalog name is never changed
+ * here. Returns whether MORE items
  * remain, so the caller can self-chain and clear the whole backlog in one
  * night rather than piggybacking only on the catalog sweep's few runs.
  */
@@ -834,7 +837,6 @@ async function runPhotoBackfill(
     .select('id, description, category, pkg_size, price')
     .eq('store_only', false).eq('is_active', true)
     .is('image_url', null)
-    .is('proposed_image_url', null)   // don't re-propose what's already queued
     .or(`photo_match_tried_at.is.null,photo_match_tried_at.lt.${staleBefore}`)
     .limit(13); // one extra row tells us the backlog isn't empty yet
   const rows = (data || []) as Array<{ id: string; description: string; category: string; pkg_size: string | null; price: number }>;
@@ -848,14 +850,11 @@ async function runPhotoBackfill(
       // verifying them against Sinclair's and not syncing them. This pass exists
       // purely to find each one a picture; once it has an image_url the query
       // above stops selecting it, so the work is one-and-done by construction.
-      if (candidate && candidate.image_url) {
-        upd.proposed_image_url = candidate.image_url;
-        upd.proposed_details = candidate.proper_name;
-        upd.proposed_name = candidate.freshop_name;
-        upd.proposed_score = candidate.score;
-        // A borrowed photo came from a DIFFERENT listing in the same
-        // department, so the reviewer must see that before approving.
-        upd.proposed_image_borrowed = candidate.borrowed_photo;
+      // Borrowed photos come from a different listing, so they never qualify.
+      if (candidate && candidate.image_url && !candidate.borrowed_photo
+        && decidePhoto(p.description, candidate.freshop_name).use) {
+        upd.image_url = candidate.image_url;
+        upd.image_source = 'name_match';
       }
       const { error: updErr } = await supabase.from('products').update(upd).eq('id', p.id);
       if (updErr) {
