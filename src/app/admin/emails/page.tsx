@@ -72,6 +72,10 @@ function Step({ n, title, hint, children }: {
 
 export default function EmailsPage() {
   const [tab, setTab] = useState<'send' | 'newsletters' | 'contacts'>('send');
+  const [problemCount, setProblemCount] = useState(0);
+  useEffect(() => {
+    adminFetch('/api/admin/contacts?problems=1').then((r) => r.json()).then((j) => setProblemCount((j.problems || []).length)).catch(() => {});
+  }, [tab]);
   useEffect(() => {
     const t = new URLSearchParams(window.location.search).get('tab');
     if (t === 'contacts' || t === 'newsletters') setTab(t);
@@ -234,6 +238,13 @@ export default function EmailsPage() {
           </button>
         ))}
       </div>
+      {problemCount > 0 && (
+        <button type="button"
+          onClick={() => { window.history.replaceState(null, '', '/admin/emails?tab=contacts&status=problem'); setTab('send'); setTimeout(() => setTab('contacts'), 0); }}
+          className="mb-4 -mt-2 rounded-full bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-100 inline-flex items-center gap-1.5">
+          <AlertTriangle className="w-3.5 h-3.5" /> {problemCount} bounced / blocked {problemCount === 1 ? 'address' : 'addresses'}: fix or try again
+        </button>
+      )}
       {tab === 'newsletters' && <NewslettersPanel />}
       {tab === 'contacts' && <ContactsPanel />}
 

@@ -13,7 +13,9 @@ type Contact = {
   email: string; name: string | null; company: string | null; vessel: string | null;
   user_id: string | null; source: 'imported' | 'sign-up' | 'manual';
   status: 'subscribed' | 'unsubscribed' | 'bounced' | 'suppressed'; added_at: string; has_account?: boolean;
+  status_reason?: string | null; status_at?: string | null;
 };
+const isProblem = (s: string) => s === 'bounced' || s === 'suppressed';
 
 const STATUS_LABEL: Record<Contact['status'], string> = {
   subscribed: 'Subscribed', unsubscribed: 'Unsubscribed', bounced: 'Bounced', suppressed: 'Blocked',
@@ -46,6 +48,8 @@ export function ContactsPanel() {
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const [fixing, setFixing] = useState<string | null>(null);
+  const [fixTo, setFixTo] = useState('');
 
   const load = useCallback(async () => {
     const res = await adminFetch('/api/admin/contacts');
@@ -60,7 +64,9 @@ export function ContactsPanel() {
     setAccounts(j.accounts || []);
   }, []);
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get('view') === 'accounts') setView('accounts');
+    const sp = new URLSearchParams(window.location.search);
+    if (sp.get('view') === 'accounts') setView('accounts');
+    if (sp.get('status') === 'problem') setStatus('problem');
     loadAccounts();
   }, [loadAccounts]);
   const accountsShown = useMemo(() => {
@@ -71,7 +77,7 @@ export function ContactsPanel() {
 
   const shown = useMemo(() => {
     const s = q.trim().toLowerCase();
-    return contacts.filter((c) => (!status || c.status === status) && (!source || c.source === source)
+    return contacts.filter((c) => (!status || (status === 'problem' ? isProblem(c.status) : c.status === status)) && (!source || c.source === source)
       && (!account || !!c.has_account === (account === 'yes'))
       && (!s || [c.email, c.name, c.company, c.vessel].some((v) => (v || '').toLowerCase().includes(s))));
   }, [contacts, q, status, source, account]);
@@ -80,6 +86,7 @@ export function ContactsPanel() {
     for (const c of contacts) m[c.status] = (m[c.status] || 0) + 1;
     return m;
   }, [contacts]);
+  const problems = (counts.bounced || 0) + (counts.suppressed || 0);
 
   // What adding the pasted text would do, before anything is saved.
   const parsed = useMemo(() => {
@@ -109,6 +116,33 @@ export function ContactsPanel() {
     if (!res.ok) { const j = await res.json().catch(() => ({})); setErr(j.error || 'Could not save.'); return; }
     load();
   }
+  async function fix(c: Contact) {
+    const next = fixTo.trim().toLowerCase();
+    if (!next) return;
+    const login = !!c.has_account;
+    if (!window.confirm(`Change ${c.email} to ${next}?${login ? '\n\nTheir login and boat crew entry move to the new address too, so they sign in with it.' : ''}\n\nThe old address stays marked so it isn't used again.`)) return;
+    setBusy(true); setErr(''); setMsg('');
+    const res = await adminFetch('/api/admin/contacts', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: c.email, fix: next, login: true }),
+    });
+    const j = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (!res.ok) { setErr(j.error || 'Could not fix it.'); return; }
+    setMsg(`${next} is on the list.${j.login ? ' Their login now uses it.' : ''}${j.crew ? ` Updated ${j.crew} boat crew entr${j.crew === 1 ? 'y' : 'ies'}.` : ''}`);
+    setFixing(null); setFixTo(''); load(); loadAccounts();
+  }
+  async function clear(c: Contact) {
+    if (!window.confirm(`Try ${c.email} again?\n\nIt comes off the bounce/block list and gets the next emails. If the address is still bad it will bounce again, and too many bounces hurt delivery for everyone. Fix the spelling first if it's a typo.`)) return;
+    setBusy(true); setErr(''); setMsg('');
+    const res = await adminFetch('/api/admin/contacts', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: c.email, clear: true }),
+    });
+    const j = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (!res.ok) { setErr(j.error || 'Could not clear it.'); return; }
+    setMsg(`${c.email} will be tried again.`); load();
+  }
+
   async function remove(c: Contact) {
     if (!window.confirm(`Remove ${c.email} from the list?`)) return;
     await adminFetch(`/api/admin/contacts?email=${encodeURIComponent(c.email)}`, { method: 'DELETE' });
@@ -171,6 +205,12 @@ export function ContactsPanel() {
       ) : (<>
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <span className="font-bold text-brand-navy">{contacts.length} on the list</span>
+        {problems > 0 && (
+          <button type="button" onClick={() => setStatus(status === 'problem' ? '' : 'problem')}
+            className={`rounded-full px-2.5 py-1 text-xs font-bold inline-flex items-center gap-1 ${status === 'problem' ? 'bg-red-700 text-white' : 'bg-red-50 text-red-700 hover:bg-red-100'}`}>
+            <AlertTriangle className="w-3.5 h-3.5" /> Bounced / blocked ({problems})
+          </button>
+        )}
         {(['subscribed', 'unsubscribed', 'bounced', 'suppressed'] as const).map((s) => counts[s] ? (
           <span key={s} className={`rounded-full px-2 py-0.5 text-xs font-semibold ${STATUS_TONE[s]}`}>{counts[s]} {STATUS_LABEL[s].toLowerCase()}</span>
         ) : null)}
@@ -222,6 +262,7 @@ export function ContactsPanel() {
         </div>
         <select className="input-base" value={status} onChange={(e) => setStatus(e.target.value)}>
           <option value="">Any status</option>
+          <option value="problem">Bounced / blocked</option>
           {Object.entries(STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
         <select className="input-base" value={source} onChange={(e) => setSource(e.target.value)}>
@@ -261,12 +302,34 @@ export function ContactsPanel() {
                     {[c.name, c.company, c.vessel].filter(Boolean).join(' · ') || '—'}
                     {c.has_account ? ' · has an account' : ' · no account yet'} · {SOURCE_LABEL[c.source]} · added {new Date(c.added_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric', year: 'numeric' })}
                   </p>
+                  {(isProblem(c.status) || c.status === 'unsubscribed') && c.status_reason && (
+                    <p className={`text-xs mt-0.5 ${isProblem(c.status) ? 'text-red-700' : 'text-gray-500'}`}>
+                      {day(c.status_at ?? null)}: {c.status_reason.length > 140 ? `${c.status_reason.slice(0, 140)}…` : c.status_reason}
+                    </p>
+                  )}
+                  {isProblem(c.status) && (fixing === c.email ? (
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      <input className="input-base flex-1 min-w-[200px]" autoFocus placeholder="Correct address" value={fixTo}
+                        onChange={(e) => setFixTo(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') fix(c); }} />
+                      <button type="button" disabled={busy || !fixTo.trim()} className="btn-primary text-sm disabled:opacity-40" onClick={() => fix(c)}>Save</button>
+                      <button type="button" className="btn-outline text-sm" onClick={() => setFixing(null)}><X className="w-4 h-4" /></button>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      <button type="button" className="btn-outline text-xs" onClick={() => { setFixing(c.email); setFixTo(c.email); }}>Fix email</button>
+                      <button type="button" disabled={busy} className="btn-outline text-xs disabled:opacity-40" onClick={() => clear(c)}>Clear bounce · try again</button>
+                    </div>
+                  ))}
                 </div>
               )}
-              <select value={c.status} onChange={(e) => patch(c.email, { status: e.target.value })}
-                className={`rounded-full border-0 px-2.5 py-1 text-xs font-semibold ${STATUS_TONE[c.status]}`}>
-                {Object.entries(STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-              </select>
+              {c.status === 'subscribed' ? (
+                <select value={c.status} onChange={(e) => patch(c.email, { status: e.target.value })}
+                  className={`rounded-full border-0 px-2.5 py-1 text-xs font-semibold ${STATUS_TONE[c.status]}`}>
+                  {Object.entries(STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                </select>
+              ) : (
+                <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_TONE[c.status]}`}>{STATUS_LABEL[c.status]}</span>
+              )}
               {editing !== c.email && (
                 <button type="button" title="Edit" className="p-1.5 text-gray-400 hover:text-brand-navy"
                   onClick={() => { setEditing(c.email); setEdit({ name: c.name || '', company: c.company || '', vessel: c.vessel || '' }); }}>

@@ -57,6 +57,13 @@ export function CustomerLoginsPanel() {
   const [adding, setAdding] = useState<string | null>(null);
   const [signupsKey, setSignupsKey] = useState(0);
   const { confirm, dialog } = useConfirm();
+  // Login addresses that bounced or are blocked, from the Email list.
+  const [bounced, setBounced] = useState<Map<string, string>>(new Map());
+  useEffect(() => {
+    adminFetch('/api/admin/contacts?problems=1').then((r) => r.json())
+      .then((j) => setBounced(new Map((j.problems || []).map((p: { email: string; status: string }) => [p.email, p.status]))))
+      .catch(() => {});
+  }, []);
 
   const load = useCallback(async (q?: string) => {
     setLoading(true);
@@ -284,6 +291,12 @@ export function CustomerLoginsPanel() {
                                 <p className="text-xs text-gray-400 truncate">
                                   {m.email} · <span className="capitalize">{m.role}</span>
                                 </p>
+                                {m.email && bounced.has(m.email.toLowerCase()) && (
+                                  <Link href="/admin/emails?tab=contacts&status=problem"
+                                    className="inline-block mt-0.5 rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-bold text-red-700 hover:bg-red-100">
+                                    Email {bounced.get(m.email.toLowerCase()) === 'suppressed' ? 'blocked' : 'bounced'} · fix it
+                                  </Link>
+                                )}
                                 {m.signed_up_at && (
                                   <p className="text-[11px] text-gray-400">
                                     Signed up {ctDay(m.signed_up_at)} · {m.last_sign_in_at ? `Last sign-in ${ctDay(m.last_sign_in_at)}` : 'Never signed in'}
