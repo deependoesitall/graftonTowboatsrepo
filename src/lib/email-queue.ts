@@ -112,19 +112,22 @@ async function sentBefore(supabase: Supa, emails: string[], key: string): Promis
     const [{ data, error }, { data: sup, error: sErr }, { data: con, error: cErr }] = await Promise.all([
       supabase.from('email_import_recipients').select('email, status, import_id').in('status', ['sent', 'failed']).in('email', part),
       supabase.from('email_suppressions').select('email, origin').in('email', part),
-      supabase.from('email_contacts').select('email, status').neq('status', 'subscribed').in('email', part),
+      supabase.from('email_contacts').select('email, status').in('email', part),
     ]);
     if (error || sErr || cErr) throw new Error((error || sErr || cErr)!.message);
     for (const r of sup || []) out.set(String(r.email).toLowerCase(), `Suppressed in Resend (${r.origin})`);
+    const cleared = new Set<string>();
     for (const r of con || []) {
       const e = String(r.email).toLowerCase();
+      if (r.status === 'subscribed') { cleared.add(e); continue; }
       if (r.status === 'unsubscribed') out.set(e, 'Unsubscribed');
       else if (!out.has(e)) out.set(e, r.status === 'bounced' ? 'Bounced or marked as spam before' : 'Suppressed');
     }
     for (const r of data || []) {
       const e = String(r.email).toLowerCase();
       if (out.has(e)) continue;
-      if (r.status === 'failed') out.set(e, 'Bounced or marked as spam before');
+      // A failure counts unless the list says it was cleared since.
+      if (r.status === 'failed') { if (!cleared.has(e)) out.set(e, 'Bounced or marked as spam before'); }
       else if (sameEmail.has(r.import_id)) out.set(e, isAnnouncementKey(key) ? 'Already sent the announcement' : 'Already sent this newsletter');
     }
   }

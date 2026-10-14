@@ -122,6 +122,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, type: evt.type });
   }
 
+  if (evt.type === 'suppression.removed') {
+    // Cleared in Resend (here or on its dashboard): the contact can be sent to again.
+    const email = lower(data.email);
+    if (email.includes('@')) {
+      const supabase = createServiceClient();
+      await supabase.from('email_suppressions').delete().eq('email', email);
+      await supabase.from('email_contacts')
+        .update({ status: 'subscribed', status_reason: 'Removed from the Resend block list', status_at: at })
+        .eq('email', email).eq('status', 'suppressed');
+    }
+    return NextResponse.json({ ok: true, type: evt.type });
+  }
+
   // email.delivery_delayed and anything else: acknowledged, nothing to change.
   return NextResponse.json({ ok: true, type: evt.type ?? null, ignored: true });
 }
