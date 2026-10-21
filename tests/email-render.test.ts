@@ -71,3 +71,30 @@ test('withUnsubscribe works on emails with a nested </body>', () => {
   const r = withUnsubscribe({ subject: 's', text: 't', html: '<html><body><div>&lt;/body&gt;</div><table><tr><td></td></tr></table></body></html>' }, 'https://u');
   assert.ok(r.html.endsWith('</p>\n</body></html>'));
 });
+
+import { STARTERS, BUILT_IN_SECTIONS, newBlock } from '@/lib/email-blocks';
+test('buttons are bulletproof: VML for Outlook, a link everywhere else', async () => {
+  const e = await renderBlocks({ blocks: [{ id: 'b', type: 'button', label: 'Order', href: 'https://x.com/o', color: 'orange', size: 'lg', align: 'end' }] }, { subject: 's' });
+  assert.match(e.html, /<!--\[if mso\]><v:roundrect[^>]+href="https:\/\/x\.com\/o"[^>]+fillcolor="#D9640A"/);
+  assert.match(e.html, /<!--\[if !mso\]><!--><a href="https:\/\/x\.com\/o"/);
+  assert.match(e.html, /align="right"/);
+  assert.match(e.html, /xmlns:v="urn:schemas-microsoft-com:vml"/);
+});
+
+test('button rows and picture+text stack on phones', async () => {
+  const e = await renderBlocks({ blocks: [newBlock('buttons'), newBlock('pictext'), newBlock('spacer')] }, { subject: 's' });
+  assert.equal((e.html.match(/class="gts-stack"/g) || []).length, 4);
+  assert.match(e.html, /@media only screen and \(max-width:480px\)\{\.gts-stack\{display:block!important/);
+});
+
+test('every starter and section renders, with links and text', async () => {
+  for (const st of STARTERS) {
+    const e = await renderBlocks(st.doc(), { subject: st.name });
+    assert.ok(e.html.length > 1000 && e.text.length > 20, st.key);
+    assert.doesNotMatch(e.html, /undefined|\[object/);
+  }
+  const f = await renderBlocks({ blocks: BUILT_IN_SECTIONS[1].blocks() }, { subject: 's' });
+  assert.match(f.html, /<a href="https:\/\/graftontowboatservices\.com"[^>]*>graftontowboatservices\.com<\/a>/);
+  assert.match(f.html, /href="tel:6185560290"/);
+  assert.match(f.text, /Call: 6185560290/);
+});

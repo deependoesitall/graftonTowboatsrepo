@@ -9,6 +9,9 @@
 // POST { action:'check', doc, subject, plain }         → { problems }
 // POST { action:'test', id }                           → "Send me one first": the real
 //   message (unsubscribe included) to the GTS inbox
+// GET  ?sections=1                                    → { sections } saved sections
+// POST { action:'section-save', name, blocks }         → { id }
+// POST { action:'section-delete', id }                 → { ok }
 // GET  ?stats=<newsletter key>                         → { sends: SendStats[] }
 // GET  ?csv=<import id>                                → CSV of that send
 import { NextRequest, NextResponse } from 'next/server';
@@ -111,6 +114,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ problems: await checkEmail(doc, { subject, html: shown.html }), bytes });
     }
 
+    if (body.action === 'section-save') {
+      const name = String(body.name || '').trim().slice(0, 60);
+      const doc = docFrom({ blocks: body.blocks });
+      if (!name || !doc || !doc.blocks.length || doc.blocks.length > 30) return err('Name the section and pick what goes in it.');
+      const { data, error } = await supabase.from('email_sections')
+        .insert({ name, blocks: doc.blocks, created_by_name: session.display_name || session.username }).select('id').single();
+      if (error || !data) return err(error?.message || 'Could not save.', 500);
+      return NextResponse.json({ id: data.id });
+    }
+    if (body.action === 'section-delete') {
+      if (!UUID.test(String(body.id || ''))) return err('Unknown section');
+      await supabase.from('email_sections').delete().eq('id', body.id);
+      return NextResponse.json({ ok: true });
+    }
+
     if (body.action === 'test') {
       const id = String(body.id || '');
       if (!UUID.test(id) && id !== 'branded' && id !== 'plain') return err('Save the email first.');
@@ -144,6 +162,11 @@ export async function GET(req: NextRequest) {
       return new NextResponse(await statsCsv(supabase, csv), {
         headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="email-stats-${csv.slice(0, 8)}.csv"` },
       });
+    }
+    if (u.searchParams.get('sections')) {
+      const { data, error } = await supabase.from('email_sections').select('id, name, blocks').order('created_at', { ascending: false }).limit(50);
+      if (error) return err(error.message, 500);
+      return NextResponse.json({ sections: data || [] });
     }
     const key = u.searchParams.get('stats');
     const sends = await loadStats(supabase, { key: key && key !== 'all' ? key : null, limit: 12 });

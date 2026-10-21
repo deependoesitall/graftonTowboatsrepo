@@ -13,7 +13,7 @@ import { EmailPreview } from '@/components/admin/EmailPreview';
 import { NewsletterSendBox } from '@/components/admin/NewsletterSendBox';
 import { BlockEditor, type BuilderDraft } from '@/components/admin/BlockEditor';
 import { EmailStats } from '@/components/admin/EmailStats';
-import { starterDoc, type EmailDoc } from '@/lib/email-blocks';
+import { STARTERS, type EmailDoc } from '@/lib/email-blocks';
 
 type Newsletter = NewsletterDraft & { id: string; updated_at: string; format?: 'text' | 'blocks' };
 const BUILT_IN = [{ key: 'branded', name: 'Announcement · Branded' }, { key: 'plain', name: 'Announcement · Plain' }];
@@ -21,6 +21,7 @@ const BUILT_IN = [{ key: 'branded', name: 'Announcement · Branded' }, { key: 'p
 const NEW = '__new';
 const BUILD = '__build';
 const IMPORT = '__import';
+const PICK = '__pick';
 
 /** Bring in an outside email: paste it, or pick its .html (or a .zip with
  *  its pictures, or the .html plus its pictures). */
@@ -153,7 +154,7 @@ export function NewslettersPanel() {
             }`}><Plus className="w-3.5 h-3.5" /> New newsletter</button>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => startBuild({ name: '', subject: '', doc: starterDoc(), send_plain: false })}
+          <button type="button" onClick={() => { setOpen(PICK); setMsg(''); setErr(''); }}
             className="btn-outline text-sm inline-flex items-center gap-1.5"><LayoutTemplate className="w-4 h-4" /> Build an email</button>
           <button type="button" onClick={() => { setOpen(IMPORT); setMsg(''); setErr(''); }}
             className="btn-outline text-sm inline-flex items-center gap-1.5"><FileCode className="w-4 h-4" /> Bring in an email</button>
@@ -161,6 +162,16 @@ export function NewslettersPanel() {
             className="btn-outline text-sm inline-flex items-center gap-1.5"><CalendarClock className="w-4 h-4" /> Copy last week's</button>
         </div>
 
+        {open === PICK && (
+          <div className="grid grid-cols-2 gap-2">
+            {STARTERS.map((t) => (
+              <button key={t.key} type="button" onClick={() => startBuild({ name: t.name, subject: '', doc: t.doc(), send_plain: false })}
+                className="rounded-xl border-2 border-gray-200 bg-white px-3 py-3 text-left text-sm font-semibold text-brand-navy hover:border-brand-gold">{t.name}</button>
+            ))}
+            <button type="button" onClick={() => startBuild({ name: '', subject: '', doc: { branded: true, blocks: [] }, send_plain: false })}
+              className="rounded-xl border-2 border-dashed border-gray-300 px-3 py-3 text-left text-sm font-semibold text-gray-600 hover:border-brand-gold">Blank</button>
+          </div>
+        )}
         {open === IMPORT && <ImportBox onDone={(d, notice) => startBuild(d, notice)} />}
         {open === BUILD && builder && (
           <BlockEditor key={builder.key} initial={builder.draft} notice={builder.notice} onPreview={setPreview}
@@ -171,7 +182,7 @@ export function NewslettersPanel() {
         )}
         {open !== BUILD && current?.format === 'blocks' && builder?.key !== current.id && <p className="text-sm text-gray-500">Opening…</p>}
 
-        {open && !builtIn && open !== BUILD && open !== IMPORT && current?.format !== 'blocks' && (
+        {open && !builtIn && open !== BUILD && open !== IMPORT && open !== PICK && current?.format !== 'blocks' && (
           <NewsletterEditor key={open} initial={initial} onPreview={setPreview}
             saveLabel={current ? 'Save changes' : 'Save draft'}
             onSaved={async (id) => { await load(id); setMsg('Saved.'); }} />
