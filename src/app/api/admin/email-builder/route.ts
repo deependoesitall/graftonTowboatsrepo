@@ -14,7 +14,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Resend } from 'resend';
 import { unzipSync } from 'fflate';
-import { requireAdmin } from '@/lib/admin-auth-server';
+import { requireEmailAccess } from '@/lib/admin-auth-server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { importHtml } from '@/lib/email-import';
 import { hostDocImages, supabaseImageStore, MAX_IMAGE_BYTES, type ImportFile } from '@/lib/email-images';
@@ -71,7 +71,7 @@ function docFrom(v: unknown): EmailDoc | null {
 }
 
 export async function POST(req: NextRequest) {
-  const session = requireAdmin(req, { gtsOnly: true });
+  const session = requireEmailAccess(req);
   if (session instanceof NextResponse) return session;
   const supabase = createServiceClient();
   const isForm = (req.headers.get('content-type') || '').includes('multipart/form-data');
@@ -133,7 +133,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
-  const session = requireAdmin(req, { gtsOnly: true });
+  const session = requireEmailAccess(req);
   if (session instanceof NextResponse) return session;
   const supabase = createServiceClient();
   const u = new URL(req.url);

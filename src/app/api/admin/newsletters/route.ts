@@ -15,7 +15,7 @@
 // PATCH { selected }    → the copy used for announcement lists loaded from now on
 // DELETE ?id=<id>       → delete (the announcement falls back to Branded if it used it)
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/admin-auth-server';
+import { requireEmailAccess } from '@/lib/admin-auth-server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { renderNewsletter } from '@/lib/announcement-versions';
 import { renderBlocks } from '@/lib/email-render';
@@ -57,7 +57,7 @@ async function settingsId(supabase: ReturnType<typeof createServiceClient>) {
 }
 
 export async function GET(req: NextRequest) {
-  const session = requireAdmin(req, { gtsOnly: true });
+  const session = requireEmailAccess(req);
   if (session instanceof NextResponse) return session;
   const supabase = createServiceClient();
   const preview = new URL(req.url).searchParams.get('preview');
@@ -82,7 +82,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = requireAdmin(req, { gtsOnly: true });
+  const session = requireEmailAccess(req);
   if (session instanceof NextResponse) return session;
   const body = await req.json().catch(() => ({}));
   const supabase = createServiceClient();
@@ -135,7 +135,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
-  const session = requireAdmin(req, { gtsOnly: true });
+  const session = requireEmailAccess(req);
   if (session instanceof NextResponse) return session;
   const body = await req.json().catch(() => ({}));
   if (!UUID.test(String(body.id ?? ''))) return NextResponse.json({ error: 'Unknown newsletter' }, { status: 400 });
@@ -148,7 +148,7 @@ export async function PUT(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const session = requireAdmin(req, { gtsOnly: true });
+  const session = requireEmailAccess(req);
   if (session instanceof NextResponse) return session;
   const { selected } = await req.json().catch(() => ({}));
   const key = String(selected ?? '');
@@ -168,7 +168,7 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const session = requireAdmin(req, { gtsOnly: true });
+  const session = requireEmailAccess(req);
   if (session instanceof NextResponse) return session;
   const id = new URL(req.url).searchParams.get('id') || '';
   if (!UUID.test(id)) return NextResponse.json({ error: 'Unknown newsletter' }, { status: 400 });

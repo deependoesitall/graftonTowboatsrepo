@@ -11,7 +11,7 @@
 // PATCH { email, clear: true } → clear a bounce/block (Resend too); never an unsubscribe
 // DELETE ?email=              → remove one contact
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/admin-auth-server';
+import { requireEmailAccess } from '@/lib/admin-auth-server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { accountHolders, addContacts, allContacts } from '@/lib/contacts';
 import { normalizeEmail } from '@/lib/email-address';
@@ -23,7 +23,7 @@ export const maxDuration = 60;
 const STATUSES = ['subscribed', 'unsubscribed', 'bounced', 'suppressed'];
 
 export async function GET(req: NextRequest) {
-  const session = requireAdmin(req, { gtsOnly: true });
+  const session = requireEmailAccess(req);
   if (session instanceof NextResponse) return session;
   try {
     if (new URL(req.url).searchParams.get('problems')) return NextResponse.json({ problems: await problemAddresses(createServiceClient()) });
@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = requireAdmin(req, { gtsOnly: true });
+  const session = requireEmailAccess(req);
   if (session instanceof NextResponse) return session;
   const body = await req.json().catch(() => ({}));
   const rows = Array.isArray(body.rows) ? body.rows.slice(0, 20000) : [];
@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const session = requireAdmin(req, { gtsOnly: true });
+  const session = requireEmailAccess(req);
   if (session instanceof NextResponse) return session;
   const body = await req.json().catch(() => ({}));
   const email = normalizeEmail(String(body.email || ''));
@@ -89,7 +89,7 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const session = requireAdmin(req, { gtsOnly: true });
+  const session = requireEmailAccess(req);
   if (session instanceof NextResponse) return session;
   const email = normalizeEmail(new URL(req.url).searchParams.get('email') || '');
   if (!email) return NextResponse.json({ error: 'No address.' }, { status: 400 });
