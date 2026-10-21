@@ -4,6 +4,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { verifyUnsubscribe } from '@/lib/unsubscribe';
+import { recordUnsubscribe } from '@/lib/email-stats';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,6 +48,7 @@ export async function POST(req: NextRequest) {
   // Waiting sends to this address stop now.
   await supabase.from('email_import_recipients').update({ status: 'skipped', error: 'Unsubscribed' })
     .eq('email', email).eq('status', 'pending');
+  if (!error) await recordUnsubscribe(supabase, email, now).catch(() => {});
   if (error) return page('Something went wrong', '<p>Please try again, or reply to any of our emails.</p>', 500);
   return page('You are unsubscribed', `<p><b>${esc(email)}</b> won't get list emails from us anymore.</p>`);
 }

@@ -1,6 +1,7 @@
 // src/app/api/webhooks/resend/route.ts
 //
-// Resend tells us here when an announcement bounces or is marked as spam.
+// Resend tells us here when an announcement bounces or is marked as spam,
+// and (for the stats view) when a list email is delivered, opened or clicked.
 // Signed with Svix: RESEND_WEBHOOK_SECRET (whsec_…) checks svix-id,
 // svix-timestamp and svix-signature, and anything unsigned, stale or forged
 // gets a 401.
@@ -17,6 +18,7 @@
 import { createHmac, timingSafeEqual } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
+import { recordEvent, tagMap } from '@/lib/email-stats';
 
 export const dynamic = 'force-dynamic';
 
@@ -101,6 +103,7 @@ export async function POST(req: NextRequest) {
       for (const r of byId || []) if (!to.includes(lower(r.email))) to.push(lower(r.email));
     }
     const lists = await markFailed(supabase, to, error.slice(0, 500), at);
+    await recordEvent(supabase, { type: evt.type === 'email.complained' ? 'complained' : 'bounced', emailId, tags: tagMap(data.tags), email: to[0], at, dedupe: req.headers.get('svix-id') || undefined });
     await markContacts(supabase, to, evt.type === 'email.complained' ? 'suppressed' : 'bounced', error.slice(0, 500), at);
     return NextResponse.json({ ok: true, type: evt.type, addresses: to.length, lists });
   }
@@ -133,6 +136,19 @@ export async function POST(req: NextRequest) {
         .eq('email', email).eq('status', 'suppressed');
     }
     return NextResponse.json({ ok: true, type: evt.type });
+  }
+
+  // Counted for the stats view. Opens and clicks only arrive once tracking
+  // is on for the sending domain and these events are subscribed.
+  if (evt.type === 'email.delivered' || evt.type === 'email.opened' || evt.type === 'email.clicked') {
+    const type = evt.type === 'email.delivered' ? 'delivered' : evt.type === 'email.opened' ? 'opened' : 'clicked';
+    const to = (Array.isArray(data.to) ? data.to : []).map(lower).filter((e) => e.includes('@'));
+    const click = (data.click || {}) as { link?: string };
+    const saved = await recordEvent(createServiceClient(), {
+      type, emailId: typeof data.email_id === 'string' ? data.email_id : '', tags: tagMap(data.tags), email: to[0],
+      link: type === 'clicked' ? click.link || null : null, at, dedupe: req.headers.get('svix-id') || undefined,
+    });
+    return NextResponse.json({ ok: true, type: evt.type, counted: saved });
   }
 
   // email.delivery_delayed and anything else: acknowledged, nothing to change.
