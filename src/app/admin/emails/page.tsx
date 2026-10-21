@@ -20,6 +20,7 @@ import { AnnouncementVersions, type AnnouncementPreview } from '@/components/adm
 import { NewCustomerSend } from '@/components/admin/NewCustomerSend';
 import { EmailQueuePanel } from '@/components/admin/EmailQueuePanel';
 import { NewslettersPanel } from '@/components/admin/NewslettersPanel';
+import { SendDayReminder } from '@/components/admin/SendDayReminder';
 import { ContactsPanel } from '@/components/admin/ContactsPanel';
 import { parseEmailList } from '@/lib/email-address';
 
@@ -245,6 +246,7 @@ export default function EmailsPage() {
           <AlertTriangle className="w-3.5 h-3.5" /> {problemCount} bounced / blocked {problemCount === 1 ? 'address' : 'addresses'}: fix or try again
         </button>
       )}
+      <SendDayReminder />
       {tab === 'newsletters' && <NewslettersPanel />}
       {tab === 'contacts' && <ContactsPanel />}
 

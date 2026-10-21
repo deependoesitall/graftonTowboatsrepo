@@ -5,22 +5,68 @@
 // Plain) are here too, read-only, so either can go out as its own send.
 // Every send uses the same daily-limited queue and shows in its history.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Copy, Plus, Trash2 } from 'lucide-react';
+import { BarChart3, CalendarClock, Copy, FileCode, LayoutTemplate, Loader2, Plus, Trash2 } from 'lucide-react';
 import { adminFetch } from '@/lib/admin-auth';
 import { EMPTY_DRAFT, NewsletterEditor, type NewsletterDraft } from '@/components/admin/NewsletterEditor';
 import { EmailQueuePanel } from '@/components/admin/EmailQueuePanel';
 import { EmailPreview } from '@/components/admin/EmailPreview';
 import { NewsletterSendBox } from '@/components/admin/NewsletterSendBox';
+import { BlockEditor, type BuilderDraft } from '@/components/admin/BlockEditor';
+import { EmailStats } from '@/components/admin/EmailStats';
+import { starterDoc, type EmailDoc } from '@/lib/email-blocks';
 
-type Newsletter = NewsletterDraft & { id: string; updated_at: string };
+type Newsletter = NewsletterDraft & { id: string; updated_at: string; format?: 'text' | 'blocks' };
 const BUILT_IN = [{ key: 'branded', name: 'Announcement · Branded' }, { key: 'plain', name: 'Announcement · Plain' }];
 
 const NEW = '__new';
+const BUILD = '__build';
+const IMPORT = '__import';
+
+/** Bring in an outside email: paste it, or pick its .html (or a .zip with
+ *  its pictures, or the .html plus its pictures). */
+function ImportBox({ onDone }: { onDone: (d: BuilderDraft, notice: string) => void }) {
+  const [html, setHtml] = useState('');
+  const [files, setFiles] = useState<File[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  async function go() {
+    setBusy(true); setErr('');
+    const fd = new FormData();
+    fd.set('action', 'import');
+    if (html.trim()) fd.set('html', html);
+    for (const f of files) fd.append('file', f);
+    const res = await adminFetch('/api/admin/email-builder', { method: 'POST', body: fd });
+    const j = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (!res.ok) { setErr(j.error || 'Could not bring that in.'); return; }
+    const notes: string[] = [j.mode === 'blocks' ? 'Brought in as blocks you can edit.' : 'Kept as one design, exactly as it looked. Its buttons and pictures can still be changed.'];
+    if (j.hosted) notes.push(`${j.hosted} picture${j.hosted > 1 ? 's' : ''} saved with the email.`);
+    if (j.missing?.length) notes.push(`${j.missing.length} picture${j.missing.length > 1 ? 's were' : ' was'} not found; add ${j.missing.length > 1 ? 'them' : 'it'} again in its picture spot.`);
+    if (j.removed?.length) notes.push(`Taken out for safety: ${j.removed.join(', ')}.`);
+    const subject = j.subject || '';
+    onDone({ name: subject || 'Imported email', subject, doc: j.doc as EmailDoc, send_plain: false }, notes.join(' '));
+  }
+  return (
+    <div className="flex flex-col gap-2.5">
+      <p className="text-sm text-gray-600">Paste an email made in another program, or pick its file. An unsubscribe link is added to every send.</p>
+      <textarea className="input-base min-h-[160px] font-mono text-xs" placeholder="Paste the email code here" value={html} onChange={(e) => setHtml(e.target.value)} />
+      <label className="btn-outline text-sm self-start cursor-pointer inline-flex items-center gap-1.5">
+        <FileCode className="w-4 h-4" /> {files.length ? `${files.length} file${files.length > 1 ? 's' : ''} picked` : 'Pick the .html, .zip or pictures'}
+        <input type="file" multiple accept=".html,.htm,.zip,image/*" className="hidden" onChange={(e) => setFiles(Array.from(e.target.files || []))} />
+      </label>
+      <button type="button" disabled={busy || (!html.trim() && !files.length)} onClick={go} className="btn-primary text-sm self-start inline-flex items-center gap-1.5 disabled:opacity-40">
+        {busy && <Loader2 className="w-4 h-4 animate-spin" />} Bring it in
+      </button>
+      {err && <p className="text-sm text-red-700">{err}</p>}
+    </div>
+  );
+}
 
 export function NewslettersPanel() {
   const [list, setList] = useState<Newsletter[]>([]);
   const [open, setOpen] = useState('');
-  const [preview, setPreview] = useState({ subject: '', html: '' });
+  const [preview, setPreview] = useState<{ subject: string; html: string; bytes?: number }>({ subject: '', html: '' });
+  const [builder, setBuilder] = useState<{ key: string; draft: BuilderDraft; notice?: string } | null>(null);
   const [builtInSubject, setBuiltInSubject] = useState('');
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
@@ -43,10 +89,32 @@ export function NewslettersPanel() {
     }).catch(() => {});
   }, [builtIn]);
 
-  const current = list.find((n) => n.id === open);
+  // A new email in the builder keeps its editor open once it has saved.
+  const current = list.find((n) => n.id === (open === BUILD ? builder?.draft.id : open));
   const initial = useMemo<NewsletterDraft>(() => (current
     ? { id: current.id, name: current.name, subject: current.subject, body: current.body, style: current.style }
     : EMPTY_DRAFT), [current]);
+
+  // A builder email opens with its blocks.
+  useEffect(() => {
+    if (open === BUILD || !current || current.format !== 'blocks' || builder?.key === current.id) return;
+    adminFetch(`/api/admin/newsletters?id=${current.id}`).then((r) => r.json()).then((j) => {
+      const n = j.newsletter;
+      if (n) setBuilder({ key: n.id, draft: { id: n.id, name: n.name, subject: n.subject, doc: n.blocks, send_plain: !!n.send_plain } });
+    }).catch(() => {});
+  }, [open, current, builder?.key]);
+
+  function startBuild(draft: BuilderDraft, notice?: string) {
+    setBuilder({ key: BUILD + Date.now(), draft, notice }); setOpen(BUILD); setMsg(''); setErr('');
+  }
+
+  async function copyLast() {
+    const res = await adminFetch('/api/admin/newsletters', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ copyLast: true }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (res.ok) { setBuilder(null); await load(j.id); setMsg(`Copied: ${j.name}.`); } else setErr(j.error || 'Could not copy.');
+  }
 
   async function duplicate() {
     if (!current) return;
@@ -84,8 +152,26 @@ export function NewslettersPanel() {
               open === NEW ? 'border-brand-navy text-brand-navy' : 'border-gray-300 text-gray-500 hover:border-brand-gold'
             }`}><Plus className="w-3.5 h-3.5" /> New newsletter</button>
         </div>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => startBuild({ name: '', subject: '', doc: starterDoc(), send_plain: false })}
+            className="btn-outline text-sm inline-flex items-center gap-1.5"><LayoutTemplate className="w-4 h-4" /> Build an email</button>
+          <button type="button" onClick={() => { setOpen(IMPORT); setMsg(''); setErr(''); }}
+            className="btn-outline text-sm inline-flex items-center gap-1.5"><FileCode className="w-4 h-4" /> Bring in an email</button>
+          <button type="button" onClick={copyLast}
+            className="btn-outline text-sm inline-flex items-center gap-1.5"><CalendarClock className="w-4 h-4" /> Copy last week's</button>
+        </div>
 
-        {open && !builtIn && (
+        {open === IMPORT && <ImportBox onDone={(d, notice) => startBuild(d, notice)} />}
+        {open === BUILD && builder && (
+          <BlockEditor key={builder.key} initial={builder.draft} notice={builder.notice} onPreview={setPreview}
+            onSaved={async (id) => { setBuilder((b) => (b ? { ...b, draft: { ...b.draft, id } } : b)); await load(BUILD); }} />
+        )}
+        {open !== BUILD && current?.format === 'blocks' && builder?.key === current.id && (
+          <BlockEditor key={current.id} initial={builder.draft} onPreview={setPreview} onSaved={() => {}} />
+        )}
+        {open !== BUILD && current?.format === 'blocks' && builder?.key !== current.id && <p className="text-sm text-gray-500">Opening…</p>}
+
+        {open && !builtIn && open !== BUILD && open !== IMPORT && current?.format !== 'blocks' && (
           <NewsletterEditor key={open} initial={initial} onPreview={setPreview}
             saveLabel={current ? 'Save changes' : 'Save draft'}
             onSaved={async (id) => { await load(id); setMsg('Saved.'); }} />
@@ -98,19 +184,27 @@ export function NewslettersPanel() {
               <button type="button" onClick={remove} className="btn-outline text-sm inline-flex items-center gap-1.5 text-red-700"><Trash2 className="w-4 h-4" /> Delete</button>
             </div>
             <NewsletterSendBox key={current.id} newsletterKey={current.id} subject={current.subject} onSent={() => setHistoryKey((k) => k + 1)} />
+            <details className="rounded-xl border border-gray-200 p-3">
+              <summary className="cursor-pointer text-sm font-semibold text-brand-navy inline-flex items-center gap-1.5"><BarChart3 className="w-4 h-4" /> How it did</summary>
+              <div className="mt-3"><EmailStats newsletterKey={current.id} /></div>
+            </details>
           </>
         )}
         {builtIn && (
           <>
             <p className="text-sm text-gray-600">The announcement's built-in wording. For different words, start a new newsletter.</p>
             <NewsletterSendBox key={builtIn.key} newsletterKey={builtIn.key} subject={builtInSubject} onSent={() => setHistoryKey((k) => k + 1)} />
+            <details className="rounded-xl border border-gray-200 p-3">
+              <summary className="cursor-pointer text-sm font-semibold text-brand-navy inline-flex items-center gap-1.5"><BarChart3 className="w-4 h-4" /> How it did</summary>
+              <div className="mt-3"><EmailStats newsletterKey={builtIn.key} /></div>
+            </details>
           </>
         )}
         {msg && <p className="text-sm text-emerald-700">{msg}</p>}
         {err && <p className="text-sm text-red-700">{err}</p>}
         <EmailQueuePanel reloadKey={historyKey} />
       </div>
-      <EmailPreview subject={preview.subject} html={preview.html} />
+      <EmailPreview subject={preview.subject} html={preview.html} bytes={preview.bytes} />
     </div>
   );
 }
