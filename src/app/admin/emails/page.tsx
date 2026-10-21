@@ -13,7 +13,8 @@ import {
   Mail, Send, Loader2, CheckCircle2, AlertTriangle, UserPlus, Megaphone,
   Monitor, Smartphone, X, FlaskConical, Copy, Check,
 } from 'lucide-react';
-import { adminFetch } from '@/lib/admin-auth';
+import { adminFetch, getAdminRole, getAdminPermissions } from '@/lib/admin-auth';
+import { canUseEmails } from '@/lib/email-access';
 import { boatInviteText } from '@/lib/boat-invite';
 import { EmailQuota, quotaRoom } from '@/lib/email-quota';
 import { AnnouncementVersions, type AnnouncementPreview } from '@/components/admin/AnnouncementVersions';
@@ -72,6 +73,15 @@ function Step({ n, title, hint, children }: {
 }
 
 export default function EmailsPage() {
+  // Sinclair's accounts never get this page (the API says no as well).
+  const [allowed, setAllowed] = useState<boolean | null>(null);
+  useEffect(() => { setAllowed(canUseEmails(getAdminRole(), getAdminPermissions())); }, []);
+  if (allowed === null) return null;
+  if (!allowed) return <p className="p-6 text-sm text-gray-600">This page is for Grafton Towboat Services staff.</p>;
+  return <EmailsPageInner />;
+}
+
+function EmailsPageInner() {
   const [tab, setTab] = useState<'send' | 'newsletters' | 'contacts'>('send');
   const [problemCount, setProblemCount] = useState(0);
   useEffect(() => {

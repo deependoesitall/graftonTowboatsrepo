@@ -5,7 +5,8 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { LayoutDashboard, ShoppingBag, Settings, LogOut, Package, BarChart3, Users, Truck, Menu, X, Mail } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { getAdminRole, getAdminName, logoutAdmin, canAccess, isGtsRole, AdminRole } from '@/lib/admin-auth';
+import { getAdminRole, getAdminName, logoutAdmin, canAccess, isGtsRole, getAdminPermissions, AdminRole } from '@/lib/admin-auth';
+import { canUseEmails } from '@/lib/email-access';
 
 const NAV: Array<{ href: string; label: string; icon: any; area: 'orders' | 'products' | 'settings' | 'reports' | 'customers' | null; gtsOnly?: boolean }> = [
   { href: '/admin',          label: 'Dashboard', icon: LayoutDashboard, area: null },
@@ -46,7 +47,8 @@ export function AdminNav() {
 
   const visibleNav = NAV.filter(item =>
     (item.area === null || canAccess(role, item.area))
-    && (!item.gtsOnly || (role !== null && isGtsRole(role))),
+    && (!item.gtsOnly || (role !== null && isGtsRole(role)))
+    && (item.href !== '/admin/emails' || canUseEmails(role, getAdminPermissions())),
   );
   // Same phone chrome for GTS and Sinclair's: hamburger + labeled panels,
   // name/role stay in the bar. Desktop keeps the full pill row.
