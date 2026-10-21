@@ -33,3 +33,13 @@ CREATE TABLE IF NOT EXISTS email_events (
 CREATE INDEX IF NOT EXISTS email_events_import_idx ON email_events (import_id, type);
 CREATE INDEX IF NOT EXISTS email_events_key_idx ON email_events (newsletter_key, type);
 ALTER TABLE email_events ENABLE ROW LEVEL SECURITY;  -- service role only
+
+-- Saved sections (a header, a footer, a row of buttons...) to drop into any email.
+CREATE TABLE IF NOT EXISTS email_sections (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name            text NOT NULL,
+  blocks          jsonb NOT NULL,
+  created_by_name text,
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE email_sections ENABLE ROW LEVEL SECURITY;  -- service role only

@@ -4,34 +4,95 @@
 // Shared by the editor (browser) and the renderer (server).
 import { Parser } from 'htmlparser2';
 
-export type TextBlock = { id: string; type: 'text'; text: string; heading?: boolean };
+/** The GTS brand kit: the only colours buttons and words come in. */
+export type BrandColor = 'green' | 'orange' | 'yellow' | 'ink';
+export const BRAND: Record<BrandColor, { bg: string; fg: string; label: string }> = {
+  green: { bg: '#1E3D1E', fg: '#D9E84A', label: 'GTS green' },
+  orange: { bg: '#D9640A', fg: '#FFFFFF', label: 'Orange' },
+  yellow: { bg: '#D9E84A', fg: '#1E3D1E', label: 'Yellow' },
+  ink: { bg: '#15181C', fg: '#FFFFFF', label: 'Charcoal' },
+};
+export type Size = 'sm' | 'md' | 'lg';
+export type Align = 'start' | 'center' | 'end';
+
+export type TextBlock = { id: string; type: 'text'; text: string; heading?: boolean; color?: BrandColor; size?: Size; align?: Align };
 export type ImageBlock = { id: string; type: 'image'; src: string; alt: string; href?: string; width?: number };
-export type ButtonBlock = { id: string; type: 'button'; label: string; href: string; color?: 'green' | 'orange' };
+export type ButtonSpec = { label: string; href: string; color?: BrandColor; size?: Size };
+export type ButtonBlock = ButtonSpec & { id: string; type: 'button'; align?: Align };
+/** Two or three buttons side by side; one under another on phones. */
+export type ButtonsBlock = { id: string; type: 'buttons'; buttons: ButtonSpec[] };
 export type DividerBlock = { id: string; type: 'divider' };
+export type SpacerBlock = { id: string; type: 'spacer'; height: number };
+/** A picture with words beside it; the words go under it on phones. */
+export type PicTextBlock = { id: string; type: 'pictext'; src: string; alt: string; href?: string; text: string };
 export type HtmlBlock = { id: string; type: 'html'; html: string };
-export type Block = TextBlock | ImageBlock | ButtonBlock | DividerBlock | HtmlBlock;
+export type Block = TextBlock | ImageBlock | ButtonBlock | ButtonsBlock | DividerBlock | SpacerBlock | PicTextBlock | HtmlBlock;
 export type EmailDoc = { blocks: Block[]; branded?: boolean };
 
 export const SITE = 'https://graftontowboatservices.com';
 export const LOGO_URL = `${SITE}/branding/gts-badge.png`;
+export const PHONE = '(618) 556-0290';
+export const GTS_EMAIL = 'GraftonTowboatServices@gmail.com';
 /** One-tap links for buttons. */
 export const SAVED_LINKS = [
+  { label: 'Order', href: `${SITE}/order` },
   { label: 'Shop', href: `${SITE}/catalog` },
-  { label: 'Order page', href: `${SITE}/order` },
+  { label: 'Specials', href: `${SITE}/weekly-ad` },
   { label: 'Sign-up', href: `${SITE}/account?signup=1` },
-  { label: "This week's specials", href: `${SITE}/weekly-ad` },
+  { label: 'Call', href: 'tel:6185560290' },
+  { label: 'Email', href: `mailto:${GTS_EMAIL}` },
 ] as const;
 
 export const newId = () => Math.random().toString(36).slice(2, 10);
 
-export function newBlock(type: Block['type']): Block {
+export type NewKind = Block['type'] | 'heading';
+export function newBlock(type: NewKind): Block {
   const id = newId();
-  if (type === 'text') return { id, type, text: '' };
+  if (type === 'heading') return { id, type: 'text', heading: true, text: 'Heading' };
+  if (type === 'text') return { id, type, text: 'Write here.' };
   if (type === 'image') return { id, type, src: '', alt: '' };
-  if (type === 'button') return { id, type, label: 'Order now', href: SAVED_LINKS[0].href, color: 'green' };
+  if (type === 'button') return { id, type, label: 'Order now', href: `${SITE}/order`, color: 'green', size: 'md', align: 'center' };
+  if (type === 'buttons') return { id, type, buttons: [{ label: 'Order', href: `${SITE}/order`, color: 'green' }, { label: 'Specials', href: `${SITE}/weekly-ad`, color: 'orange' }] };
   if (type === 'divider') return { id, type };
+  if (type === 'spacer') return { id, type, height: 24 };
+  if (type === 'pictext') return { id, type, src: '', alt: '', text: '**New this week**\nA few words about it.' };
   return { id, type: 'html', html: '' };
 }
+
+const t = (text: string, heading = false): TextBlock => ({ id: newId(), type: 'text', text, ...(heading ? { heading } : {}) });
+const btn = (label: string, href: string, color: BrandColor = 'green'): ButtonBlock => ({ id: newId(), type: 'button', label, href, color, size: 'md', align: 'center' });
+const SIGN_OFF = () => t(`Questions? Call ${PHONE}, day or night.\n\nJen`);
+
+/** Ready-made emails to start from. */
+export const STARTERS: { key: string; name: string; doc: () => EmailDoc }[] = [
+  { key: 'specials', name: 'Weekly specials', doc: starterDoc },
+  { key: 'announcement', name: 'Announcement', doc: () => ({ branded: true, blocks: [
+    t('Something new at Grafton Towboat Services', true),
+    t('Hi captains and crew,\n\nWrite the news here in a sentence or two.'),
+    btn('Find out more', `${SITE}/order-online`), { id: newId(), type: 'divider' }, SIGN_OFF(),
+  ] }) },
+  { key: 'hours', name: 'Holiday hours', doc: () => ({ branded: true, blocks: [
+    t('Holiday hours', true),
+    t('Here is when we deliver over the holiday:\n\n- **Wed:** regular hours\n- **Thu:** closed\n- **Fri:** 8 AM to noon\n\nGet orders in early so nothing waits.'),
+    { id: newId(), type: 'buttons', buttons: [{ label: 'Order now', href: `${SITE}/order`, color: 'green' }, { label: 'Call us', href: 'tel:6185560290', color: 'orange' }] },
+    SIGN_OFF(),
+  ] }) },
+  { key: 'item', name: 'New item', doc: () => ({ branded: true, blocks: [
+    t('Now on the shelf', true),
+    { id: newId(), type: 'pictext', src: `${SITE}/branding/email/onsale.jpg`, alt: 'New item', text: '**Item name**\nWhat it is, the size, and the price.' },
+    btn('Add it to your order', `${SITE}/catalog`), SIGN_OFF(),
+  ] }) },
+];
+
+/** Built-in sections to drop into any email. Saved ones are added to these. */
+export const BUILT_IN_SECTIONS: { name: string; blocks: () => Block[] }[] = [
+  { name: 'GTS header', blocks: () => [{ id: newId(), type: 'image', src: `${SITE}/branding/gts-badge.png`, alt: 'Grafton Towboat Services', width: 120 }, t('Grafton Towboat Services', true)] },
+  { name: 'Contact footer', blocks: () => [{ id: newId(), type: 'divider' }, t(`Grafton Towboat Services\n${PHONE} · [graftontowboatservices.com](${SITE})`), { id: newId(), type: 'buttons', buttons: [{ label: 'Call', href: 'tel:6185560290', color: 'green' }, { label: 'Email', href: `mailto:${GTS_EMAIL}`, color: 'ink' }] }] },
+  { name: 'Order buttons', blocks: () => [{ id: newId(), type: 'buttons', buttons: [{ label: 'Order', href: `${SITE}/order`, color: 'green' }, { label: 'Shop', href: `${SITE}/catalog`, color: 'ink' }, { label: 'Specials', href: `${SITE}/weekly-ad`, color: 'orange' }] }] },
+];
+
+/** A copy of blocks with fresh ids, for inserting a section again. */
+export const freshIds = (bs: Block[]): Block[] => bs.map((b) => ({ ...b, id: newId() }) as Block);
 
 /** The GTS starter: logo header (from the branded frame), intro, specials,
  *  Order Now, and the GTS footer. */
@@ -39,17 +100,20 @@ export function starterDoc(): EmailDoc {
   return {
     branded: true,
     blocks: [
-      { id: newId(), type: 'text', heading: true, text: 'This week at Grafton Towboat Services' },
-      { id: newId(), type: 'text', text: 'Hi captains and crew,\n\nHere is what is fresh and on sale this week. Order by Thursday noon for Friday delivery.' },
+      t('This week at Grafton Towboat Services', true),
+      t('Hi captains and crew,\n\nHere is what is fresh and on sale this week. Order by Thursday noon for Friday delivery.'),
       { id: newId(), type: 'image', src: `${SITE}/branding/email/onsale.jpg`, alt: "This week's specials" },
-      { id: newId(), type: 'text', heading: true, text: 'Specials' },
-      { id: newId(), type: 'text', text: '- Ribeyes\n- Pork loin\n- Frozen vegetables' },
-      { id: newId(), type: 'button', label: 'Order now', href: `${SITE}/catalog`, color: 'green' },
+      t('Specials', true),
+      t('- Ribeyes\n- Pork loin\n- Frozen vegetables'),
+      { ...btn('Order now', `${SITE}/catalog`) },
       { id: newId(), type: 'divider' },
-      { id: newId(), type: 'text', text: 'Questions? Call (618) 556-0290, day or night.\n\nJen' },
+      SIGN_OFF(),
     ],
   };
 }
+
+/** [words](address) links inside written words. */
+export const MD_LINK = /\[([^\]]+)\]\(((?:https?:|mailto:|tel:)[^)\s]+)\)/g;
 
 export function isDoc(x: unknown): x is EmailDoc {
   return !!x && typeof x === 'object' && Array.isArray((x as EmailDoc).blocks);
@@ -61,8 +125,12 @@ export function docLinks(doc: EmailDoc): { label: string; href: string }[] {
   const out: { label: string; href: string }[] = [];
   for (const b of doc.blocks) {
     if (b.type === 'button') out.push({ label: b.label, href: b.href });
-    if (b.type === 'image' && b.href) out.push({ label: b.alt || 'Picture', href: b.href });
-    if (b.type === 'text') for (const m of b.text.matchAll(/https?:\/\/[^\s)<>"]+/g)) out.push({ label: m[0], href: m[0] });
+    if (b.type === 'buttons') for (const x of b.buttons) out.push({ label: x.label, href: x.href });
+    if ((b.type === 'image' || b.type === 'pictext') && b.href) out.push({ label: b.alt || 'Picture', href: b.href });
+    if (b.type === 'text' || b.type === 'pictext') {
+      for (const m of b.text.matchAll(MD_LINK)) out.push({ label: m[1], href: m[2] });
+      for (const m of b.text.replace(MD_LINK, '').matchAll(/https?:\/\/[^\s)<>"]+/g)) out.push({ label: m[0], href: m[0] });
+    }
     if (b.type === 'html') for (const p of htmlParts(b.html)) if (p.kind === 'link') out.push({ label: p.text || p.attrs.href || '', href: p.attrs.href || '' });
   }
   return out;
@@ -71,7 +139,7 @@ export function docLinks(doc: EmailDoc): { label: string; href: string }[] {
 export function docImages(doc: EmailDoc): { src: string; alt: string }[] {
   const out: { src: string; alt: string }[] = [];
   for (const b of doc.blocks) {
-    if (b.type === 'image') out.push({ src: b.src, alt: b.alt });
+    if (b.type === 'image' || b.type === 'pictext') out.push({ src: b.src, alt: b.alt });
     if (b.type === 'html') for (const p of htmlParts(b.html)) if (p.kind === 'image') out.push({ src: p.attrs.src || '', alt: p.attrs.alt || '' });
   }
   return out;
@@ -81,8 +149,12 @@ export function docImages(doc: EmailDoc): { src: string; alt: string }[] {
 export function docToText(doc: EmailDoc): string {
   const parts: string[] = [];
   for (const b of doc.blocks) {
-    if (b.type === 'text') parts.push(b.heading ? b.text.toUpperCase() : b.text);
-    if (b.type === 'button') parts.push(`${b.label}: ${b.href}`);
+    const words = (x: string) => x.replace(MD_LINK, '$1: $2').replace(/\*\*([^*]+)\*\*/g, '$1');
+    const where = (h: string) => h.replace(/^(tel|mailto):/, '');
+    if (b.type === 'text') parts.push(b.heading ? words(b.text).toUpperCase() : words(b.text));
+    if (b.type === 'button') parts.push(`${b.label}: ${where(b.href)}`);
+    if (b.type === 'buttons') parts.push(b.buttons.map((x) => `${x.label}: ${where(x.href)}`).join('\n'));
+    if (b.type === 'pictext') parts.push(words(b.text) + (b.href ? `\n${b.href}` : ''));
     if (b.type === 'image' && b.href) parts.push(`${b.alt || 'Picture'}: ${b.href}`);
     if (b.type === 'divider') parts.push('---');
     if (b.type === 'html') parts.push(htmlText(b.html));
