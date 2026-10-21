@@ -30,10 +30,10 @@ export interface WelcomeVars {
   password: string;
 }
 
-const GREEN = '#1E3D1E';
-const YELLOW = '#D9E84A';
-const ORANGE = '#D9640A';
-const INK = '#15181C';
+export const GREEN = '#1E3D1E';
+export const YELLOW = '#D9E84A';
+export const ORANGE = '#D9640A';
+export const INK = '#15181C';
 const SOFT = '#4A544C';
 const ORDER_URL = 'https://graftontowboatservices.com/catalog';
 const HOW_IT_WORKS_URL = 'https://graftontowboatservices.com/order-online';

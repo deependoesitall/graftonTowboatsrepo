@@ -12,7 +12,11 @@ import { SIGNUP_URL } from './boat-invite';
 import { CUSTOMER_STATUS_WALKTHROUGH } from './customer-order-status';
 
 export type AnnouncementEmail = { subject: string; html: string; text: string };
-export type Newsletter = { id: string; name: string; subject: string; body: string; style: 'plain' | 'branded' };
+export type Newsletter = {
+  id: string; name: string; subject: string; body: string; style: 'plain' | 'branded';
+  /** 'blocks' is made in the email builder; 'text' (every older one) is the words above. */
+  format?: 'text' | 'blocks'; blocks?: unknown; send_plain?: boolean;
+};
 
 export const SIGNUP_TOKEN = '{signup_link}';
 const HOW_IT_WORKS_URL = 'https://graftontowboatservices.com/order-online';
@@ -93,11 +97,18 @@ export function renderNewsletter(v: Pick<Newsletter, 'subject' | 'body'> & { sty
   return { subject, html, text };
 }
 
-/** Adds the unsubscribe line to the end of an email. */
+/** {unsubscribe_link} in an imported design: the reader's own link. */
+export const UNSUBSCRIBE_TOKEN = '{unsubscribe_link}';
+
+/** Adds the unsubscribe line to the end of an email, and fills in any
+ *  {unsubscribe_link} an imported design carries. */
 export function withUnsubscribe(e: AnnouncementEmail, url: string): AnnouncementEmail {
   const line = `<p style="font-family:Arial,sans-serif;font-size:12px;color:#777;margin:18px 0 0;text-align:center;">Don't want these emails? <a href="${esc(url)}" style="color:#777;">Unsubscribe</a></p>`;
-  const html = e.html.includes('</body>') ? e.html.replace('</body>', `${line}\n</body>`) : e.html + line;
-  return { ...e, html, text: `${e.text}\n\n--\nUnsubscribe: ${url}` };
+  const filled = e.html.split(UNSUBSCRIBE_TOKEN).join(esc(url));
+  const end = filled.lastIndexOf('</body>');
+  const html = end > -1 ? `${filled.slice(0, end)}${line}\n${filled.slice(end)}` : filled + line;
+  const text = e.text.split(UNSUBSCRIBE_TOKEN).join(url);
+  return { ...e, html, text: `${text}\n\n--\nUnsubscribe: ${url}` };
 }
 
 /** The branded email with a text part derived from it. */
