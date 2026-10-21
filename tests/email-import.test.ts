@@ -38,3 +38,11 @@ test('htmlParts and patchHtmlPart change one link or picture only', () => {
   // Linked picture: its words aren't replaced.
   assert.equal(patchHtmlPart(out, 'link', 1, { text: 'x' }).includes('<img'), true);
 });
+
+import { toEditableHtml, fromEditableHtml } from '@/lib/rich-text';
+test('words edited on the email round-trip: bold, links, new lines', () => {
+  const t = 'Hi **crew**,\nsee [this week](https://x.com/a?b=1&c=2).\n\n- one';
+  assert.equal(fromEditableHtml(toEditableHtml(t)), t);
+  assert.equal(fromEditableHtml('<div>a <strong>b</strong></div><div>c <a href="javascript:x">bad</a> <script>z</script></div>'), 'a **b**\nc bad z');
+  assert.equal(toEditableHtml('<img src=x onerror=1>'), '&lt;img src=x onerror=1&gt;');
+});
