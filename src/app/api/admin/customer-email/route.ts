@@ -7,7 +7,7 @@
 // POST { template, to[], vars?, bcc? } → sends it.
 import { NextRequest, NextResponse } from 'next/server';
 import { Resend } from 'resend';
-import { requireAdmin } from '@/lib/admin-auth-server';
+import { requireEmailAccess } from '@/lib/admin-auth-server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { buildWelcomeEmail, buildSignInEmail, CustomerEmailKey } from '@/lib/customer-emails';
 import { loadAnnouncement } from '@/lib/announcement-versions-server';
@@ -46,7 +46,7 @@ function parseTemplate(raw: string | null): CustomerEmailKey | null {
 }
 
 export async function GET(req: NextRequest) {
-  const session = requireAdmin(req, { gtsOnly: true });
+  const session = requireEmailAccess(req);
   if (session instanceof NextResponse) return session;
 
   const url = new URL(req.url);
@@ -59,7 +59,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = requireAdmin(req, { gtsOnly: true });
+  const session = requireEmailAccess(req);
   if (session instanceof NextResponse) return session;
 
   const apiKey = process.env.RESEND_API_KEY;

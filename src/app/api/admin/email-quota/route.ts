@@ -3,11 +3,11 @@
 // GET → what Resend says is left to send today and this month. GTS only,
 // same as the customer emails it is shown next to.
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/admin-auth-server';
+import { requireEmailAccess } from '@/lib/admin-auth-server';
 import { getEmailQuota } from '@/lib/email-quota-server';
 
 export async function GET(req: NextRequest) {
-  const session = requireAdmin(req, { gtsOnly: true });
+  const session = requireEmailAccess(req);
   if (session instanceof NextResponse) return session;
 
   const apiKey = process.env.RESEND_API_KEY;

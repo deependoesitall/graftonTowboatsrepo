@@ -4,13 +4,13 @@
 //         (skipped, invalid, failed), for the expandable lists.
 // PATCH { action: 'pause' | 'resume' | 'cancel' }
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/admin-auth-server';
+import { requireEmailAccess } from '@/lib/admin-auth-server';
 import { createServiceClient } from '@/lib/supabase/server';
 
 type Ctx = { params: Promise<{ id: string }> };
 
 export async function GET(req: NextRequest, ctx: Ctx) {
-  const session = requireAdmin(req, { gtsOnly: true });
+  const session = requireEmailAccess(req);
   if (session instanceof NextResponse) return session;
   const { id } = await ctx.params;
 
@@ -34,7 +34,7 @@ const MOVES: Record<string, { from: string[]; to: string }> = {
 };
 
 export async function PATCH(req: NextRequest, ctx: Ctx) {
-  const session = requireAdmin(req, { gtsOnly: true });
+  const session = requireEmailAccess(req);
   if (session instanceof NextResponse) return session;
   const { id } = await ctx.params;
 

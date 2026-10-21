@@ -10,7 +10,7 @@
 // PATCH { sendTime: 'HH:MM' } → the daily send time (America/Chicago). Until
 //       this is saved once, the queue sends nothing on its own.
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/admin-auth-server';
+import { requireEmailAccess } from '@/lib/admin-auth-server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { getEmailQuota } from '@/lib/email-quota-server';
 import { quotaRoom } from '@/lib/email-quota';
@@ -26,7 +26,7 @@ export const maxDuration = 60;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function GET(req: NextRequest) {
-  const session = requireAdmin(req, { gtsOnly: true });
+  const session = requireEmailAccess(req);
   if (session instanceof NextResponse) return session;
 
   const supabase = createServiceClient();
@@ -88,7 +88,7 @@ async function progress(supabase: ReturnType<typeof createServiceClient>) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = requireAdmin(req, { gtsOnly: true });
+  const session = requireEmailAccess(req);
   if (session instanceof NextResponse) return session;
 
   const body = await req.json().catch(() => ({}));
@@ -140,7 +140,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const session = requireAdmin(req, { gtsOnly: true });
+  const session = requireEmailAccess(req);
   if (session instanceof NextResponse) return session;
 
   const body = await req.json().catch(() => ({}));
