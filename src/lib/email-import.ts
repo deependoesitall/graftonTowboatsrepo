@@ -78,10 +78,25 @@ function toBlocks(html: string): Block[] | null {
 
 export type ImportResult = { doc: EmailDoc; mode: 'blocks' | 'locked'; removed: string[]; subject?: string };
 
+/** Coloured panels, bars or call-out boxes mean someone designed this
+ *  email: keep it exactly as it looks rather than flatten it into blocks. */
+export function isDesigned(html: string): boolean {
+  const dom = parseDocument(html, { decodeEntities: true });
+  const colours = new Set<string>();
+  let callouts = 0;
+  for (const e of DomUtils.findAll((x) => /^(table|tr|td|th|div|p|center)$/.test(x.name), dom.children)) {
+    const st = (e.attribs.style || '').toLowerCase();
+    const bg = (e.attribs.bgcolor || st.match(/background(?:-color)?\s*:\s*([^;]+)/)?.[1] || '').trim();
+    if (bg && !/^(#fff(fff)?|white|transparent|none|inherit)$/.test(bg)) colours.add(bg);
+    if (/border(-left|-top)?\s*:\s*[2-9]px/.test(st)) callouts++;
+  }
+  return colours.size >= 2 || callouts > 0;
+}
+
 export function importHtml(raw: string): ImportResult {
   const subject = words(raw.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '') || undefined;
   const { html, removed } = sanitizeEmailHtml(raw);
-  const blocks = toBlocks(html);
+  const blocks = isDesigned(html) ? null : toBlocks(html);
   if (blocks) return { doc: { branded: true, blocks }, mode: 'blocks', removed, subject };
   return { doc: { branded: false, blocks: [{ id: newId(), type: 'html', html }] }, mode: 'locked', removed, subject };
 }

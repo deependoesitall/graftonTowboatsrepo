@@ -68,6 +68,38 @@ async function download(url: string, fetcher: Fetcher): Promise<{ bytes: Uint8Ar
   } finally { clearTimeout(t); }
 }
 
+/** Inbox-sized: at most 1200 px wide, JPEG unless it has see-through parts
+ *  (then a compressed PNG). GIFs stay as they are (animation). The smaller
+ *  of original and shrunk is kept; if shrinking isn't possible, the
+ *  original goes through unchanged. */
+export async function shrinkBytes(bytes: Uint8Array, type: string): Promise<{ bytes: Uint8Array; type: string }> {
+  if (type === 'image/gif') return { bytes, type };
+  try {
+    const sharp = (await import('sharp')).default;
+    const img = sharp(Buffer.from(bytes), { failOn: 'none' }).rotate();
+    const meta = await img.metadata();
+    const resized = img.resize({ width: 1200, withoutEnlargement: true });
+    let alpha = false;
+    if (meta.hasAlpha) {
+      const st = await sharp(Buffer.from(bytes)).stats();
+      alpha = !st.isOpaque;
+    }
+    const out = alpha
+      ? await resized.png({ compressionLevel: 9, palette: true, quality: 85 }).toBuffer()
+      : await resized.flatten({ background: '#ffffff' }).jpeg({ quality: 80, mozjpeg: true }).toBuffer();
+    if (out.length >= bytes.length && (meta.width || 0) <= 1200) return { bytes, type };
+    return { bytes: new Uint8Array(out), type: alpha ? 'image/png' : 'image/jpeg' };
+  } catch {
+    return { bytes, type };
+  }
+}
+
+/** Shrink, then store. */
+async function putSmall(store: ImageStore, bytes: Uint8Array, type: string): Promise<string> {
+  const s = await shrinkBytes(bytes, type);
+  return store.put(s.bytes, s.type);
+}
+
 const basename = (s: string) => decodeURIComponent(s.split(/[?#]/)[0].split('/').pop() || '').toLowerCase();
 
 /** The hosted address for one picture source, or null if it can't be found. */
@@ -79,20 +111,20 @@ async function hostOne(src: string, ctx: { store: ImageStore; files: ImportFile[
   if (data) {
     const bytes = Uint8Array.from(Buffer.from(data[2].replace(/\s/g, ''), 'base64'));
     ctx.res.hosted++;
-    return ctx.store.put(bytes, sniff(bytes) || data[1].toLowerCase());
+    return putSmall(ctx.store, bytes, sniff(bytes) || data[1].toLowerCase());
   }
   if (/^cid:/i.test(s)) {
     const cid = s.slice(4).replace(/^<|>$/g, '').toLowerCase();
     const f = ctx.files.find((x) => (x.cid || '').toLowerCase() === cid || x.name.toLowerCase() === cid || basename(x.name) === basename(cid));
     if (!f) return null;
     ctx.res.hosted++;
-    return ctx.store.put(f.bytes, sniff(f.bytes) || f.type);
+    return putSmall(ctx.store, f.bytes, sniff(f.bytes) || f.type);
   }
   if (/^https?:\/\//i.test(s)) {
     try {
       const { bytes, type } = await download(s, ctx.fetcher);
       ctx.res.hosted++;
-      return await ctx.store.put(bytes, type);
+      return await putSmall(ctx.store, bytes, type);
     } catch {
       // Keep the outside address; the pre-send check reports it if broken.
       ctx.res.failed.push(s);
@@ -103,7 +135,7 @@ async function hostOne(src: string, ctx: { store: ImageStore; files: ImportFile[
   const f = ctx.files.find((x) => basename(x.name) === basename(s));
   if (!f) return null;
   ctx.res.hosted++;
-  return ctx.store.put(f.bytes, sniff(f.bytes) || f.type);
+  return putSmall(ctx.store, f.bytes, sniff(f.bytes) || f.type);
 }
 
 export async function hostHtmlImages(html: string, opts: { store: ImageStore; files?: ImportFile[]; fetcher?: Fetcher; res?: HostResult }): Promise<{ html: string } & HostResult> {
