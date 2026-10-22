@@ -43,3 +43,13 @@ CREATE TABLE IF NOT EXISTS email_sections (
   created_at      timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE email_sections ENABLE ROW LEVEL SECURITY;  -- service role only
+
+-- Data API access, granted explicitly (Supabase no longer grants it to new
+-- public tables on its own). Both tables are read and written only by the
+-- server with the service role; RLS is on with no policies, and anon /
+-- authenticated get nothing. email_events.id is bigserial, so its sequence
+-- needs USAGE for inserts. The newsletters columns added above inherit that
+-- table's existing grants, and the storage bucket row needs none.
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.email_events TO service_role;
+GRANT USAGE, SELECT ON SEQUENCE public.email_events_id_seq TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.email_sections TO service_role;
