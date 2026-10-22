@@ -46,3 +46,24 @@ test('words edited on the email round-trip: bold, links, new lines', () => {
   assert.equal(fromEditableHtml('<div>a <strong>b</strong></div><div>c <a href="javascript:x">bad</a> <script>z</script></div>'), 'a **b**\nc bad z');
   assert.equal(toEditableHtml('<img src=x onerror=1>'), '&lt;img src=x onerror=1&gt;');
 });
+
+import { isDesigned } from '@/lib/email-import';
+import { shrinkBytes } from '@/lib/email-images';
+test('a designed email (coloured panels, call-out box) is kept as it looks', () => {
+  const html = '<table><tr><td style="background:#09283f;color:#fff">GTS</td></tr><tr><td><p>Hi</p></td></tr><tr><td style="background:#edf4f7"><p>Steps</p></td></tr><tr><td bgcolor="#f4bd39"><a href="https://x.com">SHOP</a></td></tr></table>';
+  assert.equal(isDesigned(html), true);
+  const r = importHtml(html);
+  assert.equal(r.mode, 'locked');
+  assert.equal(isDesigned('<p style="color:#333">Plain words</p><p><a href="https://x.com" style="background:#1E3D1E">Go</a></p>'), false);
+});
+
+test('big embedded pictures are shrunk to inbox size', async () => {
+  const sharp = (await import('sharp')).default;
+  const big = new Uint8Array(await sharp({ create: { width: 2400, height: 1600, channels: 3, background: '#3a6ea5' } }).png({ compressionLevel: 0 }).toBuffer());
+  const s = await shrinkBytes(big, 'image/png');
+  assert.equal(s.type, 'image/jpeg');
+  assert.ok(s.bytes.length < big.length / 10);
+  assert.equal((await sharp(Buffer.from(s.bytes)).metadata()).width, 1200);
+  const gif = Uint8Array.from([0x47, 0x49, 0x46, 0x38]);
+  assert.equal((await shrinkBytes(gif, 'image/gif')).bytes, gif);
+});
