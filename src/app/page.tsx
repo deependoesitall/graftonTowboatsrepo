@@ -29,6 +29,9 @@ import { SiteShell, Photo, CtaBand } from '@/components/site/SiteChrome';
 import PartnerLockup from '@/components/site/PartnerLockup';
 import { HOME, HOME_SERVICES, CTA, BUSINESS, IMAGES } from '@/app/site/content';
 
+const OG_POSTER = 'https://graftontowboatservices.com/og/gts-og-poster.jpg';
+const OG_VIDEO = 'https://graftontowboatservices.com/og/gts-og-preview.mp4';
+
 export const metadata: Metadata = {
   title: HOME.meta.title,
   description: HOME.meta.description,
@@ -37,13 +40,14 @@ export const metadata: Metadata = {
     title: HOME.meta.title,
     description: HOME.meta.description,
     url: 'https://graftontowboatservices.com/',
-    images: [{ url: '/branding/gts-lockup.png', width: 1178, height: 492, alt: 'Grafton Towboat Services' }],
+    images: [{ url: OG_POSTER, width: 1200, height: 630, alt: 'Grafton Towboat Services' }],
+    videos: [{ url: OG_VIDEO, secureUrl: OG_VIDEO, type: 'video/mp4', width: 1200, height: 630 }],
   },
   twitter: {
     card: 'summary_large_image',
     title: HOME.meta.title,
     description: HOME.meta.description,
-    images: ['/branding/gts-lockup.png'],
+    images: [OG_POSTER],
   },
 };
 
