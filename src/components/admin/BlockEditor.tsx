@@ -8,7 +8,7 @@
 // copy to the GTS inbox first.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Bold, Check, Copy, GripVertical, Image as ImageIcon, Link2, Loader2, Plus,
+  Bold, Check, Copy, GripVertical, Image as ImageIcon, Link2, List, Loader2, Plus,
   Send, ShieldCheck, Trash2, Undo2, AlignCenter, AlignLeft, AlignRight, Bookmark, X,
 } from 'lucide-react';
 import { adminFetch } from '@/lib/admin-auth';
@@ -16,7 +16,7 @@ import {
   BRAND, BUILT_IN_SECTIONS, SAVED_LINKS, freshIds, htmlParts, newBlock, patchHtmlPart,
   type Align, type Block, type BrandColor, type ButtonSpec, type EmailDoc, type NewKind, type Size,
 } from '@/lib/email-blocks';
-import { fromEditableHtml, toEditableHtml } from '@/lib/rich-text';
+import { fromEditableHtml, toEditableHtml, toggleBullets } from '@/lib/rich-text';
 import { shrinkImage } from '@/lib/image-shrink';
 
 export type BuilderDraft = { id?: string; name: string; subject: string; doc: EmailDoc; send_plain: boolean };
@@ -147,6 +147,13 @@ function InlineText({ text, heading, color, size, align, onText, onStyle }: {
       {focus && onStyle && (
         <div onMouseDown={(e) => e.preventDefault()} className="absolute -top-11 left-0 z-20 flex flex-wrap items-center gap-1 rounded-lg border border-gray-200 bg-white px-1.5 py-1 shadow-lg">
           <button type="button" title="Bold" onClick={() => cmd('bold')} className="p-1.5 rounded hover:bg-gray-100"><Bold className="w-4 h-4" /></button>
+          <button type="button" title="Bullet list" onClick={() => {
+            const cur = el.current ? fromEditableHtml(el.current.innerHTML) : text;
+            const selText = window.getSelection()?.toString() || '';
+            const next = toggleBullets(cur, selText);
+            onText(next);
+            if (el.current) { el.current.innerHTML = toEditableHtml(next); el.current.focus(); }
+          }} className="p-1.5 rounded hover:bg-gray-100 inline-flex items-center gap-1 text-xs font-semibold text-brand-navy"><List className="w-4 h-4" /> Bullets</button>
           <button type="button" title="Link" onClick={() => { const s = window.getSelection(); range.current = s && s.rangeCount ? s.getRangeAt(0).cloneRange() : null; setLinking('https://'); }} className="p-1.5 rounded hover:bg-gray-100"><Link2 className="w-4 h-4" /></button>
           <span className="w-px h-5 bg-gray-200 mx-0.5" />
           {COLORS.filter((c) => c !== 'yellow').map((c) => (

@@ -4,7 +4,7 @@
 // delete, and send or plan one. The announcement's two copies (Branded,
 // Plain) are here too, read-only, so either can go out as its own send.
 // Every send uses the same daily-limited queue and shows in its history.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BarChart3, CalendarClock, Copy, FileCode, LayoutTemplate, Loader2, Plus, Trash2 } from 'lucide-react';
 import { adminFetch } from '@/lib/admin-auth';
 import { EMPTY_DRAFT, NewsletterEditor, type NewsletterDraft } from '@/components/admin/NewsletterEditor';
@@ -12,7 +12,7 @@ import { EmailQueuePanel } from '@/components/admin/EmailQueuePanel';
 import { EmailPreview } from '@/components/admin/EmailPreview';
 import { NewsletterSendBox } from '@/components/admin/NewsletterSendBox';
 import { BlockEditor, type BuilderDraft } from '@/components/admin/BlockEditor';
-import { EmailStats } from '@/components/admin/EmailStats';
+import { EmailStats, ResultsSummaryBar } from '@/components/admin/EmailStats';
 import { STARTERS, type EmailDoc } from '@/lib/email-blocks';
 
 type Newsletter = NewsletterDraft & { id: string; updated_at: string; format?: 'text' | 'blocks' };
@@ -72,6 +72,8 @@ export function NewslettersPanel() {
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
   const [historyKey, setHistoryKey] = useState(0);
+  const [statsOpen, setStatsOpen] = useState(true);
+  const statsRef = useRef<HTMLDivElement | null>(null);
 
   const load = useCallback(async (show?: string) => {
     const res = await adminFetch('/api/admin/newsletters');
@@ -79,7 +81,7 @@ export function NewslettersPanel() {
     if (!res.ok) { setErr(j.error || 'Could not load newsletters.'); return; }
     setList(j.newsletters);
     if (show !== undefined) setOpen(show);
-    else setOpen((cur) => cur || j.newsletters[0]?.id || NEW);
+    else setOpen((cur) => cur || j.newsletters[0]?.id || 'branded');
   }, []);
   useEffect(() => { load(); }, [load]);
   const builtIn = BUILT_IN.find((b) => b.key === open);
@@ -96,6 +98,12 @@ export function NewslettersPanel() {
     ? { id: current.id, name: current.name, subject: current.subject, body: current.body, style: current.style }
     : EMPTY_DRAFT), [current]);
 
+  const names = useMemo(() => {
+    const m: Record<string, string> = { branded: 'Announcement · Branded', plain: 'Announcement · Plain' };
+    for (const n of list) m[n.id] = n.name;
+    return m;
+  }, [list]);
+
   // A builder email opens with its blocks.
   useEffect(() => {
     if (open === BUILD || !current || current.format !== 'blocks' || builder?.key === current.id) return;
@@ -107,6 +115,13 @@ export function NewslettersPanel() {
 
   function startBuild(draft: BuilderDraft, notice?: string) {
     setBuilder({ key: BUILD + Date.now(), draft, notice }); setOpen(BUILD); setMsg(''); setErr('');
+  }
+
+  function viewStatsFor(key: string) {
+    setOpen(key);
+    setStatsOpen(true);
+    setMsg(''); setErr('');
+    window.setTimeout(() => statsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 60);
   }
 
   async function copyLast() {
@@ -132,90 +147,155 @@ export function NewslettersPanel() {
     await load(''); setMsg('Deleted.');
   }
 
+  const activeStatsKey = current?.id || builtIn?.key || 'branded';
+  const activeStatsTitle = current?.name || builtIn?.name || 'Announcement · Branded';
+
   return (
-    <div className="grid gap-6 lg:gap-8 lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
-      <div className="flex flex-col gap-5 min-w-0">
-        <div className="flex flex-wrap gap-2">
-          {BUILT_IN.map((n) => (
-            <button key={n.key} type="button" onClick={() => { setOpen(n.key); setMsg(''); setErr(''); }}
-              className={`rounded-full border-2 px-3 py-1.5 text-sm font-semibold ${
-                open === n.key ? 'border-brand-navy bg-brand-navy text-white' : 'border-gray-200 bg-gray-50 text-brand-navy hover:border-brand-gold'
-              }`}>{n.name}</button>
-          ))}
-          {list.map((n) => (
-            <button key={n.id} type="button" onClick={() => { setOpen(n.id); setMsg(''); setErr(''); }}
-              className={`rounded-full border-2 px-3 py-1.5 text-sm font-semibold max-w-full truncate ${
-                open === n.id ? 'border-brand-navy bg-brand-navy text-white' : 'border-gray-200 bg-white text-brand-navy hover:border-brand-gold'
-              }`}>{n.name}</button>
-          ))}
-          <button type="button" onClick={() => { setOpen(NEW); setMsg(''); setErr(''); }}
-            className={`rounded-full border-2 border-dashed px-3 py-1.5 text-sm font-semibold inline-flex items-center gap-1 ${
-              open === NEW ? 'border-brand-navy text-brand-navy' : 'border-gray-300 text-gray-500 hover:border-brand-gold'
-            }`}><Plus className="w-3.5 h-3.5" /> New newsletter</button>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => { setOpen(PICK); setMsg(''); setErr(''); }}
-            className="btn-outline text-sm inline-flex items-center gap-1.5"><LayoutTemplate className="w-4 h-4" /> Build an email</button>
-          <button type="button" onClick={() => { setOpen(IMPORT); setMsg(''); setErr(''); }}
-            className="btn-outline text-sm inline-flex items-center gap-1.5"><FileCode className="w-4 h-4" /> Bring in an email</button>
-          <button type="button" onClick={copyLast}
-            className="btn-outline text-sm inline-flex items-center gap-1.5"><CalendarClock className="w-4 h-4" /> Copy last week's</button>
-        </div>
+    <div className="flex flex-col gap-6">
+      <ResultsSummaryBar
+        names={names}
+        activeStatsOpen={statsOpen}
+        onToggleStats={() => {
+          if (!current && !builtIn) setOpen(list[0]?.id || 'branded');
+          setStatsOpen((v) => !v);
+          window.setTimeout(() => statsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 60);
+        }}
+        onSelectNewsletter={(key) => viewStatsFor(key)}
+      />
 
-        {open === PICK && (
-          <div className="grid grid-cols-2 gap-2">
-            {STARTERS.map((t) => (
-              <button key={t.key} type="button" onClick={() => startBuild({ name: t.name, subject: '', doc: t.doc(), send_plain: false })}
-                className="rounded-xl border-2 border-gray-200 bg-white px-3 py-3 text-left text-sm font-semibold text-brand-navy hover:border-brand-gold">{t.name}</button>
-            ))}
-            <button type="button" onClick={() => startBuild({ name: '', subject: '', doc: { branded: true, blocks: [] }, send_plain: false })}
-              className="rounded-xl border-2 border-dashed border-gray-300 px-3 py-3 text-left text-sm font-semibold text-gray-600 hover:border-brand-gold">Blank</button>
-          </div>
-        )}
-        {open === IMPORT && <ImportBox onDone={(d, notice) => startBuild(d, notice)} />}
-        {open === BUILD && builder && (
-          <BlockEditor key={builder.key} initial={builder.draft} notice={builder.notice} onPreview={setPreview}
-            onSaved={async (id) => { setBuilder((b) => (b ? { ...b, draft: { ...b.draft, id } } : b)); await load(BUILD); }} />
-        )}
-        {open !== BUILD && current?.format === 'blocks' && builder?.key === current.id && (
-          <BlockEditor key={current.id} initial={builder.draft} onPreview={setPreview} onSaved={() => {}} />
-        )}
-        {open !== BUILD && current?.format === 'blocks' && builder?.key !== current.id && <p className="text-sm text-gray-500">Opening…</p>}
-
-        {open && !builtIn && open !== BUILD && open !== IMPORT && open !== PICK && current?.format !== 'blocks' && (
-          <NewsletterEditor key={open} initial={initial} onPreview={setPreview}
-            saveLabel={current ? 'Save changes' : 'Save draft'}
-            onSaved={async (id) => { await load(id); setMsg('Saved.'); }} />
-        )}
-
-        {current && (
-          <>
-            <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={duplicate} className="btn-outline text-sm inline-flex items-center gap-1.5"><Copy className="w-4 h-4" /> Duplicate</button>
-              <button type="button" onClick={remove} className="btn-outline text-sm inline-flex items-center gap-1.5 text-red-700"><Trash2 className="w-4 h-4" /> Delete</button>
+      <div className="grid gap-6 lg:gap-8 lg:grid-cols-[minmax(0,440px)_minmax(0,1fr)]">
+        <div className="flex flex-col gap-5 min-w-0">
+          <div className="flex flex-col gap-2">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400">Your emails &amp; newsletters</p>
+            <div className="flex flex-col gap-1.5">
+              {BUILT_IN.map((n) => {
+                const isActive = open === n.key;
+                return (
+                  <div
+                    key={n.key}
+                    className={`flex items-center justify-between gap-2 rounded-xl border-2 px-3 py-2 transition ${
+                      isActive ? 'border-brand-navy bg-brand-navy/5' : 'border-gray-200 bg-white hover:border-brand-gold'
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => { setOpen(n.key); setMsg(''); setErr(''); }}
+                      className="text-left text-sm font-bold text-brand-navy truncate min-w-0 flex-1"
+                    >
+                      {n.name}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => viewStatsFor(n.key)}
+                      className="shrink-0 rounded-full border border-brand-navy/20 bg-amber-50 hover:bg-brand-gold/30 px-2.5 py-1 text-xs font-bold text-brand-navy inline-flex items-center gap-1"
+                    >
+                      <BarChart3 className="w-3.5 h-3.5" /> View stats
+                    </button>
+                  </div>
+                );
+              })}
+              {list.map((n) => {
+                const isActive = open === n.id || (open === BUILD && builder?.draft.id === n.id);
+                return (
+                  <div
+                    key={n.id}
+                    className={`flex items-center justify-between gap-2 rounded-xl border-2 px-3 py-2 transition ${
+                      isActive ? 'border-brand-navy bg-brand-navy/5' : 'border-gray-200 bg-white hover:border-brand-gold'
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => { setOpen(n.id); setMsg(''); setErr(''); }}
+                      className="text-left text-sm font-bold text-brand-navy truncate min-w-0 flex-1"
+                    >
+                      {n.name}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => viewStatsFor(n.id)}
+                      className="shrink-0 rounded-full border border-brand-navy/20 bg-amber-50 hover:bg-brand-gold/30 px-2.5 py-1 text-xs font-bold text-brand-navy inline-flex items-center gap-1"
+                    >
+                      <BarChart3 className="w-3.5 h-3.5" /> View stats
+                    </button>
+                  </div>
+                );
+              })}
             </div>
-            <NewsletterSendBox key={current.id} newsletterKey={current.id} subject={current.subject} onSent={() => setHistoryKey((k) => k + 1)} />
-            <details className="rounded-xl border border-gray-200 p-3">
-              <summary className="cursor-pointer text-sm font-semibold text-brand-navy inline-flex items-center gap-1.5"><BarChart3 className="w-4 h-4" /> How it did</summary>
-              <div className="mt-3"><EmailStats newsletterKey={current.id} /></div>
-            </details>
-          </>
-        )}
-        {builtIn && (
-          <>
-            <p className="text-sm text-gray-600">The announcement's built-in wording. For different words, start a new newsletter.</p>
-            <NewsletterSendBox key={builtIn.key} newsletterKey={builtIn.key} subject={builtInSubject} onSent={() => setHistoryKey((k) => k + 1)} />
-            <details className="rounded-xl border border-gray-200 p-3">
-              <summary className="cursor-pointer text-sm font-semibold text-brand-navy inline-flex items-center gap-1.5"><BarChart3 className="w-4 h-4" /> How it did</summary>
-              <div className="mt-3"><EmailStats newsletterKey={builtIn.key} /></div>
-            </details>
-          </>
-        )}
-        {msg && <p className="text-sm text-emerald-700">{msg}</p>}
-        {err && <p className="text-sm text-red-700">{err}</p>}
-        <EmailQueuePanel reloadKey={historyKey} />
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => { setOpen(PICK); setMsg(''); setErr(''); }}
+              className="btn-primary text-sm inline-flex items-center gap-1.5"><LayoutTemplate className="w-4 h-4" /> Build an email</button>
+            <button type="button" onClick={() => { setOpen(IMPORT); setMsg(''); setErr(''); }}
+              className="btn-outline text-sm inline-flex items-center gap-1.5"><FileCode className="w-4 h-4" /> Bring in an email</button>
+            <button type="button" onClick={copyLast}
+              className="btn-outline text-sm inline-flex items-center gap-1.5"><CalendarClock className="w-4 h-4" /> Copy last week's</button>
+            <button type="button" onClick={() => { setOpen(NEW); setMsg(''); setErr(''); }}
+              className="btn-outline text-sm inline-flex items-center gap-1.5"><Plus className="w-4 h-4" /> Plain text draft</button>
+          </div>
+
+          {open === PICK && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {STARTERS.map((t) => (
+                <button key={t.key} type="button" onClick={() => startBuild({ name: t.name, subject: t.subject || '', doc: t.doc(), send_plain: false })}
+                  className="rounded-xl border-2 border-gray-200 bg-white px-3.5 py-3 text-left text-sm font-bold text-brand-navy hover:border-brand-gold">{t.name}</button>
+              ))}
+              <button type="button" onClick={() => startBuild({ name: '', subject: '', doc: { branded: true, blocks: [] }, send_plain: false })}
+                className="rounded-xl border-2 border-dashed border-gray-300 px-3.5 py-3 text-left text-sm font-semibold text-gray-600 hover:border-brand-gold">Blank email</button>
+            </div>
+          )}
+          {open === IMPORT && <ImportBox onDone={(d, notice) => startBuild(d, notice)} />}
+          {open === BUILD && builder && (
+            <BlockEditor key={builder.key} initial={builder.draft} notice={builder.notice} onPreview={setPreview}
+              onSaved={async (id) => { setBuilder((b) => (b ? { ...b, draft: { ...b.draft, id } } : b)); await load(BUILD); }} />
+          )}
+          {open !== BUILD && current?.format === 'blocks' && builder?.key === current.id && (
+            <BlockEditor key={current.id} initial={builder.draft} onPreview={setPreview} onSaved={() => {}} />
+          )}
+          {open !== BUILD && current?.format === 'blocks' && builder?.key !== current.id && <p className="text-sm text-gray-500">Opening…</p>}
+
+          {open && !builtIn && open !== BUILD && open !== IMPORT && open !== PICK && current?.format !== 'blocks' && (
+            <NewsletterEditor key={open} initial={initial} onPreview={setPreview}
+              saveLabel={current ? 'Save changes' : 'Save draft'}
+              onSaved={async (id) => { await load(id); setMsg('Saved.'); }} />
+          )}
+
+          {current && (
+            <>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => viewStatsFor(current.id)} className="btn-outline text-sm inline-flex items-center gap-1.5"><BarChart3 className="w-4 h-4" /> View stats</button>
+                <button type="button" onClick={duplicate} className="btn-outline text-sm inline-flex items-center gap-1.5"><Copy className="w-4 h-4" /> Duplicate</button>
+                <button type="button" onClick={remove} className="btn-outline text-sm inline-flex items-center gap-1.5 text-red-700"><Trash2 className="w-4 h-4" /> Delete</button>
+              </div>
+              <NewsletterSendBox key={current.id} newsletterKey={current.id} subject={current.subject} onSent={() => setHistoryKey((k) => k + 1)} />
+            </>
+          )}
+          {builtIn && (
+            <>
+              <p className="text-sm text-gray-600">The announcement's built-in wording. For different words, start a new newsletter.</p>
+              <NewsletterSendBox key={builtIn.key} newsletterKey={builtIn.key} subject={builtInSubject} onSent={() => setHistoryKey((k) => k + 1)} />
+            </>
+          )}
+
+          {statsOpen && (current || builtIn) && (
+            <div ref={statsRef} className="rounded-2xl border-2 border-brand-navy/20 bg-white p-4 shadow-xs">
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <div className="flex items-center gap-2">
+                  <BarChart3 className="w-4 h-4 text-brand-navy" />
+                  <h3 className="text-sm font-extrabold text-brand-navy">How it did · {activeStatsTitle}</h3>
+                </div>
+                <button type="button" onClick={() => setStatsOpen(false)} className="text-xs font-semibold text-gray-500 hover:text-brand-navy">Hide</button>
+              </div>
+              <EmailStats newsletterKey={activeStatsKey} title={activeStatsTitle} />
+            </div>
+          )}
+
+          {msg && <p className="text-sm text-emerald-700">{msg}</p>}
+          {err && <p className="text-sm text-red-700">{err}</p>}
+          <EmailQueuePanel reloadKey={historyKey} />
+        </div>
+        <EmailPreview subject={preview.subject} html={preview.html} bytes={preview.bytes} />
       </div>
-      <EmailPreview subject={preview.subject} html={preview.html} bytes={preview.bytes} />
     </div>
   );
 }
