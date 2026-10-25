@@ -89,7 +89,7 @@ test("Grocery Outreach (Jen's design) starter has hosted banner and no duplicate
   assert.match(html, /SHOP SINCLAIR’S GROCERIES/);
 });
 
-import { readUpload } from '@/app/api/admin/email-builder/route';
+import { readUpload } from '@/lib/email-import';
 import { hostDocImages } from '@/lib/email-images';
 test('readUpload and importHtml accept a >3.4 MB HTML file with a large embedded base64 PNG', async () => {
   const sharp = (await import('sharp')).default;
