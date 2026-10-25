@@ -40,7 +40,7 @@ const SAMPLE_UNSUB = 'https://graftontowboatservices.com/api/unsubscribe';
 const err = (error: string, status = 400) => NextResponse.json({ error }, { status });
 const typeOf = (name: string) => ({ jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp' } as Record<string, string>)[name.split('.').pop()!.toLowerCase()] || '';
 
-async function readUpload(form: FormData): Promise<{ html: string; files: ImportFile[] } | string> {
+export async function readUpload(form: FormData): Promise<{ html: string; files: ImportFile[] } | string> {
   let html = String(form.get('html') || '');
   const files: ImportFile[] = [];
   let total = 0;
@@ -65,7 +65,7 @@ async function readUpload(form: FormData): Promise<{ html: string; files: Import
     }
   }
   if (!html.trim()) return 'Paste the email, or pick its .html file.';
-  if (html.length > 2_000_000) return 'That email is too big to bring in.';
+  if (html.length > MAX_UPLOAD) return 'That email is too big to bring in.';
   return { html, files };
 }
 

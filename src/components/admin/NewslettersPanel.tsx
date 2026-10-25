@@ -14,6 +14,7 @@ import { NewsletterSendBox } from '@/components/admin/NewsletterSendBox';
 import { BlockEditor, type BuilderDraft } from '@/components/admin/BlockEditor';
 import { EmailStats, ResultsSummaryBar } from '@/components/admin/EmailStats';
 import { STARTERS, type EmailDoc } from '@/lib/email-blocks';
+import { shrinkHtmlDataImages, shrinkImage } from '@/lib/image-shrink';
 
 type Newsletter = NewsletterDraft & { id: string; updated_at: string; format?: 'text' | 'blocks' };
 const BUILT_IN = [{ key: 'branded', name: 'Announcement · Branded' }, { key: 'plain', name: 'Announcement · Plain' }];
@@ -34,8 +35,21 @@ function ImportBox({ onDone }: { onDone: (d: BuilderDraft, notice: string) => vo
     setBusy(true); setErr('');
     const fd = new FormData();
     fd.set('action', 'import');
-    if (html.trim()) fd.set('html', html);
-    for (const f of files) fd.append('file', f);
+    let inlineHtml = html.trim() ? await shrinkHtmlDataImages(html) : '';
+    for (const f of files) {
+      if (!inlineHtml && (/\.html?$/i.test(f.name) || f.type === 'text/html')) {
+        try { inlineHtml = await shrinkHtmlDataImages(await f.text()); continue; } catch { /* fall back to raw file */ }
+      }
+      if (/^image\/(jpeg|png|webp)$/i.test(f.type) && f.size > 300_000) {
+        try {
+          const b = await shrinkImage(f);
+          fd.append('file', b, f.name.replace(/\.\w+$/, b.type === 'image/png' ? '.png' : '.jpg'));
+          continue;
+        } catch { /* fall back to raw file */ }
+      }
+      fd.append('file', f);
+    }
+    if (inlineHtml) fd.set('html', inlineHtml);
     const res = await adminFetch('/api/admin/email-builder', { method: 'POST', body: fd });
     const j = await res.json().catch(() => ({}));
     setBusy(false);
