@@ -1,4 +1,4 @@
-﻿// src/app/order-online/page.tsx
+// src/app/order-online/page.tsx
 //
 // Dedicated Order front door for marketing traffic (nav "Order", Order Now,
 // Google sitelink candidate). Keeps /catalog as the actual storefront and
@@ -11,6 +11,9 @@ import { ShoppingCart, LogIn, Smartphone, Phone, ChevronRight, Ship } from 'luci
 import { SiteShell, CtaBand } from '@/components/site/SiteChrome';
 import { ORDER_PAGE, CTA, BUSINESS } from '@/app/site/content';
 
+const OG_POSTER = 'https://graftontowboatservices.com/og/gts-og-poster.jpg';
+const OG_VIDEO = 'https://graftontowboatservices.com/og/gts-og-preview.mp4';
+
 export const metadata: Metadata = {
   title: ORDER_PAGE.meta.title,
   description: ORDER_PAGE.meta.description,
@@ -19,13 +22,14 @@ export const metadata: Metadata = {
     title: ORDER_PAGE.meta.title,
     description: ORDER_PAGE.meta.description,
     url: 'https://graftontowboatservices.com/order-online',
-    images: [{ url: '/branding/gts-lockup.png', width: 1178, height: 492, alt: 'Grafton Towboat Services' }],
+    images: [{ url: OG_POSTER, width: 1200, height: 630, alt: 'Grafton Towboat Services' }],
+    videos: [{ url: OG_VIDEO, secureUrl: OG_VIDEO, type: 'video/mp4', width: 1200, height: 630 }],
   },
   twitter: {
     card: 'summary_large_image',
     title: ORDER_PAGE.meta.title,
     description: ORDER_PAGE.meta.description,
-    images: ['/branding/gts-lockup.png'],
+    images: [OG_POSTER],
   },
 };
 

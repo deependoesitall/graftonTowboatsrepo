@@ -13,13 +13,15 @@ import {
   Mail, Send, Loader2, CheckCircle2, AlertTriangle, UserPlus, Megaphone,
   Monitor, Smartphone, X, FlaskConical, Copy, Check,
 } from 'lucide-react';
-import { adminFetch } from '@/lib/admin-auth';
+import { adminFetch, getAdminRole, getAdminPermissions } from '@/lib/admin-auth';
+import { canUseEmails } from '@/lib/email-access';
 import { boatInviteText } from '@/lib/boat-invite';
 import { EmailQuota, quotaRoom } from '@/lib/email-quota';
 import { AnnouncementVersions, type AnnouncementPreview } from '@/components/admin/AnnouncementVersions';
 import { NewCustomerSend } from '@/components/admin/NewCustomerSend';
 import { EmailQueuePanel } from '@/components/admin/EmailQueuePanel';
 import { NewslettersPanel } from '@/components/admin/NewslettersPanel';
+import { SendDayReminder } from '@/components/admin/SendDayReminder';
 import { ContactsPanel } from '@/components/admin/ContactsPanel';
 import { parseEmailList } from '@/lib/email-address';
 
@@ -71,6 +73,15 @@ function Step({ n, title, hint, children }: {
 }
 
 export default function EmailsPage() {
+  // Sinclair's accounts never get this page (the API says no as well).
+  const [allowed, setAllowed] = useState<boolean | null>(null);
+  useEffect(() => { setAllowed(canUseEmails(getAdminRole(), getAdminPermissions())); }, []);
+  if (allowed === null) return null;
+  if (!allowed) return <p className="p-6 text-sm text-gray-600">This page is for Grafton Towboat Services staff.</p>;
+  return <EmailsPageInner />;
+}
+
+function EmailsPageInner() {
   const [tab, setTab] = useState<'send' | 'newsletters' | 'contacts'>('send');
   const [problemCount, setProblemCount] = useState(0);
   useEffect(() => {
@@ -245,6 +256,7 @@ export default function EmailsPage() {
           <AlertTriangle className="w-3.5 h-3.5" /> {problemCount} bounced / blocked {problemCount === 1 ? 'address' : 'addresses'}: fix or try again
         </button>
       )}
+      <SendDayReminder />
       {tab === 'newsletters' && <NewslettersPanel />}
       {tab === 'contacts' && <ContactsPanel />}
 
