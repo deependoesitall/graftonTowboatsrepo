@@ -88,3 +88,34 @@ test("Grocery Outreach (Jen's design) starter has hosted banner and no duplicate
   assert.doesNotMatch(html, /Reply\s*[“"']remove/i);
   assert.match(html, /SHOP SINCLAIR’S GROCERIES/);
 });
+
+import { readUpload } from '@/app/api/admin/email-builder/route';
+import { hostDocImages } from '@/lib/email-images';
+test('readUpload and importHtml accept a >3.4 MB HTML file with a large embedded base64 PNG', async () => {
+  const sharp = (await import('sharp')).default;
+  const pngBytes = await sharp({ create: { width: 1400, height: 1100, channels: 3, background: '#1e3d1e' } }).png({ compressionLevel: 0 }).toBuffer();
+  const b64 = pngBytes.toString('base64');
+  // Pad with harmless whitespace inside base64 or HTML comments so total HTML > 3.4 MB
+  const pad = ' '.repeat(Math.max(0, 3_500_000 - b64.length));
+  const bigHtml = `<!doctype html><html><head><title>Grafton Towboat Services</title></head><body><!--${pad}--><table style="background:#edf2f5"><tr><td style="background:#09283f;color:#fff">GTS</td></tr><tr><td><img src="data:image/png;base64,${b64}" width="600" alt="Banner"></td></tr><tr><td bgcolor="#f4bd39"><a href="https://graftontowboatservices.com">SHOP</a></td></tr></table></body></html>`;
+  assert.ok(bigHtml.length > 3_400_000, `expected >3.4 MB, got ${bigHtml.length}`);
+  const fd = new FormData();
+  fd.set('action', 'import');
+  fd.append('file', new File([bigHtml], 'GTS_Grocery_E-mail.html', { type: 'text/html' }));
+  const up = await readUpload(fd);
+  assert.notEqual(typeof up, 'string');
+  if (typeof up !== 'string') {
+    const r = importHtml(up.html);
+    assert.equal(r.mode, 'locked');
+    let savedBytes = 0;
+    const hosted = await hostDocImages(r.doc, {
+      store: {
+        owns: () => false,
+        async put(bytes) { savedBytes = bytes.length; return 'https://example.com/hosted.jpg'; },
+      },
+      files: up.files,
+    });
+    assert.equal(hosted.hosted, 1);
+    assert.ok(savedBytes > 0 && savedBytes < 100_000);
+  }
+});
