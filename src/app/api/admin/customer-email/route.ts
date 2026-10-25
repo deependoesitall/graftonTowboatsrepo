@@ -7,10 +7,11 @@
 // POST { template, to[], vars?, bcc? } → sends it.
 import { NextRequest, NextResponse } from 'next/server';
 import { Resend } from 'resend';
-import { requireAdmin } from '@/lib/admin-auth-server';
+import { requireEmailAccess } from '@/lib/admin-auth-server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { buildWelcomeEmail, buildSignInEmail, CustomerEmailKey } from '@/lib/customer-emails';
 import { loadAnnouncement } from '@/lib/announcement-versions-server';
+import { listMessage } from '@/lib/list-email';
 import { BCC_PER_EMAIL, addressesThatFit, announcementCost, quotaRoom } from '@/lib/email-quota';
 import { getEmailQuota } from '@/lib/email-quota-server';
 
@@ -45,7 +46,7 @@ function parseTemplate(raw: string | null): CustomerEmailKey | null {
 }
 
 export async function GET(req: NextRequest) {
-  const session = requireAdmin(req, { gtsOnly: true });
+  const session = requireEmailAccess(req);
   if (session instanceof NextResponse) return session;
 
   const url = new URL(req.url);
@@ -58,7 +59,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = requireAdmin(req, { gtsOnly: true });
+  const session = requireEmailAccess(req);
   if (session instanceof NextResponse) return session;
 
   const apiKey = process.env.RESEND_API_KEY;
@@ -143,7 +144,14 @@ export async function POST(req: NextRequest) {
    */
   try {
     if (!bulk) {
-      const result = await resend.emails.send({ from, to: clean, replyTo, subject, html, ...(text ? { text } : {}) });
+      // An announcement test is the list message itself: unsubscribe link
+      // and headers built for the test inbox, exactly as a reader gets it.
+      const m = template === 'announcement' && body.test === true
+        ? listMessage({ subject, html, text: text || '' }, clean[0], { key: body.vars?.version || 'announcement' })
+        : null;
+      const result = await resend.emails.send(m
+        ? { from, to: clean, replyTo, subject: m.subject, html: m.html, text: m.text, headers: m.headers, tags: m.tags }
+        : { from, to: clean, replyTo, subject, html, ...(text ? { text } : {}) });
       if (result.error) {
         return NextResponse.json({ error: result.error.message || JSON.stringify(result.error) }, { status: 502 });
       }
