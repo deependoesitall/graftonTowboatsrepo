@@ -281,13 +281,13 @@ export function NewslettersPanel() {
                 <button type="button" onClick={duplicate} className="btn-outline text-sm inline-flex items-center gap-1.5"><Copy className="w-4 h-4" /> Duplicate</button>
                 <button type="button" onClick={remove} className="btn-outline text-sm inline-flex items-center gap-1.5 text-red-700"><Trash2 className="w-4 h-4" /> Delete</button>
               </div>
-              <NewsletterSendBox key={current.id} newsletterKey={current.id} subject={current.subject} onSent={() => setHistoryKey((k) => k + 1)} />
+              <NewsletterSendBox key={current.id} newsletterKey={current.id} newsletterName={current.name} allNewsletterNames={names} subject={current.subject} onSent={() => setHistoryKey((k) => k + 1)} />
             </>
           )}
           {builtIn && (
             <>
               <p className="text-sm text-gray-600">The announcement's built-in wording. For different words, start a new newsletter.</p>
-              <NewsletterSendBox key={builtIn.key} newsletterKey={builtIn.key} subject={builtInSubject} onSent={() => setHistoryKey((k) => k + 1)} />
+              <NewsletterSendBox key={builtIn.key} newsletterKey={builtIn.key} newsletterName={builtIn.name} allNewsletterNames={names} subject={builtInSubject} onSent={() => setHistoryKey((k) => k + 1)} />
             </>
           )}
 

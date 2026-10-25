@@ -62,3 +62,47 @@ test('rollupStats aggregates sent, delivered, unique opens/clicks, bounces, and 
   assert.equal(tot.unsubscribed, 1);
   assert.equal(tot.openRate, 33.3);
 });
+
+import { buildSendPlan, describeSingleRollout } from '@/lib/send-plan';
+
+test('describeSingleRollout and buildSendPlan calculate 2-day rollout and back-to-back overlap for 141 contacts', () => {
+  const single = describeSingleRollout({
+    recipientCount: 141,
+    startDay: '2026-10-26',
+    startTime: '10:00',
+    queueSendTime: '08:30',
+    dailyCap: 95,
+    dailyLimit: 100,
+  });
+  assert.equal(single.batches.length, 2);
+  assert.equal(single.batches[0].count, 95);
+  assert.equal(single.batches[0].day, '2026-10-26');
+  assert.equal(single.batches[1].count, 46);
+  assert.equal(single.batches[1].day, '2026-10-27');
+  assert.match(single.summary, /~95 go out Monday/);
+  assert.match(single.summary, /~46 finish automatically Tuesday/);
+
+  const plan = buildSendPlan({
+    schedules: [
+      { id: 's1', newsletter_key: 'n1', name: 'GTS Monday', next_at: '2026-10-26T15:00:00Z', paused: false, recipientCount: 141 },
+      { id: 's2', newsletter_key: 'n2', name: 'Your grocery order starts here.', next_at: '2026-10-27T15:00:00Z', paused: false, recipientCount: 141 },
+    ],
+    queueSendTime: '08:30',
+    dailyCap: 95,
+    dailyLimit: 100,
+  });
+  const mon = plan.get('s1')!;
+  const tue = plan.get('s2')!;
+  assert.equal(mon.batches[0].count, 95);
+  assert.equal(mon.batches[1].count, 46);
+  assert.equal(mon.overlapNotice, null);
+  assert.equal(mon.suggestedMoveDate, null);
+
+  assert.equal(tue.priorCarryoverCount, 46);
+  assert.equal(tue.batches[0].count, 49);
+  assert.equal(tue.batches[1].count, 92);
+  assert.equal(tue.suggestedMoveDate, '2026-10-28');
+  assert.match(tue.overlapNotice || '', /finishes its last ~46 contacts Tuesday morning/);
+  assert.match(tue.overlapNotice || '', /send ~49 on Tuesday/);
+  assert.match(tue.overlapNotice || '', /remaining ~92 on Wednesday/);
+});
