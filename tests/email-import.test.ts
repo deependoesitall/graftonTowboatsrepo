@@ -39,7 +39,8 @@ test('htmlParts and patchHtmlPart change one link or picture only', () => {
   assert.equal(patchHtmlPart(out, 'link', 1, { text: 'x' }).includes('<img'), true);
 });
 
-import { toEditableHtml, fromEditableHtml } from '@/lib/rich-text';
+import { toEditableHtml, fromEditableHtml, toggleBullets } from '@/lib/rich-text';
+import { groceryOutreachDoc } from '@/lib/email-blocks';
 test('words edited on the email round-trip: bold, links, new lines', () => {
   const t = 'Hi **crew**,\nsee [this week](https://x.com/a?b=1&c=2).\n\n- one';
   assert.equal(fromEditableHtml(toEditableHtml(t)), t);
@@ -66,4 +67,24 @@ test('big embedded pictures are shrunk to inbox size', async () => {
   assert.equal((await sharp(Buffer.from(s.bytes)).metadata()).width, 1200);
   const gif = Uint8Array.from([0x47, 0x49, 0x46, 0x38]);
   assert.equal((await shrinkBytes(gif, 'image/gif')).bytes, gif);
+});
+
+test('bullet lists render as • in the editor and round-trip cleanly with toggleBullets', () => {
+  const html = toEditableHtml('- Ribeyes\n- Pork loin');
+  assert.match(html, /• Ribeyes<br>• Pork loin/);
+  assert.equal(fromEditableHtml(html), '- Ribeyes\n- Pork loin');
+  const added = toggleBullets('Ribeyes\nPork loin');
+  assert.equal(added, '- Ribeyes\n- Pork loin');
+  const removed = toggleBullets(added);
+  assert.equal(removed, 'Ribeyes\nPork loin');
+});
+
+test("Grocery Outreach (Jen's design) starter has hosted banner and no duplicate Reply remove line", () => {
+  const doc = groceryOutreachDoc();
+  assert.equal(doc.branded, false);
+  assert.equal(doc.blocks[0].type, 'html');
+  const html = (doc.blocks[0] as { html: string }).html;
+  assert.match(html, /grocery-outreach-banner\.jpg/);
+  assert.doesNotMatch(html, /Reply\s*[“"']remove/i);
+  assert.match(html, /SHOP SINCLAIR’S GROCERIES/);
 });

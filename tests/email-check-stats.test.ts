@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { checkEmail } from '@/lib/email-check';
-import { summarize } from '@/lib/email-stats';
+import { summarize, rollupStats } from '@/lib/email-stats';
 
 test('pre-send check names broken links, missing pictures, alt text, size, subject', async () => {
   const fetcher = (async (u: string) => new Response('', { status: u.includes('dead') ? 404 : 200 })) as never;
@@ -41,4 +41,24 @@ test('stats: unique vs total, rates, links, people with boat', () => {
   assert.equal(s.openRate, 50); assert.equal(s.unsubscribed, 1);
   assert.deepEqual(s.links, [{ link: 'https://s/catalog', unique: 1, total: 2 }]);
   assert.equal(s.people[0].vessel, 'MV Alpha');
+});
+
+test('rollupStats aggregates sent, delivered, unique opens/clicks, bounces, and unsubscribes across sends', () => {
+  const s1 = summarize({ id: '1', created_at: '2026-10-12T13:30:00Z', subject: 'A', newsletter_key: 'k1' },
+    [{ email: 'a@x', status: 'sent', error: null }, { email: 'b@x', status: 'sent', error: null }],
+    [{ type: 'delivered', email: 'a@x', link: null, import_id: '1' }, { type: 'opened', email: 'a@x', link: null, import_id: '1' }, { type: 'clicked', email: 'a@x', link: 'https://s/1', import_id: '1' }],
+    new Map());
+  const s2 = summarize({ id: '2', created_at: '2026-10-19T13:30:00Z', subject: 'B', newsletter_key: 'k2' },
+    [{ email: 'c@x', status: 'sent', error: null }, { email: 'd@x', status: 'failed', error: 'Bounced' }],
+    [{ type: 'delivered', email: 'c@x', link: null, import_id: '2' }, { type: 'unsubscribed', email: 'c@x', link: null, import_id: '2' }],
+    new Map());
+  const tot = rollupStats([s1, s2]);
+  assert.equal(tot.sends, 2);
+  assert.equal(tot.sent, 4);
+  assert.equal(tot.delivered, 2);
+  assert.equal(tot.openedUnique, 1);
+  assert.equal(tot.clickedUnique, 1);
+  assert.equal(tot.bounced, 1);
+  assert.equal(tot.unsubscribed, 1);
+  assert.equal(tot.openRate, 33.3);
 });
