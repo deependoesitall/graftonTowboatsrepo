@@ -2,16 +2,21 @@
 
 // "Send it": who gets it (everyone subscribed, the people on an earlier send,
 // or pasted addresses) and when (now, on a date, every week, every other
-// week, Chicago time). Below it, the newsletter's planned sends with Pause.
-import { useCallback, useEffect, useState } from 'react';
-import { CalendarClock, Loader2, Pause, Play, Send, Trash2 } from 'lucide-react';
+// week, Chicago time). Below it, the newsletter's planned sends with exact
+// recipient counts, multi-day batch breakdowns, 1-click reschedule, and Pause.
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, ArrowRight, CalendarClock, Loader2, Pause, Play, Send, Trash2, Users } from 'lucide-react';
 import { adminFetch } from '@/lib/admin-auth';
+import {
+  buildSendPlan, describeSingleRollout, planCtDay, planCtHm, planDayLabel,
+  type PlanScheduleInput,
+} from '@/lib/send-plan';
 
 type ContactLite = { email: string; company: string | null; source: string; status: string; has_account?: boolean };
 type PastSend = { id: string; subject: string | null; created_at: string; total: number };
 type Schedule = {
   id: string; newsletter_key: string; kind: 'once' | 'weekly' | 'biweekly'; next_at: string | null;
-  paused: boolean; last_sent_at: string | null; last_error: string | null;
+  paused: boolean; last_sent_at: string | null; last_error: string | null; recipient_count?: number;
   audience: { fromImport?: string; emails?: string; company?: string; source?: string };
 };
 type Who = 'all' | 'yes' | 'no' | 'past' | 'paste';
@@ -32,12 +37,17 @@ function tomorrowCt(): string {
   return d.toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
 }
 
-export function NewsletterSendBox({ newsletterKey, subject, onSent }: {
-  newsletterKey: string; subject: string; onSent: () => void;
+export function NewsletterSendBox({ newsletterKey, newsletterName, allNewsletterNames, subject, onSent }: {
+  newsletterKey: string;
+  newsletterName?: string;
+  allNewsletterNames?: Record<string, string>;
+  subject: string;
+  onSent: () => void;
 }) {
   const [contacts, setContacts] = useState<ContactLite[]>([]);
   const [past, setPast] = useState<PastSend[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [queueSendTime, setQueueSendTime] = useState('08:30');
   const [who, setWho] = useState<Who>('all');
   const [company, setCompany] = useState('');
   const [source, setSource] = useState('');
@@ -45,19 +55,27 @@ export function NewsletterSendBox({ newsletterKey, subject, onSent }: {
   const [pasted, setPasted] = useState('');
   const [when, setWhen] = useState<When>('now');
   const [date, setDate] = useState(tomorrowCt());
-  const [time, setTime] = useState('08:00');
+  const [time, setTime] = useState('10:00');
   const [busy, setBusy] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDate, setEditDate] = useState('');
+  const [editTime, setEditTime] = useState('10:00');
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
 
   const loadSchedules = useCallback(async () => {
     const j = await adminFetch('/api/admin/newsletter-schedules').then((r) => r.json()).catch(() => ({}));
     setSchedules(j.schedules || []);
+    if (typeof j.queueSendTime === 'string' && j.queueSendTime) setQueueSendTime(j.queueSendTime);
   }, []);
+
   useEffect(() => {
     adminFetch('/api/admin/contacts').then((r) => r.json()).then((j) => setContacts(j.contacts || [])).catch(() => {});
     adminFetch('/api/admin/email-imports').then((r) => r.json()).then((j) => setPast(j.imports || [])).catch(() => {});
     loadSchedules();
+    const onUpdate = () => loadSchedules();
+    window.addEventListener('gts-schedules-updated', onUpdate);
+    return () => window.removeEventListener('gts-schedules-updated', onUpdate);
   }, [loadSchedules]);
 
   const subscribed = contacts.filter((c) => c.status === 'subscribed');
@@ -73,6 +91,32 @@ export function NewsletterSendBox({ newsletterKey, subject, onSent }: {
     : who === 'past' ? { fromImport: pastId } : { emails: pasted };
   const mine = schedules.filter((s) => s.newsletter_key === newsletterKey);
 
+  const planMap = useMemo(() => {
+    const fallbackCount = subscribed.length || 141;
+    const inputs: PlanScheduleInput[] = schedules.map((s) => ({
+      id: s.id,
+      newsletter_key: s.newsletter_key,
+      name: allNewsletterNames?.[s.newsletter_key] || (s.newsletter_key === newsletterKey ? newsletterName || subject || 'Newsletter' : 'Newsletter'),
+      next_at: s.next_at,
+      paused: s.paused,
+      recipientCount: s.recipient_count || fallbackCount,
+    }));
+    return buildSendPlan({ schedules: inputs, queueSendTime });
+  }, [schedules, subscribed.length, allNewsletterNames, newsletterKey, newsletterName, subject, queueSendTime]);
+
+  const draftRollout = useMemo(() => {
+    if (!count) return null;
+    const startDay = when === 'now' ? planCtDay(new Date()) : date;
+    const startTime = when === 'now' ? planCtHm(new Date()) : time;
+    return describeSingleRollout({
+      recipientCount: count,
+      startDay,
+      startTime,
+      queueSendTime,
+      isImmediate: when === 'now',
+    });
+  }, [count, when, date, time, queueSendTime]);
+
   async function go() {
     if (!count) return;
     setErr(''); setMsg('');
@@ -87,7 +131,7 @@ export function NewsletterSendBox({ newsletterKey, subject, onSent }: {
       setBusy(false);
       if (!res.ok) { setErr(j.error || 'Send failed.'); return; }
       const parts = [`Sent to ${j.sentNow} now.`];
-      if (j.queued > 0) parts.push(`${j.queued} wait for the daily send.`);
+      if (j.queued > 0) parts.push(`${j.queued} queued for tomorrow's batch (${queueSendTime === '08:30' ? '8:30 AM CT' : `${queueSendTime} CT`}).`);
       if (j.skipped > 0) parts.push(`${j.skipped} skipped (already got it, unsubscribed or bounced).`);
       if (j.note) parts.push(j.note);
       setMsg(parts.join(' '));
@@ -102,20 +146,40 @@ export function NewsletterSendBox({ newsletterKey, subject, onSent }: {
     const j = await res.json().catch(() => ({}));
     setBusy(false);
     if (!res.ok) { setErr(j.error || 'Could not plan it.'); return; }
-    setMsg(`Planned. First one goes ${ct(j.next_at)}.`);
-    loadSchedules();
+    setMsg(`Planned. First batch goes ${ct(j.next_at)}.`);
+    await loadSchedules();
+    window.dispatchEvent(new Event('gts-schedules-updated'));
   }
 
   async function setPaused(s: Schedule, paused: boolean) {
     await adminFetch('/api/admin/newsletter-schedules', {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: s.id, paused }),
     });
-    loadSchedules();
+    await loadSchedules();
+    window.dispatchEvent(new Event('gts-schedules-updated'));
   }
+
+  async function reschedule(id: string, newDate: string, newTime: string) {
+    setBusy(true); setErr(''); setMsg('');
+    const res = await adminFetch('/api/admin/newsletter-schedules', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, date: newDate, time: newTime }),
+    });
+    const j = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (!res.ok) { setErr(j.error || 'Could not move schedule.'); return; }
+    setEditingId(null);
+    setMsg(`Moved to ${planDayLabel(newDate)}.`);
+    await loadSchedules();
+    window.dispatchEvent(new Event('gts-schedules-updated'));
+  }
+
   async function stop(s: Schedule) {
     if (!window.confirm('Stop this for good? Emails already sent stay sent.')) return;
     await adminFetch(`/api/admin/newsletter-schedules?id=${s.id}`, { method: 'DELETE' });
-    loadSchedules();
+    await loadSchedules();
+    window.dispatchEvent(new Event('gts-schedules-updated'));
   }
 
   const chip = (on: boolean) => `rounded-lg border-2 px-3 py-2 text-sm font-semibold text-left ${
@@ -123,7 +187,14 @@ export function NewsletterSendBox({ newsletterKey, subject, onSent }: {
 
   return (
     <div className="rounded-xl border border-gray-200 p-3.5 flex flex-col gap-3">
-      <p className="text-sm font-bold text-brand-navy">Send it</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-bold text-brand-navy">Send it</p>
+        {count > 0 && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 border border-blue-200 px-2.5 py-0.5 text-xs font-bold text-brand-navy">
+            <Users className="w-3.5 h-3.5" /> {count} subscribed {count === 1 ? 'contact' : 'contacts'}
+          </span>
+        )}
+      </div>
 
       <div>
         <p className="text-xs font-semibold text-gray-600 mb-1.5">Who gets it <span className="font-normal text-gray-400">(subscribed only)</span></p>
@@ -183,6 +254,12 @@ export function NewsletterSendBox({ newsletterKey, subject, onSent }: {
         )}
       </div>
 
+      {draftRollout && draftRollout.batches.length > 1 && (
+        <div className="rounded-lg bg-blue-50/70 border border-blue-200 px-3 py-2 text-xs text-brand-navy leading-relaxed">
+          <b>Automatic 2-day rollout:</b> {draftRollout.summary}
+        </div>
+      )}
+
       <button type="button" disabled={busy || !count || (who === 'past' && !pastId)} onClick={go}
         className="btn-primary inline-flex items-center justify-center gap-2 disabled:opacity-40">
         {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : when === 'now' ? <Send className="w-4 h-4" /> : <CalendarClock className="w-4 h-4" />}
@@ -191,36 +268,123 @@ export function NewsletterSendBox({ newsletterKey, subject, onSent }: {
       <p className="text-xs text-gray-500">
         One email each, within the daily limit; any left over go at the daily send time. Unsubscribed and bounced addresses are skipped, and nobody gets the same newsletter twice.
       </p>
-      {msg && <p className="text-sm text-emerald-700">{msg}</p>}
+      {msg && <p className="text-sm text-emerald-700 font-semibold">{msg}</p>}
       {err && <p className="text-sm text-red-700">{err}</p>}
 
       {mine.length > 0 && (
         <div className="border-t border-gray-100 pt-3">
-          <p className="text-xs font-semibold text-gray-600 mb-1.5">Planned</p>
-          <ul className="flex flex-col gap-2">
-            {mine.map((s) => (
-              <li key={s.id} className="rounded-lg bg-gray-50 px-3 py-2 text-sm flex flex-wrap items-center gap-2">
-                <div className="flex-1 min-w-[180px]">
-                  <p className="font-semibold text-brand-navy">
-                    {s.kind === 'once' ? 'Once' : s.kind === 'weekly' ? 'Every week' : 'Every other week'}
-                    {s.paused ? ' · paused' : ''}
-                  </p>
-                  <p className="text-xs text-gray-600">
-                    {s.next_at ? `Next: ${ct(s.next_at)}` : 'Done'}
-                    {s.last_sent_at ? ` · Last: ${ct(s.last_sent_at)}` : ''}
-                  </p>
+          <p className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">Planned for this email</p>
+          <ul className="flex flex-col gap-2.5">
+            {mine.map((s) => {
+              const plan = planMap.get(s.id);
+              const recCount = s.recipient_count || subscribed.length || 141;
+              const isEditing = editingId === s.id;
+              return (
+                <li key={s.id} className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm flex flex-col gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-bold text-brand-navy">
+                          {s.kind === 'once' ? 'One-time send' : s.kind === 'weekly' ? 'Every week' : 'Every other week'}
+                          {s.paused ? ' · Paused' : ''}
+                        </span>
+                        <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 border border-blue-200 px-2 py-0.5 text-xs font-bold text-brand-navy">
+                          <Users className="w-3 h-3" /> {recCount} subscribed contacts
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-600 mt-0.5">
+                        {s.next_at ? `Scheduled: ${ct(s.next_at)}` : 'Completed'}
+                        {s.last_sent_at ? ` · Last sent: ${ct(s.last_sent_at)}` : ''}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {s.next_at && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (isEditing) setEditingId(null);
+                            else {
+                              setEditingId(s.id);
+                              setEditDate(planCtDay(s.next_at!));
+                              setEditTime(planCtHm(s.next_at!));
+                            }
+                          }}
+                          className="btn-outline text-xs py-1 px-2.5"
+                        >
+                          {isEditing ? 'Cancel' : 'Change day'}
+                        </button>
+                      )}
+                      {s.next_at && (
+                        <button type="button" onClick={() => setPaused(s, !s.paused)} className="btn-outline text-xs py-1 px-2.5 inline-flex items-center gap-1">
+                          {s.paused ? <><Play className="w-3.5 h-3.5" /> Resume</> : <><Pause className="w-3.5 h-3.5" /> Pause</>}
+                        </button>
+                      )}
+                      <button type="button" onClick={() => stop(s)} className="btn-outline text-xs py-1 px-2.5 inline-flex items-center gap-1 text-red-700">
+                        <Trash2 className="w-3.5 h-3.5" /> Stop
+                      </button>
+                    </div>
+                  </div>
+
+                  {isEditing && (
+                    <div className="flex flex-wrap items-end gap-2 rounded-lg bg-white border border-gray-200 p-2.5">
+                      <label className="text-xs text-gray-600">
+                        New day
+                        <input type="date" className="input-base mt-1 text-xs py-1" value={editDate} onChange={(e) => setEditDate(e.target.value)} />
+                      </label>
+                      <label className="text-xs text-gray-600">
+                        Time (CT)
+                        <input type="time" className="input-base mt-1 text-xs py-1" value={editTime} onChange={(e) => setEditTime(e.target.value)} />
+                      </label>
+                      <button
+                        type="button"
+                        disabled={busy || !editDate}
+                        onClick={() => reschedule(s.id, editDate, editTime)}
+                        className="btn-primary text-xs py-1.5 px-3"
+                      >
+                        Save new date
+                      </button>
+                    </div>
+                  )}
+
+                  {plan && !s.paused && (
+                    <>
+                      <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                        {plan.batches.map((b, idx) => (
+                          <span key={b.day + idx} className="inline-flex items-center gap-1">
+                            {idx > 0 && <ArrowRight className="w-3 h-3 text-gray-400" />}
+                            <span className={`rounded-md px-2 py-0.5 font-semibold border ${
+                              b.isCarryover ? 'bg-white border-gray-200 text-gray-700' : 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                            }`}>
+                              ~{b.count} on {b.dayLabel} ({b.timeLabel})
+                            </span>
+                          </span>
+                        ))}
+                      </div>
+                      <p className="text-xs text-gray-700 leading-relaxed">{plan.summary}</p>
+                      {plan.overlapNotice && (
+                        <div className="rounded-lg bg-amber-50 border border-amber-200 p-2.5 text-xs text-amber-950 flex flex-col gap-2">
+                          <div className="flex items-start gap-2">
+                            <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                            <span className="leading-relaxed">{plan.overlapNotice}</span>
+                          </div>
+                          {plan.suggestedMoveDate && (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => reschedule(s.id, plan.suggestedMoveDate!, plan.suggestedMoveTime)}
+                              className="self-start rounded-full bg-brand-navy text-white hover:bg-brand-navy/90 px-3 py-1 text-xs font-bold inline-flex items-center gap-1"
+                            >
+                              <CalendarClock className="w-3.5 h-3.5" /> {plan.suggestedMoveLabel}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  )}
                   {s.last_error && <p className="text-xs text-red-700">{s.last_error}</p>}
-                </div>
-                {s.next_at && (
-                  <button type="button" onClick={() => setPaused(s, !s.paused)} className="btn-outline text-xs inline-flex items-center gap-1">
-                    {s.paused ? <><Play className="w-3.5 h-3.5" /> Resume</> : <><Pause className="w-3.5 h-3.5" /> Pause</>}
-                  </button>
-                )}
-                <button type="button" onClick={() => stop(s)} className="btn-outline text-xs inline-flex items-center gap-1 text-red-700">
-                  <Trash2 className="w-3.5 h-3.5" /> Stop
-                </button>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
