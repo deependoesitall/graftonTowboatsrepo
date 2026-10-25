@@ -8,7 +8,7 @@
 // PATCH { id, paused }                  → pause / resume
 // DELETE ?id=<id>                       → stop it for good
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/admin-auth-server';
+import { requireEmailAccess } from '@/lib/admin-auth-server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { UUID } from '@/lib/announcement-versions-server';
 import { cleanAudience } from '@/lib/contacts';
@@ -20,7 +20,7 @@ export const dynamic = 'force-dynamic';
 const validKey = (k: string) => UUID.test(k) || k === 'branded' || k === 'plain';
 
 export async function GET(req: NextRequest) {
-  const session = requireAdmin(req, { gtsOnly: true });
+  const session = requireEmailAccess(req);
   if (session instanceof NextResponse) return session;
   const { data, error } = await createServiceClient().from('newsletter_schedules')
     .select('id, newsletter_key, audience, kind, next_at, paused, last_sent_at, last_import_id, last_error, created_by_name')
@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = requireAdmin(req, { gtsOnly: true });
+  const session = requireEmailAccess(req);
   if (session instanceof NextResponse) return session;
   const body = await req.json().catch(() => ({}));
   const key = String(body.newsletter ?? '');
@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const session = requireAdmin(req, { gtsOnly: true });
+  const session = requireEmailAccess(req);
   if (session instanceof NextResponse) return session;
   const body = await req.json().catch(() => ({}));
   const id = String(body.id ?? '');
@@ -73,7 +73,7 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const session = requireAdmin(req, { gtsOnly: true });
+  const session = requireEmailAccess(req);
   if (session instanceof NextResponse) return session;
   const id = new URL(req.url).searchParams.get('id') || '';
   if (!UUID.test(id)) return NextResponse.json({ error: 'Bad request' }, { status: 400 });
