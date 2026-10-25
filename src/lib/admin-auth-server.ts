@@ -15,6 +15,7 @@
 //   • Stay signed in ON   — 30d JWT + httpOnly cookie + localStorage, so
 //     dock phones stay logged in across closes.
 
+import { canUseEmails } from '@/lib/email-access';
 import { NextRequest, NextResponse } from 'next/server';
 import jwt from 'jsonwebtoken';
 
@@ -226,5 +227,19 @@ export function requireAdmin(
     }
   }
 
+  return session;
+}
+
+/**
+ * List emails (builder, sends, schedules, email list, stats, pictures):
+ * GTS people only. Sinclair's roles, and any account carrying the Sinclair
+ * flag, get a 403 from every one of these routes.
+ */
+export function requireEmailAccess(req: NextRequest): AdminSessionPayload | NextResponse {
+  const session = getAdminSession(req);
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!canUseEmails(session.role, session.permissions)) {
+    return NextResponse.json({ error: 'Only Grafton Towboat Services staff can do this.' }, { status: 403 });
+  }
   return session;
 }

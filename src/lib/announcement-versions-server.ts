@@ -8,6 +8,8 @@ import {
   type AnnouncementEmail, type Newsletter,
   buildBrandedAnnouncement, buildPlainAnnouncement, renderNewsletter,
 } from '@/lib/announcement-versions';
+import { renderBlocks } from '@/lib/email-render';
+import { isDoc } from '@/lib/email-blocks';
 
 type Supa = ReturnType<typeof createServiceClient>;
 
@@ -25,7 +27,7 @@ export async function selectedVersionKey(supabase: Supa): Promise<string> {
 
 export async function listNewsletters(supabase: Supa): Promise<(Newsletter & { updated_at: string; created_by_name: string | null })[]> {
   const { data, error } = await supabase.from('newsletters')
-    .select('id, name, subject, body, style, updated_at, created_by_name')
+    .select('id, name, subject, body, style, format, send_plain, updated_at, created_by_name')
     .eq('archived', false).order('updated_at', { ascending: false });
   if (error) throw new Error(error.message);
   return (data || []) as (Newsletter & { updated_at: string; created_by_name: string | null })[];
@@ -41,8 +43,10 @@ export async function loadAnnouncement(supabase: Supa, key?: string | null): Pro
   if (k === 'branded') return { key: k, ...buildBrandedAnnouncement() };
   if (UUID.test(k)) {
     const { data } = await supabase.from('newsletters')
-      .select('subject, body, style').eq('id', k).eq('archived', false).maybeSingle();
-    if (data) return { key: k, ...renderNewsletter(data as Newsletter) };
+      .select('subject, body, style, format, blocks, send_plain').eq('id', k).eq('archived', false).maybeSingle();
+    const n = data as Newsletter | null;
+    if (n?.format === 'blocks' && isDoc(n.blocks)) return { key: k, ...await renderBlocks(n.blocks, { subject: n.subject, plain: n.send_plain }) };
+    if (n) return { key: k, ...renderNewsletter(n) };
   }
   if (!asAnnouncement) throw new Error('That newsletter was deleted');
   return { key: 'branded', ...buildBrandedAnnouncement() };
