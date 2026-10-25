@@ -161,3 +161,44 @@ export async function statsCsv(supabase: Supa, importId: string): Promise<string
   });
   return [head, ...rows].map((r) => r.map(csvCell).join(',')).join('\n') + '\n';
 }
+
+export type StatsTotals = {
+  sends: number;
+  sent: number;
+  delivered: number;
+  openedUnique: number;
+  openedTotal: number;
+  clickedUnique: number;
+  clickedTotal: number;
+  bounced: number;
+  blocked: number;
+  complained: number;
+  unsubscribed: number;
+  openRate: number | null;
+  clickRate: number | null;
+};
+
+/** Aggregate numbers across a list of sends, for the top-level Results & Stats bar. */
+export function rollupStats(sends: SendStats[]): StatsTotals {
+  let sent = 0, delivered = 0, openedUnique = 0, openedTotal = 0, clickedUnique = 0, clickedTotal = 0;
+  let bounced = 0, blocked = 0, complained = 0, unsubscribed = 0, failed = 0;
+  for (const s of sends) {
+    sent += s.sent;
+    delivered += s.delivered;
+    openedUnique += s.opened.unique;
+    openedTotal += s.opened.total;
+    clickedUnique += s.clicked.unique;
+    clickedTotal += s.clicked.total;
+    bounced += s.bounced;
+    blocked += s.blocked;
+    complained += s.complained;
+    unsubscribed += s.unsubscribed;
+    failed += s.failed;
+  }
+  const base = sent - failed;
+  const rate = (n: number) => (base > 0 ? Math.round((n / base) * 1000) / 10 : null);
+  return {
+    sends: sends.length, sent, delivered, openedUnique, openedTotal, clickedUnique, clickedTotal,
+    bounced, blocked, complained, unsubscribed, openRate: rate(openedUnique), clickRate: rate(clickedUnique),
+  };
+}
