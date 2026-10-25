@@ -12,8 +12,7 @@
 import { Resend } from 'resend';
 import { createServiceClient } from '@/lib/supabase/server';
 import { loadAnnouncement, selectedVersionKey } from '@/lib/announcement-versions-server';
-import { withUnsubscribe } from '@/lib/announcement-versions';
-import { unsubscribeHeaders, unsubscribeUrl } from '@/lib/unsubscribe';
+import { listMessage } from '@/lib/list-email';
 import { listAuthUsers } from '@/lib/auth-user-dates';
 import { parseEmailList } from '@/lib/email-address';
 
@@ -299,9 +298,8 @@ export async function sendFromImports(supabase: Supa, opts: {
           const chunk = go.slice(i, i + EMAILS_PER_BATCH);
           const r = await resend.batch.send(
             chunk.map((x) => {
-              const url = unsubscribeUrl(x.email);
-              const { subject, html, text } = withUnsubscribe(email, url);
-              return { from, to: [x.email], replyTo, subject, html, text, headers: unsubscribeHeaders(url) };
+              const m = listMessage(email, x.email, { key, importId: id });
+              return { from, to: [x.email], replyTo, subject: m.subject, html: m.html, text: m.text, headers: m.headers, tags: m.tags };
             }),
             { idempotencyKey: `gts-import-${id}-${chunk[0].id}-${chunk.length}` },
           );
