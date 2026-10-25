@@ -16,11 +16,10 @@
 // GET  ?csv=<import id>                                → CSV of that send
 import { NextRequest, NextResponse } from 'next/server';
 import { Resend } from 'resend';
-import { unzipSync } from 'fflate';
 import { requireEmailAccess } from '@/lib/admin-auth-server';
 import { createServiceClient } from '@/lib/supabase/server';
-import { importHtml } from '@/lib/email-import';
-import { hostDocImages, supabaseImageStore, MAX_IMAGE_BYTES, type ImportFile } from '@/lib/email-images';
+import { importHtml, readUpload } from '@/lib/email-import';
+import { hostDocImages, supabaseImageStore, MAX_IMAGE_BYTES } from '@/lib/email-images';
 import { renderBlocks } from '@/lib/email-render';
 import { checkEmail } from '@/lib/email-check';
 import { isDoc, type EmailDoc } from '@/lib/email-blocks';
@@ -33,41 +32,10 @@ import { loadStats, statsCsv } from '@/lib/email-stats';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-const MAX_UPLOAD = 20 * 1024 * 1024;
-const IMAGE_EXT = /\.(jpe?g|png|gif|webp)$/i;
 const SAMPLE_UNSUB = 'https://graftontowboatservices.com/api/unsubscribe';
 
 const err = (error: string, status = 400) => NextResponse.json({ error }, { status });
 const typeOf = (name: string) => ({ jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp' } as Record<string, string>)[name.split('.').pop()!.toLowerCase()] || '';
-
-export async function readUpload(form: FormData): Promise<{ html: string; files: ImportFile[] } | string> {
-  let html = String(form.get('html') || '');
-  const files: ImportFile[] = [];
-  let total = 0;
-  for (const v of form.getAll('file')) {
-    if (typeof v === 'string') continue;
-    const bytes = new Uint8Array(await v.arrayBuffer());
-    total += bytes.length;
-    if (total > MAX_UPLOAD) return 'Those files are over 20 MB together.';
-    const name = v.name || 'file';
-    if (/\.zip$/i.test(name)) {
-      let entries: Record<string, Uint8Array>;
-      try { entries = unzipSync(bytes); } catch { return 'That .zip file could not be opened.'; }
-      for (const [path, data] of Object.entries(entries)) {
-        if (path.startsWith('__MACOSX/') || !data.length) continue;
-        if (/\.html?$/i.test(path) && !html) html = new TextDecoder().decode(data);
-        else if (IMAGE_EXT.test(path) && data.length <= MAX_IMAGE_BYTES) files.push({ name: path, type: typeOf(path), bytes: data });
-      }
-    } else if (/\.html?$/i.test(name) || v.type === 'text/html') {
-      if (!html) html = new TextDecoder().decode(bytes);
-    } else if (IMAGE_EXT.test(name) || /^image\//.test(v.type)) {
-      files.push({ name, type: v.type || typeOf(name), bytes });
-    }
-  }
-  if (!html.trim()) return 'Paste the email, or pick its .html file.';
-  if (html.length > MAX_UPLOAD) return 'That email is too big to bring in.';
-  return { html, files };
-}
 
 function docFrom(v: unknown): EmailDoc | null {
   return isDoc(v) && v.blocks.length <= 200 ? v : null;
