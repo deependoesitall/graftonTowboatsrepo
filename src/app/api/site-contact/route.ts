@@ -193,9 +193,14 @@ export async function POST(req: NextRequest) {
   }
 
   // ── 2. Notify. Best-effort — a failure here does NOT fail the request. ──
-  // BUSINESS_EMAIL is the live To (currently deepenptech@gmail.com). Do not
-  // redirect this to graftontowboatservices@gmail.com.
-  const to = process.env.BUSINESS_EMAIL;
+  // Same recipient as order emails: the GTS inbox in Admin settings first,
+  // then BUSINESS_EMAIL, then the GTS inbox.
+  const { data: settings } = await supabase
+    .from('admin_settings')
+    .select('business_email')
+    .maybeSingle();
+  const to =
+    settings?.business_email || process.env.BUSINESS_EMAIL || 'GraftonTowboatServices@gmail.com';
   const from = process.env.EMAIL_FROM;
   let emailError: string | null = null;
 
